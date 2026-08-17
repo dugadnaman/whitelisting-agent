@@ -57,16 +57,21 @@ export type TemplatePreview = {
   entity_id?: string;
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+function getApiUrl(path: string): string {
+  if (typeof window !== "undefined") {
+    // In browser: relative URL (proxied by Next.js rewrites to backend)
+    return path;
+  }
+  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  return `${base}${path}`;
+}
 
 export async function fetchStats(
   account: Account = "bajaj",
   channel: Channel = "whatsapp"
 ): Promise<Stats> {
-  const url = new URL(`${API}/api/stats`);
-  url.searchParams.set("account", account);
-  url.searchParams.set("channel", channel);
-  const res = await fetch(url.toString());
+  const qs = new URLSearchParams({ account, channel }).toString();
+  const res = await fetch(getApiUrl(`/api/stats?${qs}`));
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -77,12 +82,13 @@ export async function fetchTemplates(params?: {
   status?: string;
   search?: string;
 }): Promise<Template[]> {
-  const url = new URL(`${API}/api/templates`);
-  url.searchParams.set("account", params?.account || "bajaj");
-  url.searchParams.set("channel", params?.channel || "whatsapp");
-  if (params?.status) url.searchParams.set("status", params.status);
-  if (params?.search) url.searchParams.set("search", params.search);
-  const res = await fetch(url.toString());
+  const qs = new URLSearchParams();
+  qs.set("account", params?.account || "bajaj");
+  qs.set("channel", params?.channel || "whatsapp");
+  if (params?.status) qs.set("status", params.status);
+  if (params?.search) qs.set("search", params.search);
+
+  const res = await fetch(getApiUrl(`/api/templates?${qs.toString()}`));
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -94,10 +100,8 @@ export async function previewFile(
 ): Promise<TemplatePreview[]> {
   const form = new FormData();
   form.append("file", file);
-  const url = new URL(`${API}/api/preview`);
-  url.searchParams.set("account", account);
-  url.searchParams.set("channel", channel);
-  const res = await fetch(url.toString(), {
+  const qs = new URLSearchParams({ account, channel }).toString();
+  const res = await fetch(getApiUrl(`/api/preview?${qs}`), {
     method: "POST",
     body: form,
   });
@@ -112,10 +116,8 @@ export async function submitFile(
 ): Promise<{ submitted: number; results: Template[] }> {
   const form = new FormData();
   form.append("file", file);
-  const url = new URL(`${API}/api/submit`);
-  url.searchParams.set("account", account);
-  url.searchParams.set("channel", channel);
-  const res = await fetch(url.toString(), {
+  const qs = new URLSearchParams({ account, channel }).toString();
+  const res = await fetch(getApiUrl(`/api/submit?${qs}`), {
     method: "POST",
     body: form,
   });
@@ -127,10 +129,8 @@ export async function pollPending(
   account: Account = "bajaj",
   channel: Channel = "whatsapp"
 ): Promise<{ checked: number }> {
-  const url = new URL(`${API}/api/poll`);
-  url.searchParams.set("account", account);
-  url.searchParams.set("channel", channel);
-  const res = await fetch(url.toString(), { method: "POST" });
+  const qs = new URLSearchParams({ account, channel }).toString();
+  const res = await fetch(getApiUrl(`/api/poll?${qs}`), { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -146,7 +146,7 @@ export async function updateCredentials(creds: {
   entity_id?: string;
   lounge_cookie?: string;
 }): Promise<{ ok: boolean }> {
-  const res = await fetch(`${API}/api/credentials`, {
+  const res = await fetch(getApiUrl(`/api/credentials`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(creds),
@@ -162,14 +162,12 @@ export async function testCredentials(
   ok: boolean;
   message: string;
 }> {
-  const url = new URL(`${API}/api/test-credentials`);
-  url.searchParams.set("account", account);
-  url.searchParams.set("channel", channel);
-  const res = await fetch(url.toString(), { method: "POST" });
+  const qs = new URLSearchParams({ account, channel }).toString();
+  const res = await fetch(getApiUrl(`/api/test-credentials?${qs}`), { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export function getSampleCsvUrl(channel: Channel = "whatsapp"): string {
-  return `${API}/api/sample-csv?channel=${channel}`;
+  return getApiUrl(`/api/sample-csv?channel=${channel}`);
 }
