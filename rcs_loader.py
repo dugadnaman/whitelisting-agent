@@ -17,6 +17,20 @@ from rcs_models import RcsTemplateSubmission
 logger = logging.getLogger(__name__)
 
 
+def _normalize_row_keys(raw_row: dict) -> dict:
+    """Normalize row keys to lowercase snake_case for flexible header matching."""
+    clean = {}
+    for k, v in raw_row.items():
+        if k is None:
+            continue
+        val = str(v).strip() if v is not None else ""
+        norm_key = re.sub(r'[\s\-]+', '_', str(k).strip().lower())
+        clean[norm_key] = val
+        clean[str(k).strip().lower()] = val
+        clean[str(k).strip()] = val
+    return clean
+
+
 def _build_suggestions_from_row(row: dict) -> list[dict]:
     """Parse button columns into Karix RCS suggestion dictionaries."""
     suggestions = []
@@ -68,6 +82,8 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
             })
 
     return suggestions
+
+
 def _build_carousel_cards_from_row(row: dict) -> list[dict]:
     """Parse multiple cards for carousel templates from pipe-separated columns or JSON."""
     if row.get("carousel_cards"):
@@ -78,11 +94,11 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
         except (json.JSONDecodeError, TypeError):
             pass
 
-    titles = [t.strip() for t in str(row.get("card_title") or "").split("|") if t.strip()]
-    descriptions = [d.strip() for d in str(row.get("body") or row.get("card_description") or row.get("text_message") or "").split("|") if d.strip()]
-    media_urls = [u.strip() for u in str(row.get("media_url") or "").split("|") if u.strip()]
-    button_texts = [b.strip() for b in str(row.get("button_text") or "").split("|") if b.strip()]
-    button_urls = [u.strip() for u in str(row.get("button_url") or "").split("|") if u.strip()]
+    titles = [t.strip() for t in str(row.get("card_title") or row.get("title") or "").split("|") if t.strip()]
+    descriptions = [d.strip() for d in str(row.get("body") or row.get("card_description") or row.get("text_message") or row.get("description") or "").split("|") if d.strip()]
+    media_urls = [u.strip() for u in str(row.get("media_url") or row.get("image_url") or row.get("image") or "").split("|") if u.strip()]
+    button_texts = [b.strip() for b in str(row.get("button_text") or row.get("button_name") or "").split("|") if b.strip()]
+    button_urls = [u.strip() for u in str(row.get("button_url") or row.get("link") or "").split("|") if u.strip()]
     button_types = [t.strip().upper() for t in str(row.get("button_type") or "").split("|") if t.strip()]
 
     max_cards = max(len(titles), len(descriptions), len(media_urls), len(button_texts), 2)
@@ -123,15 +139,26 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
     return cards
 
 
-def _row_to_rcs_submission(row: dict, client: str = "tata") -> RcsTemplateSubmission:
+def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 1) -> RcsTemplateSubmission:
     """Convert a normalized dict to an RcsTemplateSubmission."""
+    row = _normalize_row_keys(row)
     c = (row.get("client") or client).lower()
-    template_name = str(row.get("template_name") or row.get("name") or "").strip()
+
+    template_name = str(
+        row.get("template_name")
+        or row.get("templatename")
+        or row.get("name")
+        or row.get("template")
+        or row.get("campaign_name")
+        or row.get("campaign")
+        or f"rcs_template_{fallback_idx}"
+    ).strip()
+
     bot_id = str(row.get("bot_id") or row.get("sender_id") or get_rcs_bot_id(c)).strip()
 
     raw_type = str(row.get("template_type") or row.get("type") or "").strip().lower()
-    media_url = str(row.get("media_url") or row.get("image_url") or "").strip() or None
-    card_title = str(row.get("card_title") or "").strip() or None
+    media_url = str(row.get("media_url") or row.get("image_url") or row.get("image") or "").strip() or None
+    card_title = str(row.get("card_title") or row.get("title") or "").strip() or None
 
     is_carousel = (
         raw_type in ("carousel", "carousal", "carousel_cards", "multi_card")
@@ -155,6 +182,8 @@ def _row_to_rcs_submission(row: dict, client: str = "tata") -> RcsTemplateSubmis
         or row.get("body")
         or row.get("card_description")
         or row.get("template_message")
+        or row.get("description")
+        or row.get("message")
         or ""
     ).strip()
 
@@ -181,32 +210,61 @@ def _row_to_rcs_submission(row: dict, client: str = "tata") -> RcsTemplateSubmis
         source_ref=row.get("source_ref") or template_name,
     )
 
+
 def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from a CSV file."""
     rows = []
     with open(path, newline="", encoding="utf-8") as f:
-        for raw_row in csv.DictReader(f):
-            clean_row = {
-                (k.strip() if k else ""): (v.strip() if v else "")
-                for k, v in raw_row.items()
-                if k
-            }
-            if not clean_row.get("template_name") and not clean_row.get("name"):
+        for idx, raw_row in enumerate(csv.DictReader(f), 1):
+            if not any(raw_row.values()):
                 continue
-            rows.append(clean_row)
-    return [_row_to_rcs_submission(row, client=client) for row in rows]
+            rows.append(_row_to_rcs_submission(raw_row, client=client, fallback_idx=idx))
+    return rows
+
+def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
+    """Extract embedded images from an Excel (.xlsx) file in order."""
+    images = []
+    try:
+        import zipfile
+        with zipfile.ZipFile(path, "r") as z:
+            media_names = [f for f in z.namelist() if f.startswith("xl/media/")]
+            def natural_key(name):
+                return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name)]
+            media_names.sort(key=natural_key)
+            for name in media_names:
+                filename = name.split("/")[-1]
+                images.append((filename, z.read(name)))
+    except Exception as e:
+        logger.warning("Could not extract embedded images from xlsx: %s", e)
+    return images
 
 
 def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
-    """Load RCS templates from an Excel (.xlsx) file."""
+    """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
+
+    # Auto-extract and upload any images embedded in the Excel spreadsheet
+    extracted_images = _extract_images_from_xlsx(path)
+    uploaded_file_names = []
+    if extracted_images:
+        try:
+            from rcs_client import upload_rcs_media
+            for fname, img_data in extracted_images:
+                try:
+                    k_name = upload_rcs_media(img_data, filename=fname, client=client)
+                    uploaded_file_names.append(k_name)
+                    logger.info("Auto-uploaded embedded image %s -> %s", fname, k_name)
+                except Exception as ex:
+                    logger.warning("Failed to auto-upload embedded image %s: %s", fname, ex)
+        except Exception as e:
+            logger.warning("Could not upload extracted xlsx images: %s", e)
 
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
 
     rows = []
-    for row in sheet.iter_rows(min_row=2, values_only=True):
+    for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 1):
         if not any(row):
             continue
 
@@ -215,14 +273,25 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
             if h:
                 raw_row[h] = str(val).strip() if val is not None else ""
 
-        if not raw_row.get("template_name") and not raw_row.get("name"):
+        if not any(raw_row.values()):
             continue
 
-        rows.append(raw_row)
+        sub = _row_to_rcs_submission(raw_row, client=client, fallback_idx=idx)
 
-    return [_row_to_rcs_submission(row, client=client) for row in rows]
+        # Auto-bind uploaded image fileNames to carousel cards or richcard if not manually set
+        if uploaded_file_names:
+            if sub.template_type == "carousel" and sub.carousel_cards:
+                for c_idx, card in enumerate(sub.carousel_cards):
+                    if c_idx < len(uploaded_file_names):
+                        card["fileName"] = uploaded_file_names[c_idx]
+            elif sub.template_type == "richcard" and not sub.media_url:
+                setattr(sub, "file_name", uploaded_file_names[0])
+
+        rows.append(sub)
+
+    return rows
 
 
 def load_rcs_from_list(rows: list[dict], client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load from a list of dicts already in memory."""
-    return [_row_to_rcs_submission(row, client=client) for row in rows]
+    return [_row_to_rcs_submission(row, client=client, fallback_idx=idx) for idx, row in enumerate(rows, 1)]

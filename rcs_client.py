@@ -27,15 +27,55 @@ from rcs_models import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Retry policy
+# Constants & Timeout
 # ---------------------------------------------------------------------------
-MAX_RETRIES = 3
-BACKOFF_SECONDS = 2  # doubles each retry: 2 s → 4 s → 8 s
 REQUEST_TIMEOUT = 30  # seconds
-
-# HTTP status codes worth retrying (transport-level)
+MAX_RETRIES = 3
+BACKOFF_SECONDS = 2
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str = "tata") -> str:
+    """
+    Upload a binary image to Karix RCS media storage (gRBM).
+    Returns the generated fileName string from Karix.
+    """
+    import io
+    c = client.lower()
+    headers = dict(get_rcs_auth_headers(c))
+    headers.pop("Content-Type", None)
+    esme_addr = get_esmeaddr(c)
+    stream = io.BytesIO(image_data)
+    stream.seek(0)
 
+    clean_filename = filename.split("/")[-1].split("\\")[-1] or "image.png"
+    if clean_filename.lower().endswith((".jpg", ".jpeg")):
+        mime_type = "image/jpeg"
+    elif clean_filename.lower().endswith(".gif"):
+        mime_type = "image/gif"
+    else:
+        mime_type = "image/png"
+        if not clean_filename.lower().endswith(".png"):
+            clean_filename += ".png"
+
+    resp = requests.post(
+        "https://rcsgui.karix.solutions/v1.0/templates/mediaUpload",
+        headers=headers,
+        files={"file": (clean_filename, stream, mime_type)},
+        data={
+            "esmeaddr": esme_addr,
+            "file_type": mime_type,
+            "channelId": "gRBM",
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    if not resp.ok:
+        raise RuntimeError(f"RCS media upload failed: HTTP {resp.status_code}: {resp.text[:300]}")
+
+    data = resp.json()
+    file_name = data.get("fileName") or data.get("filename")
+    if not file_name:
+        raise RuntimeError(f"RCS media upload response missing fileName: {data}")
+    logger.info("Uploaded RCS media: fileName=%s", file_name)
+    return str(file_name)
 
 def _extract_rcs_variables(text: str) -> tuple[str, list[str]]:
     """
@@ -168,24 +208,29 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             c_entry = {
                 "cardTitle": c_title[:100] if c_title else "Offer Details",
                 "cardDescription": c_desc_norm,
-                "mediaUrl": card.get("mediaUrl") or card.get("media_url") or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
             }
+            if card.get("fileName") or card.get("file_name"):
+                c_entry["fileName"] = card.get("fileName") or card.get("file_name")
+            else:
+                c_entry["mediaUrl"] = card.get("mediaUrl") or card.get("media_url") or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop"
+
             if clean_suggs:
                 c_entry["suggestions"] = clean_suggs
             cards_list.append(c_entry)
+
         # If no cards parsed, create minimum 2 default sample cards
         if len(cards_list) < 2:
             cards_list = [
                 {
                     "cardTitle": payload.card_title or "Special Festive Offer",
                     "cardDescription": payload.text_message or "Get instant loans with flexible EMIs.",
-                    "mediaUrl": payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
+                    "mediaUrl": payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
                     "suggestions": payload.suggestions or [],
                 },
                 {
                     "cardTitle": "Easy Repayment Options",
                     "cardDescription": "Low interest rates and instant approval in minutes.",
-                    "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
+                    "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
                     "suggestions": payload.suggestions or [],
                 },
             ]
@@ -212,18 +257,23 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         if not suggestions and getattr(payload, "button_text", None):
             suggestions = _build_single_suggestion(payload)
 
+        card_entry = {
+            "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
+            "cardDescription": normalized_text,
+            "suggestions": suggestions,
+        }
+        if getattr(payload, "file_name", None):
+            card_entry["fileName"] = getattr(payload, "file_name")
+        else:
+            card_entry["mediaUrl"] = payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
+
         vi_template = {
             "name": safe_name,
             "type": "richcard",
             "botId": bot_id,
             "orientation": getattr(payload, "orientation", "VERTICAL") or "VERTICAL",
             "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
-            "standaloneCard": {
-                "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
-                "cardDescription": normalized_text,
-                "mediaUrl": payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
-                "suggestions": suggestions,
-            },
+            "standaloneCard": card_entry,
         }
     else:
         raw_text = payload.text_message or getattr(payload, "template_message", "")
@@ -240,6 +290,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             "textMessage": normalized_text,
             "suggestions": suggestions,
         }
+
     return {
         "esmeAddr": esme_addr,
         "templatePlaceHolderCount": len(param_names),
