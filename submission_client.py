@@ -68,27 +68,16 @@ def _is_retryable(exc: Exception | None, response: requests.Response | None) -> 
     return bool(response is not None and response.status_code in _RETRYABLE_STATUS_CODES)
 
 
-def upload_media(file_path: str, file_type: str = "image/jpeg") -> str:
+def upload_media(file_path: str, file_type: str = "image/jpeg", client: str = "bajaj") -> str:
     """
     Upload a media file to Karix for use as a template HEADER image.
 
     This is the first step of the two-step image-header flow:
       1. POST /mediaUpload → returns a header_handle string
       2. POST /create with the handle in components[].example.header_handle
-
-    Args:
-        file_path: Absolute path to the image file.
-        file_type: MIME type (e.g. "image/jpeg", "image/png").
-
-    Returns:
-        The first media handle string from the response.
-
-    Raises:
-        RuntimeError: If the upload fails.
-        EnvironmentError: If auth credentials are missing.
     """
     url = f"{KARIX_BASE_URL}/mediaUpload"
-    headers = get_portal_auth_headers()
+    headers = get_portal_auth_headers(client)
     # Don't set Content-Type — requests sets multipart boundary automatically
 
     path = Path(file_path)
@@ -101,9 +90,9 @@ def upload_media(file_path: str, file_type: str = "image/jpeg") -> str:
             headers=headers,
             files={"file": (path.name, f, file_type)},
             data={
-                "esmeaddr": BAJAJ_ESMEADDR,
-                "waba_id": BAJAJ_WABA_ID,
-                "template_namespace_id": BAJAJ_TEMPLATE_NAMESPACE_ID,
+                "esmeaddr": get_esmeaddr(client),
+                "waba_id": get_waba_id(client),
+                "template_namespace_id": get_template_namespace_id(client),
                 "file_type": file_type,
             },
             timeout=MEDIA_UPLOAD_TIMEOUT,
@@ -125,7 +114,6 @@ def upload_media(file_path: str, file_type: str = "image/jpeg") -> str:
     first_handle = handle_str.strip().split("\n")[0].strip()
     logger.info("Media uploaded: handle=%s...", first_handle[:60])
     return first_handle
-
 
 def _ensure_default_sample_image() -> str:
     """
@@ -161,18 +149,11 @@ def _ensure_default_sample_image() -> str:
     return str(default_path.resolve())
 
 
-def _resolve_header_media(components: list) -> list:
+def _resolve_header_media(components: list, client: str = "bajaj") -> list:
     """
     Pre-process components before submission: for any HEADER component with
     format=IMAGE, ensure a valid media handle is attached.
-
-    If media_file/media_url is provided, upload that image.
-    If no image is provided, automatically fall back to default_sample_header.png
-    so the template can be submitted and whitelisted without custom media.
-
-    This mutates and returns the components list.
     """
-
     for comp in components:
         if not isinstance(comp, dict):
             continue
@@ -208,9 +189,9 @@ def _resolve_header_media(components: list) -> list:
             urlretrieve(media_url, media_file)
 
         # Upload and fill in the handle
-        handle = upload_media(media_file, file_type)
+        handle = upload_media(media_file, file_type, client=client)
         comp["example"] = {"header_handle": [handle]}
-        logger.info("Header image uploaded for template, handle set.")
+        logger.info("Header image uploaded for template (%s), handle set.", client)
 
     return components
 
@@ -254,29 +235,15 @@ def _resolve_body_variables(components: list) -> list:
     return components
 
 
-def _build_portal_create_body(payload: TemplateSubmission) -> dict:
+def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj") -> dict:
     """
     Build the legacy portal create body used only for media headers.
-
-    Note the quirks confirmed via real traffic:
-    - snake_case `waba_id` (unlike the camelCase `wabaId` in /getAllTemplates)
-    - `"sessionId": "12345"` is a literal hardcoded placeholder observed in
-      production traffic - not a real session value
-    - `esmeaddr` and `template_namespace_id` are fixed per WABA account
     """
-    # Convert components to plain dicts for the API.
-    # Components can be either TemplateComponent dataclasses or raw dicts
-    # (e.g. when loaded from JSON).  Raw dicts are passed through as-is to
-    # support complex component types (HEADER with format/example, BUTTONS
-    # with buttons_type/buttons_attributes, etc.) without needing every
-    # possible field on the TemplateComponent dataclass.
     components_raw = []
     for comp in payload.components:
         if isinstance(comp, dict):
-            # Already a plain dict — pass through verbatim
             components_raw.append(comp)
         else:
-            # TemplateComponent dataclass — convert, stripping None values
             d: dict = {"type": comp.type}
             if comp.text is not None:
                 d["text"] = comp.text
@@ -288,18 +255,17 @@ def _build_portal_create_body(payload: TemplateSubmission) -> dict:
 
     return {
         "requestType": "createTemplate",
-        "esmeaddr": BAJAJ_ESMEADDR,
-        "waba_id": BAJAJ_WABA_ID,
+        "esmeaddr": get_esmeaddr(client),
+        "waba_id": get_waba_id(client),
         "allow_category_change": True,
         "allow_marketing_recategorization": True,
         "sessionId": "12345",  # literal hardcoded placeholder from real traffic
         "template_name": payload.template_name,
-        "template_namespace_id": BAJAJ_TEMPLATE_NAMESPACE_ID,
+        "template_namespace_id": get_template_namespace_id(client),
         "language": payload.language,
         "category": payload.category,
         "components": components_raw,
     }
-
 
 # ---------------------------------------------------------------------------
 # Status mapping
@@ -316,29 +282,20 @@ _STATUS_MAP = {
 # Public API
 # ---------------------------------------------------------------------------
 
-def _submit_portal_template(payload: TemplateSubmission) -> SubmissionResult:
+def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") -> SubmissionResult:
     """
-    Submit one template for whitelisting, retrying transport-level
-    failures with exponential backoff.
-
-    Returns a SubmissionResult regardless of outcome — callers shouldn't
-    need to catch an exception for a normal "rejected/failed" case.
-
-    Retry policy:
-    - Retries on: timeout, connection error, 429 rate-limit, 5xx server error
-    - Does NOT retry on: 400 validation error, Karix {"Failed": "..."} response,
-      or any other non-transport error.  Retrying an invalid payload just
-      fails identically every time.
+    Submit one template with media headers via the portal API.
     """
+    c = (client or getattr(payload, "client", None) or "bajaj").lower()
     url = f"{KARIX_BASE_URL}/create"
-    body = _build_portal_create_body(payload)
+    body = _build_portal_create_body(payload, client=c)
 
     # Pre-process: upload media for HEADER IMAGE components and auto-fill variable samples
     try:
-        body["components"] = _resolve_header_media(body["components"])
+        body["components"] = _resolve_header_media(body["components"], client=c)
         body["components"] = _resolve_body_variables(body["components"])
     except (OSError, RuntimeError, FileNotFoundError) as e:
-        logger.error("Media upload failed for %s: %s", payload.template_name, e)
+        logger.error("Media upload failed for %s (%s): %s", payload.template_name, c, e)
         return SubmissionResult(
             source_ref=payload.source_ref,
             template_name=payload.template_name,
@@ -354,10 +311,7 @@ def _submit_portal_template(payload: TemplateSubmission) -> SubmissionResult:
         resp: requests.Response | None = None
 
         try:
-            # Read auth headers fresh on each attempt — credentials may have
-            # been refreshed between retries (unlikely, but cheap to re-read).
-            headers = get_portal_auth_headers()
-
+            headers = get_portal_auth_headers(c)
             # CRITICAL: The /create endpoint expects multipart/form-data with
             # the JSON payload in a field called "request" — NOT a raw JSON
             # body.  Sending application/json returns 400 Bad Request with no
@@ -493,13 +447,13 @@ def _requires_portal_media(payload: TemplateSubmission) -> bool:
     return False
 
 
-def _build_official_create_body(payload: TemplateSubmission) -> dict:
+def _build_official_create_body(payload: TemplateSubmission, client: str = "bajaj") -> dict:
     """
     Build the documented JSON body for POST /api/v1.0/template/{wabaId}.
 
     Portal-only account fields and the literal sessionId are deliberately absent.
     """
-    components = copy.deepcopy(_build_portal_create_body(payload)["components"])
+    components = copy.deepcopy(_build_portal_create_body(payload, client=client)["components"])
     components = _resolve_body_variables(components)
     return {
         "template_name": payload.template_name,
@@ -507,7 +461,6 @@ def _build_official_create_body(payload: TemplateSubmission) -> dict:
         "category": payload.category,
         "components": components,
     }
-
 def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj") -> SubmissionResult:
     """Submit a text-only template through the verified official Karix API."""
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
@@ -610,9 +563,8 @@ def submit_template(payload: TemplateSubmission, client: str | None = None) -> S
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
     if _requires_portal_media(payload):
-        return _submit_portal_template(payload)
+        return _submit_portal_template(payload, client=c)
     return _submit_official_template(payload, client=c)
-
 
 def check_status(provider_ref_id: str, client: str = "bajaj") -> tuple[ApprovalStatus, str | None, dict]:
     """

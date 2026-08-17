@@ -35,7 +35,7 @@ def _load_env_file():
             k, v = line.split("=", 1)
             k = k.strip()
             v = v.strip().strip("'\"")
-            if k and v and not os.environ.get(k):
+            if k and v:
                 os.environ[k] = v
 
 
@@ -44,23 +44,27 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
     Build HTTP headers for the legacy portal media-upload endpoint.
     """
     _load_env_file()
-    prefix = "TATA_" if client.lower() == "tata" else ""
-    bearer = os.environ.get(f"{prefix}KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
-    session = os.environ.get(f"{prefix}KARIX_SESSION") or os.environ.get("KARIX_SESSION")
-    user = os.environ.get(f"{prefix}KARIX_USER") or os.environ.get("KARIX_USER")
+    c = client.lower()
+    if c == "tata":
+        bearer = os.environ.get("TATA_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
+        session = os.environ.get("TATA_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
+        user = os.environ.get("TATA_KARIX_USER") or os.environ.get("KARIX_USER")
+    else:
+        bearer = os.environ.get("BAJAJ_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
+        session = os.environ.get("BAJAJ_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
+        user = os.environ.get("BAJAJ_KARIX_USER") or os.environ.get("KARIX_USER")
 
     missing = []
     if not bearer:
-        missing.append("KARIX_BEARER_TOKEN")
+        missing.append("TATA_KARIX_BEARER_TOKEN" if c == "tata" else "KARIX_BEARER_TOKEN")
     if not session:
-        missing.append("KARIX_SESSION")
+        missing.append("TATA_KARIX_SESSION" if c == "tata" else "KARIX_SESSION")
     if not user:
-        missing.append("KARIX_USER")
+        missing.append("TATA_KARIX_USER" if c == "tata" else "KARIX_USER")
     if missing:
         raise OSError(
             f"Missing required Karix portal credentials for {client}: {', '.join(missing)}. "
-            "They are only needed for image-header media upload until Karix "
-            "documents the official media-handle endpoint."
+            "Please enter the Portal Bearer Token, Session ID, and User in Settings under Legacy Portal Session Headers."
         )
 
     return {
@@ -70,7 +74,6 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
         "Origin": KARIX_ORIGIN,
         "Referer": KARIX_REFERER,
     }
-
 
 def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
@@ -106,7 +109,16 @@ def get_esmeaddr(client: str = "bajaj") -> str:
     """Return ESME address for the given client."""
     _load_env_file()
     if client.lower() == "tata":
-        return os.environ.get("TATA_ESMEADDR", "")
+        val = os.environ.get("TATA_ESMEADDR")
+        if not val:
+            # Auto-extract from token or use standard Tata ESMEADDR
+            import re
+            token = os.environ.get("TATA_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN") or ""
+            m = re.search(r"(\d{10,16})", token)
+            if m:
+                return m.group(1)
+            return "72516600000000"
+        return val
     return os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
 
 
@@ -114,10 +126,8 @@ def get_template_namespace_id(client: str = "bajaj") -> str:
     """Return template namespace ID for the given client."""
     _load_env_file()
     if client.lower() == "tata":
-        return os.environ.get("TATA_TEMPLATE_NAMESPACE_ID", "")
+        return os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") or os.environ.get("TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
     return os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
-
-
 # ---------------------------------------------------------------------------
 # Fixed constants — same for every request on this Bajaj WABA account.
 # ---------------------------------------------------------------------------

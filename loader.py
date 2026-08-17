@@ -111,24 +111,18 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     return components
 
 
-def load_from_csv(path: str) -> list[TemplateSubmission]:
+def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """
-    Load templates from a CSV file.
-
-    Supports two CSV structures:
-    1. Flat CSV columns (recommended): header_type, header_text, body, footer,
-       button_type, button_text, button_url, button_url_example
-    2. JSON components column: components column containing JSON string
+    Load templates from a CSV file for the specified client.
     """
-    from config import BAJAJ_WABA_ID
+    from config import get_waba_id
 
+    default_waba = get_waba_id(client) if client.lower() == "bajaj" else (get_waba_id(client) or "")
     rows = []
     with open(path, newline="", encoding="utf-8") as f:
         for raw_row in csv.DictReader(f):
-            # Clean keys/values of surrounding whitespace
             clean_row = {k.strip(): (v.strip() if v else "") for k, v in raw_row.items() if k}
 
-            # If components column exists and is non-empty JSON
             if clean_row.get("components"):
                 try:
                     clean_row["components"] = json.loads(clean_row["components"])
@@ -137,9 +131,9 @@ def load_from_csv(path: str) -> list[TemplateSubmission]:
             else:
                 clean_row["components"] = _flat_row_to_components(clean_row)
 
-            # Apply defaults
+            clean_row["client"] = clean_row.get("client") or client
             if not clean_row.get("waba_id"):
-                clean_row["waba_id"] = BAJAJ_WABA_ID
+                clean_row["waba_id"] = default_waba
             if not clean_row.get("language"):
                 clean_row["language"] = "en"
             if not clean_row.get("category"):
@@ -149,18 +143,14 @@ def load_from_csv(path: str) -> list[TemplateSubmission]:
 
     return [_row_to_submission(row) for row in rows]
 
-
-def load_from_excel(path: str) -> list[TemplateSubmission]:
+def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """
-    Load templates directly from an Excel (.xlsx) file.
-
-    Supports flat columns: template_name, category, language, header_type,
-    header_text, body, footer, button_type, button_text, button_url, button_url_example
+    Load templates directly from an Excel (.xlsx) file for the specified client.
     """
     import openpyxl
+    from config import get_waba_id
 
-    from config import BAJAJ_WABA_ID
-
+    default_waba = get_waba_id(client) if client.lower() == "bajaj" else (get_waba_id(client) or "")
     try:
         wb = openpyxl.load_workbook(path, data_only=True)
     except Exception as e:
@@ -178,7 +168,6 @@ def load_from_excel(path: str) -> list[TemplateSubmission]:
         raise ValueError(f"Unable to read Excel file '{path}': {e}") from e
 
     sheet = wb.active
-
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
 
     rows = []
@@ -202,8 +191,9 @@ def load_from_excel(path: str) -> list[TemplateSubmission]:
         else:
             raw_row["components"] = _flat_row_to_components(raw_row)
 
+        raw_row["client"] = raw_row.get("client") or client
         if not raw_row.get("waba_id"):
-            raw_row["waba_id"] = BAJAJ_WABA_ID
+            raw_row["waba_id"] = default_waba
         if not raw_row.get("language"):
             raw_row["language"] = "en"
         if not raw_row.get("category"):
@@ -212,7 +202,6 @@ def load_from_excel(path: str) -> list[TemplateSubmission]:
         rows.append(raw_row)
 
     return [_row_to_submission(row) for row in rows]
-
 
 def load_from_list(rows: list[dict]) -> list[TemplateSubmission]:
     """Load from a list of dicts already in memory (e.g. from a mock)."""
