@@ -316,9 +316,9 @@ export default function SubmitPage() {
                     <>
                       <th className="px-5 py-3">#</th>
                       <th className="px-5 py-3">Template Name</th>
-                      <th className="px-5 py-3">DLT Template ID</th>
                       <th className="px-5 py-3">Type</th>
-                      <th className="px-5 py-3">Sender IDs</th>
+                      <th className="px-5 py-3">Content / Title</th>
+                      <th className="px-5 py-3">Buttons / Cards</th>
                     </>
                   )}
                 </tr>
@@ -338,10 +338,18 @@ export default function SubmitPage() {
                       </>
                     ) : (
                       <>
-                        <td className="px-5 py-3 font-mono text-gray-700">{p.template_id || '—'}</td>
-                        <td className="px-5 py-3 text-gray-700">{p.template_type || '—'}</td>
-                        <td className="px-5 py-3 text-gray-700">
-                          {Array.isArray(p.sender_ids) ? p.sender_ids.join(', ') : p.sender_ids || '—'}
+                        <td className="px-5 py-3 font-semibold text-gray-800 uppercase tracking-wider text-[11px]">
+                          {p.template_type || (p.carousel_cards?.length ? 'carousel' : (p.media_url ? 'richcard' : 'text'))}
+                        </td>
+                        <td className="px-5 py-3 text-gray-700 max-w-xs truncate">
+                          {p.card_title || p.text_message || p.template_message || '—'}
+                        </td>
+                        <td className="px-5 py-3 text-gray-600 text-[11px]">
+                          {p.carousel_cards?.length
+                            ? `${p.carousel_cards.length} card(s)`
+                            : p.suggestions?.length
+                            ? `${p.suggestions.length} button(s)`
+                            : 'No buttons'}
                         </td>
                       </>
                     )}
@@ -414,9 +422,9 @@ export default function SubmitPage() {
                       </>
                     ) : (
                       <>
-                        <th className="px-5 py-3">DLT ID</th>
+                        <th className="px-5 py-3">Karix Template ID</th>
                         <th className="px-5 py-3">Status</th>
-                        <th className="px-5 py-3">Notes</th>
+                        <th className="px-5 py-3">Details / Response</th>
                       </>
                     )}
                   </tr>
@@ -447,15 +455,17 @@ export default function SubmitPage() {
                         </>
                       ) : (
                         <>
-                          <td className="px-5 py-3 font-mono text-gray-700">{r.template_id || '—'}</td>
+                          <td className="px-5 py-3 font-mono font-semibold text-indigo-700 text-xs">
+                            {r.template_id || r.provider_ref_id || '—'}
+                          </td>
                           <td className="px-5 py-3">
                             <StatusBadge status={r.status} />
                           </td>
-                          <td className="px-5 py-3 text-gray-500">
+                          <td className="px-5 py-3 text-gray-600">
                             {r.error ? (
                               <span className="text-red-600 font-medium">{r.error}</span>
                             ) : (
-                              'Processed'
+                              <span className="text-emerald-700 font-medium">Template created on Karix Bot Builder</span>
                             )}
                           </td>
                         </>

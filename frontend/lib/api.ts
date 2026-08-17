@@ -51,12 +51,17 @@ export type TemplatePreview = {
   // RCS preview fields
   template_id?: string;
   template_type?: string;
+  text_message?: string;
+  card_title?: string;
+  card_description?: string;
+  media_url?: string;
+  suggestions?: Array<Record<string, unknown>>;
+  carousel_cards?: Array<Record<string, unknown>>;
   sender_ids?: string[];
   template_message_type?: string;
   template_message?: string;
   entity_id?: string;
 };
-
 function getApiUrl(path: string): string {
   if (typeof window !== "undefined") {
     // In browser: relative URL (proxied by Next.js rewrites to backend)
