@@ -5,17 +5,19 @@ Supports multiple accounts (Bajaj, Tata Capital) and multiple channels (WhatsApp
 Wraps the existing Python pipelines and exposes REST endpoints consumed by the Next.js frontend.
 """
 
+import logging
 import os
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
 import requests as http_client
-from fastapi import FastAPI, File, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
 # WhatsApp pipeline imports
 from config import (
     BAJAJ_ESMEADDR,
@@ -227,7 +229,6 @@ async def submit_file(
 
     acc = account.lower()
     chan = channel.lower()
-
     try:
         if chan == "rcs":
             before_count = len(load_rcs_log(RCS_LOG_PATH))
@@ -242,8 +243,15 @@ async def submit_file(
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
         return {"submitted": len(new_entries), "results": new_entries}
+    except Exception as exc:
+        logger.exception("Submission failed for %s (%s): %s", acc, chan, exc)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Submission failed for {acc} ({chan}): {str(exc)}",
+        )
     finally:
-        os.unlink(tmp_path)
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @app.post("/api/poll")

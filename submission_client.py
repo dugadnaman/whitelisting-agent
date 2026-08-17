@@ -510,16 +510,30 @@ def _build_official_create_body(payload: TemplateSubmission) -> dict:
 
 def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj") -> SubmissionResult:
     """Submit a text-only template through the verified official Karix API."""
-    waba_id = get_waba_id(client)
+    c = (client or getattr(payload, "client", None) or "bajaj").lower()
+    try:
+        waba_id = (payload.waba_id if getattr(payload, "waba_id", None) and payload.waba_id not in ("", BAJAJ_WABA_ID) and c == "tata" else None) or get_waba_id(c)
+        headers = get_official_auth_headers(c)
+    except OSError as exc:
+        return SubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=SubmissionStatus.FAILED,
+            error=str(exc),
+            approval_status=ApprovalStatus.UNKNOWN,
+            retry_count=0,
+        )
+
     url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
     body = _build_official_create_body(payload)
     last_result: SubmissionResult | None = None
 
     for attempt in range(MAX_RETRIES):
         try:
-            headers = get_official_auth_headers(client)
+            headers = get_official_auth_headers(c)
             headers["Content-Type"] = "application/json"
             response = requests.post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
+        except (requests.ConnectionError, requests.Timeout) as exc:
             last_result = SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
@@ -531,16 +545,6 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
             if attempt < MAX_RETRIES - 1:
                 time.sleep(BACKOFF_SECONDS * (2 ** attempt))
             continue
-        except OSError as exc:
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=str(exc),
-                approval_status=ApprovalStatus.UNKNOWN,
-                retry_count=attempt,
-            )
-
         try:
             data = response.json()
         except (json.JSONDecodeError, ValueError):
