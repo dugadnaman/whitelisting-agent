@@ -17,6 +17,29 @@ from rcs_models import RcsTemplateSubmission
 logger = logging.getLogger(__name__)
 
 
+def infer_cta_link_and_button(text: str) -> tuple[str, str]:
+    """
+    If no explicit CTA button or link is given in the brief:
+    Infers the most relevant Tata Capital landing page and button label based on copy keywords.
+    """
+    t_lower = text.lower()
+
+    if any(w in t_lower for w in ("home loan", "housing", "property", "mortgage")):
+        return "Check Rates", "https://www.tatacapital.com/home-loan.html"
+    elif any(w in t_lower for w in ("business loan", "enterprise", "msme", "sme", "working capital")):
+        return "Apply Business", "https://www.tatacapital.com/business-loan.html"
+    elif any(w in t_lower for w in ("vehicle", "car", "2-wheeler", "bike", "auto")):
+        return "Explore Vehicle Loan", "https://www.tatacapital.com/vehicle-loan.html"
+    elif any(w in t_lower for w in ("eligibility", "eligible", "check offer", "check my offer")):
+        return "Check Eligibility", "https://www.tatacapital.com/personal-loan.html"
+    elif any(w in t_lower for w in ("claim", "pre-approved", "pre approved", "exclusive")):
+        return "Claim Your Offer", "https://www.tatacapital.com/personal-loan.html"
+    elif any(w in t_lower for w in ("feedback", "survey", "rating", "experience", "satisfied")):
+        return "Rate Experience", "https://www.tatacapital.com"
+    else:
+        return "Apply Now", "https://www.tatacapital.com/personal-loan.html"
+
+
 def parse_single_cell_card_block(cell_text: str) -> dict:
     """
     Decompose an unstructured marketing card text block (from Excel cells) into:
@@ -30,13 +53,14 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
             "card_title": "",
             "card_description": "",
             "button_text": "Apply Now",
-            "button_url": "https://www.tatacapital.com",
+            "button_url": "https://www.tatacapital.com/personal-loan.html",
         }
 
     lines = [line.strip() for line in cell_text.splitlines() if line.strip()]
 
-    button_text = "Apply Now"
-    button_url = "https://www.tatacapital.com"
+    inferred_text, inferred_url = infer_cta_link_and_button(cell_text)
+    button_text = inferred_text
+    button_url = inferred_url
     clean_lines = []
 
     for line in lines:

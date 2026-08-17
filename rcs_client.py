@@ -498,17 +498,25 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
 
 def fetch_rcs_templates(bot_id: str | None = None, client: str = "tata") -> list[dict]:
     """
-    Fetch all RCS templates for the bot ID from the official Karix RCS endpoint.
+    Fetch all live RCS templates for the bot ID from official Karix RCS endpoint:
+    POST https://rcsgui.karix.solutions/api/rcstemplate/fetchTemplates
     """
     c = client.lower()
     b_id = bot_id or get_rcs_bot_id(c)
-    headers = get_rcs_auth_headers(c)
-    url = f"{KARIX_RCS_FETCH_URL}?senderId={b_id}"
-
-    resp = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-    if not resp.ok:
-        logger.error("Failed to fetch RCS templates: HTTP %d: %s", resp.status_code, resp.text[:300])
+    esme_addr = get_esmeaddr(c)
+    try:
+        headers = get_rcs_auth_headers(c)
+        resp = requests.post(
+            "https://rcsgui.karix.solutions/api/rcstemplate/fetchTemplates",
+            headers=headers,
+            json={"esmeaddr": str(esme_addr), "senderId": b_id},
+            timeout=REQUEST_TIMEOUT,
+        )
+        if not resp.ok:
+            logger.error("Failed to fetch RCS templates: HTTP %d: %s", resp.status_code, resp.text[:300])
+            return []
+        data = resp.json()
+        return data.get("templateInfo", [])
+    except Exception as exc:
+        logger.error("Error fetching live RCS templates for %s: %s", c, exc)
         return []
-
-    data = resp.json()
-    return data.get("templateInfo", [])

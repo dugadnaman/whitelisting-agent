@@ -38,11 +38,10 @@ from rcs_config import (
     get_rcs_auth_headers,
     get_rcs_entity_id,
 )
+from rcs_client import fetch_rcs_templates
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
 from rcs_runner import run_rcs_file
 from rcs_tracker import load_rcs_log
-
-# ---------------------------------------------------------------------------
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -91,24 +90,42 @@ def get_stats(
 ):
     acc = account.lower()
     chan = channel.lower()
-
     if chan == "rcs":
-        entries = load_rcs_log(RCS_LOG_PATH)
-        entries = [e for e in entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-        total = len(entries)
-        submitted = sum(1 for e in entries if e.get("status") == "submitted")
-        failed = sum(1 for e in entries if e.get("status") == "failed")
-        duplicate = sum(1 for e in entries if e.get("status") == "duplicate")
+        local_entries = load_rcs_log(RCS_LOG_PATH)
+        local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+
+        live_templates = fetch_rcs_templates(client=acc)
+        seen_names = set()
+        merged = []
+
+        for lt in live_templates:
+            vi = lt.get("viTemplate", {})
+            name = vi.get("name") or str(lt.get("templateId", ""))
+            status_str = str(lt.get("status", "SUBMITTED")).upper()
+            merged.append({
+                "template_name": name,
+                "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
+                "approval_status": status_str.lower(),
+            })
+            seen_names.add(name.lower())
+
+        for le in local_entries:
+            if le.get("template_name", "").lower() not in seen_names:
+                merged.append(le)
+
+        total = len(merged)
+        submitted = sum(1 for e in merged if e.get("status") == "submitted")
+        failed = sum(1 for e in merged if e.get("status") == "failed")
+        duplicate = sum(1 for e in merged if e.get("status") == "duplicate")
         return {
             "total": total,
             "submitted": submitted,
             "failed": failed,
             "duplicate": duplicate,
-            "pending": 0,
-            "approved": 0,
-            "rejected": 0,
+            "pending": sum(1 for e in merged if e.get("approval_status") == "pending"),
+            "approved": sum(1 for e in merged if e.get("approval_status") == "approved"),
+            "rejected": sum(1 for e in merged if e.get("approval_status") == "rejected"),
         }
-
     # WhatsApp
     entries = load_log(LOG_PATH)
     entries = [e for e in entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
@@ -143,35 +160,81 @@ def get_templates(
     chan = channel.lower()
 
     if chan == "rcs":
-        entries = load_rcs_log(RCS_LOG_PATH)
-        entries = [e for e in entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+        local_entries = load_rcs_log(RCS_LOG_PATH)
+        local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
 
-        if status:
-            entries = [e for e in entries if e.get("status") == status]
+        live_templates = fetch_rcs_templates(client=acc)
+        seen_names = set()
+        merged_entries = []
 
-        if search:
+        for lt in live_templates:
+            vi = lt.get("viTemplate", {})
+            name = vi.get("name") or str(lt.get("templateId", ""))
+            status_str = str(lt.get("status", "SUBMITTED")).upper()
+            t_type = vi.get("type", "text")
+
+            carousel_cards = vi.get("carouselCard", [])
+            card_title = ""
+            msg = vi.get("textMessage", "")
+            if carousel_cards:
+                t_type = f"carousel ({len(carousel_cards)} cards)"
+                card_title = " | ".join([c.get("cardTitle", "") for c in carousel_cards if c.get("cardTitle")])
+                msg = " | ".join([c.get("cardDescription", "") for c in carousel_cards if c.get("cardDescription")])
+            elif vi.get("standaloneCard"):
+                t_type = "richcard"
+                card_title = vi.get("standaloneCard", {}).get("cardTitle", "")
+                msg = vi.get("standaloneCard", {}).get("cardDescription", "")
+
+            entry = {
+                "source_ref": name,
+                "template_name": name,
+                "template_id": str(lt.get("templateId", "")),
+                "template_type": t_type,
+                "card_title": card_title,
+                "template_message": msg,
+                "sender_ids": [lt.get("botId", "")],
+                "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
+                "approval_status": status_str.lower(),
+                "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
+                "provider_response": lt,
+                "client": acc,
+                "channel": "rcs",
+            }
+            merged_entries.append(entry)
+            seen_names.add(name.lower())
+
+        for le in local_entries:
+            if le.get("template_name", "").lower() not in seen_names:
+                merged_entries.append(le)
+
+        if status and isinstance(status, str):
+            s_val = status.lower()
+            merged_entries = [
+                e for e in merged_entries
+                if str(e.get("status", "")).lower() == s_val or str(e.get("approval_status", "")).lower() == s_val
+            ]
+
+        if search and isinstance(search, str):
             q = search.lower()
-            entries = [
-                e for e in entries
+            merged_entries = [
+                e for e in merged_entries
                 if q in str(e.get("template_name", "")).lower()
                 or q in str(e.get("template_id", "")).lower()
                 or q in str(e.get("source_ref", "")).lower()
             ]
-
-        entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
-        return entries
-
-    # WhatsApp
+        merged_entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
+        return merged_entries
     entries = load_log(LOG_PATH)
     entries = [e for e in entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
 
-    if status:
+    if status and isinstance(status, str):
+        s_val = status.lower()
         entries = [
             e for e in entries
-            if e.get("approval_status") == status or e.get("status") == status
+            if str(e.get("approval_status", "")).lower() == s_val or str(e.get("status", "")).lower() == s_val
         ]
 
-    if search:
+    if search and isinstance(search, str):
         q = search.lower()
         entries = [
             e for e in entries
@@ -179,7 +242,6 @@ def get_templates(
             or q in str(e.get("source_ref", "")).lower()
             or q in str(e.get("provider_ref_id", "")).lower()
         ]
-
     entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
     return entries
 
