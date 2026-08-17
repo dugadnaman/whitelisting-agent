@@ -17,8 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
-logger = logging.getLogger(__name__)
-# WhatsApp pipeline imports
 from config import (
     BAJAJ_ESMEADDR,
     KARIX_BASE_URL,
@@ -29,7 +27,9 @@ from config import (
     get_waba_id,
 )
 from loader import load_from_csv, load_from_excel
+from models import ApprovalStatus
 from runner import poll_pending, run_file
+from submission_client import _STATUS_MAP
 from tracker import load_log, pending_entries
 
 # RCS pipeline imports
@@ -80,6 +80,26 @@ class CredentialUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
+    """Fetch live templates directly from Karix WhatsApp API."""
+    acc = client.lower()
+    try:
+        waba_id = get_waba_id(acc)
+        headers = get_official_auth_headers(acc)
+        resp = http_client.get(
+            f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}",
+            headers=headers,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
+            return data.get("response", {}).get("templates", [])
+    except Exception as e:
+        logger.warning("Could not fetch live WhatsApp templates for %s: %s", acc, e)
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -127,17 +147,34 @@ def get_stats(
             "rejected": sum(1 for e in merged if e.get("approval_status") == "rejected"),
         }
     # WhatsApp
-    entries = load_log(LOG_PATH)
-    entries = [e for e in entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-    total = len(entries)
-    submitted = sum(1 for e in entries if e.get("status") == "submitted")
-    failed = sum(1 for e in entries if e.get("status") == "failed")
-    pending = sum(
-        1 for e in entries
-        if e.get("status") == "submitted" and e.get("approval_status") == "pending"
-    )
-    approved = sum(1 for e in entries if e.get("approval_status") == "approved")
-    rejected = sum(1 for e in entries if e.get("approval_status") == "rejected")
+    local_entries = load_log(LOG_PATH)
+    local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+
+    live_templates = fetch_whatsapp_templates(client=acc)
+    seen_names = set()
+    merged = []
+
+    for lt in live_templates:
+        name = lt.get("template_name") or str(lt.get("fb_template_id", ""))
+        status_str = str(lt.get("template_create_status", "PENDING")).upper()
+        approval_val = _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value if status_str in _STATUS_MAP else status_str.lower()
+        merged.append({
+            "template_name": name,
+            "status": "submitted",
+            "approval_status": approval_val,
+        })
+        seen_names.add(name.lower())
+
+    for le in local_entries:
+        if le.get("template_name", "").lower() not in seen_names:
+            merged.append(le)
+
+    total = len(merged)
+    submitted = sum(1 for e in merged if e.get("status") == "submitted")
+    failed = sum(1 for e in merged if e.get("status") == "failed")
+    pending = sum(1 for e in merged if e.get("approval_status") == "pending")
+    approved = sum(1 for e in merged if e.get("approval_status") == "approved")
+    rejected = sum(1 for e in merged if e.get("approval_status") == "rejected")
     return {
         "total": total,
         "submitted": submitted,
@@ -147,7 +184,6 @@ def get_stats(
         "rejected": rejected,
         "duplicate": 0,
     }
-
 
 @app.get("/api/templates")
 def get_templates(
@@ -224,26 +260,59 @@ def get_templates(
             ]
         merged_entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
         return merged_entries
-    entries = load_log(LOG_PATH)
-    entries = [e for e in entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+    # WhatsApp
+    local_entries = load_log(LOG_PATH)
+    local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+
+    live_templates = fetch_whatsapp_templates(client=acc)
+    seen_names = set()
+    merged_entries = []
+
+    for lt in live_templates:
+        name = lt.get("template_name") or str(lt.get("fb_template_id", ""))
+        status_str = str(lt.get("template_create_status", "PENDING")).upper()
+        approval_val = _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value if status_str in _STATUS_MAP else status_str.lower()
+
+        entry = {
+            "source_ref": name,
+            "template_name": name,
+            "status": "submitted",
+            "provider_ref_id": str(lt.get("fb_template_id", "") or lt.get("sno", "")),
+            "approval_status": approval_val,
+            "approval_reason": lt.get("template_status_reason"),
+            "error": None,
+            "retry_count": 0,
+            "submitted_at": lt.get("created_at") or lt.get("modified_at") or "",
+            "updated_at": lt.get("modified_at"),
+            "provider_response": lt,
+            "client": acc,
+            "channel": "whatsapp",
+        }
+        merged_entries.append(entry)
+        seen_names.add(name.lower())
+
+    for le in local_entries:
+        if le.get("template_name", "").lower() not in seen_names:
+            merged_entries.append(le)
 
     if status and isinstance(status, str):
         s_val = status.lower()
-        entries = [
-            e for e in entries
+        merged_entries = [
+            e for e in merged_entries
             if str(e.get("approval_status", "")).lower() == s_val or str(e.get("status", "")).lower() == s_val
         ]
 
     if search and isinstance(search, str):
         q = search.lower()
-        entries = [
-            e for e in entries
+        merged_entries = [
+            e for e in merged_entries
             if q in str(e.get("template_name", "")).lower()
             or q in str(e.get("source_ref", "")).lower()
             or q in str(e.get("provider_ref_id", "")).lower()
         ]
-    entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
-    return entries
+
+    merged_entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
+    return merged_entries
 
 
 @app.post("/api/preview")

@@ -1,53 +1,170 @@
 """
-Input loader: turns raw rows (CSV, JSON list, or a list of dicts you already
-have in memory) into validated TemplateSubmission objects.
+Input loader: turns raw rows (CSV, JSON list, or Excel files) into validated
+TemplateSubmission objects for WhatsApp.
 
-This layer doesn't change when the real Karix API shows up tomorrow — only
-submission_client.py does.
+Supports both standard column spreadsheets and unstructured single-cell
+marketing briefs (like Book 4) with automatic image extraction.
 """
+
 import csv
+import io
 import json
+import logging
 import re
+import zipfile
 from pathlib import Path
 
+from config import get_waba_id
 from models import TemplateComponent, TemplateSubmission
 
+logger = logging.getLogger(__name__)
 
-def _row_to_submission(row: dict) -> TemplateSubmission:
-    # TemplateComponent only knows about type/text/variables/buttons.
-    # Complex components (HEADER with format/example, BUTTONS with
-    # buttons_type/buttons_attributes) have extra keys.  Keep those as
-    # raw dicts — submission_client._build_create_body handles both.
+
+def infer_whatsapp_cta(text: str, client: str = "bajaj") -> tuple[str, str, str]:
+    """
+    If no explicit CTA is provided:
+    Infers the appropriate button text, dynamic URL, and Meta sample example.
+    """
+    t_lower = text.lower()
+    is_tata = client.lower() == "tata"
+
+    if is_tata:
+        base_domain = "https://www.tatacapital.com"
+        if any(w in t_lower for w in ("home loan", "housing", "property")):
+            return "Check Rates", f"{base_domain}/home-loan.html/{{{{1}}}}", f"{base_domain}/home-loan.html"
+        elif any(w in t_lower for w in ("business loan", "enterprise", "msme")):
+            return "Apply Business", f"{base_domain}/business-loan.html/{{{{1}}}}", f"{base_domain}/business-loan.html"
+        elif any(w in t_lower for w in ("vehicle", "car", "2-wheeler", "bike")):
+            return "Explore Vehicle", f"{base_domain}/vehicle-loan.html/{{{{1}}}}", f"{base_domain}/vehicle-loan.html"
+        elif any(w in t_lower for w in ("eligibility", "eligible", "check offer")):
+            return "Check Eligibility", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
+        elif any(w in t_lower for w in ("claim", "pre-approved", "pre approved", "exclusive")):
+            return "Claim Your Offer", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
+        else:
+            return "Apply Now", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
+    else:
+        # Bajaj
+        base_domain = "https://www.bajajfinservmarkets.in"
+        return "Apply Now", "https://1kx.in/{{1}}", base_domain
+
+
+def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> dict:
+    """
+    Decompose an unstructured marketing card text block (from Excel cells) into WhatsApp components:
+    - Clean body (with CTA instruction lines stripped)
+    - Normalized variables ({{1}}, {{2}}...)
+    - Clean header title
+    - Action button with dynamic link
+    """
+    if not cell_text:
+        return {"header": None, "body": "", "button_text": "Apply Now", "button_url": "https://1kx.in/{{1}}", "button_example": "https://www.tatacapital.com"}
+
+    lines = [line.strip() for line in cell_text.splitlines() if line.strip()]
+
+    inferred_btn, inferred_url, inferred_ex = infer_whatsapp_cta(cell_text, client=client)
+    button_text = inferred_btn
+    button_url = inferred_url
+    button_example = inferred_ex
+    clean_lines = []
+
+    for line in lines:
+        is_cta = False
+        # 1. Match CTA Button <Text> or CTA button<Text> or CTA<Text>
+        m_cta = re.search(r'CTA\s*(?:Button|button)?\s*[:<\[]\s*([^>\]<]+)\s*[>\]]', line, re.IGNORECASE)
+        if m_cta:
+            cand = m_cta.group(1).strip()
+            if cand.lower() not in ("link", "url"):
+                button_text = cand
+            is_cta = True
+
+        # 2. Match [Button Text] <link> or <Button Text> <link>
+        m_link = re.search(r'[\[<]([^>\]<]+)[\]>]\s*(?:<link>|\[link\])', line, re.IGNORECASE)
+        if m_link and not is_cta:
+            cand = m_link.group(1).strip()
+            if cand.lower() not in ("link", "url"):
+                button_text = cand
+            is_cta = True
+
+        # 3. Match prompt lines like "Tap to proceed ⬇️" or "Tap below to check eligibility⬇️"
+        if re.search(r'^(?:Tap|Click|Press)\s+(?:below|here|to\s+proceed|to\s+check|to\s+apply).*?(?:⬇️|->|:|here)?$', line, re.IGNORECASE):
+            is_cta = True
+
+        if not is_cta:
+            clean_lines.append(line)
+
+    full_desc = "\n\n".join(clean_lines)
+
+    # Normalize body variables: <Name>, <amt>, [var] -> {{1}}, {{2}}
+    spaced_body = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', full_desc)
+    spaced_body = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', spaced_body)
+    spaced_body = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', spaced_body)
+
+    placeholders = []
+    def _repl(m):
+        idx = len(placeholders) + 1
+        placeholders.append(m.group(0))
+        return f"{{{{{idx}}}}}"
+
+    pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
+    normalized_body = re.sub(pattern, _repl, spaced_body)
+
+    # Extract clean header title
+    first_line = clean_lines[0] if clean_lines else "Special Offer"
+    clean_title = re.sub(r'<[^>]+>|\[[^\]]+\]|\{[^}]+\}', '', first_line).strip()
+    clean_title = re.sub(r'^[,\s:–—\-]+|[,\s:–—\-]+$', '', clean_title)
+    if re.match(r'^(?:Dear|Hi|Hello)\b', clean_title, re.IGNORECASE) or len(clean_title) < 4:
+        clean_title = "Pre-Approved Personal Loan ✨"
+
+    return {
+        "header": clean_title[:60],
+        "body": normalized_body,
+        "button_text": button_text,
+        "button_url": button_url,
+        "button_example": button_example,
+    }
+
+
+def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
+    """Extract embedded images from an Excel (.xlsx) file in order."""
+    images = []
+    try:
+        with zipfile.ZipFile(path, "r") as z:
+            media_names = [f for f in z.namelist() if f.startswith("xl/media/")]
+            def natural_key(name):
+                return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name)]
+            media_names.sort(key=natural_key)
+            for name in media_names:
+                filename = name.split("/")[-1]
+                images.append((filename, z.read(name)))
+    except Exception as e:
+        logger.warning("Could not extract embedded images from xlsx: %s", e)
+    return images
+
+
+def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
     _TC_FIELDS = {"type", "text", "variables", "buttons"}
 
     components = []
-    for c in row["components"]:
+    for c in row.get("components", []):
         if isinstance(c, dict):
             if c.keys() <= _TC_FIELDS:
-                # Simple component — fits the dataclass
                 components.append(TemplateComponent(**c))
             else:
-                # Complex component — pass through as raw dict
                 components.append(c)
         else:
             components.append(c)
 
+    c_client = row.get("client") or client
     return TemplateSubmission(
-        client=row.get("client", "bajaj"),
+        client=c_client,
         channel=row.get("channel", "whatsapp"),
         template_name=row["template_name"],
-        language=row["language"],
-        category=row["category"],
-        waba_id=row["waba_id"],
+        language=row.get("language", "en"),
+        category=row.get("category", "MARKETING"),
+        waba_id=row.get("waba_id") or get_waba_id(c_client),
         components=components,
         source_ref=row.get("source_ref", row["template_name"]),
     )
-
-
-def load_from_json(path: str) -> list[TemplateSubmission]:
-    """Load a JSON file containing a list of template objects."""
-    data = json.loads(Path(path).read_text())
-    return [_row_to_submission(row) for row in data]
 
 
 def _flat_row_to_components(raw_row: dict) -> list[dict]:
@@ -67,13 +184,12 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
         components.append({
             "type": "HEADER",
             "format": "TEXT",
-            "text": raw_row["header_text"].strip()
+            "text": raw_row["header_text"].strip(),
         })
 
     # 2. BODY
     body_text = (raw_row.get("body") or raw_row.get("body_text") or "").strip()
     if body_text:
-        # Normalize non-standard tags like <name>, {#var#}, [name] to {{1}}, {{2}}
         body_text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', body_text)
         body_text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', body_text)
         body_text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', body_text)
@@ -85,6 +201,7 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
         pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
         body_text = re.sub(pattern, _repl, body_text)
         components.append({"type": "BODY", "text": body_text})
+
     # 3. FOOTER
     footer_text = (raw_row.get("footer") or raw_row.get("footer_text") or "").strip()
     if footer_text:
@@ -94,20 +211,19 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     btype = (raw_row.get("button_type") or "").strip().upper()
     btext = (raw_row.get("button_text") or "").strip()
     burl = (raw_row.get("button_url") or "").strip()
-    bexample = (raw_row.get("button_url_example") or "").strip() or "https://www.bajajfinservmarkets.in/"
+    bexample = (raw_row.get("button_url_example") or "").strip() or "https://www.tatacapital.com/personal-loan.html"
 
-    if btype == "URL" and btext and burl:
+    if btype in ("URL", "") and btext and burl:
         components.append({
             "type": "BUTTONS",
             "buttons": [{
                 "type": "URL",
                 "text": btext,
                 "url": burl,
-                "example": [bexample]
-            }]
+                "example": [bexample],
+            }],
         })
     elif btype in ("QUICK_REPLY", "QUICKREPLY") and btext:
-        # Allows pipe-separated quick replies: e.g. "Yes | No"
         btn_items = [
             {"type": "QUICK_REPLY", "text": item.strip()}
             for item in btext.split("|") if item.strip()
@@ -115,23 +231,21 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
         if btn_items:
             components.append({
                 "type": "BUTTONS",
-                "buttons": btn_items
+                "buttons": btn_items,
             })
 
     return components
 
 
 def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
-    """
-    Load templates from a CSV file for the specified client.
-    """
-    from config import get_waba_id
-
+    """Load templates from a CSV file for the specified client."""
     default_waba = get_waba_id(client) if client.lower() == "bajaj" else (get_waba_id(client) or "")
     rows = []
     with open(path, newline="", encoding="utf-8") as f:
         for raw_row in csv.DictReader(f):
             clean_row = {k.strip(): (v.strip() if v else "") for k, v in raw_row.items() if k}
+            if not clean_row.get("template_name") and not clean_row.get("name"):
+                continue
 
             if clean_row.get("components"):
                 try:
@@ -151,46 +265,98 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
 
             rows.append(clean_row)
 
-    return [_row_to_submission(row) for row in rows]
+    return [_row_to_submission(row, client=client) for row in rows]
+
 
 def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """
-    Load templates directly from an Excel (.xlsx) file for the specified client.
+    Load templates from an Excel (.xlsx) file.
+    Supports both multi-block single-cell sheets (like Book 4) and standard column tables.
     """
     import openpyxl
-    from config import get_waba_id
 
     default_waba = get_waba_id(client) if client.lower() == "bajaj" else (get_waba_id(client) or "")
-    try:
-        wb = openpyxl.load_workbook(path, data_only=True)
-    except Exception as e:
-        import zipfile
-        if zipfile.is_zipfile(path):
-            try:
-                with zipfile.ZipFile(path, "r") as z:
-                    if any("Index/Document.iwa" in name for name in z.namelist()):
-                        raise ValueError(
-                            f"File '{path}' is saved as an Apple Numbers document (.numbers).\n"
-                            "To fix: Open in Apple Numbers and go to: File -> Export To -> Excel..."
-                        ) from e
-            except zipfile.BadZipFile:
-                pass
-        raise ValueError(f"Unable to read Excel file '{path}': {e}") from e
 
+    # Check for embedded images
+    extracted_images = _extract_images_from_xlsx(path)
+
+    wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
-    headers = [str(cell.value or "").strip() for cell in sheet[1]]
+    all_raw_rows = list(sheet.iter_rows(values_only=True))
 
+    # Check if this sheet is a multi-block single-cell layout (like Book 4 where 2+ cells contain long copy)
+    block_row_cells = None
+    for r in all_raw_rows:
+        text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
+        if len(text_blocks) >= 2:
+            block_row_cells = text_blocks
+            break
+
+    if block_row_cells:
+        # Create separate WhatsApp templates for each card block in the row!
+        base_name = Path(path).stem
+        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_').lower()
+
+        submissions = []
+        for idx, block in enumerate(block_row_cells, 1):
+            parsed = parse_single_cell_whatsapp_block(block, client=client)
+            t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
+
+            components = []
+            if parsed.get("header"):
+                components.append({
+                    "type": "HEADER",
+                    "format": "TEXT",
+                    "text": parsed["header"],
+                })
+
+            components.append({
+                "type": "BODY",
+                "text": parsed["body"],
+            })
+
+            components.append({
+                "type": "FOOTER",
+                "text": "T&Cs apply",
+            })
+
+            components.append({
+                "type": "BUTTONS",
+                "buttons": [{
+                    "type": "URL",
+                    "text": parsed["button_text"],
+                    "url": parsed["button_url"],
+                    "example": [parsed["button_example"]],
+                }],
+            })
+
+            sub = TemplateSubmission(
+                client=client.lower(),
+                channel="whatsapp",
+                template_name=t_name,
+                language="en",
+                category="MARKETING",
+                waba_id=default_waba,
+                components=components,
+                source_ref=t_name,
+            )
+            submissions.append(sub)
+
+        return submissions
+
+    # Standard row-based spreadsheet
+    headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
     for row in sheet.iter_rows(min_row=2, values_only=True):
         if not any(row):
-            continue  # Skip blank rows
+            continue
 
         raw_row = {}
         for h, val in zip(headers, row):
             if h:
                 raw_row[h] = str(val).strip() if val is not None else ""
 
-        if not raw_row.get("template_name"):
+        if not raw_row.get("template_name") and not raw_row.get("name"):
             continue
 
         if raw_row.get("components"):
@@ -211,8 +377,13 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
 
         rows.append(raw_row)
 
-    return [_row_to_submission(row) for row in rows]
+    return [_row_to_submission(row, client=client) for row in rows]
+
+
+def load_from_json(path: str) -> list[TemplateSubmission]:
+    data = json.loads(Path(path).read_text())
+    return [_row_to_submission(row) for row in data]
+
 
 def load_from_list(rows: list[dict]) -> list[TemplateSubmission]:
-    """Load from a list of dicts already in memory (e.g. from a mock)."""
     return [_row_to_submission(row) for row in rows]
