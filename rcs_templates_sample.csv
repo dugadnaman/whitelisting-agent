@@ -1,0 +1,5 @@
+template_name,template_id,template_type,sender_id,template_message_type,template_message,entity_id
+Vehicle_Loan_Offer,1107166074191019404,Transactional,"BFDLPS,BFDLTS",Text,"Hi, Planning to purchase {#var#}? Continue your loan application to get instant loan offers for your 2-wheeler. Click Now {#var#} T&C",110100001654
+Personal_Loan_Instant,1107166074199885821,Promotional,"BFDLPS,BFDLTS,BFDLPL",Text,"Dear Customer, What you seek is seeking you!!! Click Now {#var#} and get instant 2-wheeler Loan Offers. T&C Apply - Bajaj MARKETS",110100001654
+Feedback_Survey_Request,1107166074201122334,Service - Implicit,BajajM,Text,"Dear customer, how satisfied are you with your recent experience with Bajaj Markets? Click {#var#} to rate us. T&C",
+Fraud_Alert_Notification,1107166074205566778,Transactional,BFDLTS,Text,"Alert: Transaction of Rs. {#var#} done on your card ending with {#var#}. If not done by you, visit {#var#} immediately. Bajaj Finance",110100001654

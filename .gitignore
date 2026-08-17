@@ -1,0 +1,27 @@
+# Secrets
+.env
+
+# Node.js
+node_modules/
+**/node_modules/
+.next/
+**/.next/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.ruff_cache/
+
+# Graphify cache
+graphify-out/cache/
+
+# Logs & data (contain per-run data, not source)
+submission_log.jsonl
+rcs_submission_log.jsonl
+
+# Scratch/Local configs
+scratch/
+.DS_Store

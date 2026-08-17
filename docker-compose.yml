@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  karix-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: karix-template-platform
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./submission_log.jsonl:/app/submission_log.jsonl
+      - ./rcs_submission_log.jsonl:/app/rcs_submission_log.jsonl
+      - ./.env:/app/.env

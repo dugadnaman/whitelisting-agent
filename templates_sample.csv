@@ -1,0 +1,9 @@
+template_name,category,language,header_type,header_text,body,footer,button_type,button_text,button_url,button_url_example
+demo_testing_1,MARKETING,en,IMAGE,,"✨ Turn your gold into immediate funds with a Gold Loan!
+👉 Competitive interest rates starting from 9.48% p.a.
+
+Bajaj Markets",Terms & conditions apply,URL,Check Offer,https://1kx.in/{{1}},https://www.bajajfinservmarkets.in/
+demo_testing_2,MARKETING,en,TEXT,Pre-Approved Card Offer,"Dear {{1}}, you have a pre-approved credit card limit of Rs. {{2}} with zero annual fees.
+
+Claim your card in 2 minutes!",Bajaj Finserv Ltd,URL,Apply Now,https://1kx.in/{{1}},https://www.bajajfinservmarkets.in/
+demo_testing_3,MARKETING,en,NONE,,"Dear customer, how satisfied are you with your recent experience with Bajaj Markets?",Thank you for your feedback,QUICK_REPLY,Satisfied | Unsatisfied,,
