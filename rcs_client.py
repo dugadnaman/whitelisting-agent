@@ -77,37 +77,41 @@ def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str
     logger.info("Uploaded RCS media: fileName=%s", file_name)
     return str(file_name)
 
-def _extract_rcs_variables(text: str) -> tuple[str, list[str]]:
+def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[str, list[str], int]:
     """
-    Extract and normalize variables into RCS bracket syntax [ParamName].
-    Returns (normalized_text, list_of_param_names).
+    Extract and sequentially number any bracket placeholder:
+    <...>, [...], {...}, {#...#} -> [1], [2], [3]...
+    Returns (normalized_text, list_of_param_numbers, next_start_index).
     """
     if not text:
-        return text, []
+        return text, [], start_index
 
-    # Normalization map for non-bracket formats:
-    # <name> -> [Name], {{1}} -> [Param_1], {#var#} -> [Var_1]
-    param_names = []
+    current_idx = start_index
+    param_numbers = []
+
+    pattern = r'(<[^>]+>|\[[^\]]+\]|\{[^}]+\}|\{#[^#]+#\})'
 
     def repl(m):
-        raw = m.group(0)
-        clean = re.sub(r'[^a-zA-Z0-9_]', '', raw)
-        if not clean or clean.isdigit():
-            name = f"Param_{len(param_names) + 1}"
-        else:
-            name = clean
-        param_names.append(name)
-        return f"[{name}]"
+        nonlocal current_idx
+        v_str = str(current_idx)
+        param_numbers.append(v_str)
+        current_idx += 1
+        return f"[{v_str}]"
 
-    # Match bracket format [Name] or <name> or {{1}} or {#var#}
-    pattern = r'(\[[a-zA-Z0-9_]+\]|<[^>]+>|\{\{[^}]+\}\}|\{#[^#]+#\})'
-    normalized_text = re.sub(pattern, repl, text)
+    # Spacing around tight tags
+    spaced_text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', text)
+    spaced_text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', spaced_text)
+    spaced_text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', spaced_text)
 
-    # If text already had pure bracket variables, extract them
-    if not param_names:
-        param_names = re.findall(r'\[([a-zA-Z0-9_]+)\]', text)
+    normalized_text = re.sub(pattern, repl, spaced_text)
+    return normalized_text, param_numbers, current_idx
 
-    return normalized_text, param_names
+
+def _ensure_url_variable(url: str, var_number: int) -> str:
+    """Ensure URL has sequential variable at the end: e.g. https://www.tatacapital.com[4]"""
+    base = (url or "https://www.tatacapital.com").strip().rstrip("/")
+    clean_base = re.sub(r'\[\w+\]$', '', base)
+    return f"{clean_base}[{var_number}]"
 
 def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
     """Helper to convert flat button fields on a payload into suggestions array."""
@@ -184,29 +188,60 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
     if is_carousel:
         cards_list = []
         all_params = []
-        for card in (payload.carousel_cards or []):
-            c_title = card.get("cardTitle") or card.get("card_title") or ""
-            c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
-            c_desc_norm, c_params = _extract_rcs_variables(c_desc_raw)
-            all_params.extend(c_params)
+        next_var_idx = 1
 
+        for c_idx, card in enumerate((payload.carousel_cards or []), 1):
+            c_title_raw = card.get("cardTitle") or card.get("card_title") or f"Offer {c_idx}"
+            c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
+
+            # Number variables in description sequentially
+            c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(c_desc_raw, start_index=next_var_idx)
+            all_params.extend(desc_params)
+
+            # Title (clean tags)
+            c_title_norm = re.sub(r'<[^>]+>|\[[^\]]+\]', '', c_title_raw).strip()[:100]
+            if not c_title_norm:
+                c_title_norm = f"Special Offer {c_idx}"
+
+            # Build suggestions with guaranteed sequential URL variable
             clean_suggs = []
-            for s in (card.get("suggestions") or []):
-                stext = s.get("text") or "Action"
+            raw_suggs = card.get("suggestions") or []
+            if not raw_suggs and getattr(payload, "button_text", None):
+                raw_suggs = _build_single_suggestion(payload)
+            if not raw_suggs:
+                raw_suggs = [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
+
+            for s in raw_suggs:
+                stext = s.get("text") or "Apply Now"
                 stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
-                s_item = {
-                    "suggestionType": stype,
-                    "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                }
+
                 if stype == "url_action" or s.get("url"):
-                    s_item["url"] = s.get("url") or "https://www.tatacapital.com"
+                    url_var_num = str(next_var_idx)
+                    all_params.append(url_var_num)
+                    next_var_idx += 1
+                    b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
+                    clean_suggs.append({
+                        "suggestionType": "url_action",
+                        "text": stext,
+                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                        "url": b_url,
+                    })
                 elif stype == "dialer_action" or s.get("phoneNumber"):
-                    s_item["phoneNumber"] = s.get("phoneNumber") or "+919999999999"
-                clean_suggs.append(s_item)
+                    clean_suggs.append({
+                        "suggestionType": "dialer_action",
+                        "text": stext,
+                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                        "phoneNumber": s.get("phoneNumber") or "+919999999999",
+                    })
+                else:
+                    clean_suggs.append({
+                        "suggestionType": "reply",
+                        "text": stext,
+                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    })
 
             c_entry = {
-                "cardTitle": c_title[:100] if c_title else "Offer Details",
+                "cardTitle": c_title_norm,
                 "cardDescription": c_desc_norm,
             }
             if card.get("fileName") or card.get("file_name"):
@@ -214,28 +249,25 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             else:
                 c_entry["mediaUrl"] = card.get("mediaUrl") or card.get("media_url") or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop"
 
-            if clean_suggs:
-                c_entry["suggestions"] = clean_suggs
+            c_entry["suggestions"] = clean_suggs
             cards_list.append(c_entry)
 
-        # If no cards parsed, create minimum 2 default sample cards
         if len(cards_list) < 2:
-            cards_list = [
-                {
-                    "cardTitle": payload.card_title or "Special Festive Offer",
-                    "cardDescription": payload.text_message or "Get instant loans with flexible EMIs.",
-                    "mediaUrl": payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
-                    "suggestions": payload.suggestions or [],
-                },
-                {
-                    "cardTitle": "Easy Repayment Options",
-                    "cardDescription": "Low interest rates and instant approval in minutes.",
-                    "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
-                    "suggestions": payload.suggestions or [],
-                },
-            ]
+            cards_list.append({
+                "cardTitle": "Instant Approval",
+                "cardDescription": "Fast disbursement with flexible repayment terms.",
+                "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
+                "suggestions": [{
+                    "suggestionType": "url_action",
+                    "text": "Apply Now",
+                    "postbackData": "apply_now",
+                    "url": f"https://www.tatacapital.com[{next_var_idx}]",
+                }],
+            })
+            all_params.append(str(next_var_idx))
+            next_var_idx += 1
 
-        param_names = list(dict.fromkeys(all_params))
+        param_names = all_params
         vi_template = {
             "name": safe_name,
             "type": "carousel",
@@ -250,17 +282,40 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             or payload.text_message
             or getattr(payload, "template_message", "")
         )
-        normalized_text, param_names = _extract_rcs_variables(raw_text)
+        normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
 
-        # Suggestions
-        suggestions = payload.suggestions or []
-        if not suggestions and getattr(payload, "button_text", None):
-            suggestions = _build_single_suggestion(payload)
+        raw_suggs = payload.suggestions or []
+        if not raw_suggs and getattr(payload, "button_text", None):
+            raw_suggs = _build_single_suggestion(payload)
+        if not raw_suggs:
+            raw_suggs = [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
+
+        clean_suggs = []
+        for s in raw_suggs:
+            stext = s.get("text") or "Apply Now"
+            stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
+            if stype == "url_action" or s.get("url"):
+                url_var_num = str(next_var_idx)
+                param_names.append(url_var_num)
+                next_var_idx += 1
+                b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
+                clean_suggs.append({
+                    "suggestionType": "url_action",
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    "url": b_url,
+                })
+            else:
+                clean_suggs.append({
+                    "suggestionType": stype,
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                })
 
         card_entry = {
             "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
             "cardDescription": normalized_text,
-            "suggestions": suggestions,
+            "suggestions": clean_suggs,
         }
         if getattr(payload, "file_name", None):
             card_entry["fileName"] = getattr(payload, "file_name")
@@ -277,18 +332,40 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         }
     else:
         raw_text = payload.text_message or getattr(payload, "template_message", "")
-        normalized_text, param_names = _extract_rcs_variables(raw_text)
+        normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
 
-        suggestions = payload.suggestions or []
-        if not suggestions and getattr(payload, "button_text", None):
-            suggestions = _build_single_suggestion(payload)
+        raw_suggs = payload.suggestions or []
+        if not raw_suggs and getattr(payload, "button_text", None):
+            raw_suggs = _build_single_suggestion(payload)
+
+        clean_suggs = []
+        for s in raw_suggs:
+            stext = s.get("text") or "Apply Now"
+            stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
+            if stype == "url_action" or s.get("url"):
+                url_var_num = str(next_var_idx)
+                param_names.append(url_var_num)
+                next_var_idx += 1
+                b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
+                clean_suggs.append({
+                    "suggestionType": "url_action",
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    "url": b_url,
+                })
+            else:
+                clean_suggs.append({
+                    "suggestionType": stype,
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                })
 
         vi_template = {
             "name": safe_name,
             "type": "text",
             "botId": bot_id,
             "textMessage": normalized_text,
-            "suggestions": suggestions,
+            "suggestions": clean_suggs,
         }
 
     return {

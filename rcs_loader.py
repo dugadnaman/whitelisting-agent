@@ -17,18 +17,59 @@ from rcs_models import RcsTemplateSubmission
 logger = logging.getLogger(__name__)
 
 
-def _normalize_row_keys(raw_row: dict) -> dict:
-    """Normalize row keys to lowercase snake_case for flexible header matching."""
-    clean = {}
-    for k, v in raw_row.items():
-        if k is None:
+def parse_single_cell_card_block(cell_text: str) -> dict:
+    """
+    Decompose an unstructured marketing card text block (from Excel cells) into:
+    - card_title
+    - card_description
+    - button_text
+    - button_url
+    """
+    if not cell_text:
+        return {
+            "card_title": "",
+            "card_description": "",
+            "button_text": "Apply Now",
+            "button_url": "https://www.tatacapital.com",
+        }
+
+    lines = [line.strip() for line in cell_text.splitlines() if line.strip()]
+
+    button_text = "Apply Now"
+    button_url = "https://www.tatacapital.com"
+    desc_lines = []
+
+    for line in lines:
+        # Match CTA patterns like:
+        # "CTA Button <Check Eligibility> <link>"
+        # "[Claim your offer] <link>"
+        # "CTA<Apply Now> <link>"
+        cta_match = re.search(
+            r'(?:CTA\s*(?:Button|button)?\s*[:<\[]|\[)([^>\]<]+)[>\]]',
+            line,
+            re.IGNORECASE,
+        )
+        if cta_match:
+            cand = cta_match.group(1).strip()
+            if cand.lower() != "link":
+                button_text = cand
             continue
-        val = str(v).strip() if v is not None else ""
-        norm_key = re.sub(r'[\s\-]+', '_', str(k).strip().lower())
-        clean[norm_key] = val
-        clean[str(k).strip().lower()] = val
-        clean[str(k).strip()] = val
-    return clean
+
+        if re.search(r'^(?:Tap|Click)\s+.*(?:⬇️|->|here)', line, re.IGNORECASE):
+            continue
+
+        desc_lines.append(line)
+
+    full_desc = "\n\n".join(desc_lines)
+    first_line = lines[0] if lines else "Offer Details"
+    card_title = first_line[:100]
+
+    return {
+        "card_title": card_title,
+        "card_description": full_desc,
+        "button_text": button_text,
+        "button_url": button_url,
+    }
 
 
 def _build_suggestions_from_row(row: dict) -> list[dict]:
@@ -50,7 +91,6 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
     bphone = (row.get("button_phone") or row.get("phone") or row.get("phone_number") or "").strip()
 
     if btext:
-        # Multiple pipe-separated quick replies e.g. "Yes | No | Call Us"
         if "|" in btext and btype in ("", "REPLY", "SUGGESTION"):
             for item in btext.split("|"):
                 clean = item.strip()
@@ -60,11 +100,11 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                         "text": clean,
                         "postbackData": clean.lower().replace(" ", "_"),
                     })
-        elif btype in ("URL", "URL_ACTION", "LINK") or burl:
+        elif btype in ("URL", "URL_ACTION", "LINK") or burl or True:
             suggestions.append({
                 "suggestionType": "url_action",
-                "text": btext or "Open Link",
-                "postbackData": btext.lower().replace(" ", "_") if btext else "open_url",
+                "text": btext or "Apply Now",
+                "postbackData": btext.lower().replace(" ", "_") if btext else "apply_now",
                 "url": burl or "https://www.tatacapital.com",
             })
         elif btype in ("DIALER", "DIALER_ACTION", "CALL", "PHONE") or bphone:
@@ -289,8 +329,42 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
 
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
-    headers = [str(cell.value or "").strip() for cell in sheet[1]]
+    all_raw_rows = list(sheet.iter_rows(values_only=True))
 
+    # Check if there is a row that contains multiple rich single-cell card blocks (like Book4)
+    block_row_cards = None
+    for r in all_raw_rows:
+        text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
+        if len(text_blocks) >= 2:
+            block_row_cards = text_blocks
+            break
+
+    if block_row_cards:
+        c_cards = []
+        for c_idx, block in enumerate(block_row_cards):
+            card_dict = parse_single_cell_card_block(block)
+            if c_idx < len(uploaded_file_names):
+                card_dict["fileName"] = uploaded_file_names[c_idx]
+            c_cards.append(card_dict)
+
+        base_name = Path(path).stem
+        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_')
+        t_name = f"tata_{clean_name}_carousel"[:25].rstrip('_')
+
+        sub = RcsTemplateSubmission(
+            template_name=t_name,
+            bot_id=get_rcs_bot_id(client),
+            template_type="carousel",
+            carousel_cards=c_cards,
+            template_category="TRANSACTIONAL",
+            entity_id=get_rcs_entity_id(client),
+            client=client.lower(),
+            channel="rcs",
+            source_ref=t_name,
+        )
+        return [sub]
+
+    headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
     for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 1):
         if not any(row):
