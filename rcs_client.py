@@ -123,6 +123,9 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
     except (ValueError, TypeError):
         esme_addr = 72516600000000 if c == "tata" else 72148300000000
 
+    # Sanitize and enforce max 25 chars for RCS template name
+    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', payload.template_name)[:25]
+
     # Determine template format
     is_carousel = (
         payload.template_type.lower() == "carousel"
@@ -137,6 +140,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         )
     )
 
+    # Assemble viTemplate
     if is_carousel:
         cards_list = []
         all_params = []
@@ -146,35 +150,49 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             c_desc_norm, c_params = _extract_rcs_variables(c_desc_raw)
             all_params.extend(c_params)
 
-            c_entry = {
-                "cardTitle": c_title,
-                "cardDescription": c_desc_norm,
-                "mediaUrl": card.get("mediaUrl") or card.get("media_url") or "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
-            }
-            if card.get("suggestions"):
-                c_entry["suggestions"] = card["suggestions"]
-            cards_list.append(c_entry)
+            clean_suggs = []
+            for s in (card.get("suggestions") or []):
+                stext = s.get("text") or "Action"
+                stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
+                s_item = {
+                    "suggestionType": stype,
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                }
+                if stype == "url_action" or s.get("url"):
+                    s_item["url"] = s.get("url") or "https://www.tatacapital.com"
+                elif stype == "dialer_action" or s.get("phoneNumber"):
+                    s_item["phoneNumber"] = s.get("phoneNumber") or "+919999999999"
+                clean_suggs.append(s_item)
 
+            c_entry = {
+                "cardTitle": c_title[:100] if c_title else "Offer Details",
+                "cardDescription": c_desc_norm,
+                "mediaUrl": card.get("mediaUrl") or card.get("media_url") or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
+            }
+            if clean_suggs:
+                c_entry["suggestions"] = clean_suggs
+            cards_list.append(c_entry)
         # If no cards parsed, create minimum 2 default sample cards
         if len(cards_list) < 2:
             cards_list = [
                 {
                     "cardTitle": payload.card_title or "Special Festive Offer",
                     "cardDescription": payload.text_message or "Get instant loans with flexible EMIs.",
-                    "mediaUrl": payload.media_url or "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
+                    "mediaUrl": payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
                     "suggestions": payload.suggestions or [],
                 },
                 {
                     "cardTitle": "Easy Repayment Options",
                     "cardDescription": "Low interest rates and instant approval in minutes.",
-                    "mediaUrl": "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
+                    "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
                     "suggestions": payload.suggestions or [],
                 },
             ]
 
         param_names = list(dict.fromkeys(all_params))
         vi_template = {
-            "name": payload.template_name,
+            "name": safe_name,
             "type": "carousel",
             "botId": bot_id,
             "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
@@ -195,7 +213,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             suggestions = _build_single_suggestion(payload)
 
         vi_template = {
-            "name": payload.template_name,
+            "name": safe_name,
             "type": "richcard",
             "botId": bot_id,
             "orientation": getattr(payload, "orientation", "VERTICAL") or "VERTICAL",
@@ -203,7 +221,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             "standaloneCard": {
                 "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
                 "cardDescription": normalized_text,
-                "mediaUrl": payload.media_url or "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
+                "mediaUrl": payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=800",
                 "suggestions": suggestions,
             },
         }
@@ -216,7 +234,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             suggestions = _build_single_suggestion(payload)
 
         vi_template = {
-            "name": payload.template_name,
+            "name": safe_name,
             "type": "text",
             "botId": bot_id,
             "textMessage": normalized_text,
