@@ -264,48 +264,51 @@ def poll(
 
     if chan != "whatsapp":
         return {"checked": 0}
-
-    all_pending = pending_entries(LOG_PATH)
-    matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-    poll_pending(LOG_PATH, client=acc)
-    return {"checked": len(matching)}
-
-
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate):
     env_path = Path(".env")
     acc = creds.account.lower()
     chan = creds.channel.lower()
-
-    mapping = {}
     is_tata = acc == "tata"
+    mapping = {}
 
     if chan == "whatsapp":
         if creds.waba_auth_token is not None and creds.waba_auth_token.strip():
             key = "TATA_WABA_AUTH_TOKEN" if is_tata else "WABA_AUTH_TOKEN"
-            mapping[key] = creds.waba_auth_token.strip()
+            val = creds.waba_auth_token.strip()
+            mapping[key] = val
+            os.environ[key] = val
         if creds.waba_id is not None and creds.waba_id.strip():
             key = "TATA_WABA_ID" if is_tata else "BAJAJ_WABA_ID"
-            mapping[key] = creds.waba_id.strip()
+            val = creds.waba_id.strip()
+            mapping[key] = val
+            os.environ[key] = val
         if creds.bearer_token is not None and creds.bearer_token.strip():
             key = "TATA_KARIX_BEARER_TOKEN" if is_tata else "KARIX_BEARER_TOKEN"
-            mapping[key] = creds.bearer_token.strip()
+            val = creds.bearer_token.strip()
+            mapping[key] = val
+            os.environ[key] = val
         if creds.session is not None and creds.session.strip():
             key = "TATA_KARIX_SESSION" if is_tata else "KARIX_SESSION"
-            mapping[key] = creds.session.strip()
+            val = creds.session.strip()
+            mapping[key] = val
+            os.environ[key] = val
         if creds.user is not None and creds.user.strip():
             key = "TATA_KARIX_USER" if is_tata else "KARIX_USER"
-            mapping[key] = creds.user.strip()
+            val = creds.user.strip()
+            mapping[key] = val
+            os.environ[key] = val
     elif chan == "rcs":
         if creds.entity_id is not None and creds.entity_id.strip():
             key = "TATA_ENTITY_ID" if is_tata else "BAJAJ_ENTITY_ID"
-            mapping[key] = creds.entity_id.strip()
+            val = creds.entity_id.strip()
+            mapping[key] = val
+            os.environ[key] = val
         if creds.lounge_cookie is not None and creds.lounge_cookie.strip():
             key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else "KARIX_LOUNGE_COOKIE"
-            mapping[key] = creds.lounge_cookie.strip()
-        if creds.bearer_token is not None and creds.bearer_token.strip():
-            key = "TATA_KARIX_BEARER_TOKEN" if is_tata else "KARIX_BEARER_TOKEN"
-            mapping[key] = creds.bearer_token.strip()
+            val = creds.lounge_cookie.strip()
+            mapping[key] = val
+            os.environ[key] = val
 
     if not mapping:
         return {"ok": True}
@@ -329,10 +332,10 @@ def update_credentials(creds: CredentialUpdate):
         if k not in seen:
             lines.append(f"{k}={v}")
 
-    env_path.write_text("\n".join(lines) + "\n")
-
-    for k, v in mapping.items():
-        os.environ[k] = v
+    try:
+        env_path.write_text("\n".join(lines) + "\n")
+    except Exception:
+        pass
 
     return {"ok": True}
 
@@ -347,8 +350,7 @@ def test_credentials(
     chan = (creds.channel if creds and creds.channel else channel).lower()
     acc_name = "Tata Capital" if acc == "tata" else "Bajaj"
     is_tata = acc == "tata"
-
-    # If credentials were submitted in body, apply them to in-memory env first
+    # Apply any supplied creds directly to environment in memory
     if creds:
         if creds.waba_id and creds.waba_id.strip():
             os.environ["TATA_WABA_ID" if is_tata else "BAJAJ_WABA_ID"] = creds.waba_id.strip()
@@ -361,7 +363,7 @@ def test_credentials(
 
     if chan == "rcs":
         try:
-            entity_id = (creds.entity_id if creds and creds.entity_id else None) or get_rcs_entity_id(acc)
+            entity_id = (creds.entity_id.strip() if creds and creds.entity_id and creds.entity_id.strip() else None) or get_rcs_entity_id(acc)
             headers = get_rcs_auth_headers(acc)
             resp = http_client.get(
                 "https://karix.solutions/lounge/LoungePage/dltRegistration.php",
@@ -384,13 +386,28 @@ def test_credentials(
     # WhatsApp
     results = []
     try:
-        waba_id = (creds.waba_id if creds and creds.waba_id else None) or get_waba_id(acc)
-        token = (creds.waba_auth_token if creds and creds.waba_auth_token else None)
-        if token:
-            headers = {"Authentication": f"Bearer {token.strip()}"}
-        else:
-            headers = get_official_auth_headers(acc)
+        waba_id = (
+            (creds.waba_id.strip() if creds and creds.waba_id and creds.waba_id.strip() else None)
+            or os.environ.get("TATA_WABA_ID" if is_tata else "BAJAJ_WABA_ID")
+            or (BAJAJ_WABA_ID if not is_tata else None)
+        )
+        if not waba_id:
+            return {
+                "ok": False,
+                "message": f"{acc_name} WhatsApp: Please enter the WABA ID in the field above or set {'TATA_WABA_ID' if is_tata else 'BAJAJ_WABA_ID'} in Render Environment.",
+            }
 
+        token = (
+            (creds.waba_auth_token.strip() if creds and creds.waba_auth_token and creds.waba_auth_token.strip() else None)
+            or os.environ.get("TATA_WABA_AUTH_TOKEN" if is_tata else "WABA_AUTH_TOKEN")
+        )
+        if not token:
+            return {
+                "ok": False,
+                "message": f"{acc_name} WhatsApp: Please enter the WABA API Token in the field above or set {'TATA_WABA_AUTH_TOKEN' if is_tata else 'WABA_AUTH_TOKEN'} in Render Environment.",
+            }
+
+        headers = {"Authentication": f"Bearer {token}"}
         resp = http_client.get(
             f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}",
             headers=headers,
@@ -401,15 +418,13 @@ def test_credentials(
             count = len(data.get("response", {}).get("templates", []))
             results.append(f"{acc_name} WhatsApp: Valid ({count} templates on WABA {waba_id})")
         elif resp.status_code == 401:
-            results.append(f"{acc_name} WhatsApp: 401 Unauthorized — Please check WABA API Token and WABA ID.")
+            results.append(f"{acc_name} WhatsApp: 401 Unauthorized — The API token or WABA ID ({waba_id}) is incorrect.")
         else:
-            results.append(f"{acc_name} WhatsApp Official API: HTTP {resp.status_code} ({resp.text[:200]})")
+            results.append(f"{acc_name} WhatsApp: HTTP {resp.status_code} ({resp.text[:200]})")
     except Exception as exc:
         results.append(f"{acc_name} WhatsApp: {exc}")
-
     is_ok = any("Valid" in r for r in results)
     return {"ok": is_ok, "message": " | ".join(results)}
-
 
 @app.get("/api/sample-csv")
 def get_sample_csv(channel: str = Query("whatsapp")):
