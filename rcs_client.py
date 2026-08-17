@@ -69,6 +69,46 @@ def _extract_rcs_variables(text: str) -> tuple[str, list[str]]:
 
     return normalized_text, param_names
 
+def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
+    """Helper to convert flat button fields on a payload into suggestions array."""
+    suggestions = []
+    btype = (getattr(payload, "button_type", "URL") or "URL").upper()
+    btext = getattr(payload, "button_text", "") or ""
+    burl = getattr(payload, "button_url", "") or ""
+    bphone = getattr(payload, "button_phone", "") or ""
+
+    if btext:
+        if "|" in btext and btype in ("", "REPLY", "SUGGESTION"):
+            for item in btext.split("|"):
+                clean = item.strip()
+                if clean:
+                    suggestions.append({
+                        "suggestionType": "reply",
+                        "text": clean,
+                        "postbackData": clean.lower().replace(" ", "_"),
+                    })
+        elif btype in ("URL", "URL_ACTION", "LINK") or burl:
+            suggestions.append({
+                "suggestionType": "url_action",
+                "text": btext or "Open Link",
+                "postbackData": btext.lower().replace(" ", "_") if btext else "open_url",
+                "url": burl or "https://www.tatacapital.com",
+            })
+        elif btype in ("DIALER", "DIALER_ACTION", "CALL", "PHONE") or bphone:
+            suggestions.append({
+                "suggestionType": "dialer_action",
+                "text": btext or "Call Now",
+                "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
+                "phoneNumber": bphone or "+919999999999",
+            })
+        else:
+            suggestions.append({
+                "suggestionType": "reply",
+                "text": btext,
+                "postbackData": btext.lower().replace(" ", "_"),
+            })
+    return suggestions
+
 
 def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata") -> dict:
     """
@@ -83,53 +123,77 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
     except (ValueError, TypeError):
         esme_addr = 72516600000000 if c == "tata" else 72148300000000
 
-    # Determine message text and variables
+    # Determine template format
+    is_carousel = (
+        payload.template_type.lower() == "carousel"
+        or bool(getattr(payload, "carousel_cards", None))
+    )
     is_richcard = (
-        payload.template_type.lower() == "richcard"
-        or bool(payload.media_url)
-        or bool(payload.card_title)
+        not is_carousel
+        and (
+            payload.template_type.lower() == "richcard"
+            or bool(payload.media_url)
+            or bool(payload.card_title)
+        )
     )
 
-    raw_text = (
-        payload.card_description
-        or payload.text_message
-        or getattr(payload, "template_message", "")
-    )
-    normalized_text, param_names = _extract_rcs_variables(raw_text)
+    if is_carousel:
+        cards_list = []
+        all_params = []
+        for card in (payload.carousel_cards or []):
+            c_title = card.get("cardTitle") or card.get("card_title") or ""
+            c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
+            c_desc_norm, c_params = _extract_rcs_variables(c_desc_raw)
+            all_params.extend(c_params)
 
-    # Format suggestions
-    suggestions = []
-    if payload.suggestions:
-        suggestions = payload.suggestions
-    elif hasattr(payload, "button_text") and payload.button_text:
-        btype = getattr(payload, "button_type", "URL") or "URL"
-        btext = payload.button_text
-        burl = getattr(payload, "button_url", "")
-        bphone = getattr(payload, "button_phone", "")
+            c_entry = {
+                "cardTitle": c_title,
+                "cardDescription": c_desc_norm,
+                "mediaUrl": card.get("mediaUrl") or card.get("media_url") or "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
+            }
+            if card.get("suggestions"):
+                c_entry["suggestions"] = card["suggestions"]
+            cards_list.append(c_entry)
 
-        if btype.upper() in ("URL", "URL_ACTION") and burl:
-            suggestions.append({
-                "suggestionType": "url_action",
-                "text": btext,
-                "postbackData": btext.lower().replace(" ", "_"),
-                "url": burl,
-            })
-        elif btype.upper() in ("DIALER", "DIALER_ACTION", "CALL") and bphone:
-            suggestions.append({
-                "suggestionType": "dialer_action",
-                "text": btext,
-                "postbackData": btext.lower().replace(" ", "_"),
-                "phoneNumber": bphone,
-            })
-        else:
-            suggestions.append({
-                "suggestionType": "reply",
-                "text": btext,
-                "postbackData": btext.lower().replace(" ", "_"),
-            })
+        # If no cards parsed, create minimum 2 default sample cards
+        if len(cards_list) < 2:
+            cards_list = [
+                {
+                    "cardTitle": payload.card_title or "Special Festive Offer",
+                    "cardDescription": payload.text_message or "Get instant loans with flexible EMIs.",
+                    "mediaUrl": payload.media_url or "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
+                    "suggestions": payload.suggestions or [],
+                },
+                {
+                    "cardTitle": "Easy Repayment Options",
+                    "cardDescription": "Low interest rates and instant approval in minutes.",
+                    "mediaUrl": "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
+                    "suggestions": payload.suggestions or [],
+                },
+            ]
 
-    # Assemble viTemplate
-    if is_richcard:
+        param_names = list(dict.fromkeys(all_params))
+        vi_template = {
+            "name": payload.template_name,
+            "type": "carousel",
+            "botId": bot_id,
+            "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
+            "width": getattr(payload, "width", "MEDIUM") or "MEDIUM",
+            "carouselCard": cards_list,
+        }
+    elif is_richcard:
+        raw_text = (
+            payload.card_description
+            or payload.text_message
+            or getattr(payload, "template_message", "")
+        )
+        normalized_text, param_names = _extract_rcs_variables(raw_text)
+
+        # Suggestions
+        suggestions = payload.suggestions or []
+        if not suggestions and getattr(payload, "button_text", None):
+            suggestions = _build_single_suggestion(payload)
+
         vi_template = {
             "name": payload.template_name,
             "type": "richcard",
@@ -144,6 +208,13 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             },
         }
     else:
+        raw_text = payload.text_message or getattr(payload, "template_message", "")
+        normalized_text, param_names = _extract_rcs_variables(raw_text)
+
+        suggestions = payload.suggestions or []
+        if not suggestions and getattr(payload, "button_text", None):
+            suggestions = _build_single_suggestion(payload)
+
         vi_template = {
             "name": payload.template_name,
             "type": "text",
@@ -151,7 +222,6 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             "textMessage": normalized_text,
             "suggestions": suggestions,
         }
-
     return {
         "esmeAddr": esme_addr,
         "templatePlaceHolderCount": len(param_names),

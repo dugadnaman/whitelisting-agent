@@ -50,7 +50,9 @@ class RcsTemplateSubmission:
     media_url: str | None = None
     orientation: str = "VERTICAL"  # "VERTICAL" | "HORIZONTAL"
     height: str = "MEDIUM"  # "SHORT" | "MEDIUM" | "TALL"
+    width: str = "MEDIUM"  # "SMALL" | "MEDIUM" (for carousel cards)
     suggestions: list[dict] = field(default_factory=list)
+    carousel_cards: list[dict] = field(default_factory=list)
     template_category: str = "TRANSACTIONAL"
     entity_id: str = ""
     template_id: str = ""  # DLT ID if applicable

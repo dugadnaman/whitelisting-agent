@@ -68,6 +68,59 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
             })
 
     return suggestions
+def _build_carousel_cards_from_row(row: dict) -> list[dict]:
+    """Parse multiple cards for carousel templates from pipe-separated columns or JSON."""
+    if row.get("carousel_cards"):
+        if isinstance(row["carousel_cards"], list):
+            return row["carousel_cards"]
+        try:
+            return json.loads(row["carousel_cards"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    titles = [t.strip() for t in str(row.get("card_title") or "").split("|") if t.strip()]
+    descriptions = [d.strip() for d in str(row.get("body") or row.get("card_description") or row.get("text_message") or "").split("|") if d.strip()]
+    media_urls = [u.strip() for u in str(row.get("media_url") or "").split("|") if u.strip()]
+    button_texts = [b.strip() for b in str(row.get("button_text") or "").split("|") if b.strip()]
+    button_urls = [u.strip() for u in str(row.get("button_url") or "").split("|") if u.strip()]
+    button_types = [t.strip().upper() for t in str(row.get("button_type") or "").split("|") if t.strip()]
+
+    max_cards = max(len(titles), len(descriptions), len(media_urls), len(button_texts), 2)
+
+    cards = []
+    for i in range(max_cards):
+        c_title = titles[i] if i < len(titles) else (f"Card {i+1}" if titles else "")
+        c_desc = descriptions[i] if i < len(descriptions) else (descriptions[0] if descriptions else "")
+        c_url = media_urls[i] if i < len(media_urls) else (media_urls[0] if media_urls else "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png")
+
+        card_suggs = []
+        if i < len(button_texts):
+            btext = button_texts[i]
+            btype = button_types[i] if i < len(button_types) else (button_types[0] if button_types else "URL")
+            b_link = button_urls[i] if i < len(button_urls) else (button_urls[0] if button_urls else "https://www.tatacapital.com")
+
+            if btype in ("URL", "URL_ACTION", "LINK") or b_link:
+                card_suggs.append({
+                    "suggestionType": "url_action",
+                    "text": btext,
+                    "postbackData": btext.lower().replace(" ", "_"),
+                    "url": b_link,
+                })
+            else:
+                card_suggs.append({
+                    "suggestionType": "reply",
+                    "text": btext,
+                    "postbackData": btext.lower().replace(" ", "_"),
+                })
+
+        cards.append({
+            "cardTitle": c_title,
+            "cardDescription": c_desc,
+            "mediaUrl": c_url,
+            "suggestions": card_suggs,
+        })
+
+    return cards
 
 
 def _row_to_rcs_submission(row: dict, client: str = "tata") -> RcsTemplateSubmission:
@@ -80,10 +133,22 @@ def _row_to_rcs_submission(row: dict, client: str = "tata") -> RcsTemplateSubmis
     media_url = str(row.get("media_url") or row.get("image_url") or "").strip() or None
     card_title = str(row.get("card_title") or "").strip() or None
 
-    if raw_type in ("richcard", "card", "image") or media_url or card_title:
+    is_carousel = (
+        raw_type in ("carousel", "carousal", "carousel_cards", "multi_card")
+        or bool(row.get("carousel_cards"))
+        or ("|" in str(row.get("card_title") or "") and "|" in str(row.get("media_url") or ""))
+        or ("|" in str(row.get("card_title") or "") and raw_type in ("carousel", "carousal"))
+    )
+
+    if is_carousel:
+        template_type = "carousel"
+        carousel_cards = _build_carousel_cards_from_row(row)
+    elif raw_type in ("richcard", "card", "image") or media_url or card_title:
         template_type = "richcard"
+        carousel_cards = []
     else:
         template_type = "text"
+        carousel_cards = []
 
     message = (
         row.get("text_message")
@@ -106,14 +171,15 @@ def _row_to_rcs_submission(row: dict, client: str = "tata") -> RcsTemplateSubmis
         media_url=media_url,
         orientation=str(row.get("orientation") or "VERTICAL").strip().upper(),
         height=str(row.get("height") or "MEDIUM").strip().upper(),
+        width=str(row.get("width") or "MEDIUM").strip().upper(),
         suggestions=suggestions,
+        carousel_cards=carousel_cards,
         template_category=category,
         entity_id=str(row.get("entity_id") or get_rcs_entity_id(c)).strip(),
         client=c,
         channel="rcs",
         source_ref=row.get("source_ref") or template_name,
     )
-
 
 def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from a CSV file."""
