@@ -157,13 +157,26 @@ export async function updateCredentials(creds: {
 
 export async function testCredentials(
   account: Account = "bajaj",
-  channel: Channel = "whatsapp"
+  channel: Channel = "whatsapp",
+  creds?: {
+    waba_auth_token?: string;
+    waba_id?: string;
+    bearer_token?: string;
+    session?: string;
+    user?: string;
+    entity_id?: string;
+    lounge_cookie?: string;
+  }
 ): Promise<{
   ok: boolean;
   message: string;
 }> {
   const qs = new URLSearchParams({ account, channel }).toString();
-  const res = await fetch(getApiUrl(`/api/test-credentials?${qs}`), { method: "POST" });
+  const res = await fetch(getApiUrl(`/api/test-credentials?${qs}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ account, channel, ...creds }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

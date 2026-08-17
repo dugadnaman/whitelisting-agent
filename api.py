@@ -333,16 +333,28 @@ def update_credentials(creds: CredentialUpdate):
 def test_credentials(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
+    creds: CredentialUpdate | None = None,
 ):
-    acc = account.lower()
-    chan = channel.lower()
+    acc = (creds.account if creds and creds.account else account).lower()
+    chan = (creds.channel if creds and creds.channel else channel).lower()
     acc_name = "Tata Capital" if acc == "tata" else "Bajaj"
+    is_tata = acc == "tata"
+
+    # If credentials were submitted in body, apply them to in-memory env first
+    if creds:
+        if creds.waba_id and creds.waba_id.strip():
+            os.environ["TATA_WABA_ID" if is_tata else "BAJAJ_WABA_ID"] = creds.waba_id.strip()
+        if creds.waba_auth_token and creds.waba_auth_token.strip():
+            os.environ["TATA_WABA_AUTH_TOKEN" if is_tata else "WABA_AUTH_TOKEN"] = creds.waba_auth_token.strip()
+        if creds.entity_id and creds.entity_id.strip():
+            os.environ["TATA_ENTITY_ID" if is_tata else "BAJAJ_ENTITY_ID"] = creds.entity_id.strip()
+        if creds.lounge_cookie and creds.lounge_cookie.strip():
+            os.environ["TATA_KARIX_LOUNGE_COOKIE" if is_tata else "KARIX_LOUNGE_COOKIE"] = creds.lounge_cookie.strip()
 
     if chan == "rcs":
         try:
-            entity_id = get_rcs_entity_id(acc)
+            entity_id = (creds.entity_id if creds and creds.entity_id else None) or get_rcs_entity_id(acc)
             headers = get_rcs_auth_headers(acc)
-            # Test pinging DLT URL
             resp = http_client.get(
                 "https://karix.solutions/lounge/LoungePage/dltRegistration.php",
                 headers=headers,
@@ -364,19 +376,26 @@ def test_credentials(
     # WhatsApp
     results = []
     try:
-        waba_id = get_waba_id(acc)
-        official_headers = get_official_auth_headers(acc)
+        waba_id = (creds.waba_id if creds and creds.waba_id else None) or get_waba_id(acc)
+        token = (creds.waba_auth_token if creds and creds.waba_auth_token else None)
+        if token:
+            headers = {"Authentication": f"Bearer {token.strip()}"}
+        else:
+            headers = get_official_auth_headers(acc)
+
         resp = http_client.get(
             f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}",
-            headers=official_headers,
+            headers=headers,
             timeout=15,
         )
         if resp.status_code == 200:
             data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
             count = len(data.get("response", {}).get("templates", []))
             results.append(f"{acc_name} WhatsApp: Valid ({count} templates on WABA {waba_id})")
+        elif resp.status_code == 401:
+            results.append(f"{acc_name} WhatsApp: 401 Unauthorized — Please check WABA API Token and WABA ID.")
         else:
-            results.append(f"{acc_name} WhatsApp Official API: HTTP {resp.status_code}")
+            results.append(f"{acc_name} WhatsApp Official API: HTTP {resp.status_code} ({resp.text[:200]})")
     except Exception as exc:
         results.append(f"{acc_name} WhatsApp: {exc}")
 

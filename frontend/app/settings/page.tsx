@@ -39,7 +39,15 @@ export default function SettingsPage() {
     setTesting(true);
     setBanner(null);
     try {
-      const res = await testCredentials(selectedAccount, selectedChannel);
+      const res = await testCredentials(selectedAccount, selectedChannel, {
+        waba_auth_token: wabaAuthToken.trim() || undefined,
+        waba_id: wabaId.trim() || undefined,
+        bearer_token: bearerToken.trim() || undefined,
+        session: session.trim() || undefined,
+        user: user.trim() || undefined,
+        entity_id: entityId.trim() || undefined,
+        lounge_cookie: loungeCookie.trim() || undefined,
+      });
       if (res.ok) {
         setBanner({ type: 'success', message: res.message || 'Connection verified successfully!' });
       } else {
@@ -71,19 +79,23 @@ export default function SettingsPage() {
         lounge_cookie: loungeCookie.trim() || undefined,
       });
 
-      setBanner({
-        type: 'success',
-        message: `Saved credentials for ${accountTitle} — ${channelTitle} successfully!`,
+      // Run immediate test to verify
+      const testRes = await testCredentials(selectedAccount, selectedChannel, {
+        waba_auth_token: wabaAuthToken.trim() || undefined,
+        waba_id: wabaId.trim() || undefined,
       });
 
-      // Clear input fields
-      setWabaAuthToken('');
-      setWabaId('');
-      setBearerToken('');
-      setSession('');
-      setUser('');
-      setEntityId('');
-      setLoungeCookie('');
+      if (testRes.ok) {
+        setBanner({
+          type: 'success',
+          message: `Saved & Verified credentials for ${accountTitle} — ${channelTitle}! (${testRes.message})`,
+        });
+      } else {
+        setBanner({
+          type: 'success',
+          message: `Saved credentials for ${accountTitle} — ${channelTitle}. (${testRes.message})`,
+        });
+      }
     } catch (err) {
       setBanner({
         type: 'error',
