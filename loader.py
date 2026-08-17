@@ -5,9 +5,9 @@ have in memory) into validated TemplateSubmission objects.
 This layer doesn't change when the real Karix API shows up tomorrow — only
 submission_client.py does.
 """
-
 import csv
 import json
+import re
 from pathlib import Path
 
 from models import TemplateComponent, TemplateSubmission
@@ -73,8 +73,18 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     # 2. BODY
     body_text = (raw_row.get("body") or raw_row.get("body_text") or "").strip()
     if body_text:
+        # Normalize non-standard tags like <name>, {#var#}, [name] to {{1}}, {{2}}
+        body_text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', body_text)
+        body_text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', body_text)
+        body_text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', body_text)
+        placeholders = []
+        def _repl(m):
+            idx = len(placeholders) + 1
+            placeholders.append(m.group(0))
+            return f"{{{{{idx}}}}}"
+        pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
+        body_text = re.sub(pattern, _repl, body_text)
         components.append({"type": "BODY", "text": body_text})
-
     # 3. FOOTER
     footer_text = (raw_row.get("footer") or raw_row.get("footer_text") or "").strip()
     if footer_text:

@@ -17,6 +17,7 @@ Auth model:
 import copy
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from urllib.request import urlretrieve
@@ -195,14 +196,66 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
 
     return components
 
+def normalize_whatsapp_text_variables(text: str) -> tuple[str, list[str]]:
+    """
+    Normalize non-standard variable tags into official WhatsApp sequential variables ({{1}}, {{2}}).
+
+    Supports:
+      - Angle brackets: <name>, <customer_name>, <var>, <amount>, etc.
+      - DLT format: {#var#}, {#var1#}, etc.
+      - Square brackets: [name], [var], etc.
+      - Single curly braces: {name}, {1}, etc.
+      - Named double curly: {{name}}, {{amount}}, etc.
+      - Standard numeric: {{1}}, {{2}}, etc.
+    """
+    if not text:
+        return text, []
+
+    # Add spacing around tight tags (e.g. "Hi<name>" -> "Hi <name>")
+    text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', text)
+    text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', text)
+    text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', text)
+
+    # Regex matching any placeholder pattern
+    pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
+
+    placeholders = []
+
+    def repl(m):
+        match = m.group(0)
+        idx = len(placeholders) + 1
+        placeholders.append(match)
+        return f"{{{{{idx}}}}}"
+
+    normalized = re.sub(pattern, repl, text)
+
+    # Generate realistic sample examples for Meta approval
+    samples = []
+    for idx, p in enumerate(placeholders, 1):
+        p_clean = re.sub(r'[^a-zA-Z0-9_]', '', p).lower()
+        if 'name' in p_clean:
+            samples.append("John Doe")
+        elif any(w in p_clean for w in ('amount', 'price', 'rs', 'inr', 'loan', 'limit', 'emi', 'fee')):
+            samples.append("5,00,000")
+        elif any(w in p_clean for w in ('date', 'day', 'time', 'month', 'year')):
+            samples.append("25 August 2026")
+        elif any(w in p_clean for w in ('otp', 'code', 'pin')):
+            samples.append("482910")
+        elif any(w in p_clean for w in ('url', 'link')):
+            samples.append("https://1kx.in/offer")
+        elif any(w in p_clean for w in ('account', 'acct', 'card', 'id', 'num')):
+            samples.append("12345678")
+        else:
+            samples.append(f"Sample_{idx}")
+
+    return normalized, samples
+
+
 def _resolve_body_variables(components: list) -> list:
     """
-    Ensure any BODY or BUTTON component containing {{1}}, {{2}}, etc. has example
-    samples populated if not explicitly provided.
-    Meta rejects templates with INVALID_FORMAT if variable samples are missing.
+    Ensure any BODY or BUTTON component containing variables ({{1}}, {{2}}, <name>, etc.)
+    is properly formatted and has example samples populated for Meta whitelisting.
     """
-    import re
-
     for comp in components:
         if not isinstance(comp, dict):
             continue
@@ -211,16 +264,25 @@ def _resolve_body_variables(components: list) -> list:
 
         # BODY component with variables
         if ctype == "BODY":
-            text = comp.get("text", "")
-            vars_found = re.findall(r"\{\{(\d+)\}\}", text)
-            if vars_found:
-                var_indices = sorted({int(v) for v in vars_found})
-                max_var = max(var_indices)
+            raw_text = comp.get("text", "")
+            normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text)
+            comp["text"] = normalized_text
+
+            if auto_samples:
                 example = comp.setdefault("example", {})
                 if "body_text" not in example or not example["body_text"]:
-                    samples = [f"sample_{i}" for i in range(1, max_var + 1)]
-                    example["body_text"] = [samples]
-                    logger.info("Auto-generated %d body variable sample(s)", max_var)
+                    example["body_text"] = [auto_samples]
+                    logger.info("Auto-normalized text and generated %d body variable sample(s)", len(auto_samples))
+
+        # HEADER text component with variables
+        elif ctype == "HEADER" and comp.get("format") == "TEXT":
+            raw_text = comp.get("text", "")
+            normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text)
+            comp["text"] = normalized_text
+            if auto_samples:
+                example = comp.setdefault("example", {})
+                if "header_text" not in example or not example["header_text"]:
+                    example["header_text"] = [auto_samples[0]]
 
         # BUTTONS component with URL variables
         elif ctype == "BUTTONS":
