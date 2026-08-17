@@ -37,40 +37,46 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
 
     button_text = "Apply Now"
     button_url = "https://www.tatacapital.com"
-    desc_lines = []
+    clean_lines = []
 
     for line in lines:
-        # Match CTA patterns like:
-        # "CTA Button <Check Eligibility> <link>"
-        # "[Claim your offer] <link>"
-        # "CTA<Apply Now> <link>"
-        cta_match = re.search(
-            r'(?:CTA\s*(?:Button|button)?\s*[:<\[]|\[)([^>\]<]+)[>\]]',
-            line,
-            re.IGNORECASE,
-        )
-        if cta_match:
-            cand = cta_match.group(1).strip()
-            if cand.lower() != "link":
+        is_cta = False
+        # 1. Match CTA Button <Text> or CTA button<Text> or CTA<Text>
+        m_cta = re.search(r'CTA\s*(?:Button|button)?\s*[:<\[]\s*([^>\]<]+)\s*[>\]]', line, re.IGNORECASE)
+        if m_cta:
+            cand = m_cta.group(1).strip()
+            if cand.lower() not in ("link", "url"):
                 button_text = cand
-            continue
+            is_cta = True
 
-        if re.search(r'^(?:Tap|Click)\s+.*(?:⬇️|->|here)', line, re.IGNORECASE):
-            continue
+        # 2. Match [Button Text] <link> or <Button Text> <link>
+        m_link = re.search(r'[\[<]([^>\]<]+)[\]>]\s*(?:<link>|\[link\])', line, re.IGNORECASE)
+        if m_link and not is_cta:
+            cand = m_link.group(1).strip()
+            if cand.lower() not in ("link", "url"):
+                button_text = cand
+            is_cta = True
 
-        desc_lines.append(line)
+        # 3. Match prompt lines like "Tap to proceed ⬇️" or "Tap below to check eligibility⬇️"
+        if re.search(r'^(?:Tap|Click|Press)\s+(?:below|here|to\s+proceed|to\s+check|to\s+apply).*?(?:⬇️|->|:|here)?$', line, re.IGNORECASE):
+            is_cta = True
 
-    full_desc = "\n\n".join(desc_lines)
-    first_line = lines[0] if lines else "Offer Details"
-    card_title = first_line[:100]
+        if not is_cta:
+            clean_lines.append(line)
+
+    full_desc = "\n\n".join(clean_lines)
+    first_line = clean_lines[0] if clean_lines else "Special Offer"
+    clean_title = re.sub(r'<[^>]+>|\[[^\]]+\]|\{[^}]+\}', '', first_line).strip()
+    clean_title = re.sub(r'^[,\s:–—\-]+|[,\s:–—\-]+$', '', clean_title)
+    if re.match(r'^(?:Dear|Hi|Hello)\b', clean_title, re.IGNORECASE) or len(clean_title) < 4:
+        clean_title = "Pre-Approved Loan Offer ✨"
 
     return {
-        "card_title": card_title,
+        "card_title": clean_title[:100],
         "card_description": full_desc,
         "button_text": button_text,
         "button_url": button_url,
     }
-
 
 def _build_suggestions_from_row(row: dict) -> list[dict]:
     """Parse button columns into Karix RCS suggestion dictionaries."""
@@ -345,6 +351,17 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
             card_dict = parse_single_cell_card_block(block)
             if c_idx < len(uploaded_file_names):
                 card_dict["fileName"] = uploaded_file_names[c_idx]
+
+            b_text = card_dict.get("button_text") or "Apply Now"
+            b_url = card_dict.get("button_url") or "https://www.tatacapital.com"
+            card_dict["suggestions"] = [
+                {
+                    "suggestionType": "url_action",
+                    "text": b_text,
+                    "postbackData": b_text.lower().replace(" ", "_"),
+                    "url": b_url,
+                }
+            ]
             c_cards.append(card_dict)
 
         base_name = Path(path).stem
@@ -363,7 +380,6 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
             source_ref=t_name,
         )
         return [sub]
-
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
     for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 1):
