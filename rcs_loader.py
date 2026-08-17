@@ -221,6 +221,33 @@ def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmis
             rows.append(_row_to_rcs_submission(raw_row, client=client, fallback_idx=idx))
     return rows
 
+def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> bytes:
+    """Auto-fit image bytes to match target aspect ratio (16:9 for Carousel) if needed."""
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(img_bytes))
+        target_w, target_h = target_ratio
+        current_w, current_h = img.size
+        target_aspect = target_w / target_h
+        current_aspect = current_w / current_h
+        if abs(current_aspect - target_aspect) > 0.02:
+            if current_aspect > target_aspect:
+                new_w = int(current_h * target_aspect)
+                left = (current_w - new_w) // 2
+                img = img.crop((left, 0, left + new_w, current_h))
+            else:
+                new_h = int(current_w / target_aspect)
+                top = (current_h - new_h) // 2
+                img = img.crop((0, top, current_w, top + new_h))
+        buf = io.BytesIO()
+        fmt = "PNG" if img.format == "PNG" else "JPEG"
+        img.save(buf, format=fmt, quality=95)
+        return buf.getvalue()
+    except Exception:
+        return img_bytes
+
+
 def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
     """Extract embedded images from an Excel (.xlsx) file in order."""
     images = []
@@ -233,11 +260,12 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
             media_names.sort(key=natural_key)
             for name in media_names:
                 filename = name.split("/")[-1]
-                images.append((filename, z.read(name)))
+                raw_data = z.read(name)
+                fitted_data = _ensure_aspect_ratio(raw_data, (16, 9))
+                images.append((filename, fitted_data))
     except Exception as e:
         logger.warning("Could not extract embedded images from xlsx: %s", e)
     return images
-
 
 def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
