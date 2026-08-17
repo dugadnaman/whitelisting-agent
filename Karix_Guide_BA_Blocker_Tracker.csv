@@ -1,0 +1,23 @@
+Business Analyst Blocker & QA Issue Tracking Log,,,,,,,,,,
+"Instructions for BA: Log every edge case, failed submission, or platform error in this table. Share with engineering for immediate fixes.",,,,,,,,,,
+Bug ID,Date Logged,Tester Name,Account,Channel,Uploaded File Name,Template Name(s),Observed Behavior / Error Message,Expected Behavior,Severity,Fix Status
+BUG-001,2026-08-17,Business Analyst,Tata Capital,RCS (DLT),Book4 (1).xlsx,tata_multi_product_carousel,"HTTP 400: name is too long, Max length is 25",Template should submit or auto-truncate,High,RESOLVED
+BUG-002,2026-08-17,Business Analyst,Tata Capital,RCS (DLT),Book4 (1).xlsx,tata_festive_card_offer,HTTP 400: Invalid aspect ratio for unsplash URL,Image should auto-fit 16:9 ratio,High,RESOLVED
+BUG-003,2026-08-17,Business Analyst,Tata Capital,WhatsApp,templates_sample.csv,tata_pl_offer,Missing required Tata WABA ID in environment,Should allow testing WABA ID directly from UI form,Medium,RESOLVED
+BUG-004,2026-08-17,Business Analyst,Tata Capital,RCS (DLT),Book4 (1).xlsx,tata_papl_brief_final,Button text 'Claim your offer' was treated as variable,Button text should stay as CTA label; body variables only,High,RESOLVED
+BUG-005,2026-08-17,Business Analyst,Tata Capital,RCS (DLT),Dashboard,All templates,Could not see created templates in dashboard logs,Dashboard should query Karix Bot Builder live,High,RESOLVED
+BUG-010,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-011,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-012,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-013,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-014,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-015,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-016,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-017,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-018,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-019,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-020,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-021,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-022,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-023,,,Tata Capital,RCS,,,,,Medium,OPEN
+BUG-024,,,Tata Capital,RCS,,,,,Medium,OPEN

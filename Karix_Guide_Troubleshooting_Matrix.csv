@@ -1,0 +1,9 @@
+"Common Errors, Root Causes & Resolution Steps",,,,
+Error Message Observed on Screen,Channel / Module,Root Cause Explanation,Agent Automatic Recovery,Required Manual Fix (if any)
+"HTTP 400: name is too long, Max length is 25",RCS Bot Builder,Karix Bot Builder database limits template name to 25 characters,Auto-truncates template name to 25 chars in latest version,Keep initial template name concise in column 1
+HTTP 400: Invalid aspect ratio for [url],RCS Rich Cards,Remote image is not 16:9 (for Carousel) or 2:1 (for Standalone Card),Auto-fits aspect ratio when images embedded in Excel (.xlsx),"If using URLs in CSV, resize image to 1280x720 (16:9) or 1200x600 (2:1)"
+HTTP 401: Unauthorised User,RCS / Portal,Portal session token (KARIX_SESSION / Bearer) expired after inactivity,Displays error message with link to Settings,"Go to /settings, paste fresh session headers from DevTools, click Save"
+Missing required Tata WABA ID in environment,WhatsApp,Tata WABA ID not entered yet in environment or settings form,Validation prompt shown in UI,Enter TATA_WABA_ID and TATA_WABA_AUTH_TOKEN in /settings
+Template with name [...] already exists,Karix / Meta,A template with this exact name was already approved or submitted,Logged as 'duplicate' status in results table,Rename template in spreadsheet (e.g. append _v2) and resubmit
+Missing variable sample in body_text,WhatsApp / Meta,"Meta requires example values for all variables ({{1}}, {{2}})","Agent auto-generates realistic samples (John Doe, 5,00,000, etc.)",None required — fully automated
+Mandatory parameter missing: postbackData,RCS Carousels,Karix requires postbackData string on every card action button,Agent auto-populates postbackData from button text,None required — fully automated
