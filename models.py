@@ -34,9 +34,12 @@ class TemplateComponent:
     """One block of a template: HEADER, BODY, FOOTER, or BUTTONS."""
     type: str  # "HEADER" | "BODY" | "FOOTER" | "BUTTONS"
     text: str | None = None
+    format: str | None = None
     variables: list | None = None
     buttons: list | None = None
-
+    example: dict | None = None
+    media_url: str | None = None
+    media_file: str | None = None
 
 @dataclass
 class TemplateSubmission:

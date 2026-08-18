@@ -142,7 +142,7 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
 
 
 def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
-    _TC_FIELDS = {"type", "text", "variables", "buttons"}
+    _TC_FIELDS = {"type", "text", "format", "variables", "buttons", "example", "media_url", "media_file"}
 
     components = []
     for c in row.get("components", []):
@@ -153,7 +153,6 @@ def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
                 components.append(c)
         else:
             components.append(c)
-
     c_client = row.get("client") or client
     template_name = row.get("template_name") or row.get("name")
     return TemplateSubmission(
@@ -215,14 +214,17 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     bexample = (raw_row.get("button_url_example") or "").strip() or "https://www.tatacapital.com/personal-loan.html"
 
     if btype in ("URL", "") and btext and burl:
+        btn_data = {
+            "type": "URL",
+            "text": btext,
+            "url": burl,
+        }
+        # Meta Rule: 'example' is ONLY valid if URL contains dynamic variables (e.g. {{1}})
+        if "{{1}}" in burl or "{{0}}" in burl or "<" in burl:
+            btn_data["example"] = [bexample]
         components.append({
             "type": "BUTTONS",
-            "buttons": [{
-                "type": "URL",
-                "text": btext,
-                "url": burl,
-                "example": [bexample],
-            }],
+            "buttons": [btn_data],
         })
     elif btype in ("QUICK_REPLY", "QUICKREPLY") and btext:
         btn_items = [

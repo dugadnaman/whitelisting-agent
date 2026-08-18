@@ -204,17 +204,10 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
 
     return components
 
-def normalize_whatsapp_text_variables(text: str) -> tuple[str, list[str]]:
+def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple[str, list[str]]:
     """
     Normalize non-standard variable tags into official WhatsApp sequential variables ({{1}}, {{2}}).
-
-    Supports:
-      - Angle brackets: <name>, <customer_name>, <var>, <amount>, etc.
-      - DLT format: {#var#}, {#var1#}, etc.
-      - Square brackets: [name], [var], etc.
-      - Single curly braces: {name}, {1}, etc.
-      - Named double curly: {{name}}, {{amount}}, etc.
-      - Standard numeric: {{1}}, {{2}}, etc.
+    Generates realistic, Meta-approved context-aware sample values.
     """
     if not text:
         return text, []
@@ -227,39 +220,61 @@ def normalize_whatsapp_text_variables(text: str) -> tuple[str, list[str]]:
     # Regex matching any placeholder pattern
     pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
 
-    placeholders = []
+    matches = list(re.finditer(pattern, text))
+    samples = []
+    is_tata = (client or "bajaj").lower() == "tata"
+    company_name = "Tata Capital" if is_tata else "Bajaj Markets"
 
+    for idx, match in enumerate(matches, 1):
+        raw_tag = match.group(0)
+        start, end = match.span()
+
+        before_text = text[max(0, start - 30):start]
+        after_text = text[end:min(len(text), end + 30)]
+
+        line_prefix = before_text.split('\n')[-1].lower().strip()
+        line_suffix = after_text.split('\n')[0].lower().strip()
+        tag_clean = re.sub(r'[^a-zA-Z0-9_]', '', raw_tag).lower()
+
+        # 1. Suffix cues (e.g. {{2}} T&Cs apply)
+        if any(w in line_suffix for w in ('t&c', 'terms', 'apply', 'condition', 'disclaimer', 'ltd')):
+            samples.append(company_name)
+        elif any(w in line_suffix for w in ('days', 'months', 'years', 'hours', 'mins', 'minutes')):
+            samples.append("30")
+        elif any(w in line_suffix for w in ('%', 'percent', 'p.a.', 'rate')):
+            samples.append("9.5%")
+        elif any(w in line_suffix for w in ('emi', 'per month', '/month')):
+            samples.append("12,500")
+
+        # 2. Prefix cues (e.g. ₹{{1}} or Dear {{1}})
+        elif any(w in line_prefix for w in ('₹', 'rs.', 'rs', 'inr', 'amount', 'price', 'worth', 'upto', 'up to', 'loan', 'limit', 'of')):
+            samples.append("5,00,000")
+        elif any(w in line_prefix for w in ('hi', 'dear', 'hello', 'mr', 'ms', 'user', 'customer', 'hey')) or 'name' in tag_clean:
+            samples.append("John")
+        elif any(w in line_prefix for w in ('interest', 'rate', 'roi')):
+            samples.append("9.5%")
+
+        # 3. Tag content cues
+        elif any(w in tag_clean for w in ('otp', 'code', 'pin')):
+            samples.append("482910")
+        elif any(w in tag_clean for w in ('date', 'day', 'time', 'month', 'year')):
+            samples.append("25 August 2026")
+        elif any(w in tag_clean for w in ('account', 'acct', 'card', 'id', 'num')):
+            samples.append("12345678")
+        else:
+            samples.append("5,00,000" if idx == 1 else company_name)
+
+    placeholders = []
     def repl(m):
-        match = m.group(0)
         idx = len(placeholders) + 1
-        placeholders.append(match)
+        placeholders.append(m.group(0))
         return f"{{{{{idx}}}}}"
 
     normalized = re.sub(pattern, repl, text)
-
-    # Generate realistic sample examples for Meta approval
-    samples = []
-    for idx, p in enumerate(placeholders, 1):
-        p_clean = re.sub(r'[^a-zA-Z0-9_]', '', p).lower()
-        if 'name' in p_clean:
-            samples.append("John Doe")
-        elif any(w in p_clean for w in ('amount', 'price', 'rs', 'inr', 'loan', 'limit', 'emi', 'fee')):
-            samples.append("5,00,000")
-        elif any(w in p_clean for w in ('date', 'day', 'time', 'month', 'year')):
-            samples.append("25 August 2026")
-        elif any(w in p_clean for w in ('otp', 'code', 'pin')):
-            samples.append("482910")
-        elif any(w in p_clean for w in ('url', 'link')):
-            samples.append("https://1kx.in/offer")
-        elif any(w in p_clean for w in ('account', 'acct', 'card', 'id', 'num')):
-            samples.append("12345678")
-        else:
-            samples.append(f"Sample_{idx}")
-
     return normalized, samples
 
 
-def _resolve_body_variables(components: list) -> list:
+def _resolve_body_variables(components: list, client: str = "bajaj") -> list:
     """
     Ensure any BODY or BUTTON component containing variables ({{1}}, {{2}}, <name>, etc.)
     is properly formatted and has example samples populated for Meta whitelisting.
@@ -273,7 +288,7 @@ def _resolve_body_variables(components: list) -> list:
         # BODY component with variables
         if ctype == "BODY":
             raw_text = comp.get("text", "")
-            normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text)
+            normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text, client=client)
             comp["text"] = normalized_text
 
             if auto_samples:
@@ -285,7 +300,7 @@ def _resolve_body_variables(components: list) -> list:
         # HEADER text component with variables
         elif ctype == "HEADER" and comp.get("format") == "TEXT":
             raw_text = comp.get("text", "")
-            normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text)
+            normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text, client=client)
             comp["text"] = normalized_text
             if auto_samples:
                 example = comp.setdefault("example", {})
@@ -298,9 +313,13 @@ def _resolve_body_variables(components: list) -> list:
             for b in btns:
                 if isinstance(b, dict) and b.get("type") == "URL":
                     url = b.get("url", "")
-                    if "{{1}}" in url and not b.get("example"):
-                        b["example"] = ["https://www.bajajfinservmarkets.in/"]
-                        logger.info("Auto-generated URL variable sample for button")
+                    if "{{1}}" in url or "{{0}}" in url or "<" in url:
+                        if not b.get("example") or not b["example"]:
+                            b["example"] = ["https://www.tatacapital.com/personal-loan.html" if client.lower() == "tata" else "https://www.bajajfinservmarkets.in/"]
+                            logger.info("Auto-generated URL variable sample for button")
+                    else:
+                        # Meta Rule: static URL buttons MUST NOT have 'example' parameter
+                        b.pop("example", None)
 
     return components
 
@@ -312,15 +331,23 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
     components_raw = []
     for comp in payload.components:
         if isinstance(comp, dict):
-            components_raw.append(comp)
+            components_raw.append(copy.deepcopy(comp))
         else:
             d: dict = {"type": comp.type}
-            if comp.text is not None:
+            if getattr(comp, "format", None) is not None:
+                d["format"] = comp.format
+            if getattr(comp, "text", None) is not None:
                 d["text"] = comp.text
-            if comp.variables is not None:
+            if getattr(comp, "variables", None) is not None:
                 d["variables"] = comp.variables
-            if comp.buttons is not None:
+            if getattr(comp, "buttons", None) is not None:
                 d["buttons"] = comp.buttons
+            if getattr(comp, "example", None) is not None:
+                d["example"] = comp.example
+            if getattr(comp, "media_url", None) is not None:
+                d["media_url"] = comp.media_url
+            if getattr(comp, "media_file", None) is not None:
+                d["media_file"] = comp.media_file
             components_raw.append(d)
 
     return {
@@ -337,7 +364,6 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         "components": components_raw,
     }
 
-# ---------------------------------------------------------------------------
 # Status mapping
 # ---------------------------------------------------------------------------
 
@@ -508,11 +534,9 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
 def _requires_portal_media(payload: TemplateSubmission) -> bool:
     """Return whether the template needs an unverified official media handle."""
     for component in payload.components:
-        if not isinstance(component, dict):
-            continue
-        if component.get("type") != "HEADER":
-            continue
-        if str(component.get("format", "")).upper() in {"IMAGE", "DOCUMENT", "VIDEO"}:
+        ctype = component.get("type") if isinstance(component, dict) else getattr(component, "type", "")
+        cformat = component.get("format") if isinstance(component, dict) else getattr(component, "format", "")
+        if str(ctype).upper() == "HEADER" and str(cformat).upper() in {"IMAGE", "DOCUMENT", "VIDEO"}:
             return True
     return False
 
@@ -524,7 +548,7 @@ def _build_official_create_body(payload: TemplateSubmission, client: str = "baja
     Portal-only account fields and the literal sessionId are deliberately absent.
     """
     components = copy.deepcopy(_build_portal_create_body(payload, client=client)["components"])
-    components = _resolve_body_variables(components)
+    components = _resolve_body_variables(components, client=client)
     return {
         "template_name": payload.template_name,
         "language": payload.language,
