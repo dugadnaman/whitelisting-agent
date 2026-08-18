@@ -10,6 +10,7 @@ type AppContextType = {
   setChannel: (channel: Channel) => void;
   user: string;
   setUser: (user: string) => void;
+  mounted: boolean;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -62,7 +63,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   };
   return (
-    <AppContext.Provider value={{ account, setAccount, channel, setChannel, user, setUser }}>
+    <AppContext.Provider value={{ account, setAccount, channel, setChannel, user, setUser, mounted }}>
       {children}
     </AppContext.Provider>
   );

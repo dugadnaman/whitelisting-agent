@@ -294,26 +294,26 @@ def get_templates(
                     card_title = vi.get("standaloneCard", {}).get("cardTitle", "")
                     msg = vi.get("standaloneCard", {}).get("cardDescription", "")
 
-            entry = {
-                "source_ref": name,
-                "template_name": name,
-                "template_id": str(lt.get("templateId", "")),
-                "template_type": t_type,
-                "card_title": card_title,
-                "template_message": msg,
-                "sender_ids": [lt.get("botId", "")],
-                "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-                "approval_status": status_str.lower(),
-                "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
-                "provider_response": lt,
-                "client": acc,
-                "channel": "rcs",
-                "submitted_by": None,
-                "source_file": None,
-                "live": True,
-            }
-            merged_entries.append(entry)
-            seen_names.add(name.lower())
+                entry = {
+                    "source_ref": name,
+                    "template_name": name,
+                    "template_id": str(lt.get("templateId", "")),
+                    "template_type": t_type,
+                    "card_title": card_title,
+                    "template_message": msg,
+                    "sender_ids": [lt.get("botId", "")],
+                    "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
+                    "approval_status": status_str.lower(),
+                    "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
+                    "provider_response": lt,
+                    "client": acc,
+                    "channel": "rcs",
+                    "submitted_by": None,
+                    "source_file": None,
+                    "live": True,
+                }
+                merged_entries.append(entry)
+                seen_names.add(name.lower())
 
             for le in local_entries:
                 if le.get("template_name", "").lower() not in seen_names:
@@ -369,6 +369,9 @@ def get_templates(
                 "source_file": None,
                 "live": True,
             }
+            merged_entries.append(entry)
+            seen_names.add(name.lower())
+
         for le in local_entries:
             if le.get("template_name", "").lower() not in seen_names:
                 le_clean = dict(le)

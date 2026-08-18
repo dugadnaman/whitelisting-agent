@@ -62,15 +62,15 @@ function ActivityIcon({ action }: { action: string }) {
 }
 
 export default function DashboardPage() {
-  const { account, channel, user } = useApp();
+  const { account, channel, user, mounted } = useApp();
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
   const [templatesLoading, setTemplatesLoading] = useState(true);
-  const [polling, setPolling] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [operatorFilter, setOperatorFilter] = useState('all');
+  const [polling, setPolling] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -86,8 +86,18 @@ export default function DashboardPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  // Reset filters when switching account or channel
+  useEffect(() => {
+    setStatusFilter('');
+    setOperatorFilter('all');
+    setSearch('');
+    setExpandedRow(null);
+  }, [account, channel]);
+
   const loadStats = useCallback(async () => {
+    if (!mounted) return;
     try {
+      setStatsLoading(true);
       const data = await fetchStats(account, channel);
       setStats(data);
       setLastSynced(new Date().toISOString());
@@ -99,9 +109,10 @@ export default function DashboardPage() {
     } finally {
       setStatsLoading(false);
     }
-  }, [account, channel]);
+  }, [account, channel, mounted]);
 
   const loadTemplates = useCallback(async () => {
+    if (!mounted) return;
     try {
       setTemplatesLoading(true);
       const params: { status?: string; search?: string } = {};
@@ -115,9 +126,10 @@ export default function DashboardPage() {
     } finally {
       setTemplatesLoading(false);
     }
-  }, [account, channel, statusFilter, debouncedSearch]);
+  }, [account, channel, statusFilter, debouncedSearch, mounted]);
 
   const loadActivity = useCallback(async () => {
+    if (!mounted) return;
     try {
       const [logs, activitySummary] = await Promise.all([
         fetchActivityLogs({ limit: 6 }),
@@ -128,7 +140,7 @@ export default function DashboardPage() {
     } catch {
       // Activity feed is non-critical; keep the dashboard alive if it fails
     }
-  }, []);
+  }, [mounted]);
 
   useEffect(() => {
     loadStats();
@@ -143,7 +155,7 @@ export default function DashboardPage() {
   }, [loadActivity]);
 
   useEffect(() => {
-    if (autoRefresh) {
+    if (autoRefresh && mounted) {
       intervalRef.current = setInterval(() => {
         loadStats();
         loadTemplates();
@@ -153,7 +165,7 @@ export default function DashboardPage() {
     return () => {
       clearInterval(intervalRef.current as NodeJS.Timeout);
     };
-  }, [autoRefresh, loadStats, loadTemplates, loadActivity]);
+  }, [autoRefresh, loadStats, loadTemplates, loadActivity, mounted]);
 
   const handlePoll = async () => {
     try {
