@@ -549,6 +549,18 @@ def _build_official_create_body(payload: TemplateSubmission, client: str = "baja
     """
     components = copy.deepcopy(_build_portal_create_body(payload, client=client)["components"])
     components = _resolve_body_variables(components, client=client)
+
+    # For official API: ensure HEADER IMAGE/DOCUMENT/VIDEO has a valid example URL or handle
+    for comp in components:
+        if comp.get("type") == "HEADER" and str(comp.get("format", "")).upper() in ("IMAGE", "DOCUMENT", "VIDEO"):
+            example = comp.get("example")
+            if not example or not isinstance(example, dict):
+                media_url = comp.pop("media_url", None)
+                if media_url:
+                    comp["example"] = {"header_url": [media_url]}
+                else:
+                    comp["example"] = {"header_url": ["https://rcmui.instaalerts.zone/default_sample_header.png"]}
+
     return {
         "template_name": payload.template_name,
         "language": payload.language,
@@ -663,12 +675,11 @@ def submit_template(payload: TemplateSubmission, client: str | None = None) -> S
     """
     Submit a template for whitelisting.
 
-    Text-only templates use the official static-token API. Media-header
-    templates keep the portal flow until Karix provides a compatible official
-    media-handle endpoint.
+    All Tata Capital submissions and text-only Bajaj templates use the official
+    API. Legacy Bajaj portal media templates use the portal session endpoint.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
-    if _requires_portal_media(payload):
+    if c == "bajaj" and _requires_portal_media(payload):
         return _submit_portal_template(payload, client=c)
     return _submit_official_template(payload, client=c)
 
