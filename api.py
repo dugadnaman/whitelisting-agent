@@ -85,17 +85,39 @@ def _clean_error_message(err) -> str | None:
     if not err:
         return None
     if isinstance(err, str):
+        s = err.strip()
+        if s.startswith("HTTP ") and ":" in s:
+            prefix, rest = s.split(":", 1)
+            cleaned_rest = _clean_error_message(rest.strip())
+            if cleaned_rest and cleaned_rest != rest.strip():
+                return cleaned_rest
+        if (s.startswith("{") and s.endswith("}")) or (s.startswith("[") and s.endswith("]")):
+            try:
+                parsed = json.loads(s)
+                return _clean_error_message(parsed)
+            except Exception:
+                pass
+        m = re.search(r'"error_user_msg"\s*:\s*"([^"]+)"', s)
+        if m:
+            return m.group(1)
+        m = re.search(r'"message"\s*:\s*"([^"]+)"', s)
+        if m and "Invalid parameter" not in m.group(1):
+            return m.group(1)
         return err
+
     if isinstance(err, dict):
-        if "error" in err and isinstance(err["error"], dict):
-            return err["error"].get("message") or err["error"].get("error_user_msg") or str(err)
+        if "error_user_msg" in err:
+            return str(err["error_user_msg"])
+        if "errorMessage" in err:
+            return _clean_error_message(err["errorMessage"])
+        if "error" in err:
+            return _clean_error_message(err["error"])
         if "message" in err:
             return str(err["message"])
         if "reason" in err:
             return _clean_error_message(err["reason"])
         return str(err)
     return str(err)
-
 
 def _json_safe(obj):
     """

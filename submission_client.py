@@ -212,12 +212,16 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
     if not text:
         return text, []
 
-    # Add spacing around tight tags (e.g. "Hi<name>" -> "Hi <name>")
+    # 1. Normalize line endings and collapse 3+ consecutive newlines (Meta Rule: max 2)
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = re.sub(r'[ \t]+([.,!?:;])', r'\1', text)
+
+    # 2. Add spacing around tight tags (e.g. "Hi<name>" -> "Hi <name>")
     text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', text)
     text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', text)
     text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', text)
-
-    # Regex matching any placeholder pattern
     pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
 
     matches = list(re.finditer(pattern, text))

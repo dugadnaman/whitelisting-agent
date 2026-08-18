@@ -190,6 +190,11 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     # 2. BODY
     body_text = (raw_row.get("body") or raw_row.get("body_text") or "").strip()
     if body_text:
+        # Normalize line endings and collapse 3+ consecutive newlines (Meta Rule: max 2)
+        body_text = body_text.replace('\r\n', '\n').replace('\r', '\n')
+        body_text = re.sub(r'[ \t]+\n', '\n', body_text)
+        body_text = re.sub(r'\n{3,}', '\n\n', body_text)
+        body_text = re.sub(r'[ \t]+([.,!?:;])', r'\1', body_text)
         body_text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', body_text)
         body_text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', body_text)
         body_text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', body_text)
@@ -200,8 +205,7 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
             return f"{{{{{idx}}}}}"
         pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
         body_text = re.sub(pattern, _repl, body_text)
-        components.append({"type": "BODY", "text": body_text})
-
+        components.append({"type": "BODY", "text": body_text.strip()})
     # 3. FOOTER
     footer_text = (raw_row.get("footer") or raw_row.get("footer_text") or "").strip()
     if footer_text:
