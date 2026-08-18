@@ -71,13 +71,36 @@ function getApiUrl(path: string): string {
   return `${base}${path}`;
 }
 
+async function getErrorMessage(res: Response): Promise<string> {
+  try {
+    const data = await res.json();
+    if (typeof data === "string") return data;
+    if (data?.detail) {
+      if (typeof data.detail === "string") return data.detail;
+      if (Array.isArray(data.detail)) {
+        return data.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join(", ");
+      }
+      return JSON.stringify(data.detail);
+    }
+    if (data?.message) return data.message;
+    return JSON.stringify(data);
+  } catch {
+    try {
+      const text = await res.text();
+      return text || `Request failed (${res.status})`;
+    } catch {
+      return `Request failed (${res.status})`;
+    }
+  }
+}
+
 export async function fetchStats(
   account: Account = "bajaj",
   channel: Channel = "whatsapp"
 ): Promise<Stats> {
   const qs = new URLSearchParams({ account, channel }).toString();
   const res = await fetch(getApiUrl(`/api/stats?${qs}`));
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
@@ -94,7 +117,7 @@ export async function fetchTemplates(params?: {
   if (params?.search) qs.set("search", params.search);
 
   const res = await fetch(getApiUrl(`/api/templates?${qs.toString()}`));
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
@@ -110,7 +133,7 @@ export async function previewFile(
     method: "POST",
     body: form,
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
@@ -126,7 +149,7 @@ export async function submitFile(
     method: "POST",
     body: form,
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
@@ -136,7 +159,7 @@ export async function pollPending(
 ): Promise<{ checked: number }> {
   const qs = new URLSearchParams({ account, channel }).toString();
   const res = await fetch(getApiUrl(`/api/poll?${qs}`), { method: "POST" });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
@@ -156,7 +179,7 @@ export async function updateCredentials(creds: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(creds),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
@@ -182,7 +205,7 @@ export async function testCredentials(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ account, channel, ...creds }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 

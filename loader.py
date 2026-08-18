@@ -155,15 +155,16 @@ def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
             components.append(c)
 
     c_client = row.get("client") or client
+    template_name = row.get("template_name") or row.get("name")
     return TemplateSubmission(
         client=c_client,
         channel=row.get("channel", "whatsapp"),
-        template_name=row["template_name"],
+        template_name=template_name,
         language=row.get("language", "en"),
         category=row.get("category", "MARKETING"),
         waba_id=row.get("waba_id") or get_waba_id(c_client),
         components=components,
-        source_ref=row.get("source_ref", row["template_name"]),
+        source_ref=row.get("source_ref") or template_name,
     )
 
 
@@ -265,7 +266,11 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
 
             rows.append(clean_row)
 
-    return [_row_to_submission(row, client=client) for row in rows]
+    # Only keep rows that actually produced template content. A non-template
+    # file (e.g. a customer-data export with a `name` column) would otherwise
+    # be turned into empty, invalid templates instead of being ignored.
+    submissions = [_row_to_submission(row, client=client) for row in rows]
+    return [s for s in submissions if s.components]
 
 
 def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:

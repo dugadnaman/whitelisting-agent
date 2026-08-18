@@ -369,6 +369,11 @@ async def preview_file(
                 submissions = load_rcs_from_excel(tmp_path, client=account)
             else:
                 submissions = load_rcs_from_csv(tmp_path, client=account)
+            if not submissions:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}'. Please make sure the file contains RCS template definitions.",
+                )
             return [asdict(s) for s in submissions]
 
         # WhatsApp
@@ -376,9 +381,25 @@ async def preview_file(
             submissions = load_from_excel(tmp_path, client=account)
         else:
             submissions = load_from_csv(tmp_path, client=account)
+
+        if not submissions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}'. Please ensure the file contains required template columns (template_name, category, language, body) or use the sample CSV format.",
+            )
+
         for s in submissions:
             s.client = account
         return [asdict(s) for s in submissions]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Don't leak a bare 500 for malformed/non-template uploads — surface a clean error.
+        logger.exception("Preview failed for %s (%s): %s", account, channel, exc)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Preview failed for {channel}: {str(exc)}",
+        )
     finally:
         os.unlink(tmp_path)
 
@@ -398,6 +419,15 @@ async def submit_file(
     chan = channel.lower()
     try:
         if chan == "rcs":
+            if suffix in (".xlsx", ".xls"):
+                subs = load_rcs_from_excel(tmp_path, client=acc)
+            else:
+                subs = load_rcs_from_csv(tmp_path, client=acc)
+            if not subs:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}' to submit.",
+                )
             before_count = len(load_rcs_log(RCS_LOG_PATH))
             run_rcs_file(tmp_path, RCS_LOG_PATH, client=acc)
             all_entries = load_rcs_log(RCS_LOG_PATH)
@@ -405,11 +435,22 @@ async def submit_file(
             return {"submitted": len(new_entries), "results": new_entries}
 
         # WhatsApp
+        if suffix in (".xlsx", ".xls"):
+            subs = load_from_excel(tmp_path, client=acc)
+        else:
+            subs = load_from_csv(tmp_path, client=acc)
+        if not subs:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
+            )
         before_count = len(load_log(LOG_PATH))
         run_file(tmp_path, LOG_PATH, client=acc)
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
         return {"submitted": len(new_entries), "results": new_entries}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Submission failed for %s (%s): %s", acc, chan, exc)
         raise HTTPException(
