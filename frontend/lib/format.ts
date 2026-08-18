@@ -6,6 +6,12 @@ export function formatError(err: unknown): string {
   if (!err) return '';
   if (typeof err === 'string') {
     const s = err.trim();
+    // Detect raw HTML responses (e.g., Render 502 Bad Gateway or Cloudflare pages)
+    if (s.startsWith('<!DOCTYPE') || s.startsWith('<html') || (s.includes('<title>') && s.includes('</title>'))) {
+      const titleMatch = s.match(/<title>([^<]+)<\/title>/i);
+      const code = titleMatch ? titleMatch[1].trim() : '502';
+      return `Server is restarting or temporarily unavailable (${code}). Please try again in a few moments.`;
+    }
     if (s.startsWith('HTTP ') && s.includes(':')) {
       const rest = s.split(':').slice(1).join(':').trim();
       const cleaned = formatError(rest);

@@ -124,6 +124,11 @@ async function getErrorMessage(res: Response): Promise<string> {
     if (data?.message) return String(data.message);
     return JSON.stringify(data);
   } catch {
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html') || (text.includes('<title>') && text.includes('</title>'))) {
+      const titleMatch = text.match(/<title>([^<]+)<\/title>/i);
+      const code = titleMatch ? titleMatch[1].trim() : String(res.status);
+      return `Server is restarting or temporarily unavailable (${code}). Please try again in a few moments.`;
+    }
     return text;
   }
 }
