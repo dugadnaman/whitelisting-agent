@@ -205,6 +205,7 @@ def get_stats(
                 "pending": sum(1 for e in merged if e.get("approval_status") == "pending"),
                 "approved": sum(1 for e in merged if e.get("approval_status") == "approved"),
                 "rejected": sum(1 for e in merged if e.get("approval_status") == "rejected"),
+                "error": None,
             }
 
         # WhatsApp
@@ -244,6 +245,7 @@ def get_stats(
             "approved": approved,
             "rejected": rejected,
             "duplicate": 0,
+            "error": None,
         }
     except Exception as exc:
         logger.exception("Error in get_stats for %s (%s): %s", acc, chan, exc)
@@ -255,6 +257,7 @@ def get_stats(
             "approved": 0,
             "rejected": 0,
             "duplicate": 0,
+            "error": str(exc),
         }
 
 @app.get("/api/templates")
@@ -293,23 +296,26 @@ def get_templates(
                     card_title = vi.get("standaloneCard", {}).get("cardTitle", "")
                     msg = vi.get("standaloneCard", {}).get("cardDescription", "")
 
-                entry = {
-                    "source_ref": name,
-                    "template_name": name,
-                    "template_id": str(lt.get("templateId", "")),
-                    "template_type": t_type,
-                    "card_title": card_title,
-                    "template_message": msg,
-                    "sender_ids": [lt.get("botId", "")],
-                    "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-                    "approval_status": status_str.lower(),
-                    "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
-                    "provider_response": lt,
-                    "client": acc,
-                    "channel": "rcs",
-                }
-                merged_entries.append(entry)
-                seen_names.add(name.lower())
+            entry = {
+                "source_ref": name,
+                "template_name": name,
+                "template_id": str(lt.get("templateId", "")),
+                "template_type": t_type,
+                "card_title": card_title,
+                "template_message": msg,
+                "sender_ids": [lt.get("botId", "")],
+                "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
+                "approval_status": status_str.lower(),
+                "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
+                "provider_response": lt,
+                "client": acc,
+                "channel": "rcs",
+                "submitted_by": None,
+                "source_file": None,
+                "live": True,
+            }
+            merged_entries.append(entry)
+            seen_names.add(name.lower())
 
             for le in local_entries:
                 if le.get("template_name", "").lower() not in seen_names:
@@ -361,14 +367,15 @@ def get_templates(
                 "provider_response": lt,
                 "client": acc,
                 "channel": "whatsapp",
+                "submitted_by": None,
+                "source_file": None,
+                "live": True,
             }
-            merged_entries.append(entry)
-            seen_names.add(name.lower())
-
         for le in local_entries:
             if le.get("template_name", "").lower() not in seen_names:
                 le_clean = dict(le)
                 le_clean["error"] = _clean_error_message(le.get("error"))
+                le_clean["live"] = False
                 merged_entries.append(le_clean)
 
         if status and isinstance(status, str):

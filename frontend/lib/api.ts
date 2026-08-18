@@ -11,7 +11,9 @@ export type Template = {
   error?: string | null;
   retry_count: number;
   submitted_at: string;
-  submitted_by?: string;
+  submitted_by?: string | null;
+  source_file?: string | null;
+  live?: boolean;
   updated_at?: string | null;
   provider_response?: Record<string, unknown> | null;
   client?: string;
@@ -32,8 +34,8 @@ export type Stats = {
   approved: number;
   rejected: number;
   duplicate: number;
+  error?: string | null;
 };
-
 export type TemplatePreview = {
   template_name: string;
   category?: string;
@@ -100,13 +102,17 @@ function getApiUrl(path: string): string {
     // In browser: relative URL (proxied by Next.js rewrites to backend)
     return path;
   }
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  const base = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
   return `${base}${path}`;
 }
 
 async function getErrorMessage(res: Response): Promise<string> {
+  // Read the body ONCE — calling res.json() then res.text() on a failed
+  // parse consumes the stream and loses the real server error.
+  const text = await res.text().catch(() => "");
+  if (!text) return `Request failed (${res.status})`;
   try {
-    const data = await res.json();
+    const data = JSON.parse(text);
     if (typeof data === "string") return data;
     if (data?.detail) {
       if (typeof data.detail === "string") return data.detail;
@@ -115,17 +121,13 @@ async function getErrorMessage(res: Response): Promise<string> {
       }
       return JSON.stringify(data.detail);
     }
-    if (data?.message) return data.message;
+    if (data?.message) return String(data.message);
     return JSON.stringify(data);
   } catch {
-    try {
-      const text = await res.text();
-      return text || `Request failed (${res.status})`;
-    } catch {
-      return `Request failed (${res.status})`;
-    }
+    return text;
   }
 }
+
 
 export async function fetchStats(
   account: Account = "bajaj",
