@@ -244,9 +244,19 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     return components
 
 
+def _resolve_row_waba(row_client: str, cache: dict[str, str]) -> str:
+    """Resolve the WABA ID for a row's client, cached per client per file load."""
+    c = (row_client or "bajaj").lower()
+    if c not in cache:
+        # Raises OSError for missing credentials — surfaces loudly at preview
+        # time instead of silently submitting against the wrong WABA.
+        cache[c] = get_waba_id(c) if c == "bajaj" else (get_waba_id(c) or "")
+    return cache[c]
+
+
 def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """Load templates from a CSV file for the specified client."""
-    default_waba = get_waba_id(client) if client.lower() == "bajaj" else (get_waba_id(client) or "")
+    waba_cache: dict[str, str] = {}
     rows = []
     with open(path, newline="", encoding="utf-8") as f:
         for raw_row in csv.DictReader(f):
@@ -264,7 +274,7 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
 
             clean_row["client"] = clean_row.get("client") or client
             if not clean_row.get("waba_id"):
-                clean_row["waba_id"] = default_waba
+                clean_row["waba_id"] = _resolve_row_waba(clean_row["client"], waba_cache)
             if not clean_row.get("language"):
                 clean_row["language"] = "en"
             if not clean_row.get("category"):
@@ -276,7 +286,10 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     # file (e.g. a customer-data export with a `name` column) would otherwise
     # be turned into empty, invalid templates instead of being ignored.
     submissions = [_row_to_submission(row, client=client) for row in rows]
-    return [s for s in submissions if s.components]
+    kept = [s for s in submissions if s.components]
+    for dropped in (s for s in submissions if not s.components):
+        logger.warning("Dropping row %r from %s: no template components parsed", dropped.template_name, path)
+    return kept
 
 
 def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
@@ -286,8 +299,7 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     """
     import openpyxl
 
-    default_waba = get_waba_id(client) if client.lower() == "bajaj" else (get_waba_id(client) or "")
-
+    waba_cache: dict[str, str] = {}
     # Check for embedded images
     extracted_images = _extract_images_from_xlsx(path)
 
@@ -354,11 +366,10 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
                 template_name=t_name,
                 language="en",
                 category="MARKETING",
-                waba_id=default_waba,
+                waba_id=_resolve_row_waba(client, waba_cache),
                 components=components,
                 source_ref=t_name,
             )
-            submissions.append(sub)
 
         return submissions
 
@@ -387,7 +398,7 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
 
         raw_row["client"] = raw_row.get("client") or client
         if not raw_row.get("waba_id"):
-            raw_row["waba_id"] = default_waba
+            raw_row["waba_id"] = _resolve_row_waba(raw_row["client"], waba_cache)
         if not raw_row.get("language"):
             raw_row["language"] = "en"
         if not raw_row.get("category"):
@@ -395,7 +406,12 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
 
         rows.append(raw_row)
 
-    return [_row_to_submission(row, client=client) for row in rows]
+    submissions = [_row_to_submission(row, client=client) for row in rows]
+    kept = [s for s in submissions if s.components]
+    for dropped in (s for s in submissions if not s.components):
+        logger.warning("Dropping row %r from %s: no template components parsed", dropped.template_name, path)
+    return kept
+
 
 
 def load_from_json(path: str) -> list[TemplateSubmission]:

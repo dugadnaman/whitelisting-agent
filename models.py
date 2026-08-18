@@ -72,6 +72,7 @@ class SubmissionResult:
     client: str = "bajaj"
     channel: str = "whatsapp"
     submitted_by: str = "Anonymous Operator"
+    source_file: str | None = None  # name of the uploaded spreadsheet, for dashboard attribution
     submitted_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

@@ -431,6 +431,8 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             status=SubmissionStatus.FAILED,
             error=f"Media upload failed: {e}",
             approval_status=ApprovalStatus.UNKNOWN,
+            client=c,
+            channel="whatsapp",
         )
 
     last_result: SubmissionResult | None = None
@@ -464,6 +466,8 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 status=SubmissionStatus.FAILED,
                 error=str(e),
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
 
@@ -475,6 +479,8 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 status=SubmissionStatus.FAILED,
                 error=str(exc),
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
@@ -491,7 +497,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
         if resp.status_code in _RETRYABLE_STATUS_CODES:
             logger.warning(
                 "Attempt %d/%d retryable HTTP %d: %s",
-                attempt + 1, MAX_RETRIES, resp.status_code, resp.text[:200],
+                attempt + 1, MAX_RETRIES, resp.status_code, resp.text[:500],
             )
             last_result = SubmissionResult(
                 source_ref=payload.source_ref,
@@ -500,6 +506,8 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 error=f"HTTP {resp.status_code}",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
@@ -512,9 +520,11 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
-                error=f"HTTP {resp.status_code}: {resp.text[:500]}",
+                error=f"HTTP {resp.status_code}: {resp.text[:2000]}",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
 
@@ -639,7 +649,7 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
         if response.status_code in _RETRYABLE_STATUS_CODES:
             err_detail = f"HTTP {response.status_code}"
             if response.text and response.text.strip():
-                err_detail = f"HTTP {response.status_code}: {response.text[:300].strip()}"
+                err_detail = f"HTTP {response.status_code}: {response.text[:2000].strip()}"
             last_result = SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
@@ -660,7 +670,7 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
-                error=f"HTTP {response.status_code}: {response.text[:500]}",
+                error=f"HTTP {response.status_code}: {response.text[:2000]}",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
                 client=c,
@@ -709,13 +719,13 @@ def submit_template(payload: TemplateSubmission, client: str | None = None) -> S
         return _submit_portal_template(payload, client=c)
     return _submit_official_template(payload, client=c)
 
-def check_status(provider_ref_id: str, client: str = "bajaj") -> tuple[ApprovalStatus, str | None, dict]:
+def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
-    Read the latest approval status from the official Karix template list for the given client.
+    Fetch the full official template list for a client's WABA exactly once.
 
-    Official create returns `templateId`, which is exposed as `fb_template_id`
-    by the list endpoint. Existing portal entries remain pollable because the
-    same list also exposes their serial number and template name.
+    Returns (templates, error_message). On any transport/credential/HTTP/JSON
+    failure, returns ([], error_message) — callers must treat an error as
+    "status unknown, retry later", never as "no templates exist".
     """
     try:
         waba_id = get_waba_id(client)
@@ -726,40 +736,58 @@ def check_status(provider_ref_id: str, client: str = "bajaj") -> tuple[ApprovalS
             timeout=REQUEST_TIMEOUT,
         )
     except OSError as exc:
-        # Missing WABA ID / token or transport error — never propagate to the caller.
-        logger.error("check_status credential/transport error: %s", exc)
-        return ApprovalStatus.UNKNOWN, str(exc), {}
+        logger.error("fetch_template_list credential error for %s: %s", client, exc)
+        return [], str(exc)
     except (requests.ConnectionError, requests.Timeout) as exc:
-        logger.error("Transport error in check_status: %s", exc)
-        return ApprovalStatus.UNKNOWN, f"Transport error: {exc}", {}
+        logger.error("fetch_template_list transport error for %s: %s", client, exc)
+        return [], f"Transport error: {exc}"
 
     if not response.ok:
-        logger.error("Official check_status HTTP %d: %s", response.status_code, response.text[:300])
-        return ApprovalStatus.UNKNOWN, f"HTTP {response.status_code}", {"_raw_text": response.text}
+        logger.error("fetch_template_list HTTP %d: %s", response.status_code, response.text[:300])
+        return [], f"HTTP {response.status_code}"
 
     try:
         data = response.json()
     except (json.JSONDecodeError, ValueError):
-        return ApprovalStatus.UNKNOWN, "Invalid JSON response", {"_raw_text": response.text}
+        return [], "Invalid JSON response"
 
-    templates = data.get("response", {}).get("templates", [])
-    matched = next(
+    return data.get("response", {}).get("templates", []), None
+
+
+def _match_template(templates: list[dict], provider_ref_id: str) -> dict | None:
+    """Match a provider ref against fb_template_id, sno, or template name."""
+    return next(
         (
-            template
-            for template in templates
-            if str(template.get("fb_template_id", "")) == provider_ref_id
-            or str(template.get("sno", "")) == provider_ref_id
-            or template.get("template_name") == provider_ref_id
+            t
+            for t in templates
+            if str(t.get("fb_template_id", "")) == provider_ref_id
+            or str(t.get("sno", "")) == provider_ref_id
+            or t.get("template_name") == provider_ref_id
         ),
         None,
     )
+
+
+def check_status(provider_ref_id: str, client: str = "bajaj") -> tuple[ApprovalStatus, str | None, dict]:
+    """
+    Read the latest approval status from the official Karix template list.
+
+    Transient failures return (UNKNOWN, reason, {"_transport_error": True}) so
+    the poller can leave the entry pollable instead of permanently marking it
+    unknown (the old behavior silently locked templates out of future polls).
+    """
+    templates, err = fetch_template_list(client)
+    if err is not None:
+        return ApprovalStatus.UNKNOWN, err, {"_transport_error": True}
+
+    matched = _match_template(templates, provider_ref_id)
     if matched is None:
         logger.warning(
-            "Official check_status: no template found matching provider_ref_id=%r (%d templates)",
+            "check_status: no template found matching provider_ref_id=%r (%d templates on WABA)",
             provider_ref_id,
             len(templates),
         )
-        return ApprovalStatus.UNKNOWN, f"Template {provider_ref_id} not found in response", data
+        return ApprovalStatus.UNKNOWN, f"Template {provider_ref_id} not found in response", {"_not_found": True}
 
     raw_status = str(matched.get("template_create_status", "")).upper()
     return _STATUS_MAP.get(raw_status, ApprovalStatus.UNKNOWN), matched.get("template_status_reason"), matched

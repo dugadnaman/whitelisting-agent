@@ -7,6 +7,7 @@ when, and a details dict with action-specific metadata.
 """
 
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,27 @@ def log_activity(
     return record
 
 
+def _iter_lines_reversed(log_path: str):
+    """Yield lines newest-first by scanning the file backwards in chunks."""
+    with open(log_path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        pos = f.tell()
+        chunk = b""
+        while pos > 0:
+            step = min(pos, 65536)
+            pos -= step
+            f.seek(pos)
+            block = f.read(step)
+            chunk = block + chunk
+            # Emit complete lines; keep the partial head for the next chunk
+            parts = chunk.split(b"\n")
+            chunk = parts[0]
+            for raw in reversed(parts[1:]):
+                yield raw.decode("utf-8", errors="replace")
+        if chunk:
+            yield chunk.decode("utf-8", errors="replace")
+
+
 def load_activities(
     user: str | None = None,
     action: str | None = None,
@@ -59,43 +81,49 @@ def load_activities(
     """
     Read back activity records, optionally filtered.
     Returns newest-first, capped at `limit`.
+
+    Streams the log backwards and stops reading the moment `limit` matching
+    records are collected — O(needed) disk reads instead of parsing the whole
+    file per request.
     """
     path = Path(log_path)
     if not path.exists():
         return []
 
+    def matches(rec: dict) -> bool:
+        if user and rec.get("user", "").lower() != user.lower():
+            return False
+        if action and rec.get("action", "").lower() != action.lower():
+            return False
+        if account and rec.get("account", "").lower() != account.lower():
+            return False
+        if channel and rec.get("channel", "").lower() != channel.lower():
+            return False
+        if search:
+            q = search.lower()
+            if (
+                q not in rec.get("user", "").lower()
+                and q not in rec.get("action", "").lower()
+                and q not in json.dumps(rec.get("details", {})).lower()
+            ):
+                return False
+        return True
+
     records = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in _iter_lines_reversed(str(path)):
         line = line.strip()
         if not line:
             continue
         try:
-            records.append(json.loads(line))
+            rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if matches(rec):
+            records.append(rec)
+            if len(records) >= limit:
+                break
 
-    # Apply filters
-    if user:
-        records = [r for r in records if r.get("user", "").lower() == user.lower()]
-    if action:
-        records = [r for r in records if r.get("action") == action]
-    if account:
-        records = [r for r in records if r.get("account", "").lower() == account.lower()]
-    if channel:
-        records = [r for r in records if r.get("channel", "").lower() == channel.lower()]
-    if search:
-        q = search.lower()
-        records = [
-            r for r in records
-            if q in r.get("user", "").lower()
-            or q in r.get("action", "").lower()
-            or q in json.dumps(r.get("details", {})).lower()
-        ]
-
-    # Sort newest first
-    records.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
-
-    return records[:limit]
+    return records
 
 
 def get_activity_summary(log_path: str = ACTIVITY_LOG_PATH) -> dict:

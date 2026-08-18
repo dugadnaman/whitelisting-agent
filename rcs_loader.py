@@ -130,19 +130,19 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                         "text": clean,
                         "postbackData": clean.lower().replace(" ", "_"),
                     })
-        elif btype in ("URL", "URL_ACTION", "LINK") or burl or True:
-            suggestions.append({
-                "suggestionType": "url_action",
-                "text": btext or "Apply Now",
-                "postbackData": btext.lower().replace(" ", "_") if btext else "apply_now",
-                "url": burl or "https://www.tatacapital.com",
-            })
         elif btype in ("DIALER", "DIALER_ACTION", "CALL", "PHONE") or bphone:
             suggestions.append({
                 "suggestionType": "dialer_action",
                 "text": btext or "Call Now",
                 "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
                 "phoneNumber": bphone or "+919999999999",
+            })
+        elif btype in ("URL", "URL_ACTION", "LINK") or burl:
+            suggestions.append({
+                "suggestionType": "url_action",
+                "text": btext or "Apply Now",
+                "postbackData": btext.lower().replace(" ", "_") if btext else "apply_now",
+                "url": burl or "https://www.tatacapital.com",
             })
         else:
             suggestions.append({
@@ -152,6 +152,50 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
             })
 
     return suggestions
+
+
+def _normalize_row_keys(row: dict) -> dict:
+    """Normalize spreadsheet header keys: strip whitespace, map common aliases to canonical names."""
+    aliases = {
+        "templatename": "template_name",
+        "campaignname": "campaign_name",
+        "botid": "bot_id",
+        "senderid": "sender_id",
+        "templatetype": "template_type",
+        "mediaurl": "media_url",
+        "imageurl": "image_url",
+        "cardtitle": "card_title",
+        "carddescription": "card_description",
+        "textmessage": "text_message",
+        "templatemessage": "template_message",
+        "entityid": "entity_id",
+        "sourceref": "source_ref",
+        "buttontext": "button_text",
+        "buttonurl": "button_url",
+        "buttonphone": "button_phone",
+        "buttontype": "button_type",
+        "suggestiontype": "suggestion_type",
+        "suggestiontext": "suggestion_text",
+    }
+    normalized = {}
+    for key, value in row.items():
+        if key is None:
+            continue
+        canonical = str(key).strip()
+        compact = re.sub(r"[^a-z0-9]", "", canonical.lower())
+        normalized[aliases.get(compact, canonical)] = value
+    return normalized
+
+
+def _parse_sender_ids(raw) -> list[str]:
+    """Parse sender IDs from a pipe/comma-separated string, list, or None."""
+    if not raw:
+        return []
+    if isinstance(raw, (list, tuple)):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    return [x.strip() for x in re.split(r"[|,]", str(raw)) if x.strip()]
+
+
 
 
 def _build_carousel_cards_from_row(row: dict) -> list[dict]:

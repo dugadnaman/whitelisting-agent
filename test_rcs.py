@@ -1,5 +1,8 @@
 """
-Unit tests for RCS DLT template configuration pipeline.
+Unit tests for the RCS Bot Builder template pipeline (current architecture).
+
+Covers: row-key normalization, sample CSV loading, sender-ID parsing,
+JSONL tracker round-trips, and client submission with mocked network.
 """
 
 import os
@@ -7,9 +10,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from rcs_client import _build_dlt_payload, submit_rcs_template
-from rcs_config import BAJAJ_ENTITY_ID
+from rcs_client import submit_rcs_template
 from rcs_loader import (
+    _normalize_row_keys,
     _parse_sender_ids,
     load_rcs_from_csv,
     load_rcs_from_list,
@@ -24,17 +27,24 @@ from rcs_tracker import load_rcs_log, log_rcs_result, update_rcs_result
 
 class TestRcsPipeline(unittest.TestCase):
 
+    def test_normalize_row_keys(self):
+        raw = {
+            "Template Name": "A",
+            "botid": "B",
+            " entity_id ": "E",
+            "Unknown-Key": "K",
+        }
+        norm = _normalize_row_keys(raw)
+        self.assertEqual(norm["template_name"], "A")
+        self.assertEqual(norm["bot_id"], "B")
+        self.assertEqual(norm["entity_id"], "E")
+        self.assertEqual(norm["Unknown-Key"], "K")
+
     def test_parse_sender_ids(self):
-        # Single sender
         self.assertEqual(_parse_sender_ids("BajajM"), ["BajajM"])
-        # Multiple comma-separated
+        self.assertEqual(_parse_sender_ids("BFDLPS | BFDLTS"), ["BFDLPS", "BFDLTS"])
         self.assertEqual(_parse_sender_ids("BFDLPS, BFDLTS"), ["BFDLPS", "BFDLTS"])
-        # Multiple pipe-separated
-        self.assertEqual(_parse_sender_ids("BFDLPS | BFDLTS | BFDLPL"), ["BFDLPS", "BFDLTS", "BFDLPL"])
-        # Max 5 enforcement
-        six_senders = "S1, S2, S3, S4, S5, S6"
-        self.assertEqual(_parse_sender_ids(six_senders), ["S1", "S2", "S3", "S4", "S5"])
-        # Empty
+        self.assertEqual(_parse_sender_ids(["A", " B "]), ["A", "B"])
         self.assertEqual(_parse_sender_ids(""), [])
         self.assertEqual(_parse_sender_ids(None), [])
 
@@ -42,50 +52,30 @@ class TestRcsPipeline(unittest.TestCase):
         csv_path = "rcs_templates_sample.csv"
         submissions = load_rcs_from_csv(csv_path)
 
-        self.assertEqual(len(submissions), 4)
+        self.assertEqual(len(submissions), 5)
 
-        # Row 1: Vehicle_Loan_Offer
-        s1 = submissions[0]
-        self.assertEqual(s1.template_name, "Vehicle_Loan_Offer")
-        self.assertEqual(s1.template_id, "1107166074191019404")
-        self.assertEqual(s1.template_type, "Transactional")
-        self.assertEqual(s1.sender_ids, ["BFDLPS", "BFDLTS"])
-        self.assertEqual(s1.template_message_type, "Text")
-        self.assertEqual(s1.entity_id, "110100001654")
-        self.assertIn("{#var#}", s1.template_message)
+        by_name = {s.template_name: s for s in submissions}
 
-        # Row 2: Personal_Loan_Instant (3 sender IDs)
-        s2 = submissions[1]
-        self.assertEqual(s2.template_name, "Personal_Loan_Instant")
-        self.assertEqual(s2.template_type, "Promotional")
-        self.assertEqual(s2.sender_ids, ["BFDLPS", "BFDLTS", "BFDLPL"])
+        carousel = by_name["tata_product_carousel"]
+        self.assertEqual(carousel.template_type, "carousel")
+        self.assertEqual(len(carousel.carousel_cards), 2)
+        self.assertTrue(carousel.carousel_cards[0]["mediaUrl"].startswith("https://"))
 
-        # Row 3: Feedback_Survey_Request (Entity ID omitted -> defaulted to BAJAJ_ENTITY_ID)
-        s3 = submissions[2]
-        self.assertEqual(s3.template_name, "Feedback_Survey_Request")
-        self.assertEqual(s3.template_type, "Service - Implicit")
-        self.assertEqual(s3.sender_ids, ["BajajM"])
-        self.assertEqual(s3.entity_id, BAJAJ_ENTITY_ID)
+        text = by_name["tata_pl_instant_offer"]
+        self.assertEqual(text.template_type, "text")
+        self.assertIn("[Name]", text.text_message)
 
-    def test_build_dlt_payload(self):
-        sub = RcsTemplateSubmission(
-            template_name="Test_Tpl",
-            template_id="1107123456789012345",
-            template_type="Transactional",
-            sender_ids=["BFDLPS", "BFDLTS"],
-            template_message_type="Text",
-            template_message="Test message {#var#}",
-            entity_id=BAJAJ_ENTITY_ID,
-        )
-        payload = _build_dlt_payload(sub)
-        self.assertEqual(payload["action"], "addTemplate")
-        self.assertEqual(payload["entityId"], BAJAJ_ENTITY_ID)
-        self.assertEqual(payload["templateId"], "1107123456789012345")
-        self.assertEqual(payload["templateName"], "Test_Tpl")
-        self.assertEqual(payload["senderId"], ["BFDLPS", "BFDLTS"])
-        self.assertEqual(payload["templateType"], "Transactional")
-        self.assertEqual(payload["templateMsgType"], "Text")
-        self.assertEqual(payload["templateMsg"], "Test message {#var#}")
+        richcard = by_name["tata_festive_card_offer"]
+        self.assertEqual(richcard.template_type, "richcard")
+        self.assertEqual(richcard.card_title, "Festive Personal Loan")
+
+        dialer = by_name["tata_loan_service_dialer"]
+        self.assertEqual(dialer.suggestions[0]["suggestionType"], "dialer_action")
+        self.assertEqual(dialer.suggestions[0]["phoneNumber"], "+919999999999")
+
+        reply = by_name["tata_feedback_survey"]
+        self.assertEqual(len(reply.suggestions), 2)
+        self.assertEqual(reply.suggestions[0]["suggestionType"], "reply")
 
     def test_tracker_log_and_read(self):
         tmp_log = "scratch/test_rcs_log.jsonl"
@@ -108,7 +98,7 @@ class TestRcsPipeline(unittest.TestCase):
         self.assertEqual(entries[0]["status"], "submitted")
 
         # Update entry
-        update_rcs_result("Test_Ref", {"status": "duplicate"}, log_path=tmp_log)
+        self.assertTrue(update_rcs_result("Test_Ref", {"status": "duplicate"}, log_path=tmp_log))
         updated = load_rcs_log(tmp_log)
         self.assertEqual(updated[0]["status"], "duplicate")
 
@@ -129,11 +119,12 @@ class TestRcsPipeline(unittest.TestCase):
             template_type="Transactional",
             sender_ids=["BFDLPS"],
             template_message_type="Text",
-            template_message="Test message {#var#}",
+            text_message="Test message {#var#}",
         )
         result = submit_rcs_template(sub)
         self.assertEqual(result.status, RcsSubmissionStatus.SUBMITTED)
         self.assertEqual(result.template_name, "Test_Tpl")
+        self.assertIsNotNone(result.template_id)
 
 
 if __name__ == "__main__":

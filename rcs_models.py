@@ -80,6 +80,7 @@ class RcsSubmissionResult:
     client: str = "tata"
     channel: str = "rcs"
     submitted_by: str = "Anonymous Operator"
+    source_file: str | None = None  # name of the uploaded spreadsheet, for dashboard attribution
     submitted_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
