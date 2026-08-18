@@ -469,6 +469,8 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 error=data["Failed"],
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
 
@@ -481,16 +483,13 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 error=data.get("reason", str(data)),
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
 
-        # ---- Success ----
-        # The /create response is {"status": "success", "reason": "Successfully
-        # Template Created."} — it does NOT return the template data (no sno).
-        # Use template_name as the provider_ref_id for now; check_status
-        # matches on both sno and template_name, so this works for polling.
+        # Success
         provider_ref = payload.template_name
-
         return SubmissionResult(
             source_ref=payload.source_ref,
             template_name=payload.template_name,
@@ -498,9 +497,10 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             provider_ref_id=provider_ref,
             provider_response=data,
             approval_status=ApprovalStatus.PENDING,
+            client=c,
+            channel="whatsapp",
             retry_count=attempt,
         )
-
     # All retries exhausted
     return last_result
 
@@ -544,6 +544,8 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
             status=SubmissionStatus.FAILED,
             error=str(exc),
             approval_status=ApprovalStatus.UNKNOWN,
+            client=c,
+            channel="whatsapp",
             retry_count=0,
         )
 
@@ -563,6 +565,8 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 status=SubmissionStatus.FAILED,
                 error=f"Transport error: {exc}",
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
@@ -581,6 +585,8 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 error=f"HTTP {response.status_code}",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
@@ -595,6 +601,8 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 error=f"HTTP {response.status_code}: {response.text[:500]}",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
 
@@ -607,6 +615,8 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 error="Official create response missing templateId",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
+                client=c,
+                channel="whatsapp",
                 retry_count=attempt,
             )
 
@@ -617,6 +627,8 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
             provider_ref_id=template_id,
             provider_response=data,
             approval_status=ApprovalStatus.PENDING,
+            client=c,
+            channel="whatsapp",
             retry_count=attempt,
         )
 

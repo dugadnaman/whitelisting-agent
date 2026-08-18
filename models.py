@@ -66,6 +66,8 @@ class SubmissionResult:
     retry_count: int = 0
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
     approval_reason: str | None = None  # e.g. rejection reason from Karix
+    client: str = "bajaj"
+    channel: str = "whatsapp"
     submitted_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
