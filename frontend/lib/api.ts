@@ -11,11 +11,11 @@ export type Template = {
   error?: string | null;
   retry_count: number;
   submitted_at: string;
+  submitted_by?: string;
   updated_at?: string | null;
   provider_response?: Record<string, unknown> | null;
   client?: string;
   channel?: string;
-  // RCS-specific fields
   template_id?: string;
   template_type?: string;
   sender_ids?: string[];
@@ -61,6 +61,39 @@ export type TemplatePreview = {
   template_message_type?: string;
   template_message?: string;
   entity_id?: string;
+};
+
+export type ActivityLog = {
+  id: string;
+  timestamp: string;
+  user: string;
+  action: string;
+  account: Account;
+  channel: Channel;
+  status: string;
+  details: {
+    filename?: string;
+    count?: number;
+    templates?: string[];
+    successful?: number;
+    failed?: number;
+    checked_count?: number;
+    keys_updated?: string[];
+    message?: string;
+    valid?: boolean;
+    [key: string]: unknown;
+  };
+  ip_address?: string;
+};
+
+export type ActivityStats = {
+  total_actions: number;
+  total_users: number;
+  total_templates_submitted: number;
+  top_user: string;
+  user_activity: Array<{ user: string; actions: number; templates: number }>;
+  action_breakdown: Record<string, number>;
+  recent_activities: ActivityLog[];
 };
 function getApiUrl(path: string): string {
   if (typeof window !== "undefined") {
@@ -140,13 +173,15 @@ export async function previewFile(
 export async function submitFile(
   file: File,
   account: Account = "bajaj",
-  channel: Channel = "whatsapp"
+  channel: Channel = "whatsapp",
+  user: string = "Namann"
 ): Promise<{ submitted: number; results: Template[] }> {
   const form = new FormData();
   form.append("file", file);
-  const qs = new URLSearchParams({ account, channel }).toString();
+  const qs = new URLSearchParams({ account, channel, user }).toString();
   const res = await fetch(getApiUrl(`/api/submit?${qs}`), {
     method: "POST",
+    headers: { "X-User": user },
     body: form,
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
@@ -155,10 +190,14 @@ export async function submitFile(
 
 export async function pollPending(
   account: Account = "bajaj",
-  channel: Channel = "whatsapp"
+  channel: Channel = "whatsapp",
+  user: string = "Namann"
 ): Promise<{ checked: number }> {
-  const qs = new URLSearchParams({ account, channel }).toString();
-  const res = await fetch(getApiUrl(`/api/poll?${qs}`), { method: "POST" });
+  const qs = new URLSearchParams({ account, channel, user }).toString();
+  const res = await fetch(getApiUrl(`/api/poll?${qs}`), {
+    method: "POST",
+    headers: { "X-User": user },
+  });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -171,12 +210,16 @@ export async function updateCredentials(creds: {
   bearer_token?: string;
   session?: string;
   user?: string;
+  user_name?: string;
   entity_id?: string;
   lounge_cookie?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetch(getApiUrl(`/api/credentials`), {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-User": creds.user_name || "Namann",
+    },
     body: JSON.stringify(creds),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
@@ -192,6 +235,7 @@ export async function testCredentials(
     bearer_token?: string;
     session?: string;
     user?: string;
+    user_name?: string;
     entity_id?: string;
     lounge_cookie?: string;
   }
@@ -199,12 +243,42 @@ export async function testCredentials(
   ok: boolean;
   message: string;
 }> {
-  const qs = new URLSearchParams({ account, channel }).toString();
+  const qs = new URLSearchParams({ account, channel, user: creds?.user_name || "Namann" }).toString();
   const res = await fetch(getApiUrl(`/api/test-credentials?${qs}`), {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-User": creds?.user_name || "Namann",
+    },
     body: JSON.stringify({ account, channel, ...creds }),
   });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchActivityLogs(params?: {
+  user?: string;
+  action?: string;
+  account?: Account | "all";
+  channel?: Channel | "all";
+  search?: string;
+  limit?: number;
+}): Promise<ActivityLog[]> {
+  const qs = new URLSearchParams();
+  if (params?.user) qs.set("user", params.user);
+  if (params?.action) qs.set("action", params.action);
+  if (params?.account) qs.set("account", params.account);
+  if (params?.channel) qs.set("channel", params.channel);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit) qs.set("limit", String(params.limit));
+
+  const res = await fetch(getApiUrl(`/api/activity?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchActivityStats(): Promise<ActivityStats> {
+  const res = await fetch(getApiUrl(`/api/activity/stats`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

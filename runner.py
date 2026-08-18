@@ -12,18 +12,18 @@ from submission_client import check_status, submit_template
 from tracker import log_result, pending_entries, update_result
 
 
-def run(templates_raw: list[dict], log_path: str = "submission_log.jsonl", client: str = "bajaj") -> None:
+def run(templates_raw: list[dict], log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator") -> None:
     """Phase 2, step 1: submit each template, log the attempt."""
     submissions = load_from_list(templates_raw)
-    for s in submissions:
-        s.client = client
-    print(f"Loaded {len(submissions)} template(s) for {client} to submit.")
+    print(f"Submitting {len(submissions)} template(s) for {client} (by {user})...")
 
     for submission in submissions:
         result = submit_template(submission, client=client)
+        result.submitted_by = user
         res_dict = result.__dict__ if hasattr(result, "__dict__") else {}
         res_dict["client"] = client
         res_dict["channel"] = "whatsapp"
+        res_dict["submitted_by"] = user
         log_result(result, log_path)
         note = f" ({result.retry_count} retries)" if result.retry_count else ""
         print(f"  {result.template_name}: {result.status.value}{note}")
@@ -60,7 +60,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
         )
         print(f"  {entry['template_name']}: {approval_status.value}")
 
-def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str = "bajaj") -> None:
+def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator") -> None:
     """Phase 2, step 1 (from CSV or XLSX): load templates from file, submit each, log attempt."""
     from loader import load_from_csv, load_from_excel
 
@@ -72,17 +72,18 @@ def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str
     for s in submissions:
         s.client = client
 
-    print(f"Loaded {len(submissions)} template(s) for {client} from {file_path} to submit.")
+    print(f"Loaded {len(submissions)} template(s) for {client} from {file_path} to submit (by {user}).")
 
     for submission in submissions:
         result = submit_template(submission, client=client)
+        result.submitted_by = user
         res_dict = result.__dict__ if hasattr(result, "__dict__") else {}
         res_dict["client"] = client
         res_dict["channel"] = "whatsapp"
+        res_dict["submitted_by"] = user
         log_result(result, log_path)
         note = f" ({result.retry_count} retries)" if result.retry_count else ""
         print(f"  {result.template_name}: {result.status.value}{note}")
-
     print(f"Done. Results appended to {log_path}")
 
 if __name__ == "__main__":

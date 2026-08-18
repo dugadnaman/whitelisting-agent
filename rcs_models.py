@@ -79,6 +79,7 @@ class RcsSubmissionResult:
     retry_count: int = 0
     client: str = "tata"
     channel: str = "rcs"
+    submitted_by: str = "Anonymous Operator"
     submitted_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

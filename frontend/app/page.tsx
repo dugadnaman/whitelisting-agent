@@ -76,7 +76,7 @@ function formatError(err: unknown): string {
 }
 
 export default function DashboardPage() {
-  const { account, channel } = useApp();
+  const { account, channel, user } = useApp();
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -167,7 +167,7 @@ export default function DashboardPage() {
   const handlePoll = async () => {
     try {
       setPolling(true);
-      await pollPending(account, channel);
+      await pollPending(account, channel, user);
       await Promise.all([loadStats(), loadTemplates()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to poll pending');

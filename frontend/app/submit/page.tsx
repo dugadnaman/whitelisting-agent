@@ -80,7 +80,7 @@ function isAcceptedFile(file: File): boolean {
 }
 
 export default function SubmitPage() {
-  const { account, channel } = useApp();
+  const { account, channel, user } = useApp();
   const [state, setState] = useState<State>({ step: 'idle' });
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -154,7 +154,7 @@ export default function SubmitPage() {
     if (!file) return;
     setState({ step: 'submitting' });
     try {
-      const res = await submitFile(file, account, channel);
+      const res = await submitFile(file, account, channel, user);
       setState({ step: 'submitted', submitted: res.submitted, results: res.results });
     } catch (err) {
       setState({

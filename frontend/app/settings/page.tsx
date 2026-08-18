@@ -8,7 +8,7 @@ import { useApp } from '@/lib/context';
 type Banner = { type: 'success' | 'error'; message: string } | null;
 
 export default function SettingsPage() {
-  const { account: activeAccount, channel: activeChannel, setAccount: setActiveAccount, setChannel: setActiveChannel } = useApp();
+  const { account: activeAccount, channel: activeChannel, setAccount: setActiveAccount, setChannel: setActiveChannel, user: currentOperator } = useApp();
 
   // Selected config tab
   const [selectedAccount, setSelectedAccount] = useState<Account>(activeAccount);
@@ -47,6 +47,7 @@ export default function SettingsPage() {
         user: user.trim() || undefined,
         entity_id: entityId.trim() || undefined,
         lounge_cookie: loungeCookie.trim() || undefined,
+        user_name: currentOperator,
       });
       if (res.ok) {
         setBanner({ type: 'success', message: res.message || 'Connection verified successfully!' });
@@ -77,12 +78,14 @@ export default function SettingsPage() {
         user: user.trim() || undefined,
         entity_id: entityId.trim() || undefined,
         lounge_cookie: loungeCookie.trim() || undefined,
+        user_name: currentOperator,
       });
 
       // Run immediate test to verify
       const testRes = await testCredentials(selectedAccount, selectedChannel, {
         waba_auth_token: wabaAuthToken.trim() || undefined,
         waba_id: wabaId.trim() || undefined,
+        user_name: currentOperator,
       });
 
       if (testRes.ok) {

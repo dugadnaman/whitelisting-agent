@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/lib/context';
@@ -11,10 +12,10 @@ const links = [
     label: 'Dashboard',
     icon: (
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="2" y="2" width="7" height="7" rx="1" />
-        <rect x="11" y="2" width="7" height="7" rx="1" />
-        <rect x="2" y="11" width="7" height="7" rx="1" />
-        <rect x="11" y="11" width="7" height="7" rx="1" />
+        <rect x="2" y="2" width="7" height="7" rx="1.5" />
+        <rect x="11" y="2" width="7" height="7" rx="1.5" />
+        <rect x="2" y="11" width="7" height="7" rx="1.5" />
+        <rect x="11" y="11" width="7" height="7" rx="1.5" />
       </svg>
     ),
   },
@@ -23,9 +24,17 @@ const links = [
     label: 'Submit Templates',
     icon: (
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M10 14V3" />
-        <path d="M5 7l5-5 5 5" />
-        <path d="M3 17h14" />
+        <path d="M10 3v10M6 9l4 4 4-4M3 15h14" />
+      </svg>
+    ),
+  },
+  {
+    href: '/activity',
+    label: 'Activity Logs',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="10" cy="10" r="7" />
+        <polyline points="10 6 10 10 13 13" />
       </svg>
     ),
   },
@@ -35,7 +44,7 @@ const links = [
     icon: (
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="10" cy="10" r="3" />
-        <path d="M10 1v2M10 17v2M3.93 3.93l1.41 1.41M14.66 14.66l1.41 1.41M1 10h2M17 10h2M3.93 16.07l1.41-1.41M14.66 5.34l1.41-1.41" />
+        <path d="M10 1v2M10 17v2M1 10h2M17 10h2M3.6 3.6l1.4 1.4M15 15l1.4 1.4M3.6 16.4l1.4-1.4M15 5l1.4-1.4" />
       </svg>
     ),
   },
@@ -43,8 +52,17 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
-  const { account, setAccount, channel, setChannel } = useApp();
+  const { account, setAccount, channel, setChannel, user, setUser } = useApp();
+  const [isEditingUser, setIsEditingUser] = useState(false);
+  const [userNameInput, setUserNameInput] = useState('');
 
+  const handleSaveUser = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (userNameInput.trim()) {
+      setUser(userNameInput.trim());
+    }
+    setIsEditingUser(false);
+  };
   return (
     <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-gray-200 flex flex-col z-30">
       {/* Brand Header */}
@@ -151,10 +169,68 @@ export default function Nav() {
       </nav>
 
       {/* Footer Info */}
-      <div className="p-4 border-t border-gray-100 text-[11px] text-gray-400">
+      {/* Active User Card & Target */}
+      <div className="p-3.5 border-t border-gray-200/80 bg-gray-50/60 space-y-2.5">
         <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
+              {(user || 'U').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold text-gray-900 truncate">
+                {user || 'Anonymous'}
+              </p>
+              <p className="text-[10px] text-gray-400 truncate">Active Operator</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setUserNameInput(user);
+              setIsEditingUser(true);
+            }}
+            className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors p-1"
+            title="Switch or rename user"
+          >
+            Switch
+          </button>
+        </div>
+
+        {/* User Edit Modal / Popover */}
+        {isEditingUser && (
+          <div className="p-2.5 bg-white border border-indigo-200 rounded-lg shadow-sm space-y-2">
+            <p className="text-[11px] font-semibold text-gray-700">Set Your Name / Identity:</p>
+            <form onSubmit={handleSaveUser} className="space-y-1.5">
+              <input
+                type="text"
+                value={userNameInput}
+                onChange={(e) => setUserNameInput(e.target.value)}
+                placeholder="e.g. Namann, M., Team..."
+                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                autoFocus
+              />
+              <div className="flex items-center justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingUser(false)}
+                  className="text-[10px] font-semibold text-gray-500 px-2 py-1 hover:bg-gray-100 rounded"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="text-[10px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1 rounded"
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1 border-t border-gray-200/60">
           <span>Target</span>
-          <span className="font-mono font-medium text-gray-600 uppercase">
+          <span className="font-mono font-semibold text-gray-700 uppercase">
             {account} / {channel}
           </span>
         </div>
