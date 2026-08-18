@@ -5,8 +5,10 @@ Supports multiple accounts (Bajaj, Tata Capital) and multiple channels (WhatsApp
 Wraps the existing Python pipelines and exposes REST endpoints consumed by the Next.js frontend.
 """
 
+import json
 import logging
 import os
+import re
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
@@ -16,6 +18,8 @@ from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from config import (
     BAJAJ_ESMEADDR,
@@ -394,6 +398,7 @@ async def preview_file(
     file: UploadFile = File(...),
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
+    user: str = Query("Anonymous Operator"),
 ):
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -408,10 +413,20 @@ async def preview_file(
             else:
                 submissions = load_rcs_from_csv(tmp_path, client=account)
             if not submissions:
+                log_activity(
+                    user=user, action="TEMPLATE_PREVIEW", account=account, channel="rcs",
+                    details={"filename": file.filename or "upload.csv", "count": 0},
+                    status="failed",
+                )
                 raise HTTPException(
                     status_code=400,
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}'. Please make sure the file contains RCS template definitions.",
                 )
+            log_activity(
+                user=user, action="TEMPLATE_PREVIEW", account=account, channel="rcs",
+                details={"filename": file.filename or "upload.csv", "count": len(submissions)},
+                status="success",
+            )
             return [asdict(s) for s in submissions]
 
         # WhatsApp
@@ -421,11 +436,21 @@ async def preview_file(
             submissions = load_from_csv(tmp_path, client=account)
 
         if not submissions:
+            log_activity(
+                user=user, action="TEMPLATE_PREVIEW", account=account, channel="whatsapp",
+                details={"filename": file.filename or "upload.csv", "count": 0},
+                status="failed",
+            )
             raise HTTPException(
                 status_code=400,
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}'. Please ensure the file contains required template columns (template_name, category, language, body) or use the sample CSV format.",
             )
 
+        log_activity(
+            user=user, action="TEMPLATE_PREVIEW", account=account, channel="whatsapp",
+            details={"filename": file.filename or "upload.csv", "count": len(submissions)},
+            status="success",
+        )
         for s in submissions:
             s.client = account
         return [asdict(s) for s in submissions]
@@ -814,7 +839,7 @@ def record_custom_activity(
     action: str = Query("CUSTOM_EVENT"),
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
-    details: dict = Body(default_factory=dict),
+    details: dict = Body(default={}),
 ):
     rec = log_activity(
         user=user,

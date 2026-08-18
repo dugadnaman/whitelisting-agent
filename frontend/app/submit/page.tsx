@@ -454,6 +454,7 @@ export default function SubmitPage() {
                         <th className="px-5 py-3">Submission Status</th>
                         <th className="px-5 py-3">Approval</th>
                         <th className="px-5 py-3">Notes</th>
+                        <th className="px-5 py-3">Submitted By</th>
                       </>
                     ) : (
                       <>
@@ -486,6 +487,16 @@ export default function SubmitPage() {
                             ) : (
                               'Submitted successfully'
                             )}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                {(r.submitted_by || user || 'U').charAt(0).toUpperCase()}
+                              </span>
+                              <span className="text-[11px] font-semibold text-gray-700">
+                                {r.submitted_by || user || '—'}
+                              </span>
+                            </span>
                           </td>
                         </>
                       ) : (

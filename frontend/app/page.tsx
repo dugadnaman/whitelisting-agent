@@ -430,7 +430,7 @@ export default function DashboardPage() {
                     <th className="px-5 py-3.5">Submit Status</th>
                     <th className="px-5 py-3.5">Approval</th>
                     <th className="px-5 py-3.5">Submitted At</th>
-                    <th className="px-5 py-3.5 text-right">Details</th>
+                    <th className="px-5 py-3.5">Submitted By</th>
                   </>
                 ) : (
                   <>
@@ -491,6 +491,16 @@ export default function DashboardPage() {
                             </td>
                             <td className="px-5 py-3.5 text-gray-500">
                               {formatDate(t.submitted_at)}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                  {(t.submitted_by || 'U').charAt(0).toUpperCase()}
+                                </span>
+                                <span className="text-[11px] font-semibold text-gray-700 truncate">
+                                  {t.submitted_by || '—'}
+                                </span>
+                              </span>
                             </td>
                           </>
                         ) : (
