@@ -12,13 +12,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 import requests as http_client
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from config import (
     BAJAJ_ESMEADDR,
+    BAJAJ_WABA_ID,
     KARIX_BASE_URL,
     OFFICIAL_TEMPLATE_BASE_URL,
     get_esmeaddr,
@@ -31,7 +32,7 @@ from models import ApprovalStatus
 from runner import poll_pending, run_file
 from submission_client import _STATUS_MAP
 from tracker import load_log, pending_entries
-
+from activity_tracker import log_activity, load_activities, get_activity_summary
 # RCS pipeline imports
 from rcs_config import (
     KARIX_DLT_ACTION_URL,
@@ -75,9 +76,9 @@ class CredentialUpdate(BaseModel):
     bearer_token: str | None = None
     session: str | None = None
     user: str | None = None
+    user_name: str | None = None  # Who is performing the update
     entity_id: str | None = None
     lounge_cookie: str | None = None
-
 
 # ---------------------------------------------------------------------------
 def _clean_error_message(err) -> str | None:
@@ -446,6 +447,7 @@ async def submit_file(
     file: UploadFile = File(...),
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
+    user: str = Query("Anonymous Operator"),
 ):
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -466,7 +468,7 @@ async def submit_file(
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}' to submit.",
                 )
             before_count = len(load_rcs_log(RCS_LOG_PATH))
-            run_rcs_file(tmp_path, RCS_LOG_PATH, client=acc)
+            run_rcs_file(tmp_path, RCS_LOG_PATH, client=acc, user=user)
             all_entries = load_rcs_log(RCS_LOG_PATH)
             new_entries = all_entries[before_count:]
             cleaned_entries = []
@@ -475,6 +477,21 @@ async def submit_file(
                 if "error" in entry:
                     entry["error"] = _clean_error_message(entry["error"])
                 cleaned_entries.append(entry)
+
+            log_activity(
+                user=user,
+                action="TEMPLATE_SUBMISSION",
+                account=acc,
+                channel=chan,
+                details={
+                    "filename": file.filename or "upload.csv",
+                    "count": len(cleaned_entries),
+                    "templates": [e.get("template_name") for e in cleaned_entries],
+                    "successful": len([e for e in cleaned_entries if e.get("status") == "submitted"]),
+                    "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
+                },
+                status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
+            )
             return {"submitted": len(cleaned_entries), "results": cleaned_entries}
 
         # WhatsApp
@@ -488,7 +505,7 @@ async def submit_file(
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
             )
         before_count = len(load_log(LOG_PATH))
-        run_file(tmp_path, LOG_PATH, client=acc)
+        run_file(tmp_path, LOG_PATH, client=acc, user=user)
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
         cleaned_entries = []
@@ -497,6 +514,21 @@ async def submit_file(
             if "error" in entry:
                 entry["error"] = _clean_error_message(entry["error"])
             cleaned_entries.append(entry)
+
+        log_activity(
+            user=user,
+            action="TEMPLATE_SUBMISSION",
+            account=acc,
+            channel=chan,
+            details={
+                "filename": file.filename or "upload.csv",
+                "count": len(cleaned_entries),
+                "templates": [e.get("template_name") for e in cleaned_entries],
+                "successful": len([e for e in cleaned_entries if e.get("status") == "submitted"]),
+                "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
+            },
+            status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
+        )
         return {"submitted": len(cleaned_entries), "results": cleaned_entries}
     except HTTPException:
         raise
@@ -515,6 +547,7 @@ async def submit_file(
 def poll(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
+    user: str = Query("Anonymous Operator"),
 ):
     acc = account.lower()
     chan = channel.lower()
@@ -524,6 +557,14 @@ def poll(
         all_pending = pending_entries(LOG_PATH)
         matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
         poll_pending(LOG_PATH, client=acc)
+        log_activity(
+            user=user,
+            action="STATUS_POLL",
+            account=acc,
+            channel=chan,
+            details={"checked_count": len(matching)},
+            status="success",
+        )
         return {"checked": len(matching)}
     except Exception as exc:
         # Never leak a 500 on Poll — surface a clean, actionable error (e.g. missing credentials).
@@ -532,7 +573,6 @@ def poll(
             status_code=400,
             detail=f"Poll failed for {acc}: {str(exc)}",
         )
-
 
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate):
@@ -621,8 +661,15 @@ def update_credentials(creds: CredentialUpdate):
     except Exception as ex:
         logger.warning("Could not write credentials.json: %s", ex)
 
+    log_activity(
+        user=creds.user_name or "Anonymous Operator",
+        action="CREDENTIALS_UPDATE",
+        account=acc,
+        channel=chan,
+        details={"keys_updated": list(mapping.keys())},
+        status="success",
+    )
     return {"ok": True}
-
 
 @app.post("/api/test-credentials")
 def test_credentials(
@@ -708,8 +755,15 @@ def test_credentials(
     except Exception as exc:
         results.append(f"{acc_name} WhatsApp: {exc}")
     is_ok = any("Valid" in r for r in results)
+    log_activity(
+        user=(creds.user_name if creds and creds.user_name else "Anonymous Operator"),
+        action="CREDENTIALS_TEST",
+        account=acc,
+        channel=chan,
+        details={"message": " | ".join(results), "valid": is_ok},
+        status="success" if is_ok else "failed",
+    )
     return {"ok": is_ok, "message": " | ".join(results)}
-
 @app.get("/api/sample-csv")
 def get_sample_csv(channel: str = Query("whatsapp")):
     chan = channel.lower()
@@ -727,3 +781,47 @@ def get_sample_csv(channel: str = Query("whatsapp")):
             filename=filename,
         )
     return PlainTextResponse("template_name,body\nexample_1,Sample message text\n")
+
+@app.get("/api/activity")
+def get_activity_logs(
+    user: str = Query("all"),
+    action: str = Query("all"),
+    account: str = Query("all"),
+    channel: str = Query("all"),
+    search: str = Query(""),
+    limit: int = Query(200),
+):
+    records = load_activities(
+        user=user if user != "all" else None,
+        action=action if action != "all" else None,
+        account=account if account != "all" else None,
+        channel=channel if channel != "all" else None,
+        search=search if search else None,
+        limit=limit,
+    )
+    return [_json_safe(r) for r in records]
+
+
+@app.get("/api/activity/stats")
+def get_activity_stats():
+    summary = get_activity_summary()
+    return _json_safe(summary)
+
+
+@app.post("/api/activity")
+def record_custom_activity(
+    user: str = Query("Anonymous Operator"),
+    action: str = Query("CUSTOM_EVENT"),
+    account: str = Query("bajaj"),
+    channel: str = Query("whatsapp"),
+    details: dict = Body(default_factory=dict),
+):
+    rec = log_activity(
+        user=user,
+        action=action,
+        account=account,
+        channel=channel,
+        details=details,
+        status="success",
+    )
+    return _json_safe(rec)

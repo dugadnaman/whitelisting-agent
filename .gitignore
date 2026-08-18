@@ -1,5 +1,6 @@
 # Secrets
 .env
+credentials.json
 
 # Node.js
 node_modules/
@@ -17,6 +18,11 @@ venv/
 
 # Graphify cache
 graphify-out/cache/
+
+# Logs & data (contain per-run data, not source)
+submission_log.jsonl
+rcs_submission_log.jsonl
+activity_log.jsonl
 
 # Scratch/Local configs
 scratch/
