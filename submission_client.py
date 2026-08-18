@@ -550,22 +550,27 @@ def _build_official_create_body(payload: TemplateSubmission, client: str = "baja
     components = copy.deepcopy(_build_portal_create_body(payload, client=client)["components"])
     components = _resolve_body_variables(components, client=client)
 
-    # For official API: ensure HEADER IMAGE/DOCUMENT/VIDEO has a valid example URL or handle
+    # For official API: clean up any empty or unsupported header components
+    cleaned_components = []
     for comp in components:
-        if comp.get("type") == "HEADER" and str(comp.get("format", "")).upper() in ("IMAGE", "DOCUMENT", "VIDEO"):
-            example = comp.get("example")
-            if not example or not isinstance(example, dict):
-                media_url = comp.pop("media_url", None)
-                if media_url:
-                    comp["example"] = {"header_url": [media_url]}
-                else:
-                    comp["example"] = {"header_url": ["https://rcmui.instaalerts.zone/default_sample_header.png"]}
+        ctype = comp.get("type")
+        if ctype == "HEADER":
+            cformat = str(comp.get("format", "")).upper()
+            if cformat in ("IMAGE", "DOCUMENT", "VIDEO"):
+                example = comp.get("example")
+                if not example or not isinstance(example, dict) or not example.get("header_handle"):
+                    logger.warning(
+                        "Omitting media HEADER %s for %s because no media handle was provided",
+                        cformat, payload.template_name
+                    )
+                    continue
+        cleaned_components.append(comp)
 
     return {
         "template_name": payload.template_name,
         "language": payload.language,
         "category": payload.category,
-        "components": components,
+        "components": cleaned_components,
     }
 def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj") -> SubmissionResult:
     """Submit a text-only template through the verified official Karix API."""
@@ -614,11 +619,14 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
             data = {"_raw_text": response.text}
 
         if response.status_code in _RETRYABLE_STATUS_CODES:
+            err_detail = f"HTTP {response.status_code}"
+            if response.text and response.text.strip():
+                err_detail = f"HTTP {response.status_code}: {response.text[:300].strip()}"
             last_result = SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
-                error=f"HTTP {response.status_code}",
+                error=err_detail,
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
                 client=c,
