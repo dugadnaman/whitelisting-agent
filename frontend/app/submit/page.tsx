@@ -30,7 +30,7 @@ type State =
   | { step: 'previewed'; previews: TemplatePreview[] }
   | { step: 'submitting' }
   | { step: 'submitted'; submitted: number; results: Template[] }
-  | { step: 'error'; message: string };
+  | { step: 'error'; message: string; previews: TemplatePreview[] | null };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
@@ -61,7 +61,7 @@ export default function SubmitPage() {
   const handleFile = useCallback(
     async (selected: File) => {
       if (!isAcceptedFile(selected)) {
-        setState({ step: 'error', message: 'Please upload a .csv, .xlsx, or .xls file.' });
+        setState({ step: 'error', message: 'Please upload a .csv, .xlsx, or .xls file.', previews: null });
         return;
       }
       setFile(selected);
@@ -73,6 +73,7 @@ export default function SubmitPage() {
         setState({
           step: 'error',
           message: err instanceof Error ? err.message : 'Failed to parse template file.',
+          previews: null,
         });
       }
     },
@@ -115,20 +116,23 @@ export default function SubmitPage() {
     setState({ step: 'idle' });
     if (inputRef.current) inputRef.current.value = '';
   }, []);
+  const currentPreviews = state.step === 'previewed' ? state.previews : null;
 
   const handleSubmit = useCallback(async () => {
-    if (!file) return;
+    if (!file || !currentPreviews) return;
     setState({ step: 'submitting' });
     try {
       const res = await submitFile(file, account, channel, user);
       setState({ step: 'submitted', submitted: res.submitted, results: res.results });
     } catch (err) {
+      // Preserve the parsed previews so a transient failure doesn't force a re-upload.
       setState({
         step: 'error',
         message: err instanceof Error ? err.message : 'Submission failed.',
+        previews: currentPreviews,
       });
     }
-  }, [file, account, channel]);
+  }, [file, account, channel, user, currentPreviews]);
 
   const handleReset = useCallback(() => {
     handleClear();
@@ -245,11 +249,26 @@ export default function SubmitPage() {
           </svg>
           <div className="flex-1">
             <h4 className="font-semibold text-red-800">Submission Error</h4>
-            <p className="mt-1 text-xs">{state.message}</p>
+            <p className="mt-1 text-xs">{formatError(state.message)}</p>
+            {state.previews && state.previews.length > 0 && (
+              <p className="mt-1.5 text-[11px] text-red-500">
+                Your parsed templates are still loaded — retry submission below.
+              </p>
+            )}
           </div>
-          <button onClick={handleReset} className="text-xs font-semibold text-red-700 underline">
-            Try again
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {state.previews && state.previews.length > 0 && (
+              <button
+                onClick={() => setState({ step: 'previewed', previews: state.previews as TemplatePreview[] })}
+                className="text-xs font-semibold text-indigo-700 underline"
+              >
+                Back to preview
+              </button>
+            )}
+            <button onClick={handleReset} className="text-xs font-semibold text-red-700 underline">
+              Reset
+            </button>
+          </div>
         </div>
       )}
 

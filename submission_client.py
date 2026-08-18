@@ -269,8 +269,9 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
         line_suffix = after_text.split('\n')[0].lower().strip()
         tag_clean = re.sub(r'[^a-zA-Z0-9_]', '', raw_tag).lower()
 
-        # 1. Suffix cues (e.g. {{2}} T&Cs apply)
-        if any(w in line_suffix for w in ('t&c', 'terms', 'apply', 'condition', 'disclaimer', 'ltd')):
+        # 1. Suffix cues (e.g. {{2}} T&Cs apply). NOTE: bare "apply" is too
+        #    common ("Apply now" CTA text) — require explicit T&C phrasing.
+        if any(w in line_suffix for w in ('t&c', 't & c', 'terms', 'terms and conditions', 'conditions apply', 'disclaimer', 'ltd.')):
             samples.append(company_name)
         elif any(w in line_suffix for w in ('days', 'months', 'years', 'hours', 'mins', 'minutes')):
             samples.append("30")

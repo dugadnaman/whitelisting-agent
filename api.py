@@ -5,6 +5,7 @@ Supports multiple accounts (Bajaj, Tata Capital) and multiple channels (WhatsApp
 Wraps the existing Python pipelines and exposes REST endpoints consumed by the Next.js frontend.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -26,10 +27,7 @@ from config import (
     BAJAJ_WABA_ID,
     KARIX_BASE_URL,
     OFFICIAL_TEMPLATE_BASE_URL,
-    get_esmeaddr,
-    get_official_auth_headers,
-    get_portal_auth_headers,
-    get_waba_id,
+    _load_env_file,
 )
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus
@@ -416,9 +414,9 @@ async def preview_file(
     try:
         if chan == "rcs":
             if suffix in (".xlsx", ".xls"):
-                submissions = load_rcs_from_excel(tmp_path, client=account)
+                submissions = await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=account)
             else:
-                submissions = load_rcs_from_csv(tmp_path, client=account)
+                submissions = await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=account)
             if not submissions:
                 log_activity(
                     user=user, action="TEMPLATE_PREVIEW", account=account, channel="rcs",
@@ -438,9 +436,9 @@ async def preview_file(
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
-            submissions = load_from_excel(tmp_path, client=account)
+            submissions = await asyncio.to_thread(load_from_excel, tmp_path, client=account)
         else:
-            submissions = load_from_csv(tmp_path, client=account)
+            submissions = await asyncio.to_thread(load_from_csv, tmp_path, client=account)
 
         if not submissions:
             log_activity(
@@ -500,7 +498,7 @@ async def submit_file(
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}' to submit.",
                 )
             before_count = len(load_rcs_log(RCS_LOG_PATH))
-            run_rcs_file(tmp_path, RCS_LOG_PATH, client=acc, user=user)
+            await asyncio.to_thread(run_rcs_file, tmp_path, RCS_LOG_PATH, client=acc, user=user)
             all_entries = load_rcs_log(RCS_LOG_PATH)
             new_entries = all_entries[before_count:]
             cleaned_entries = []
@@ -537,7 +535,7 @@ async def submit_file(
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
             )
         before_count = len(load_log(LOG_PATH))
-        run_file(tmp_path, LOG_PATH, client=acc, user=user)
+        await asyncio.to_thread(run_file, tmp_path, LOG_PATH, client=acc, user=user)
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
         cleaned_entries = []
@@ -709,10 +707,17 @@ def test_credentials(
     channel: str = Query("whatsapp"),
     creds: CredentialUpdate | None = None,
 ):
-    acc = (creds.account if creds and creds.account else account).lower()
-    chan = (creds.channel if creds and creds.channel else channel).lower()
+    # Only trust body-provided account/channel when the caller EXPLICITLY sent
+    # them. An empty `{}` body must not silently override the query params
+    # with pydantic defaults (it previously flipped tata → bajaj).
+    body_fields = creds.model_fields_set if creds else set()
+    acc = (creds.account if creds and "account" in body_fields else account).lower()
+    chan = (creds.channel if creds and "channel" in body_fields else channel).lower()
     acc_name = "Tata Capital" if acc == "tata" else "Bajaj"
     is_tata = acc == "tata"
+    # Credentials live in .env / credentials.json and are loaded lazily by
+    # config helpers — load them so os.environ checks below see the real values.
+    _load_env_file()
     # Apply any supplied creds directly to environment in memory
     if creds:
         if creds.waba_id and creds.waba_id.strip():

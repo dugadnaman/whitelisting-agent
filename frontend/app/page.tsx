@@ -319,7 +319,7 @@ export default function DashboardPage() {
                   <span className={`w-2 h-2 rounded-full ${card.dot}`} />
                   {card.label}
                 </span>
-                {active && <span className="text-[10px] font-bold text-indigo-600 uppercase">Filtered</span>}
+                {active && card.statusValue !== '' && <span className="text-[10px] font-bold text-indigo-600 uppercase">Filtered</span>}
               </div>
               <div className="text-2xl font-bold text-gray-900 mt-1.5">
                 {statsLoading ? <div className="h-8 w-12 bg-gray-200 animate-pulse rounded" /> : card.value}
