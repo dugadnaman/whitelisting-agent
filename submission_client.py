@@ -168,7 +168,16 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
 
         media_file = comp.pop("media_file", None)
         media_url = comp.pop("media_url", None)
-        file_type = comp.pop("file_type", None)
+        file_type = comp.pop("file_type", None) or "image/png"
+        image_bytes = comp.pop("image_bytes", None)
+
+        # If in-memory image_bytes provided (from .xlsx)
+        if image_bytes:
+            import tempfile
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(image_bytes)
+                media_file = tmp.name
+            file_type = "image/png"
 
         # Fallback to default sample image if no custom image specified
         if not media_file and not media_url:
@@ -177,7 +186,6 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
             )
             media_file = _ensure_default_sample_image()
             file_type = "image/png"
-
         # Download from URL if needed
         if media_url and not media_file:
             import tempfile

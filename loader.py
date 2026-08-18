@@ -303,13 +303,20 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
             t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
 
             components = []
-            if parsed.get("header"):
+            if extracted_images and (idx - 1) < len(extracted_images):
+                img_name, img_bytes = extracted_images[idx - 1]
+                components.append({
+                    "type": "HEADER",
+                    "format": "IMAGE",
+                    "image_bytes": img_bytes,
+                    "file_type": "image/jpeg" if img_name.lower().endswith((".jpg", ".jpeg")) else "image/png",
+                })
+            elif parsed.get("header"):
                 components.append({
                     "type": "HEADER",
                     "format": "TEXT",
                     "text": parsed["header"],
                 })
-
             components.append({
                 "type": "BODY",
                 "text": parsed["body"],

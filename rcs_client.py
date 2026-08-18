@@ -246,9 +246,13 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             }
             if card.get("fileName") or card.get("file_name"):
                 c_entry["fileName"] = card.get("fileName") or card.get("file_name")
+            elif card.get("mediaUrl") or card.get("media_url"):
+                c_entry["mediaUrl"] = card.get("mediaUrl") or card.get("media_url")
             else:
-                c_entry["mediaUrl"] = card.get("mediaUrl") or card.get("media_url") or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop"
-
+                raise ValueError(
+                    f"Card {c_idx} ('{c_title_norm}') is missing an image. "
+                    "Please ensure images are pasted in the Excel file or media URLs are provided."
+                )
             c_entry["suggestions"] = clean_suggs
             cards_list.append(c_entry)
 
@@ -319,9 +323,13 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         }
         if getattr(payload, "file_name", None):
             card_entry["fileName"] = getattr(payload, "file_name")
+        elif payload.media_url:
+            card_entry["mediaUrl"] = payload.media_url
         else:
-            card_entry["mediaUrl"] = payload.media_url or "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
-
+            raise ValueError(
+                f"Rich Card '{payload.template_name}' is missing an image. "
+                "Please ensure an image is pasted in the Excel file or a media URL is provided."
+            )
         vi_template = {
             "name": safe_name,
             "type": "richcard",
