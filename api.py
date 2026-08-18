@@ -80,6 +80,23 @@ class CredentialUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+def _clean_error_message(err) -> str | None:
+    """Flatten error strings or nested error dictionaries into a clean message."""
+    if not err:
+        return None
+    if isinstance(err, str):
+        return err
+    if isinstance(err, dict):
+        if "error" in err and isinstance(err["error"], dict):
+            return err["error"].get("message") or err["error"].get("error_user_msg") or str(err)
+        if "message" in err:
+            return str(err["message"])
+        if "reason" in err:
+            return _clean_error_message(err["reason"])
+        return str(err)
+    return str(err)
+
+
 def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
     """Fetch live templates directly from Karix WhatsApp API."""
     acc = client.lower()
@@ -293,7 +310,9 @@ def get_templates(
 
     for le in local_entries:
         if le.get("template_name", "").lower() not in seen_names:
-            merged_entries.append(le)
+            le_clean = dict(le)
+            le_clean["error"] = _clean_error_message(le.get("error"))
+            merged_entries.append(le_clean)
 
     if status and isinstance(status, str):
         s_val = status.lower()
