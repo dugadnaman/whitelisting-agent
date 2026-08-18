@@ -432,7 +432,13 @@ async def submit_file(
             run_rcs_file(tmp_path, RCS_LOG_PATH, client=acc)
             all_entries = load_rcs_log(RCS_LOG_PATH)
             new_entries = all_entries[before_count:]
-            return {"submitted": len(new_entries), "results": new_entries}
+            cleaned_entries = []
+            for e in new_entries:
+                entry = dict(e)
+                if "error" in entry:
+                    entry["error"] = _clean_error_message(entry["error"])
+                cleaned_entries.append(entry)
+            return {"submitted": len(cleaned_entries), "results": cleaned_entries}
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
@@ -448,7 +454,13 @@ async def submit_file(
         run_file(tmp_path, LOG_PATH, client=acc)
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
-        return {"submitted": len(new_entries), "results": new_entries}
+        cleaned_entries = []
+        for e in new_entries:
+            entry = dict(e)
+            if "error" in entry:
+                entry["error"] = _clean_error_message(entry["error"])
+            cleaned_entries.append(entry)
+        return {"submitted": len(cleaned_entries), "results": cleaned_entries}
     except HTTPException:
         raise
     except Exception as exc:
@@ -469,13 +481,20 @@ def poll(
 ):
     acc = account.lower()
     chan = channel.lower()
-
-    if chan != "whatsapp":
-        return {"checked": 0}
-    all_pending = pending_entries(LOG_PATH)
-    matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-    poll_pending(LOG_PATH, client=acc)
-    return {"checked": len(matching)}
+    try:
+        if chan != "whatsapp":
+            return {"checked": 0}
+        all_pending = pending_entries(LOG_PATH)
+        matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+        poll_pending(LOG_PATH, client=acc)
+        return {"checked": len(matching)}
+    except Exception as exc:
+        # Never leak a 500 on Poll — surface a clean, actionable error (e.g. missing credentials).
+        logger.exception("Error in poll for %s (%s): %s", acc, chan, exc)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Poll failed for {acc}: {str(exc)}",
+        )
 
 
 @app.put("/api/credentials")

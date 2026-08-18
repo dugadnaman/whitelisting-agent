@@ -22,6 +22,28 @@ function StatusBadge({ status }: { status: string }) {
     </span>
   );
 }
+function formatError(err: unknown): string {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    const anyErr = err as Record<string, unknown>;
+    if (anyErr.error && typeof anyErr.error === 'object') {
+      const nested = anyErr.error as Record<string, unknown>;
+      return String(nested.message || nested.error_user_msg || JSON.stringify(nested));
+    }
+    if (anyErr.message) return String(anyErr.message);
+    if (anyErr.reason) return formatError(anyErr.reason);
+    if (anyErr.error_user_msg) return String(anyErr.error_user_msg);
+    if (anyErr.error) return formatError(anyErr.error);
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 
 type State =
   | { step: 'idle' }
@@ -447,7 +469,7 @@ export default function SubmitPage() {
                           </td>
                           <td className="px-5 py-3 text-gray-500">
                             {r.error ? (
-                              <span className="text-red-600 font-medium">{r.error}</span>
+                              <span className="text-red-600 font-medium">{formatError(r.error)}</span>
                             ) : (
                               'Submitted successfully'
                             )}
@@ -463,7 +485,7 @@ export default function SubmitPage() {
                           </td>
                           <td className="px-5 py-3 text-gray-600">
                             {r.error ? (
-                              <span className="text-red-600 font-medium">{r.error}</span>
+                              <span className="text-red-600 font-medium">{formatError(r.error)}</span>
                             ) : (
                               <span className="text-emerald-700 font-medium">Template created on Karix Bot Builder</span>
                             )}

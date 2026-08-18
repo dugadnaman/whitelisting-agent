@@ -550,7 +550,7 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
         )
 
     url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
-    body = _build_official_create_body(payload)
+    body = _build_official_create_body(payload, client=c)
     last_result: SubmissionResult | None = None
 
     for attempt in range(MAX_RETRIES):
@@ -656,16 +656,17 @@ def check_status(provider_ref_id: str, client: str = "bajaj") -> tuple[ApprovalS
     by the list endpoint. Existing portal entries remain pollable because the
     same list also exposes their serial number and template name.
     """
-    waba_id = get_waba_id(client)
-    url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
     try:
+        waba_id = get_waba_id(client)
+        url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
         response = requests.get(
             url,
             headers=get_official_auth_headers(client),
             timeout=REQUEST_TIMEOUT,
         )
     except OSError as exc:
-        logger.error("Missing official credentials for check_status: %s", exc)
+        # Missing WABA ID / token or transport error — never propagate to the caller.
+        logger.error("check_status credential/transport error: %s", exc)
         return ApprovalStatus.UNKNOWN, str(exc), {}
     except (requests.ConnectionError, requests.Timeout) as exc:
         logger.error("Transport error in check_status: %s", exc)

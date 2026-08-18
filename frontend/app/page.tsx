@@ -40,6 +40,28 @@ function formatDate(iso: string | null): string {
   }
 }
 
+function formatError(err: unknown): string {
+  if (!err) return '';
+  if (typeof err === 'string') return err;
+  if (typeof err === 'object') {
+    const anyErr = err as Record<string, unknown>;
+    if (anyErr.error && typeof anyErr.error === 'object') {
+      const nested = anyErr.error as Record<string, unknown>;
+      return String(nested.message || nested.error_user_msg || JSON.stringify(nested));
+    }
+    if (anyErr.message) return String(anyErr.message);
+    if (anyErr.reason) return formatError(anyErr.reason);
+    if (anyErr.error_user_msg) return String(anyErr.error_user_msg);
+    if (anyErr.error) return formatError(anyErr.error);
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 export default function DashboardPage() {
   const { account, channel } = useApp();
   const [stats, setStats] = useState<Stats | null>(null);
@@ -525,14 +547,14 @@ export default function DashboardPage() {
                               {t.error && (
                                 <div className="p-2.5 bg-red-50 border border-red-200 rounded text-red-700 text-xs">
                                   <span className="font-semibold">Error: </span>
-                                  {t.error}
+                                  {formatError(t.error)}
                                 </div>
                               )}
 
                               {t.approval_reason && (
                                 <div className="p-2.5 bg-amber-50 border border-amber-200 rounded text-amber-800 text-xs">
                                   <span className="font-semibold">Approval Reason: </span>
-                                  {t.approval_reason}
+                                  {formatError(t.approval_reason)}
                                 </div>
                               )}
 
