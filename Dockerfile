@@ -31,12 +31,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy Python backend code, data, and initial logs
+# Copy Python backend code, data, initial logs, and credentials
 COPY *.py ./
 COPY *.csv ./
 COPY *.png ./
 COPY *.jsonl ./
-# Copy built frontend
+COPY *.json ./
 COPY --from=frontend-builder /app/frontend /app/frontend
 
 # Setup supervisord configuration to run both FastAPI (8000) and Next.js (3000)

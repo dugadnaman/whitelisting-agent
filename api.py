@@ -330,16 +330,16 @@ async def preview_file(
     try:
         if chan == "rcs":
             if suffix in (".xlsx", ".xls"):
-                submissions = load_rcs_from_excel(tmp_path)
+                submissions = load_rcs_from_excel(tmp_path, client=account)
             else:
-                submissions = load_rcs_from_csv(tmp_path)
+                submissions = load_rcs_from_csv(tmp_path, client=account)
             return [asdict(s) for s in submissions]
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
-            submissions = load_from_excel(tmp_path)
+            submissions = load_from_excel(tmp_path, client=account)
         else:
-            submissions = load_from_csv(tmp_path)
+            submissions = load_from_csv(tmp_path, client=account)
         for s in submissions:
             s.client = account
         return [asdict(s) for s in submissions]
@@ -395,6 +395,12 @@ def poll(
 
     if chan != "whatsapp":
         return {"checked": 0}
+    all_pending = pending_entries(LOG_PATH)
+    matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+    poll_pending(LOG_PATH, client=acc)
+    return {"checked": len(matching)}
+
+
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate):
     env_path = Path(".env")
@@ -402,7 +408,6 @@ def update_credentials(creds: CredentialUpdate):
     chan = creds.channel.lower()
     is_tata = acc == "tata"
     mapping = {}
-
     if chan == "whatsapp":
         if creds.waba_auth_token is not None and creds.waba_auth_token.strip():
             key = "TATA_WABA_AUTH_TOKEN" if is_tata else "WABA_AUTH_TOKEN"
@@ -443,30 +448,45 @@ def update_credentials(creds: CredentialUpdate):
 
     if not mapping:
         return {"ok": True}
-
-    lines: list[str] = []
-    seen: set[str] = set()
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                k = stripped.split("=", 1)[0].strip()
-                if k in mapping:
-                    lines.append(f"{k}={mapping[k]}")
-                    seen.add(k)
+    # 1. Update .env file
+    try:
+        lines: list[str] = []
+        seen: set[str] = set()
+        if env_path.exists():
+            for line in env_path.read_text().splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    k = stripped.split("=", 1)[0].strip()
+                    if k in mapping:
+                        lines.append(f"{k}={mapping[k]}")
+                        seen.add(k)
+                    else:
+                        lines.append(line)
                 else:
                     lines.append(line)
-            else:
-                lines.append(line)
 
-    for k, v in mapping.items():
-        if k not in seen:
-            lines.append(f"{k}={v}")
+        for k, v in mapping.items():
+            if k not in seen:
+                lines.append(f"{k}={v}")
 
-    try:
         env_path.write_text("\n".join(lines) + "\n")
     except Exception:
         pass
+
+    # 2. Update persistent credentials.json
+    try:
+        import json
+        cred_json_path = Path("credentials.json")
+        saved_creds = {}
+        if cred_json_path.exists():
+            try:
+                saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
+            except Exception:
+                saved_creds = {}
+        saved_creds.update(mapping)
+        cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
+    except Exception as ex:
+        logger.warning("Could not write credentials.json: %s", ex)
 
     return {"ok": True}
 

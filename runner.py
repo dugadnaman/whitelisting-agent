@@ -65,9 +65,9 @@ def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str
     from loader import load_from_csv, load_from_excel
 
     if file_path.lower().endswith((".xlsx", ".xls")):
-        submissions = load_from_excel(file_path)
+        submissions = load_from_excel(file_path, client=client)
     else:
-        submissions = load_from_csv(file_path)
+        submissions = load_from_csv(file_path, client=client)
 
     for s in submissions:
         s.client = client

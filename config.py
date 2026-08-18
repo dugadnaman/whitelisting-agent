@@ -24,8 +24,22 @@ import os
 # ---------------------------------------------------------------------------
 
 def _load_env_file():
-    """Load key-value pairs from a local .env file if present."""
+    """Load key-value pairs from credentials.json and .env file if present."""
     from pathlib import Path
+    import json
+
+    # 1. Load credentials.json (saved from Settings UI)
+    cred_json_path = Path("credentials.json")
+    if cred_json_path.exists():
+        try:
+            creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
+            for k, v in creds.items():
+                if k and v:
+                    os.environ[k] = str(v).strip()
+        except Exception:
+            pass
+
+    # 2. Load .env file
     env_path = Path(".env")
     if env_path.exists():
         for line in env_path.read_text().splitlines():
@@ -37,8 +51,6 @@ def _load_env_file():
             v = v.strip().strip("'\"")
             if k and v:
                 os.environ[k] = v
-
-
 def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
     Build HTTP headers for the legacy portal media-upload endpoint.
