@@ -189,11 +189,11 @@ def get_stats(
                 merged.append(le)
 
         total = len(merged)
-        submitted = sum(1 for e in merged if e.get("status") == "submitted")
-        failed = sum(1 for e in merged if e.get("status") == "failed")
-        pending = sum(1 for e in merged if e.get("approval_status") == "pending")
-        approved = sum(1 for e in merged if e.get("approval_status") == "approved")
-        rejected = sum(1 for e in merged if e.get("approval_status") == "rejected")
+        submitted = sum(1 for e in merged if str(e.get("status", "")).lower() == "submitted")
+        failed = sum(1 for e in merged if str(e.get("status", "")).lower() == "failed")
+        pending = sum(1 for e in merged if str(e.get("approval_status", "")).lower() == "pending")
+        approved = sum(1 for e in merged if str(e.get("approval_status", "")).lower() == "approved")
+        rejected = sum(1 for e in merged if str(e.get("approval_status", "")).lower() == "rejected")
         return {
             "total": total,
             "submitted": submitted,
