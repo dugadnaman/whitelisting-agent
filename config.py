@@ -93,7 +93,11 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
     _load_env_file()
     if client.lower() == "tata":
-        token = os.environ.get("TATA_WABA_AUTH_TOKEN") or os.environ.get("TATA_AUTH_TOKEN")
+        token = (
+            os.environ.get("TATA_WABA_AUTH_TOKEN")
+            or os.environ.get("TATA_AUTH_TOKEN")
+            or os.environ.get("WABA_AUTH_TOKEN")
+        )
     else:
         token = os.environ.get("BAJAJ_WABA_AUTH_TOKEN") or os.environ.get("WABA_AUTH_TOKEN")
 
@@ -110,9 +114,9 @@ def get_waba_id(client: str = "bajaj") -> str:
     """Return WABA ID for the given client."""
     _load_env_file()
     if client.lower() == "tata":
-        val = os.environ.get("TATA_WABA_ID")
+        val = os.environ.get("TATA_WABA_ID") or os.environ.get("WABA_ID")
         if not val:
-            raise OSError("Missing required Tata WABA ID: TATA_WABA_ID in environment.")
+            raise OSError("Missing required Tata WABA ID: Please set TATA_WABA_ID in Settings or Environment.")
         return val
     return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
 

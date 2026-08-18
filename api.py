@@ -97,6 +97,21 @@ def _clean_error_message(err) -> str | None:
     return str(err)
 
 
+def _json_safe(obj):
+    """
+    Recursively coerce arbitrary values to plain JSON-safe primitives so the
+    response encoder can never raise (e.g. a None in a sort key, a datetime,
+    an enum, or any exotic nested value from a provider payload).
+    """
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set, frozenset)):
+        return [_json_safe(v) for v in obj]
+    return str(obj)
+
+
 def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
     """Fetch live templates directly from Karix WhatsApp API."""
     acc = client.lower()
@@ -289,8 +304,8 @@ def get_templates(
                     or q in str(e.get("source_ref", "")).lower()
                 ]
 
-            merged_entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
-            return merged_entries
+            merged_entries.sort(key=lambda e: e.get("submitted_at") or "", reverse=True)
+            return [_json_safe(e) for e in merged_entries]
 
         # WhatsApp
         local_entries = load_log(LOG_PATH)
@@ -345,8 +360,8 @@ def get_templates(
                 or q in str(e.get("provider_ref_id", "")).lower()
             ]
 
-        merged_entries.sort(key=lambda e: e.get("submitted_at", ""), reverse=True)
-        return merged_entries
+        merged_entries.sort(key=lambda e: e.get("submitted_at") or "", reverse=True)
+        return [_json_safe(e) for e in merged_entries]
     except Exception as exc:
         logger.exception("Error in get_templates for %s (%s): %s", acc, chan, exc)
         return []
