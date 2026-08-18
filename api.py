@@ -472,7 +472,7 @@ def update_credentials(creds: CredentialUpdate):
         lines: list[str] = []
         seen: set[str] = set()
         if env_path.exists():
-            for line in env_path.read_text().splitlines():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#") and "=" in stripped:
                     k = stripped.split("=", 1)[0].strip()

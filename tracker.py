@@ -26,9 +26,7 @@ def load_log(log_path: str = "submission_log.jsonl") -> list[dict]:
     path = Path(log_path)
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-
-
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 def update_result(source_ref: str, updates: dict, log_path: str = "submission_log.jsonl") -> bool:
     """
     Update the log entry matching source_ref with new fields (e.g. after a

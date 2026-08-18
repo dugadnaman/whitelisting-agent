@@ -388,7 +388,7 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
 
 
 def load_from_json(path: str) -> list[TemplateSubmission]:
-    data = json.loads(Path(path).read_text())
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     return [_row_to_submission(row) for row in data]
 
 
