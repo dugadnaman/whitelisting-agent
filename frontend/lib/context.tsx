@@ -1,7 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import type { Account, Channel } from './api';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { fetchAccounts } from './api';
+import type { Account, Channel, AccountItem } from './api';
+
+const DEFAULT_ACCOUNTS: AccountItem[] = [
+  { id: 'bajaj', name: 'Bajaj Finserv', is_builtin: true },
+  { id: 'tata', name: 'Tata Capital', is_builtin: true },
+];
 
 type AppContextType = {
   account: Account;
@@ -10,6 +16,9 @@ type AppContextType = {
   setChannel: (channel: Channel) => void;
   user: string;
   setUser: (user: string) => void;
+  accounts: AccountItem[];
+  refreshAccounts: () => Promise<void>;
+  getAccountLabel: (account?: string) => string;
   mounted: boolean;
 };
 
@@ -19,13 +28,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [account, setAccountState] = useState<Account>('bajaj');
   const [channel, setChannelState] = useState<Channel>('whatsapp');
   const [user, setUserState] = useState<string>('Namann');
+  const [accounts, setAccounts] = useState<AccountItem[]>(DEFAULT_ACCOUNTS);
   const [mounted, setMounted] = useState(false);
+
+  const refreshAccounts = useCallback(async () => {
+    try {
+      const data = await fetchAccounts();
+      if (Array.isArray(data) && data.length > 0) {
+        setAccounts(data);
+      }
+    } catch (err) {
+      console.warn('Could not load accounts list:', err);
+    }
+  }, []);
+
   useEffect(() => {
     try {
-      const savedAccount = localStorage.getItem('karix_account') as Account;
+      const savedAccount = localStorage.getItem('karix_account');
       const savedChannel = localStorage.getItem('karix_channel') as Channel;
-      if (savedAccount === 'bajaj' || savedAccount === 'tata') {
-        setAccountState(savedAccount);
+      if (savedAccount && savedAccount.trim()) {
+        setAccountState(savedAccount.trim());
       }
       if (savedChannel === 'whatsapp' || savedChannel === 'rcs') {
         setChannelState(savedChannel);
@@ -34,12 +56,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (savedUser && savedUser.trim()) {
         setUserState(savedUser.trim());
       }
-      // localStorage may fail in private mode
     } catch {
-      // ignore localStorage failures (e.g. private mode)
+      // ignore localStorage failures
     }
     setMounted(true);
-  }, []);
+    refreshAccounts();
+  }, [refreshAccounts]);
 
   const setAccount = (newAccount: Account) => {
     setAccountState(newAccount);
@@ -62,8 +84,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('karix_user', u);
     } catch {}
   };
+
+  const getAccountLabel = useCallback((accId?: string): string => {
+    const target = (accId || account || '').toLowerCase().trim();
+    if (!target) return 'Account';
+    if (target === 'bajaj') return 'Bajaj';
+    if (target === 'tata') return 'Tata Capital';
+    const found = accounts.find((a) => a.id.toLowerCase() === target);
+    if (found) return found.name;
+    return target.replace(/[_-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }, [account, accounts]);
+
   return (
-    <AppContext.Provider value={{ account, setAccount, channel, setChannel, user, setUser, mounted }}>
+    <AppContext.Provider
+      value={{
+        account,
+        setAccount,
+        channel,
+        setChannel,
+        user,
+        setUser,
+        accounts,
+        refreshAccounts,
+        getAccountLabel,
+        mounted,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );

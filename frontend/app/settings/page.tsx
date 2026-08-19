@@ -1,18 +1,34 @@
 'use client';
 
 import { useState } from 'react';
-import { updateCredentials, testCredentials } from '@/lib/api';
+import { updateCredentials, testCredentials, createAccount, deleteAccount } from '@/lib/api';
 import type { Account, Channel } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
 
 export default function SettingsPage() {
-  const { account: activeAccount, channel: activeChannel, setAccount: setActiveAccount, setChannel: setActiveChannel, user: currentOperator } = useApp();
+  const {
+    account: activeAccount,
+    channel: activeChannel,
+    setAccount: setActiveAccount,
+    setChannel: setActiveChannel,
+    user: currentOperator,
+    accounts,
+    refreshAccounts,
+    getAccountLabel,
+  } = useApp();
 
   // Selected config tab
   const [selectedAccount, setSelectedAccount] = useState<Account>(activeAccount);
   const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
+
+  // New Account Modal state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [newAccountId, setNewAccountId] = useState('');
+  const [creatingAccount, setCreatingAccount] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   // WhatsApp form fields
   const [wabaAuthToken, setWabaAuthToken] = useState('');
@@ -32,8 +48,62 @@ export default function SettingsPage() {
 
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isTata = selectedAccount === 'tata';
-  const accountTitle = isTata ? 'Tata Capital' : 'Bajaj';
+  const isBajaj = selectedAccount === 'bajaj';
+  const envPrefix = isTata
+    ? 'TATA'
+    : isBajaj
+    ? 'BAJAJ'
+    : selectedAccount.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
+
+  const accountTitle = getAccountLabel(selectedAccount);
   const channelTitle = isWhatsApp ? 'WhatsApp' : 'RCS (DLT)';
+
+  const selectedAccountItem = accounts.find((a) => a.id === selectedAccount);
+  const isCustomAccount = selectedAccountItem && !selectedAccountItem.is_builtin;
+
+  async function handleCreateAccount(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newAccountName.trim()) return;
+    setCreatingAccount(true);
+    setCreateError(null);
+    try {
+      const created = await createAccount(
+        newAccountName.trim(),
+        newAccountId.trim() || undefined,
+        currentOperator
+      );
+      await refreshAccounts();
+      setSelectedAccount(created.id);
+      setShowAddModal(false);
+      setNewAccountName('');
+      setNewAccountId('');
+      setBanner({ type: 'success', message: `Account "${created.name}" created! You can now configure its WABA credentials.` });
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create account');
+    } finally {
+      setCreatingAccount(false);
+    }
+  }
+
+  async function handleDeleteAccount(accId: string, accName: string) {
+    if (!confirm(`Are you sure you want to delete the account "${accName}"?`)) return;
+    try {
+      await deleteAccount(accId, currentOperator);
+      await refreshAccounts();
+      if (selectedAccount === accId) {
+        setSelectedAccount('bajaj');
+      }
+      if (activeAccount === accId) {
+        setActiveAccount('bajaj');
+      }
+      setBanner({ type: 'success', message: `Account "${accName}" deleted.` });
+    } catch (err) {
+      setBanner({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Failed to delete account',
+      });
+    }
+  }
 
   async function handleTest() {
     setTesting(true);
@@ -112,82 +182,115 @@ export default function SettingsPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="pb-2 border-b border-gray-200">
-        <h1 className="text-2xl font-bold text-gray-900">Settings &amp; Credentials</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Manage API keys, WABA IDs, and portal credentials across accounts and channels.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Settings &amp; Credentials</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage WABA IDs, API keys, and custom client accounts for WhatsApp &amp; RCS.
+          </p>
+        </div>
+
+        <button
+          onClick={() => {
+            setShowAddModal(true);
+            setCreateError(null);
+          }}
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          Add New Account
+        </button>
       </div>
 
-      {/* Account & Channel Tabs */}
+      {/* Account Cards & Selector */}
+      <div className="space-y-3">
+        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+          Select Client Account
+        </label>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
+          {accounts.map((acc) => {
+            const isSelected = selectedAccount === acc.id;
+            return (
+              <div
+                key={acc.id}
+                onClick={() => {
+                  setSelectedAccount(acc.id);
+                  setBanner(null);
+                }}
+                className={`group relative p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                  isSelected
+                    ? 'bg-indigo-50/70 border-indigo-500 shadow-xs ring-2 ring-indigo-500/20'
+                    : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className="text-xs font-bold text-gray-900 truncate">
+                    {acc.name}
+                  </span>
+                  {!acc.is_builtin && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteAccount(acc.id, acc.name);
+                      }}
+                      title="Delete custom account"
+                      className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-600 transition-opacity p-0.5"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-gray-500 font-mono">
+                  <span>ID: {acc.id}</span>
+                  {acc.id === activeAccount && (
+                    <span className="ml-auto inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
+                      ACTIVE
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Channel Tabs */}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-2">
         <div className="flex flex-wrap gap-2">
-          {/* Bajaj WhatsApp */}
+          {/* WhatsApp Tab */}
           <button
             onClick={() => {
-              setSelectedAccount('bajaj');
               setSelectedChannel('whatsapp');
               setBanner(null);
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedAccount === 'bajaj' && selectedChannel === 'whatsapp'
+              selectedChannel === 'whatsapp'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            Bajaj — WhatsApp
+            {accountTitle} — WhatsApp
           </button>
 
-          {/* Bajaj RCS */}
+          {/* RCS Tab */}
           <button
             onClick={() => {
-              setSelectedAccount('bajaj');
               setSelectedChannel('rcs');
               setBanner(null);
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedAccount === 'bajaj' && selectedChannel === 'rcs'
+              selectedChannel === 'rcs'
                 ? 'bg-indigo-600 text-white shadow-xs'
                 : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-blue-400" />
-            Bajaj — RCS
-          </button>
-
-          {/* Tata WhatsApp */}
-          <button
-            onClick={() => {
-              setSelectedAccount('tata');
-              setSelectedChannel('whatsapp');
-              setBanner(null);
-            }}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedAccount === 'tata' && selectedChannel === 'whatsapp'
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            Tata Capital — WhatsApp
-          </button>
-
-          {/* Tata RCS */}
-          <button
-            onClick={() => {
-              setSelectedAccount('tata');
-              setSelectedChannel('rcs');
-              setBanner(null);
-            }}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedAccount === 'tata' && selectedChannel === 'rcs'
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-blue-400" />
-            Tata Capital — RCS
+            {accountTitle} — RCS (DLT)
           </button>
         </div>
       </div>
@@ -195,8 +298,8 @@ export default function SettingsPage() {
       {/* Target Info Banner */}
       <div className="flex items-center justify-between p-4 bg-indigo-50/50 border border-indigo-100 rounded-xl">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">
-            {isTata ? 'TC' : 'B'}
+          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs uppercase">
+            {accountTitle.slice(0, 2)}
           </div>
           <div>
             <div className="text-xs font-bold text-gray-900">
@@ -205,7 +308,7 @@ export default function SettingsPage() {
             <div className="text-[11px] text-gray-500">
               {isWhatsApp
                 ? 'Official WhatsApp Template REST API via static Bearer Token'
-                : 'DLT Template Registration via Karix Lounge'}
+                : 'DLT Template Registration via Karix Lounge / RCS Bot Builder'}
             </div>
           </div>
         </div>
@@ -214,6 +317,10 @@ export default function SettingsPage() {
           onClick={() => {
             setActiveAccount(selectedAccount);
             setActiveChannel(selectedChannel);
+            setBanner({
+              type: 'success',
+              message: `Active Context switched to ${accountTitle} • ${channelTitle}.`,
+            });
           }}
           className="px-3 py-1.5 bg-white border border-indigo-200 text-indigo-700 text-xs font-semibold rounded-lg hover:bg-indigo-50 transition-colors shadow-xs"
         >
@@ -228,199 +335,284 @@ export default function SettingsPage() {
             {/* WABA Auth Token */}
             <div>
               <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Official WABA API Token ({isTata ? 'TATA_WABA_AUTH_TOKEN' : 'WABA_AUTH_TOKEN'})
+                Official WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
               </label>
               <input
                 id="waba_auth_token"
                 type="password"
                 value={wabaAuthToken}
-                onChange={e => setWabaAuthToken(e.target.value)}
+                onChange={(e) => setWabaAuthToken(e.target.value)}
                 placeholder="Enter static Bearer token from Karix Lounge..."
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
-                Static token generated from Karix Lounge. Does not expire with browser sessions.
+                Static token generated from Karix Lounge for {accountTitle}. Does not expire with browser sessions.
               </p>
             </div>
 
             {/* WABA ID */}
             <div>
               <label htmlFor="waba_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                WhatsApp Business Account ID ({isTata ? 'TATA_WABA_ID' : 'BAJAJ_WABA_ID'})
+                WhatsApp Business Account ID ({envPrefix}_WABA_ID)
               </label>
               <input
                 id="waba_id"
                 type="text"
                 value={wabaId}
-                onChange={e => setWabaId(e.target.value)}
-                placeholder={isTata ? 'e.g. 109823487123984' : '286109054585247'}
+                onChange={(e) => setWabaId(e.target.value)}
+                placeholder="e.g. 1064104141771475"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
               />
+              <p className="text-[11px] text-gray-400 mt-1">
+                The numeric WhatsApp Business Account ID assigned to {accountTitle} by Meta / Karix.
+              </p>
             </div>
 
             {/* Optional Portal Credentials */}
             <div className="pt-2 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowPortalCreds(!showPortalCreds)}
-                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5"
+                onClick={() => setShowPortalCreds((prev) => !prev)}
+                className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 font-medium"
               >
-                <span>{showPortalCreds ? '▼' : '▶'}</span>
-                <span>Legacy Portal Session Headers (Optional — only for image media uploads)</span>
+                <span>{showPortalCreds ? 'Hide' : 'Show'} Legacy Portal Session Headers</span>
+                <span className="text-[10px] text-gray-400">(Optional — only for Image-header media uploads)</span>
               </button>
-            </div>
 
-            {showPortalCreds && (
-              <div className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                <div>
-                  <label htmlFor="bearer_token" className="block text-xs font-medium text-gray-700 mb-1">
-                    Portal Bearer Token
-                  </label>
-                  <textarea
-                    id="bearer_token"
-                    rows={2}
-                    value={bearerToken}
-                    onChange={e => setBearerToken(e.target.value)}
-                    placeholder="eyJhbGciOi..."
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors resize-none"
-                  />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {showPortalCreds && (
+                <div className="mt-4 space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
                   <div>
-                    <label htmlFor="session" className="block text-xs font-medium text-gray-700 mb-1">
-                      Session ID
+                    <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Portal Bearer Token ({envPrefix}_KARIX_BEARER_TOKEN)
                     </label>
                     <input
-                      id="session"
-                      type="text"
-                      value={session}
-                      onChange={e => setSession(e.target.value)}
-                      placeholder="6a757401c8ba692973064983"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                      id="bearer_token"
+                      type="password"
+                      value={bearerToken}
+                      onChange={(e) => setBearerToken(e.target.value)}
+                      placeholder="e.g. eyJhbGciOi..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white"
                     />
                   </div>
-                  <div>
-                    <label htmlFor="user" className="block text-xs font-medium text-gray-700 mb-1">
-                      User
-                    </label>
-                    <input
-                      id="user"
-                      type="text"
-                      value={user}
-                      onChange={e => setUser(e.target.value)}
-                      placeholder="Username / Nirmal"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
-                    />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label htmlFor="session" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                        Session ID ({envPrefix}_KARIX_SESSION)
+                      </label>
+                      <input
+                        id="session"
+                        type="password"
+                        value={session}
+                        onChange={(e) => setSession(e.target.value)}
+                        placeholder="Session header from DevTools..."
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="user" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                        User Header ({envPrefix}_KARIX_USER)
+                      </label>
+                      <input
+                        id="user"
+                        type="text"
+                        value={user}
+                        onChange={(e) => setUser(e.target.value)}
+                        placeholder="User header from DevTools..."
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </>
         ) : (
           <>
-            {/* Entity ID */}
+            {/* RCS DLT Entity ID */}
             <div>
               <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                DLT Principal Entity ID ({isTata ? 'TATA_ENTITY_ID' : 'BAJAJ_ENTITY_ID'})
+                DLT Principal Entity ID ({envPrefix}_ENTITY_ID)
               </label>
               <input
                 id="entity_id"
                 type="text"
                 value={entityId}
-                onChange={e => setEntityId(e.target.value)}
-                placeholder={isTata ? 'e.g. 110100009999' : '110100001654'}
+                onChange={(e) => setEntityId(e.target.value)}
+                placeholder="e.g. 1001490234791338781"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
-                DLT Principal Entity ID registered with telemarketer / Karix Lounge.
+                Govt. DLT Registration Principal Entity ID (PE ID) registered on Vilpower / Jio / Airtel DLT portal.
               </p>
             </div>
 
             {/* Karix Lounge Cookie */}
             <div>
               <label htmlFor="lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Karix Lounge Session Cookie ({isTata ? 'TATA_KARIX_LOUNGE_COOKIE' : 'KARIX_LOUNGE_COOKIE'})
+                Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
               </label>
-              <textarea
+              <input
                 id="lounge_cookie"
-                rows={2}
+                type="password"
                 value={loungeCookie}
-                onChange={e => setLoungeCookie(e.target.value)}
-                placeholder="PHPSESSID=...; login_user=..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors resize-none"
+                onChange={(e) => setLoungeCookie(e.target.value)}
+                placeholder="PHPSESSID=... from lounge.karix.solutions"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
-                Extracted from logged-in Karix Lounge session (karix.solutions/lounge).
+                Required for automated submission to Karix Lounge DLT Registration.
               </p>
             </div>
           </>
         )}
 
-        {/* Banner */}
-        {banner && (
-          <div
-            className={`rounded-lg p-4 text-xs font-semibold ${
-              banner.type === 'success'
-                ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
-                : 'bg-red-50 border border-red-200 text-red-700'
-            }`}
-          >
-            {banner.message}
+        {/* Action Buttons */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
+          <div className="text-[11px] text-gray-400">
+            Current operator: <span className="font-semibold text-gray-600">{currentOperator}</span>
           </div>
-        )}
 
-        {/* Actions */}
-        <div className="flex items-center gap-3 pt-2">
-          <button
-            onClick={handleTest}
-            disabled={testing}
-            className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {testing && (
-              <svg className="animate-spin h-3.5 w-3.5 text-gray-500" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-            )}
-            Test Connection ({accountTitle} &bull; {channelTitle})
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving && (
-              <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-            )}
-            Save Credentials
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={testing || saving}
+              className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {testing ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  Testing...
+                </>
+              ) : (
+                'Test Connection'
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || testing}
+              className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {saving ? (
+                <>
+                  <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  Saving...
+                </>
+              ) : (
+                'Save Credentials'
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Help Guide */}
-      <div className="bg-gray-50 rounded-xl border border-gray-200/80 p-6">
-        <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3">
-          How to get credentials for {accountTitle} ({channelTitle})
-        </h3>
-        {isWhatsApp ? (
-          <ol className="list-decimal list-inside space-y-2 text-xs text-gray-700">
-            <li>Log into the Karix Lounge portal for {accountTitle} (<span className="font-mono text-indigo-600">karix.solutions/lounge</span>).</li>
-            <li>Navigate to the API Keys section to generate your static WABA Template API Token.</li>
-            <li>Copy your WABA ID from your WhatsApp Business Account settings in Meta Business Manager or Karix.</li>
-            <li>Paste into the fields above and click <span className="font-semibold text-gray-800">&quot;Save Credentials&quot;</span>.</li>
-          </ol>
-        ) : (
-          <ol className="list-decimal list-inside space-y-2 text-xs text-gray-700">
-            <li>Log into the Karix Lounge DLT portal for {accountTitle}.</li>
-            <li>Obtain your 12-digit DLT Principal Entity ID registered with Karix.</li>
-            <li>For session cookie: Open DevTools (F12) on Lounge &rarr; Copy Cookie header from any registration request.</li>
-            <li>Paste into the fields above and click <span className="font-semibold text-gray-800">&quot;Save Credentials&quot;</span>.</li>
-          </ol>
-        )}
-      </div>
+      {/* Banner */}
+      {banner && (
+        <div
+          className={`p-4 rounded-xl text-xs font-medium flex items-start gap-3 border ${
+            banner.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-red-50 text-red-800 border-red-200'
+          }`}
+        >
+          {banner.type === 'success' ? (
+            <svg className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 text-red-600 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+          )}
+          <span className="flex-1 leading-relaxed">{banner.message}</span>
+          <button onClick={() => setBanner(null)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">
+            &times;
+          </button>
+        </div>
+      )}
+
+      {/* Add Account Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900">Add New Client Account</h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="text-gray-400 hover:text-gray-600 font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Create a new client environment (e.g. Kotak Mahindra, HDFC Bank, Axis, Groww). Each account maintains its own isolated credentials and template logs.
+            </p>
+
+            <form onSubmit={handleCreateAccount} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Account Display Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Kotak Mahindra Bank"
+                  value={newAccountName}
+                  onChange={(e) => setNewAccountName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Account Identifier Slug <span className="text-gray-400 font-normal">(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. kotak (auto-generated if empty)"
+                  value={newAccountId}
+                  onChange={(e) => setNewAccountId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              {createError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
+                  {createError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingAccount || !newAccountName.trim()}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {creatingAccount ? 'Creating...' : 'Create Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

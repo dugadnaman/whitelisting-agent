@@ -44,7 +44,7 @@ const links = [
     icon: (
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="10" cy="10" r="3" />
-        <path d="M10 1v2M10 17v2M1 10h2M17 10h2M3.6 3.6l1.4 1.4M15 15l1.4 1.4M3.6 16.4l1.4-1.4M15 5l1.4-1.4" />
+        <path d="M16.24 7.76a6 6 0 0 1 0 4.48m-2.48 2.48a6 6 0 0 1-4.48 0m-2.48-2.48a6 6 0 0 1 0-4.48m2.48-2.48a6 6 0 0 1 4.48 0" />
       </svg>
     ),
   },
@@ -52,7 +52,7 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
-  const { account, setAccount, channel, setChannel, user, setUser } = useApp();
+  const { account, setAccount, channel, setChannel, user, setUser, accounts, getAccountLabel } = useApp();
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [userNameInput, setUserNameInput] = useState('');
 
@@ -91,8 +91,11 @@ export default function Nav() {
               onChange={(e) => setAccount(e.target.value as Account)}
               className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none cursor-pointer transition-colors"
             >
-              <option value="bajaj">Bajaj</option>
-              <option value="tata">Tata Capital</option>
+              {accounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name}
+                </option>
+              ))}
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
               <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -139,7 +142,7 @@ export default function Nav() {
                 channel === 'whatsapp' ? 'bg-emerald-500' : 'bg-blue-500'
               }`}
             />
-            {account === 'bajaj' ? 'Bajaj' : 'Tata Capital'} &bull; {channel === 'whatsapp' ? 'WhatsApp' : 'RCS'}
+            {getAccountLabel(account)} &bull; {channel === 'whatsapp' ? 'WhatsApp' : 'RCS'}
           </span>
         </div>
       </div>

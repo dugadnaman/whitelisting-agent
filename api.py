@@ -27,6 +27,7 @@ from config import (
     BAJAJ_WABA_ID,
     KARIX_BASE_URL,
     OFFICIAL_TEMPLATE_BASE_URL,
+    _account_prefix,
     _load_env_file,
 )
 from loader import load_from_csv, load_from_excel
@@ -67,11 +68,55 @@ RCS_LOG_PATH = "rcs_submission_log.jsonl"
 
 
 # ---------------------------------------------------------------------------
-# Models
+# Models & Account Store
 # ---------------------------------------------------------------------------
 
+ACCOUNTS_FILE = Path("accounts.json")
+DEFAULT_ACCOUNTS = [
+    {"id": "bajaj", "name": "Bajaj Finserv", "is_builtin": True},
+    {"id": "tata", "name": "Tata Capital", "is_builtin": True},
+]
+
+def load_accounts() -> list[dict]:
+    """Load accounts from accounts.json, guaranteeing default built-ins exist."""
+    if not ACCOUNTS_FILE.exists():
+        try:
+            ACCOUNTS_FILE.write_text(json.dumps(DEFAULT_ACCOUNTS, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+        return [dict(a) for a in DEFAULT_ACCOUNTS]
+    try:
+        data = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            existing_ids = {a.get("id") for a in data if isinstance(a, dict)}
+            accounts = [dict(a) for a in data if isinstance(a, dict)]
+            for d in DEFAULT_ACCOUNTS:
+                if d["id"] not in existing_ids:
+                    accounts.append(dict(d))
+            return accounts
+    except Exception as exc:
+        logger.warning("Error reading accounts.json: %s", exc)
+    return [dict(a) for a in DEFAULT_ACCOUNTS]
+
+def save_accounts(accounts: list[dict]) -> None:
+    try:
+        ACCOUNTS_FILE.write_text(json.dumps(accounts, indent=2) + "\n", encoding="utf-8")
+    except Exception as exc:
+        logger.error("Failed to write accounts.json: %s", exc)
+
+def get_account_name(account_id: str) -> str:
+    accs = load_accounts()
+    for a in accs:
+        if a.get("id") == account_id.lower():
+            return a.get("name", account_id)
+    return account_id.replace("_", " ").title()
+
+class AccountCreate(BaseModel):
+    name: str
+    id: str | None = None
+
 class CredentialUpdate(BaseModel):
-    account: str = "bajaj"  # "bajaj" | "tata"
+    account: str = "bajaj"  # e.g. "bajaj", "tata", or any custom account id
     channel: str = "whatsapp"  # "whatsapp" | "rcs"
     waba_auth_token: str | None = None
     waba_id: str | None = None
@@ -81,7 +126,6 @@ class CredentialUpdate(BaseModel):
     user_name: str | None = None  # Who is performing the update
     entity_id: str | None = None
     lounge_cookie: str | None = None
-
 # ---------------------------------------------------------------------------
 def _clean_error_message(err) -> str | None:
     """Flatten error strings or nested error dictionaries into a clean message."""
@@ -607,47 +651,109 @@ def poll(
             detail=f"Poll failed for {acc}: {str(exc)}",
         )
 
+@app.get("/api/accounts")
+def get_accounts():
+    return load_accounts()
+
+@app.post("/api/accounts")
+def create_account(body: AccountCreate, user: str = Query("Anonymous Operator")):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Account name is required.")
+    
+    if body.id and body.id.strip():
+        acc_id = re.sub(r'[^a-z0-9_]', '_', body.id.strip().lower()).strip('_')
+    else:
+        acc_id = re.sub(r'[^a-z0-9_]', '_', name.lower().strip()).strip('_')
+    
+    if not acc_id:
+        raise HTTPException(status_code=400, detail="Invalid account ID generated from name.")
+    
+    accounts = load_accounts()
+    if any(a.get("id") == acc_id for a in accounts):
+        raise HTTPException(status_code=400, detail=f"Account with ID '{acc_id}' already exists.")
+    
+    new_acc = {"id": acc_id, "name": name, "is_builtin": False}
+    accounts.append(new_acc)
+    save_accounts(accounts)
+    
+    log_activity(
+        user=user,
+        action="ACCOUNT_CREATE",
+        account=acc_id,
+        channel="all",
+        details={"name": name, "id": acc_id},
+        status="success",
+    )
+    return new_acc
+
+@app.delete("/api/accounts/{account_id}")
+def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
+    acc_id = account_id.lower().strip()
+    if acc_id in ("bajaj", "tata"):
+        raise HTTPException(status_code=400, detail=f"Cannot delete built-in account '{acc_id}'.")
+    
+    accounts = load_accounts()
+    initial_count = len(accounts)
+    accounts = [a for a in accounts if a.get("id") != acc_id]
+    if len(accounts) == initial_count:
+        raise HTTPException(status_code=404, detail=f"Account '{acc_id}' not found.")
+    
+    save_accounts(accounts)
+    log_activity(
+        user=user,
+        action="ACCOUNT_DELETE",
+        account=acc_id,
+        channel="all",
+        details={"deleted_id": acc_id},
+        status="success",
+    )
+    return {"ok": True}
+
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate):
     env_path = Path(".env")
-    acc = creds.account.lower()
-    chan = creds.channel.lower()
+    acc = creds.account.lower().strip()
+    chan = creds.channel.lower().strip()
+    prefix = _account_prefix(acc)
     is_tata = acc == "tata"
+    is_bajaj = acc == "bajaj"
+    
     mapping = {}
     if chan == "whatsapp":
         if creds.waba_auth_token is not None and creds.waba_auth_token.strip():
-            key = "TATA_WABA_AUTH_TOKEN" if is_tata else "WABA_AUTH_TOKEN"
+            key = "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
             val = creds.waba_auth_token.strip()
             mapping[key] = val
             os.environ[key] = val
         if creds.waba_id is not None and creds.waba_id.strip():
-            key = "TATA_WABA_ID" if is_tata else "BAJAJ_WABA_ID"
+            key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
             val = creds.waba_id.strip()
             mapping[key] = val
             os.environ[key] = val
         if creds.bearer_token is not None and creds.bearer_token.strip():
-            key = "TATA_KARIX_BEARER_TOKEN" if is_tata else "KARIX_BEARER_TOKEN"
+            key = "TATA_KARIX_BEARER_TOKEN" if is_tata else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
             val = creds.bearer_token.strip()
             mapping[key] = val
             os.environ[key] = val
         if creds.session is not None and creds.session.strip():
-            key = "TATA_KARIX_SESSION" if is_tata else "KARIX_SESSION"
+            key = "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")
             val = creds.session.strip()
             mapping[key] = val
             os.environ[key] = val
         if creds.user is not None and creds.user.strip():
-            key = "TATA_KARIX_USER" if is_tata else "KARIX_USER"
+            key = "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")
             val = creds.user.strip()
             mapping[key] = val
             os.environ[key] = val
     elif chan == "rcs":
         if creds.entity_id is not None and creds.entity_id.strip():
-            key = "TATA_ENTITY_ID" if is_tata else "BAJAJ_ENTITY_ID"
+            key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
             val = creds.entity_id.strip()
             mapping[key] = val
             os.environ[key] = val
         if creds.lounge_cookie is not None and creds.lounge_cookie.strip():
-            key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else "KARIX_LOUNGE_COOKIE"
+            key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
             val = creds.lounge_cookie.strip()
             mapping[key] = val
             os.environ[key] = val
@@ -681,7 +787,6 @@ def update_credentials(creds: CredentialUpdate):
 
     # 2. Update persistent credentials.json
     try:
-        import json
         cred_json_path = Path("credentials.json")
         saved_creds = {}
         if cred_json_path.exists():
@@ -710,27 +815,30 @@ def test_credentials(
     channel: str = Query("whatsapp"),
     creds: CredentialUpdate | None = None,
 ):
-    # Only trust body-provided account/channel when the caller EXPLICITLY sent
-    # them. An empty `{}` body must not silently override the query params
-    # with pydantic defaults (it previously flipped tata → bajaj).
     body_fields = creds.model_fields_set if creds else set()
-    acc = (creds.account if creds and "account" in body_fields else account).lower()
-    chan = (creds.channel if creds and "channel" in body_fields else channel).lower()
-    acc_name = "Tata Capital" if acc == "tata" else "Bajaj"
+    acc = (creds.account if creds and "account" in body_fields else account).lower().strip()
+    chan = (creds.channel if creds and "channel" in body_fields else channel).lower().strip()
+    acc_name = get_account_name(acc)
+    prefix = _account_prefix(acc)
     is_tata = acc == "tata"
-    # Credentials live in .env / credentials.json and are loaded lazily by
-    # config helpers — load them so os.environ checks below see the real values.
+    is_bajaj = acc == "bajaj"
     _load_env_file()
+
+    w_id_key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
+    w_tok_key = "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+    e_id_key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
+    l_ck_key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+
     # Apply any supplied creds directly to environment in memory
     if creds:
         if creds.waba_id and creds.waba_id.strip():
-            os.environ["TATA_WABA_ID" if is_tata else "BAJAJ_WABA_ID"] = creds.waba_id.strip()
+            os.environ[w_id_key] = creds.waba_id.strip()
         if creds.waba_auth_token and creds.waba_auth_token.strip():
-            os.environ["TATA_WABA_AUTH_TOKEN" if is_tata else "WABA_AUTH_TOKEN"] = creds.waba_auth_token.strip()
+            os.environ[w_tok_key] = creds.waba_auth_token.strip()
         if creds.entity_id and creds.entity_id.strip():
-            os.environ["TATA_ENTITY_ID" if is_tata else "BAJAJ_ENTITY_ID"] = creds.entity_id.strip()
+            os.environ[e_id_key] = creds.entity_id.strip()
         if creds.lounge_cookie and creds.lounge_cookie.strip():
-            os.environ["TATA_KARIX_LOUNGE_COOKIE" if is_tata else "KARIX_LOUNGE_COOKIE"] = creds.lounge_cookie.strip()
+            os.environ[l_ck_key] = creds.lounge_cookie.strip()
 
     if chan == "rcs":
         try:
@@ -759,23 +867,24 @@ def test_credentials(
     try:
         waba_id = (
             (creds.waba_id.strip() if creds and creds.waba_id and creds.waba_id.strip() else None)
-            or os.environ.get("TATA_WABA_ID" if is_tata else "BAJAJ_WABA_ID")
-            or (BAJAJ_WABA_ID if not is_tata else None)
+            or os.environ.get(w_id_key)
+            or (BAJAJ_WABA_ID if is_bajaj else None)
         )
         if not waba_id:
             return {
                 "ok": False,
-                "message": f"{acc_name} WhatsApp: Please enter the WABA ID in the field above or set {'TATA_WABA_ID' if is_tata else 'BAJAJ_WABA_ID'} in Render Environment.",
+                "message": f"{acc_name} WhatsApp: Please enter the WABA ID in the field above or set {w_id_key} in Settings.",
             }
 
         token = (
             (creds.waba_auth_token.strip() if creds and creds.waba_auth_token and creds.waba_auth_token.strip() else None)
-            or os.environ.get("TATA_WABA_AUTH_TOKEN" if is_tata else "WABA_AUTH_TOKEN")
+            or os.environ.get(w_tok_key)
+            or os.environ.get("WABA_AUTH_TOKEN")
         )
         if not token:
             return {
                 "ok": False,
-                "message": f"{acc_name} WhatsApp: Please enter the WABA API Token in the field above or set {'TATA_WABA_AUTH_TOKEN' if is_tata else 'WABA_AUTH_TOKEN'} in Render Environment.",
+                "message": f"{acc_name} WhatsApp: Please enter the WABA API Token in the field above or set {w_tok_key} in Settings.",
             }
 
         headers = {"Authentication": f"Bearer {token}"}

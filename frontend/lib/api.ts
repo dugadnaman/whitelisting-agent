@@ -1,6 +1,11 @@
-export type Account = "bajaj" | "tata";
+export type Account = string;
 export type Channel = "whatsapp" | "rcs";
 
+export type AccountItem = {
+  id: string;
+  name: string;
+  is_builtin?: boolean;
+};
 export type Template = {
   source_ref: string;
   template_name: string;
@@ -292,4 +297,30 @@ export async function fetchActivityStats(): Promise<ActivityStats> {
 
 export function getSampleCsvUrl(channel: Channel = "whatsapp"): string {
   return getApiUrl(`/api/sample-csv?channel=${channel}`);
+}
+
+export async function fetchAccounts(): Promise<AccountItem[]> {
+  const res = await fetch(getApiUrl("/api/accounts"));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function createAccount(name: string, id?: string, user?: string): Promise<AccountItem> {
+  const qs = user ? `?user=${encodeURIComponent(user)}` : '';
+  const res = await fetch(getApiUrl(`/api/accounts${qs}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, id }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function deleteAccount(id: string, user?: string): Promise<{ ok: boolean }> {
+  const qs = user ? `?user=${encodeURIComponent(user)}` : '';
+  const res = await fetch(getApiUrl(`/api/accounts/${encodeURIComponent(id)}${qs}`), {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
 }

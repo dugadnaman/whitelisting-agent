@@ -46,7 +46,7 @@ function isAcceptedFile(file: File): boolean {
 }
 
 export default function SubmitPage() {
-  const { account, channel, user } = useApp();
+  const { account, channel, user, getAccountLabel } = useApp();
   const [state, setState] = useState<State>({ step: 'idle' });
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -138,7 +138,7 @@ export default function SubmitPage() {
     handleClear();
   }, [handleClear]);
 
-  const accountLabel = account === 'bajaj' ? 'Bajaj' : 'Tata Capital';
+  const accountLabel = getAccountLabel(account);
   const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : 'RCS (DLT)';
 
   return (

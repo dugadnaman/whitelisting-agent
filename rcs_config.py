@@ -44,22 +44,32 @@ def _load_env_file() -> None:
                 os.environ[k] = v
 
 
+def _account_prefix(client: str) -> str:
+    import re
+    return re.sub(r'[^a-zA-Z0-9_]', '_', client).strip('_').upper()
+
 def get_rcs_bot_id(client: str = "tata") -> str:
     """Return the active RCS Bot ID / Sender ID for the given client."""
     _load_env_file()
-    c = client.lower()
+    c = (client or "tata").lower().strip()
+    prefix = _account_prefix(c)
     if c == "tata":
         return os.environ.get("TATA_RCS_BOT_ID") or os.environ.get("TATA_RCS_SENDER_ID") or TATA_RCS_BOT_ID
-    return os.environ.get("BAJAJ_RCS_BOT_ID") or os.environ.get("BAJAJ_RCS_SENDER_ID") or BAJAJ_RCS_BOT_ID
+    elif c == "bajaj":
+        return os.environ.get("BAJAJ_RCS_BOT_ID") or os.environ.get("BAJAJ_RCS_SENDER_ID") or BAJAJ_RCS_BOT_ID
+    return os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID") or os.environ.get("RCS_BOT_ID") or ""
 
 
 def get_rcs_entity_id(client: str = "tata") -> str:
     """Return the Entity ID for RCS DLT templates."""
     _load_env_file()
-    c = client.lower()
+    c = (client or "tata").lower().strip()
+    prefix = _account_prefix(c)
     if c == "tata":
-        return os.environ.get("TATA_ENTITY_ID") or os.environ.get("TATA_RCS_ENTITY_ID") or ""
-    return os.environ.get("BAJAJ_ENTITY_ID") or os.environ.get("ENTITY_ID") or "110100001654"
+        return os.environ.get("TATA_ENTITY_ID") or os.environ.get("TATA_RCS_ENTITY_ID") or "1001490234791338781"
+    elif c == "bajaj":
+        return os.environ.get("BAJAJ_ENTITY_ID") or os.environ.get("ENTITY_ID") or "110100001654"
+    return os.environ.get(f"{prefix}_ENTITY_ID") or os.environ.get("ENTITY_ID") or ""
 
 
 def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
@@ -68,24 +78,25 @@ def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
     Uses Bearer authorization with session fallback.
     """
     _load_env_file()
-    c = client.lower()
-    prefix = "TATA_" if c == "tata" else "BAJAJ_"
+    c = (client or "tata").lower().strip()
+    prefix = _account_prefix(c)
 
     bearer = (
-        os.environ.get(f"{prefix}RCS_AUTH_TOKEN")
-        or os.environ.get(f"{prefix}KARIX_BEARER_TOKEN")
+        os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
+        or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+        or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
+        or os.environ.get(f"{prefix}_AUTH_TOKEN")
+        or (os.environ.get("TATA_WABA_AUTH_TOKEN") if c == "tata" else None)
+        or (os.environ.get("BAJAJ_WABA_AUTH_TOKEN") if c == "bajaj" else None)
         or os.environ.get("KARIX_BEARER_TOKEN")
-        or os.environ.get(f"{prefix}WABA_AUTH_TOKEN")
         or os.environ.get("WABA_AUTH_TOKEN")
     )
 
     if not bearer:
-        client_name = "Tata Capital" if c == "tata" else "Bajaj"
         raise OSError(
-            f"Missing required RCS Bearer token for {client_name}. "
-            "Please enter Bearer Token in Settings under Tata Capital / Bajaj."
+            f"Missing required RCS Bearer token for {client}. "
+            "Please enter Bearer Token in Settings."
         )
-
     headers = {
         "Authorization": f"Bearer {bearer.strip()}",
         "Content-Type": "application/json",

@@ -62,7 +62,7 @@ function ActivityIcon({ action }: { action: string }) {
 }
 
 export default function DashboardPage() {
-  const { account, channel, user, mounted } = useApp();
+  const { account, channel, user, mounted, getAccountLabel } = useApp();
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -191,7 +191,7 @@ export default function DashboardPage() {
     return '—';
   };
 
-  const accountLabel = account === 'bajaj' ? 'Bajaj' : 'Tata Capital';
+  const accountLabel = getAccountLabel(account);
   const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : 'RCS (DLT)';
 
   // Client-side operator filter (server filters status/search only)

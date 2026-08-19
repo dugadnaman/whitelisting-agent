@@ -51,32 +51,42 @@ def _load_env_file():
             v = v.strip().strip("'\"")
             if k and v:
                 os.environ[k] = v
+def _account_prefix(client: str) -> str:
+    """Sanitize client name into uppercase environment variable prefix."""
+    import re
+    return re.sub(r'[^a-zA-Z0-9_]', '_', client).strip('_').upper()
+
 def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
     Build HTTP headers for the legacy portal media-upload endpoint.
     """
     _load_env_file()
-    c = client.lower()
+    c = (client or "bajaj").lower().strip()
+    prefix = _account_prefix(c)
     if c == "tata":
         bearer = os.environ.get("TATA_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
         session = os.environ.get("TATA_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
         user = os.environ.get("TATA_KARIX_USER") or os.environ.get("KARIX_USER")
-    else:
+    elif c == "bajaj":
         bearer = os.environ.get("BAJAJ_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
         session = os.environ.get("BAJAJ_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
         user = os.environ.get("BAJAJ_KARIX_USER") or os.environ.get("KARIX_USER")
+    else:
+        bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
+        session = os.environ.get(f"{prefix}_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
+        user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get("KARIX_USER")
 
     missing = []
     if not bearer:
-        missing.append("TATA_KARIX_BEARER_TOKEN" if c == "tata" else "KARIX_BEARER_TOKEN")
+        missing.append(f"{prefix}_KARIX_BEARER_TOKEN" if c not in ("bajaj", "tata") else ("TATA_KARIX_BEARER_TOKEN" if c == "tata" else "KARIX_BEARER_TOKEN"))
     if not session:
-        missing.append("TATA_KARIX_SESSION" if c == "tata" else "KARIX_SESSION")
+        missing.append(f"{prefix}_KARIX_SESSION" if c not in ("bajaj", "tata") else ("TATA_KARIX_SESSION" if c == "tata" else "KARIX_SESSION"))
     if not user:
-        missing.append("TATA_KARIX_USER" if c == "tata" else "KARIX_USER")
+        missing.append(f"{prefix}_KARIX_USER" if c not in ("bajaj", "tata") else ("TATA_KARIX_USER" if c == "tata" else "KARIX_USER"))
     if missing:
         raise OSError(
             f"Missing required Karix portal credentials for {client}: {', '.join(missing)}. "
-            "Please enter the Portal Bearer Token, Session ID, and User in Settings under Legacy Portal Session Headers."
+            "Please enter the Portal Bearer Token, Session ID, and User in Settings."
         )
 
     return {
@@ -92,20 +102,28 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     Build headers for the official WhatsApp Template API for the given client.
     """
     _load_env_file()
-    if client.lower() == "tata":
+    c = (client or "bajaj").lower().strip()
+    prefix = _account_prefix(c)
+    if c == "tata":
         token = (
             os.environ.get("TATA_WABA_AUTH_TOKEN")
             or os.environ.get("TATA_AUTH_TOKEN")
             or os.environ.get("WABA_AUTH_TOKEN")
         )
-    else:
+    elif c == "bajaj":
         token = os.environ.get("BAJAJ_WABA_AUTH_TOKEN") or os.environ.get("WABA_AUTH_TOKEN")
+    else:
+        token = (
+            os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
+            or os.environ.get(f"{prefix}_AUTH_TOKEN")
+            or os.environ.get("WABA_AUTH_TOKEN")
+        )
 
     if not token:
-        client_name = "Tata Capital" if client.lower() == "tata" else "Bajaj"
+        expected_key = f"{prefix}_WABA_AUTH_TOKEN" if c not in ("bajaj", "tata") else ("TATA_WABA_AUTH_TOKEN" if c == "tata" else "BAJAJ_WABA_AUTH_TOKEN")
         raise OSError(
-            f"Missing required {client_name} official API credential: {('TATA_WABA_AUTH_TOKEN' if client.lower() == 'tata' else 'WABA_AUTH_TOKEN')}. "
-            "Set it in Settings or .env file."
+            f"Missing required API credential for {client}: {expected_key}. "
+            "Please configure the Official WABA API Token in Settings."
         )
     return {"Authentication": f"Bearer {token}"}
 
@@ -113,21 +131,30 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
 def get_waba_id(client: str = "bajaj") -> str:
     """Return WABA ID for the given client."""
     _load_env_file()
-    if client.lower() == "tata":
+    c = (client or "bajaj").lower().strip()
+    prefix = _account_prefix(c)
+    if c == "tata":
         val = os.environ.get("TATA_WABA_ID") or os.environ.get("WABA_ID")
         if not val:
-            raise OSError("Missing required Tata WABA ID: Please set TATA_WABA_ID in Settings or Environment.")
+            raise OSError("Missing required Tata WABA ID: Please set TATA_WABA_ID in Settings.")
         return val
-    return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
+    elif c == "bajaj":
+        return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
+    else:
+        val = os.environ.get(f"{prefix}_WABA_ID") or os.environ.get("WABA_ID")
+        if not val:
+            raise OSError(f"Missing required WABA ID for {client}: Please set {prefix}_WABA_ID in Settings.")
+        return val
 
 
 def get_esmeaddr(client: str = "bajaj") -> str:
     """Return ESME address for the given client."""
     _load_env_file()
-    if client.lower() == "tata":
+    c = (client or "bajaj").lower().strip()
+    prefix = _account_prefix(c)
+    if c == "tata":
         val = os.environ.get("TATA_ESMEADDR")
         if not val:
-            # Auto-extract from token or use standard Tata ESMEADDR
             import re
             token = os.environ.get("TATA_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN") or ""
             m = re.search(r"(\d{10,16})", token)
@@ -135,15 +162,23 @@ def get_esmeaddr(client: str = "bajaj") -> str:
                 return m.group(1)
             return "72516600000000"
         return val
-    return os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
+    elif c == "bajaj":
+        return os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
+    else:
+        return os.environ.get(f"{prefix}_ESMEADDR") or os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
 
 
 def get_template_namespace_id(client: str = "bajaj") -> str:
     """Return template namespace ID for the given client."""
     _load_env_file()
-    if client.lower() == "tata":
+    c = (client or "bajaj").lower().strip()
+    prefix = _account_prefix(c)
+    if c == "tata":
         return os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") or os.environ.get("TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
-    return os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
+    elif c == "bajaj":
+        return os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
+    else:
+        return os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID") or os.environ.get("TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
 # ---------------------------------------------------------------------------
 # Fixed constants — same for every request on this Bajaj WABA account.
 # ---------------------------------------------------------------------------
