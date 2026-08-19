@@ -353,7 +353,31 @@ export default function SubmitPage() {
                         <td className="px-5 py-3 text-gray-700">{p.category || 'MARKETING'}</td>
                         <td className="px-5 py-3 text-gray-700">{p.language || 'en'}</td>
                         <td className="px-5 py-3 text-gray-600">
-                          {p.components?.length ? `${p.components.length} component(s)` : 'Standard'}
+                          {p.components?.length ? (
+                            <div className="flex flex-wrap gap-1">
+                              {p.components.map((c, cIdx) => {
+                                const isHeader = c.type === 'HEADER';
+                                const format = c.format ? ` (${c.format})` : '';
+                                const color = isHeader
+                                  ? 'bg-purple-100 text-purple-800 border-purple-200'
+                                  : c.type === 'BODY'
+                                  ? 'bg-blue-100 text-blue-800 border-blue-200'
+                                  : c.type === 'BUTTONS'
+                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                  : 'bg-gray-100 text-gray-700 border-gray-200';
+                                return (
+                                  <span
+                                    key={cIdx}
+                                    className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${color}`}
+                                  >
+                                    {c.type}{format}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            'Standard'
+                          )}
                         </td>
                       </>
                     ) : (

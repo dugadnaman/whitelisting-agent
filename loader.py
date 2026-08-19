@@ -172,21 +172,22 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     components = []
 
     # 1. HEADER
-    htype = (raw_row.get("header_type") or "").strip().upper()
-    if htype == "IMAGE":
-        comp = {"type": "HEADER", "format": "IMAGE"}
-        if raw_row.get("header_media_url"):
-            comp["media_url"] = raw_row["header_media_url"].strip()
-        elif raw_row.get("header_media_file"):
-            comp["media_file"] = raw_row["header_media_file"].strip()
+    htype = (raw_row.get("header_type") or raw_row.get("header_format") or "").strip().upper()
+    if htype in ("IMAGE", "VIDEO", "DOCUMENT"):
+        comp = {"type": "HEADER", "format": htype}
+        if raw_row.get("header_media_url") or raw_row.get("media_url"):
+            comp["media_url"] = (raw_row.get("header_media_url") or raw_row.get("media_url")).strip()
+        elif raw_row.get("header_media_file") or raw_row.get("media_file"):
+            comp["media_file"] = (raw_row.get("header_media_file") or raw_row.get("media_file")).strip()
         components.append(comp)
-    elif htype in ("TEXT", "HEADER") and raw_row.get("header_text"):
+    elif htype == "LOCATION":
+        components.append({"type": "HEADER", "format": "LOCATION"})
+    elif (htype in ("TEXT", "HEADER") or (not htype and (raw_row.get("header_text") or raw_row.get("header")))) and (raw_row.get("header_text") or raw_row.get("header")):
         components.append({
             "type": "HEADER",
             "format": "TEXT",
-            "text": raw_row["header_text"].strip(),
+            "text": (raw_row.get("header_text") or raw_row.get("header")).strip(),
         })
-
     # 2. BODY
     body_text = (raw_row.get("body") or raw_row.get("body_text") or "").strip()
     if body_text:

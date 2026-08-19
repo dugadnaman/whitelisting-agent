@@ -179,15 +179,49 @@ def _ensure_default_sample_image() -> str:
     return str(default_path.resolve())
 
 
+def _ensure_default_sample_video() -> str:
+    """Ensure a default sample MP4 video exists for VIDEO headers."""
+    default_path = Path("default_sample_header.mp4")
+    if not default_path.exists():
+        import base64
+        # Valid minimal MP4 container
+        minimal_mp4_b64 = "AAAAHGZ0eXBpc29tAAAAAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAhtZGF0AAAAIG1vb3YAAABsbXZoZAAAAABAAAAAAAEAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAA=="
+        try:
+            default_path.write_bytes(base64.b64decode(minimal_mp4_b64))
+        except Exception:
+            default_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom\x00\x00\x00\x08free")
+        logger.info("Created default sample video at %s", default_path.resolve())
+    return str(default_path.resolve())
+
+
+def _ensure_default_sample_pdf() -> str:
+    """Ensure a default sample PDF exists for DOCUMENT headers."""
+    default_path = Path("default_sample_header.pdf")
+    if not default_path.exists():
+        pdf_content = (
+            b"%PDF-1.4\n"
+            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+            b"3 0 obj<</Type/Page/MediaBox[0 0 300 144]/Parent 2 0 R/Resources<<>>>>endobj\n"
+            b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n"
+            b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF\n"
+        )
+        default_path.write_bytes(pdf_content)
+        logger.info("Created default sample document at %s", default_path.resolve())
+    return str(default_path.resolve())
+
+
 def _resolve_header_media(components: list, client: str = "bajaj") -> list:
     """
     Pre-process components before submission: for any HEADER component with
-    format=IMAGE, ensure a valid media handle is attached.
+    format in (IMAGE, VIDEO, DOCUMENT), ensure a valid media handle is attached.
     """
     for comp in components:
         if not isinstance(comp, dict):
             continue
-        if comp.get("type") != "HEADER" or comp.get("format") != "IMAGE":
+        ctype = comp.get("type")
+        cformat = str(comp.get("format", "")).upper()
+        if ctype != "HEADER" or cformat not in ("IMAGE", "VIDEO", "DOCUMENT"):
             continue
 
         # Already has a handle — skip
@@ -197,39 +231,60 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
 
         media_file = comp.pop("media_file", None)
         media_url = comp.pop("media_url", None)
-        file_type = comp.pop("file_type", None) or "image/png"
+        file_type = comp.pop("file_type", None)
         image_bytes = comp.pop("image_bytes", None)
 
-        # If in-memory image_bytes provided (from .xlsx)
-        if image_bytes:
-            import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                tmp.write(image_bytes)
-                media_file = tmp.name
-            file_type = "image/png"
+        if cformat == "IMAGE":
+            default_type = "image/png"
+            if image_bytes:
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp.write(image_bytes)
+                    media_file = tmp.name
+                file_type = "image/png"
+            if not media_file and not media_url:
+                media_file = _ensure_default_sample_image()
+                file_type = "image/png"
+        elif cformat == "VIDEO":
+            default_type = "video/mp4"
+            if not media_file and not media_url:
+                media_file = _ensure_default_sample_video()
+                file_type = "video/mp4"
+        elif cformat == "DOCUMENT":
+            default_type = "application/pdf"
+            if not media_file and not media_url:
+                media_file = _ensure_default_sample_pdf()
+                file_type = "application/pdf"
+        else:
+            default_type = "application/octet-stream"
 
-        # Fallback to default sample image if no custom image specified
-        if not media_file and not media_url:
-            logger.info(
-                "HEADER IMAGE has no custom media_file/media_url; using default sample image for whitelisting."
-            )
-            media_file = _ensure_default_sample_image()
-            file_type = "image/png"
-        # Download from URL if needed
+        file_type = file_type or default_type
+
+        # Download from URL if media_url is provided
         if media_url and not media_file:
             import tempfile
-
-            suffix = Path(media_url.split("?")[0]).suffix or ".jpg"
+            suffix = Path(media_url.split("?")[0]).suffix
+            if not suffix:
+                suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                 media_file = tmp.name
 
-            logger.info("Downloading header image from %s", media_url)
-            urlretrieve(media_url, media_file)
+            logger.info("Downloading header %s from %s", cformat.lower(), media_url)
+            try:
+                urlretrieve(media_url, media_file)
+            except Exception as e:
+                logger.warning("Could not download media_url %s: %s; using default sample", media_url, e)
+                if cformat == "VIDEO":
+                    media_file = _ensure_default_sample_video()
+                elif cformat == "DOCUMENT":
+                    media_file = _ensure_default_sample_pdf()
+                else:
+                    media_file = _ensure_default_sample_image()
 
         # Upload and fill in the handle
         handle = upload_media(media_file, file_type, client=client)
         comp["example"] = {"header_handle": [handle]}
-        logger.info("Header image uploaded for template (%s), handle set.", client)
+        logger.info("Header %s uploaded for template (%s), handle set.", cformat, client)
 
     return components
 
