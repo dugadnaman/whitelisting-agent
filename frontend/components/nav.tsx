@@ -68,7 +68,7 @@ export default function Nav() {
       {/* Brand Header */}
       <div className="p-5 border-b border-gray-100">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
+          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
             K
           </div>
           <div>
@@ -89,7 +89,7 @@ export default function Nav() {
             <select
               value={account}
               onChange={(e) => setAccount(e.target.value as Account)}
-              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none cursor-pointer transition-colors"
+              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors"
             >
               {accounts.map((acc) => (
                 <option key={acc.id} value={acc.id}>
@@ -114,7 +114,7 @@ export default function Nav() {
             <select
               value={channel}
               onChange={(e) => setChannel(e.target.value as Channel)}
-              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none cursor-pointer transition-colors"
+              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors"
             >
               <option value="whatsapp">WhatsApp</option>
               <option value="rcs">RCS (DLT)</option>
@@ -160,7 +160,7 @@ export default function Nav() {
               href={link.href}
               className={
                 active
-                  ? 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold bg-indigo-50 text-indigo-700 shadow-xs'
+                  ? 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-50 text-blue-700 shadow-xs'
                   : 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors'
               }
             >
@@ -176,7 +176,7 @@ export default function Nav() {
       <div className="p-3.5 border-t border-gray-200/80 bg-gray-50/60 space-y-2.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
+            <div className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
               {(user || 'U').charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
@@ -192,7 +192,7 @@ export default function Nav() {
               setUserNameInput(user);
               setIsEditingUser(true);
             }}
-            className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 transition-colors p-1"
+            className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 transition-colors p-1"
             title="Switch or rename user"
           >
             Switch
@@ -201,7 +201,7 @@ export default function Nav() {
 
         {/* User Edit Modal / Popover */}
         {isEditingUser && (
-          <div className="p-2.5 bg-white border border-indigo-200 rounded-lg shadow-sm space-y-2">
+          <div className="p-2.5 bg-white border border-blue-200 rounded-lg shadow-sm space-y-2">
             <p className="text-[11px] font-semibold text-gray-700">Set Your Name / Identity:</p>
             <form onSubmit={handleSaveUser} className="space-y-1.5">
               <input
@@ -209,7 +209,7 @@ export default function Nav() {
                 value={userNameInput}
                 onChange={(e) => setUserNameInput(e.target.value)}
                 placeholder="e.g. Namann, M., Team..."
-                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-indigo-500 focus:outline-none"
+                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:outline-none"
                 autoFocus
               />
               <div className="flex items-center justify-end gap-1.5">
@@ -222,7 +222,7 @@ export default function Nav() {
                 </button>
                 <button
                   type="submit"
-                  className="text-[10px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1 rounded"
+                  className="text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded"
                 >
                   Save
                 </button>

@@ -12,7 +12,7 @@ function StatusBadge({ status }: { status: string }) {
     rejected: 'bg-red-100 text-red-800 border border-red-200',
     failed: 'bg-red-100 text-red-800 border border-red-200',
     submitted: 'bg-blue-100 text-blue-800 border border-blue-200',
-    duplicate: 'bg-purple-100 text-purple-800 border border-purple-200',
+    duplicate: 'bg-blue-100 text-blue-800 border border-blue-200',
     unknown: 'bg-gray-100 text-gray-800 border border-gray-200',
   };
   const s = (status || 'unknown').toLowerCase();
@@ -186,10 +186,10 @@ export default function SubmitPage() {
             onClick={() => inputRef.current?.click()}
             className={`border-2 border-dashed rounded-xl p-10 text-center transition-all cursor-pointer ${
               dragging
-                ? 'border-indigo-500 bg-indigo-50/50 ring-4 ring-indigo-50'
+                ? 'border-blue-500 bg-blue-50/50 ring-4 ring-blue-50'
                 : file
-                ? 'border-indigo-400 bg-indigo-50/20'
-                : 'border-gray-300 hover:border-indigo-400 hover:bg-gray-50/50'
+                ? 'border-blue-400 bg-blue-50/20'
+                : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50/50'
             }`}
           >
             <input
@@ -200,7 +200,7 @@ export default function SubmitPage() {
               className="hidden"
             />
             <div className="flex flex-col items-center">
-              <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 mb-3 shadow-xs">
+              <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-3 shadow-xs">
                 <svg className="w-6 h-6" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
                   <path d="M10 14V3M5 7l5-5 5 5M3 17h14" />
                 </svg>
@@ -218,7 +218,7 @@ export default function SubmitPage() {
           {file && (
             <div className="flex items-center justify-between mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center uppercase">
+                <div className="w-8 h-8 rounded bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center uppercase">
                   {file.name.split('.').pop() || 'file'}
                 </div>
                 <div>
@@ -260,7 +260,7 @@ export default function SubmitPage() {
             {state.previews && state.previews.length > 0 && (
               <button
                 onClick={() => setState({ step: 'previewed', previews: state.previews as TemplatePreview[] })}
-                className="text-xs font-semibold text-indigo-700 underline"
+                className="text-xs font-semibold text-blue-700 underline"
               >
                 Back to preview
               </button>
@@ -276,7 +276,7 @@ export default function SubmitPage() {
       {state.step === 'previewing' && (
         <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-12 text-center text-gray-500">
           <div className="flex flex-col items-center gap-3">
-            <svg className="animate-spin h-8 w-8 text-indigo-600" viewBox="0 0 24 24" fill="none">
+            <svg className="animate-spin h-8 w-8 text-blue-600" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
             </svg>
@@ -288,16 +288,16 @@ export default function SubmitPage() {
 
       {/* STEP 2: Preview Table */}
       {state.step === 'previewed' && (
-        <div className="bg-white rounded-xl border border-indigo-200 shadow-xs overflow-hidden">
-          <div className="p-4 bg-indigo-50/60 border-b border-indigo-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="bg-white rounded-xl border border-blue-200 shadow-xs overflow-hidden">
+          <div className="p-4 bg-blue-50/60 border-b border-blue-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-600" />
-                <h3 className="text-sm font-bold text-indigo-950">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                <h3 className="text-sm font-bold text-blue-950">
                   {state.previews.length} Template{state.previews.length === 1 ? '' : 's'} Found
                 </h3>
               </div>
-              <p className="text-xs text-indigo-700/80 mt-0.5">
+              <p className="text-xs text-blue-700/80 mt-0.5">
                 Ready to submit to {accountLabel} on {channelLabel}. Review before final submission.
               </p>
             </div>
@@ -310,7 +310,7 @@ export default function SubmitPage() {
               </button>
               <button
                 onClick={handleSubmit}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 shadow-sm transition-colors flex items-center gap-2"
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
               >
                 <span>Submit All ({state.previews.length})</span>
                 <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -323,7 +323,7 @@ export default function SubmitPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
-                <tr className="bg-indigo-50/30 text-indigo-900 font-semibold border-b border-indigo-100">
+                <tr className="bg-blue-50/30 text-blue-900 font-semibold border-b border-blue-100">
                   {channel === 'whatsapp' ? (
                     <>
                       <th className="px-5 py-3">#</th>
@@ -359,7 +359,7 @@ export default function SubmitPage() {
                                 const isHeader = c.type === 'HEADER';
                                 const format = c.format ? ` (${c.format})` : '';
                                 const color = isHeader
-                                  ? 'bg-purple-100 text-purple-800 border-purple-200'
+                                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
                                   : c.type === 'BODY'
                                   ? 'bg-blue-100 text-blue-800 border-blue-200'
                                   : c.type === 'BUTTONS'
@@ -409,7 +409,7 @@ export default function SubmitPage() {
       {state.step === 'submitting' && (
         <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-12 text-center text-gray-500">
           <div className="flex flex-col items-center gap-3">
-            <svg className="animate-spin h-8 w-8 text-indigo-600" viewBox="0 0 24 24" fill="none">
+            <svg className="animate-spin h-8 w-8 text-blue-600" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
             </svg>
@@ -440,7 +440,7 @@ export default function SubmitPage() {
 
               <button
                 onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
               >
                 + Submit Another File
               </button>
@@ -499,7 +499,7 @@ export default function SubmitPage() {
                           </td>
                           <td className="px-5 py-3">
                             <span className="inline-flex items-center gap-1.5">
-                              <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0">
+                              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0">
                                 {(r.submitted_by || user || 'U').charAt(0).toUpperCase()}
                               </span>
                               <span className="text-[11px] font-semibold text-gray-700">
@@ -510,7 +510,7 @@ export default function SubmitPage() {
                         </>
                       ) : (
                         <>
-                          <td className="px-5 py-3 font-mono font-semibold text-indigo-700 text-xs">
+                          <td className="px-5 py-3 font-mono font-semibold text-blue-700 text-xs">
                             {r.template_id || r.provider_ref_id || '—'}
                           </td>
                           <td className="px-5 py-3">

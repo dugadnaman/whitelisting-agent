@@ -19,7 +19,7 @@ function StatusBadge({ status }: { status: string }) {
     rejected: 'bg-red-100 text-red-800 border border-red-200',
     failed: 'bg-red-100 text-red-800 border border-red-200',
     submitted: 'bg-blue-100 text-blue-800 border border-blue-200',
-    duplicate: 'bg-purple-100 text-purple-800 border border-purple-200',
+    duplicate: 'bg-blue-100 text-blue-800 border border-blue-200',
     unknown: 'bg-gray-100 text-gray-800 border border-gray-200',
   };
   const s = (status || 'unknown').toLowerCase();
@@ -47,9 +47,9 @@ function ActivityIcon({ action }: { action: string }) {
   const map: Record<string, { bg: string; icon: string }> = {
     TEMPLATE_SUBMISSION: { bg: 'bg-emerald-50 text-emerald-600', icon: 'M4 5h12M9 3v2m1.048 8.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129' },
     TEMPLATE_PREVIEW: { bg: 'bg-blue-50 text-blue-600', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
-    STATUS_POLL: { bg: 'bg-purple-50 text-purple-600', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+    STATUS_POLL: { bg: 'bg-blue-50 text-blue-600', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
     CREDENTIALS_UPDATE: { bg: 'bg-amber-50 text-amber-600', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
-    CREDENTIALS_TEST: { bg: 'bg-indigo-50 text-indigo-600', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+    CREDENTIALS_TEST: { bg: 'bg-blue-50 text-blue-600', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
   };
   const item = map[action] || { bg: 'bg-gray-50 text-gray-500', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' };
   return (
@@ -215,7 +215,7 @@ export default function DashboardPage() {
         { key: 'approved', label: 'Approved', value: stats?.approved ?? 0, color: 'bg-emerald-500' },
         { key: 'pending', label: 'Pending', value: stats?.pending ?? 0, color: 'bg-amber-400' },
         { key: 'failed', label: 'Failed', value: stats?.failed ?? 0, color: 'bg-red-500' },
-        { key: 'duplicate', label: 'Duplicate', value: stats?.duplicate ?? 0, color: 'bg-purple-400' },
+        { key: 'duplicate', label: 'Duplicate', value: stats?.duplicate ?? 0, color: 'bg-blue-400' },
       ];
   const distTotal = segs.reduce((acc, s) => acc + s.value, 0);
 
@@ -231,7 +231,7 @@ export default function DashboardPage() {
         { key: 'approved', label: 'Approved', value: stats?.approved ?? 0, dot: 'bg-emerald-500', statusValue: 'approved' },
         { key: 'pending', label: 'Pending', value: stats?.pending ?? 0, dot: 'bg-amber-500', statusValue: 'pending' },
         { key: 'failed', label: 'Failed', value: stats?.failed ?? 0, dot: 'bg-red-500', statusValue: 'failed' },
-        { key: 'total', label: 'Total Templates', value: total, dot: 'bg-indigo-500', statusValue: '' },
+        { key: 'total', label: 'Total Templates', value: total, dot: 'bg-blue-500', statusValue: '' },
       ];
 
   return (
@@ -273,7 +273,7 @@ export default function DashboardPage() {
             <button
               onClick={handlePoll}
               disabled={polling}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors disabled:opacity-50"
             >
               {polling ? (
                 <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
@@ -294,7 +294,7 @@ export default function DashboardPage() {
               type="checkbox"
               checked={autoRefresh}
               onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             Auto-refresh
           </label>
@@ -322,7 +322,7 @@ export default function DashboardPage() {
               type="button"
               onClick={() => setStatusFilter(active ? '' : card.statusValue)}
               className={`text-left bg-white rounded-xl border shadow-xs p-4 transition-all cursor-pointer ${
-                active ? 'border-indigo-400 ring-2 ring-indigo-100' : 'border-gray-200/80 hover:border-indigo-300 hover:shadow-sm'
+                active ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200/80 hover:border-blue-300 hover:shadow-sm'
               }`}
               title={card.statusValue ? `Filter table: ${card.label}` : 'Show all'}
             >
@@ -331,7 +331,7 @@ export default function DashboardPage() {
                   <span className={`w-2 h-2 rounded-full ${card.dot}`} />
                   {card.label}
                 </span>
-                {active && card.statusValue !== '' && <span className="text-[10px] font-bold text-indigo-600 uppercase">Filtered</span>}
+                {active && card.statusValue !== '' && <span className="text-[10px] font-bold text-blue-600 uppercase">Filtered</span>}
               </div>
               <div className="text-2xl font-bold text-gray-900 mt-1.5">
                 {statsLoading ? <div className="h-8 w-12 bg-gray-200 animate-pulse rounded" /> : card.value}
@@ -388,14 +388,14 @@ export default function DashboardPage() {
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder={channel === 'whatsapp' ? 'Search templates or ref IDs...' : 'Search by name, DLT ID, or sender...'}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50/50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50/50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
                 />
               </div>
 
               <select
                 value={statusFilter}
                 onChange={e => setStatusFilter(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none cursor-pointer"
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer"
               >
                 <option value="">All Statuses</option>
                 {channel === 'whatsapp' ? (
@@ -417,7 +417,7 @@ export default function DashboardPage() {
               <select
                 value={operatorFilter}
                 onChange={e => setOperatorFilter(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none cursor-pointer"
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer"
               >
                 <option value="all">All Operators</option>
                 {operators.map(op => (
@@ -466,7 +466,7 @@ export default function DashboardPage() {
                     <tr>
                       <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
                         <div className="flex items-center justify-center gap-2">
-                          <svg className="animate-spin h-4 w-4 text-indigo-600" viewBox="0 0 24 24" fill="none">
+                          <svg className="animate-spin h-4 w-4 text-blue-600" viewBox="0 0 24 24" fill="none">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                           </svg>
@@ -496,7 +496,7 @@ export default function DashboardPage() {
                           {!stats?.error && (
                             <a
                               href="/submit"
-                              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 mt-1 inline-flex items-center gap-1"
+                              className="text-xs font-semibold text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center gap-1"
                             >
                               Go to Submit Templates →
                             </a>
@@ -523,7 +523,7 @@ export default function DashboardPage() {
                                 toggleRow(key);
                               }
                             }}
-                            className={`hover:bg-gray-50/70 transition-colors cursor-pointer ${isExpanded ? 'bg-indigo-50/30' : ''}`}
+                            className={`hover:bg-gray-50/70 transition-colors cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`}
                           >
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
@@ -569,7 +569,7 @@ export default function DashboardPage() {
                             <td className="px-4 py-3">
                               {t.submitted_by ? (
                                 <span className="inline-flex items-center gap-1.5">
-                                  <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                  <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0">
                                     {t.submitted_by.charAt(0).toUpperCase()}
                                   </span>
                                   <span className="text-[11px] font-semibold text-gray-700 truncate">{t.submitted_by}</span>
@@ -595,7 +595,7 @@ export default function DashboardPage() {
                               {formatDate(t.submitted_at)}
                             </td>
 
-                            <td className="px-4 py-3 text-right font-medium text-indigo-600 whitespace-nowrap">
+                            <td className="px-4 py-3 text-right font-medium text-blue-600 whitespace-nowrap">
                               {isExpanded ? '▲ Hide' : '▼ Details'}
                             </td>
                           </tr>
@@ -676,7 +676,7 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 {activityStats.user_activity.slice(0, 4).map(u => (
                   <div key={u.user} className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-[11px] flex items-center justify-center shrink-0">
+                    <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-[11px] flex items-center justify-center shrink-0">
                       {u.user.charAt(0).toUpperCase()}
                     </span>
                     <div className="flex-1 min-w-0">
@@ -686,7 +686,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="h-1 bg-gray-100 rounded-full mt-1">
                         <div
-                          className="h-1 bg-indigo-500 rounded-full transition-all duration-500"
+                          className="h-1 bg-blue-500 rounded-full transition-all duration-500"
                           style={{ width: `${Math.min(100, (u.actions / Math.max(1, activityStats.total_actions)) * 100)}%` }}
                         />
                       </div>
@@ -703,7 +703,7 @@ export default function DashboardPage() {
           <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Live Feed</h3>
-              <a href="/activity" className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800">
+              <a href="/activity" className="text-[11px] font-semibold text-blue-600 hover:text-blue-800">
                 View all →
               </a>
             </div>

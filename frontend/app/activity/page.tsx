@@ -38,9 +38,9 @@ function ActionBadge({ action }: { action: string }) {
   const map: Record<string, { label: string; color: string }> = {
     TEMPLATE_SUBMISSION: { label: 'Template Submit', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
     TEMPLATE_PREVIEW: { label: 'File Preview', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-    STATUS_POLL: { label: 'Status Poll', color: 'bg-purple-100 text-purple-800 border-purple-200' },
+    STATUS_POLL: { label: 'Status Poll', color: 'bg-blue-100 text-blue-800 border-blue-200' },
     CREDENTIALS_UPDATE: { label: 'Credentials Update', color: 'bg-amber-100 text-amber-800 border-amber-200' },
-    CREDENTIALS_TEST: { label: 'Credentials Test', color: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+    CREDENTIALS_TEST: { label: 'Credentials Test', color: 'bg-blue-100 text-blue-800 border-blue-200' },
   };
 
   const item = map[action] || { label: action.replace(/_/g, ' '), color: 'bg-gray-100 text-gray-800 border-gray-200' };
@@ -55,7 +55,7 @@ function ActionBadge({ action }: { action: string }) {
 function UserAvatar({ name, isCurrentUser }: { name: string; isCurrentUser?: boolean }) {
   const initial = (name || 'U').charAt(0).toUpperCase();
   const colors = [
-    'bg-indigo-600', 'bg-blue-600', 'bg-emerald-600', 'bg-purple-600',
+    'bg-blue-600', 'bg-sky-600', 'bg-emerald-600', 'bg-teal-600',
     'bg-pink-600', 'bg-amber-600', 'bg-teal-600', 'bg-cyan-600',
   ];
   let hash = 0;
@@ -71,7 +71,7 @@ function UserAvatar({ name, isCurrentUser }: { name: string; isCurrentUser?: boo
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold text-gray-900 truncate">{name}</span>
           {isCurrentUser && (
-            <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.2 rounded border border-indigo-200/60">
+            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.2 rounded border border-blue-200/60">
               You
             </span>
           )}
@@ -179,7 +179,7 @@ export default function ActivityLogsPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">Activity Logs & Team Audit Trail</h1>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800 border border-indigo-200">
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
               Live Team Audit
             </span>
           </div>
@@ -203,7 +203,7 @@ export default function ActivityLogsPage() {
           <button
             onClick={() => loadData()}
             disabled={loading}
-            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:opacity-50"
+            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:opacity-50"
           >
             <svg
               className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
@@ -224,7 +224,7 @@ export default function ActivityLogsPage() {
         <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Actions</span>
-            <span className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
+            <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
               <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="10" cy="10" r="7" />
                 <polyline points="10 6 10 10 13 13" />
@@ -274,7 +274,7 @@ export default function ActivityLogsPage() {
         <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Current Operator</span>
-            <span className="p-2 rounded-lg bg-purple-50 text-purple-600">
+            <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
               <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M10 2a5 5 0 00-5 5v1a5 5 0 0010 0V7a5 5 0 00-5-5zM3 18a7 7 0 0114 0" />
               </svg>
@@ -306,7 +306,7 @@ export default function ActivityLogsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search user, action, template name, details..."
-              className="w-full pl-9 pr-4 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+              className="w-full pl-9 pr-4 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
           </div>
 
@@ -316,7 +316,7 @@ export default function ActivityLogsPage() {
             <select
               value={filterUser}
               onChange={(e) => setFilterUser(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Team Members</option>
               {usersList.map((u) => (
@@ -330,7 +330,7 @@ export default function ActivityLogsPage() {
             <select
               value={filterAction}
               onChange={(e) => setFilterAction(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Action Types</option>
               <option value="TEMPLATE_SUBMISSION">Template Submission</option>
@@ -344,7 +344,7 @@ export default function ActivityLogsPage() {
             <select
               value={filterAccount}
               onChange={(e) => setFilterAccount(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Accounts</option>
               <option value="tata">Tata Capital</option>
@@ -355,7 +355,7 @@ export default function ActivityLogsPage() {
             <select
               value={filterChannel}
               onChange={(e) => setFilterChannel(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Channels</option>
               <option value="whatsapp">WhatsApp</option>
@@ -368,7 +368,7 @@ export default function ActivityLogsPage() {
                 type="checkbox"
                 checked={autoRefresh}
                 onChange={(e) => setAutoRefresh(e.target.checked)}
-                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <span>Live Sync</span>
             </label>
@@ -388,7 +388,7 @@ export default function ActivityLogsPage() {
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs overflow-hidden">
         <div className="p-4 bg-gray-50/80 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-indigo-600" />
+            <span className="w-2 h-2 rounded-full bg-blue-600" />
             <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
               Audit Trail ({logs.length} events)
             </h3>
@@ -414,7 +414,7 @@ export default function ActivityLogsPage() {
                 <tr>
                   <td colSpan={7} className="px-5 py-12 text-center text-gray-400">
                     <div className="flex flex-col items-center gap-2">
-                      <svg className="animate-spin h-5 w-5 text-indigo-600" viewBox="0 0 24 24" fill="none">
+                      <svg className="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                       </svg>
@@ -529,7 +529,7 @@ export default function ActivityLogsPage() {
                       <td className="px-5 py-3 text-right whitespace-nowrap">
                         <button
                           onClick={() => setSelectedLog(log)}
-                          className="px-2.5 py-1 bg-gray-100 hover:bg-indigo-50 text-gray-700 hover:text-indigo-700 rounded font-semibold text-[11px] transition-colors"
+                          className="px-2.5 py-1 bg-gray-100 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded font-semibold text-[11px] transition-colors"
                         >
                           Inspect
                         </button>
@@ -601,7 +601,7 @@ export default function ActivityLogsPage() {
             <div className="pt-2 flex justify-end">
               <button
                 onClick={() => setSelectedLog(null)}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold text-xs transition-colors"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-xs transition-colors"
               >
                 Close
               </button>

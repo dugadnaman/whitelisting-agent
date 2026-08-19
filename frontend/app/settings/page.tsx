@@ -250,7 +250,7 @@ export default function SettingsPage() {
             setShowAddModal(true);
             setCreateError(null);
           }}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -276,7 +276,7 @@ export default function SettingsPage() {
                 }}
                 className={`group relative p-3 rounded-xl border text-left cursor-pointer transition-all ${
                   isSelected
-                    ? 'bg-indigo-50/70 border-indigo-500 shadow-xs ring-2 ring-indigo-500/20'
+                    ? 'bg-blue-50/70 border-blue-500 shadow-xs ring-2 ring-blue-500/20'
                     : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'
                 }`}
               >
@@ -324,7 +324,7 @@ export default function SettingsPage() {
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
               selectedChannel === 'whatsapp'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
@@ -340,7 +340,7 @@ export default function SettingsPage() {
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
               selectedChannel === 'rcs'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
@@ -351,9 +351,9 @@ export default function SettingsPage() {
       </div>
 
       {/* Target Info Banner */}
-      <div className="flex items-center justify-between p-4 bg-indigo-50/50 border border-indigo-100 rounded-xl">
+      <div className="flex items-center justify-between p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs uppercase">
+          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase">
             {accountTitle.slice(0, 2)}
           </div>
           <div>
@@ -377,7 +377,7 @@ export default function SettingsPage() {
               message: `Active Context switched to ${accountTitle} • ${channelTitle}.`,
             });
           }}
-          className="px-3 py-1.5 bg-white border border-indigo-200 text-indigo-700 text-xs font-semibold rounded-lg hover:bg-indigo-50 transition-colors shadow-xs"
+          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-xs"
         >
           Set as Active Context
         </button>
@@ -398,7 +398,7 @@ export default function SettingsPage() {
                 value={wabaAuthToken}
                 onChange={(e) => setWabaAuthToken(e.target.value)}
                 placeholder="Enter static Bearer token from Karix Lounge..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 Static token generated from Karix Lounge for {accountTitle}. Does not expire with browser sessions.
@@ -416,7 +416,7 @@ export default function SettingsPage() {
                 value={wabaId}
                 onChange={(e) => setWabaId(e.target.value)}
                 placeholder="e.g. 1064104141771475"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 The numeric WhatsApp Business Account ID assigned to {accountTitle} by Meta / Karix.
@@ -446,7 +446,7 @@ export default function SettingsPage() {
                       value={bearerToken}
                       onChange={(e) => setBearerToken(e.target.value)}
                       placeholder="e.g. eyJhbGciOi..."
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
                     />
                   </div>
 
@@ -461,7 +461,7 @@ export default function SettingsPage() {
                         value={session}
                         onChange={(e) => setSession(e.target.value)}
                         placeholder="Session header from DevTools..."
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
                       />
                     </div>
 
@@ -475,7 +475,7 @@ export default function SettingsPage() {
                         value={user}
                         onChange={(e) => setUser(e.target.value)}
                         placeholder="User header from DevTools..."
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
                       />
                     </div>
                   </div>
@@ -496,7 +496,7 @@ export default function SettingsPage() {
                 value={entityId}
                 onChange={(e) => setEntityId(e.target.value)}
                 placeholder="e.g. 1001490234791338781"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 Govt. DLT Registration Principal Entity ID (PE ID) registered on Vilpower / Jio / Airtel DLT portal.
@@ -514,7 +514,7 @@ export default function SettingsPage() {
                 value={loungeCookie}
                 onChange={(e) => setLoungeCookie(e.target.value)}
                 placeholder="PHPSESSID=... from lounge.karix.solutions"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
                 Required for automated submission to Karix Lounge DLT Registration.
@@ -553,7 +553,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleSave}
               disabled={saving || testing}
-              className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 sm:flex-none px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {saving ? (
                 <>
@@ -625,7 +625,7 @@ export default function SettingsPage() {
                   placeholder="e.g. Kotak Mahindra Bank"
                   value={newAccountName}
                   onChange={(e) => setNewAccountName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
 
@@ -638,7 +638,7 @@ export default function SettingsPage() {
                   placeholder="e.g. kotak (auto-generated if empty)"
                   value={newAccountId}
                   onChange={(e) => setNewAccountId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
 
@@ -659,7 +659,7 @@ export default function SettingsPage() {
                 <button
                   type="submit"
                   disabled={creatingAccount || !newAccountName.trim()}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
                   {creatingAccount ? 'Creating...' : 'Create Account'}
                 </button>
