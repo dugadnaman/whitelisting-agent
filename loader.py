@@ -124,21 +124,74 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
     }
 
 
-def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
-    """Extract embedded images from an Excel (.xlsx) file in order."""
-    images = []
+def _detect_media_kind(filename: str, raw_bytes: bytes) -> tuple[str, str]:
+    """
+    Detect whether raw media bytes are IMAGE, VIDEO, or DOCUMENT, and return (kind, mime_type).
+    """
+    fn = filename.lower()
+    if fn.endswith((".mp4", ".m4v")):
+        return "VIDEO", "video/mp4"
+    if fn.endswith((".mov", ".qt")):
+        return "VIDEO", "video/quicktime"
+    if fn.endswith((".avi", ".mkv", ".webm", ".3gp", ".wmv")):
+        return "VIDEO", "video/mp4"
+    if fn.endswith((".png",)):
+        return "IMAGE", "image/png"
+    if fn.endswith((".jpg", ".jpeg")):
+        return "IMAGE", "image/jpeg"
+    if fn.endswith((".webp",)):
+        return "IMAGE", "image/webp"
+    if fn.endswith((".gif",)):
+        return "IMAGE", "image/gif"
+    if fn.endswith((".pdf",)):
+        return "DOCUMENT", "application/pdf"
+
+    # Check by magic bytes
+    if raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "IMAGE", "image/png"
+    if raw_bytes.startswith(b"\xff\xd8\xff"):
+        return "IMAGE", "image/jpeg"
+    if raw_bytes.startswith(b"%PDF"):
+        return "DOCUMENT", "application/pdf"
+    if len(raw_bytes) > 12 and (b"ftyp" in raw_bytes[:16] or b"moov" in raw_bytes[:32] or b"mdat" in raw_bytes[:32]):
+        return "VIDEO", "video/mp4"
+
+    return "IMAGE", "image/png"
+
+
+def _extract_media_from_xlsx(path: str) -> list[dict]:
+    """
+    Extract all embedded media (images, videos, documents) from an Excel (.xlsx) file in order.
+    Returns list of dicts: {"filename": str, "bytes": bytes, "kind": str, "mime_type": str}
+    """
+    media_items = []
     try:
         with zipfile.ZipFile(path, "r") as z:
-            media_names = [f for f in z.namelist() if f.startswith("xl/media/")]
+            media_names = [
+                f for f in z.namelist()
+                if f.startswith("xl/media/") or f.startswith("xl/embeddings/")
+            ]
             def natural_key(name):
                 return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name)]
             media_names.sort(key=natural_key)
             for name in media_names:
                 filename = name.split("/")[-1]
-                images.append((filename, z.read(name)))
+                raw_data = z.read(name)
+                kind, mime_type = _detect_media_kind(filename, raw_data)
+                media_items.append({
+                    "filename": filename,
+                    "bytes": raw_data,
+                    "kind": kind,
+                    "mime_type": mime_type,
+                })
     except Exception as e:
-        logger.warning("Could not extract embedded images from xlsx: %s", e)
-    return images
+        logger.warning("Could not extract embedded media from xlsx: %s", e)
+    return media_items
+
+
+def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
+    """Legacy image extractor helper."""
+    return [(m["filename"], m["bytes"]) for m in _extract_media_from_xlsx(path) if m["kind"] == "IMAGE"]
 
 
 def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
@@ -296,13 +349,16 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
 def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """
     Load templates from an Excel (.xlsx) file.
-    Supports both multi-block single-cell sheets (like Book 4) and standard column tables.
+    Supports embedded images/videos/documents, multi-block cards, and standard column tables.
     """
     import openpyxl
 
     waba_cache: dict[str, str] = {}
-    # Check for embedded images
-    extracted_images = _extract_images_from_xlsx(path)
+    # Extract all embedded media (images, videos, documents)
+    extracted_media = _extract_media_from_xlsx(path)
+    videos = [m for m in extracted_media if m["kind"] == "VIDEO"]
+    images = [m for m in extracted_media if m["kind"] == "IMAGE"]
+    docs = [m for m in extracted_media if m["kind"] == "DOCUMENT"]
 
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
@@ -317,7 +373,6 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
             break
 
     if block_row_cells:
-        # Create separate WhatsApp templates for each card block in the row!
         base_name = Path(path).stem
         clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_').lower()
 
@@ -327,13 +382,13 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
             t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
 
             components = []
-            if extracted_images and (idx - 1) < len(extracted_images):
-                img_name, img_bytes = extracted_images[idx - 1]
+            if (idx - 1) < len(extracted_media):
+                m = extracted_media[idx - 1]
                 components.append({
                     "type": "HEADER",
-                    "format": "IMAGE",
-                    "image_bytes": img_bytes,
-                    "file_type": "image/jpeg" if img_name.lower().endswith((".jpg", ".jpeg")) else "image/png",
+                    "format": m["kind"],
+                    "image_bytes": m["bytes"],
+                    "file_type": m["mime_type"],
                 })
             elif parsed.get("header"):
                 components.append({
@@ -371,12 +426,17 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
                 components=components,
                 source_ref=t_name,
             )
+            submissions.append(sub)
 
         return submissions
 
     # Standard row-based spreadsheet
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
+    v_idx = 0
+    img_idx = 0
+    doc_idx = 0
+
     for row in sheet.iter_rows(min_row=2, values_only=True):
         if not any(row):
             continue
@@ -396,6 +456,38 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
                 raw_row["components"] = _flat_row_to_components(raw_row)
         else:
             raw_row["components"] = _flat_row_to_components(raw_row)
+
+        # Assign embedded video / image / document bytes if row has a media header without URL
+        for comp in raw_row["components"]:
+            if isinstance(comp, dict) and comp.get("type") == "HEADER":
+                cformat = str(comp.get("format", "")).upper()
+                if cformat == "VIDEO" and not comp.get("media_url") and not comp.get("media_file"):
+                    if v_idx < len(videos):
+                        comp["image_bytes"] = videos[v_idx]["bytes"]
+                        comp["file_type"] = videos[v_idx]["mime_type"]
+                        v_idx += 1
+                    elif v_idx < len(extracted_media):
+                        comp["image_bytes"] = extracted_media[v_idx]["bytes"]
+                        comp["file_type"] = "video/mp4"
+                        v_idx += 1
+                elif cformat == "IMAGE" and not comp.get("media_url") and not comp.get("media_file"):
+                    if img_idx < len(images):
+                        comp["image_bytes"] = images[img_idx]["bytes"]
+                        comp["file_type"] = images[img_idx]["mime_type"]
+                        img_idx += 1
+                    elif img_idx < len(extracted_media):
+                        comp["image_bytes"] = extracted_media[img_idx]["bytes"]
+                        comp["file_type"] = "image/png"
+                        img_idx += 1
+                elif cformat == "DOCUMENT" and not comp.get("media_url") and not comp.get("media_file"):
+                    if doc_idx < len(docs):
+                        comp["image_bytes"] = docs[doc_idx]["bytes"]
+                        comp["file_type"] = docs[doc_idx]["mime_type"]
+                        doc_idx += 1
+                    elif doc_idx < len(extracted_media):
+                        comp["image_bytes"] = extracted_media[doc_idx]["bytes"]
+                        comp["file_type"] = "application/pdf"
+                        doc_idx += 1
 
         raw_row["client"] = raw_row.get("client") or client
         if not raw_row.get("waba_id"):

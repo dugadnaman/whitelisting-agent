@@ -247,15 +247,26 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
                 file_type = "image/png"
         elif cformat == "VIDEO":
             default_type = "video/mp4"
+            if image_bytes:
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                    tmp.write(image_bytes)
+                    media_file = tmp.name
+                file_type = "video/mp4"
             if not media_file and not media_url:
                 media_file = _ensure_default_sample_video()
                 file_type = "video/mp4"
         elif cformat == "DOCUMENT":
             default_type = "application/pdf"
+            if image_bytes:
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(image_bytes)
+                    media_file = tmp.name
+                file_type = "application/pdf"
             if not media_file and not media_url:
                 media_file = _ensure_default_sample_pdf()
                 file_type = "application/pdf"
-        else:
             default_type = "application/octet-stream"
 
         file_type = file_type or default_type
