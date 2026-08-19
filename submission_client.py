@@ -15,8 +15,10 @@ Auth model:
 """
 
 import copy
+import io
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -92,7 +94,7 @@ FALLBACK_PLACEHOLDER_HEADER_HANDLE = (
     "4::aW1hZ2UvcG5n:ARbniR2Mjs3AjmbXj_PT2co-Htm_UrVCspAqcYZ374tOY9ynPsS1fHzg3GhFomqWBiQjj6eUUZ3pNEkRraYDm90jI4H8yj21diMGmjLjCg0_zg:e:1787385539:379138877290302:100066839164237:ARYkaBy8mnS0GiuXUz0"
 )
 
-def upload_media(file_path: str, file_type: str = "image/png", client: str = "bajaj") -> str:
+def upload_media(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
     """
     Upload a media file to Karix/Meta for use as a template HEADER image.
 
@@ -100,10 +102,11 @@ def upload_media(file_path: str, file_type: str = "image/png", client: str = "ba
       1. POST /mediaUpload (or Meta Resumable Upload) → returns a header_handle string
       2. POST /create with the handle in components[].example.header_handle
     """
+    if not file_path or not str(file_path).strip():
+        file_path = _ensure_default_sample_image()
     path = Path(file_path)
     if not path.exists():
         path = Path(_ensure_default_sample_image())
-
     # 1. Try Karix Portal mediaUpload if portal headers are configured
     try:
         url = f"{KARIX_BASE_URL}/mediaUpload"
@@ -227,7 +230,7 @@ def _ensure_default_sample_pdf() -> str:
         )
         default_path.write_bytes(pdf_content)
         logger.info("Created default sample document at %s", default_path.resolve())
-def normalize_image_16_9(input_path_or_bytes: str | bytes, target_width: int = 1280, target_height: int = 720) -> tuple[str, str]:
+def normalize_image_16_9(input_path_or_bytes: str | bytes | None, target_width: int = 1280, target_height: int = 720) -> tuple[str, str]:
     """
     Ensure any image conforms to Meta's required 16:9 aspect ratio (1280x720).
     If the image is square (1:1), portrait (9:16), or has non-standard dimensions,
@@ -235,6 +238,8 @@ def normalize_image_16_9(input_path_or_bytes: str | bytes, target_width: int = 1
     so NO text, logo, or critical branding is cropped out by Meta.
     Returns (normalized_file_path, mime_type).
     """
+    if not input_path_or_bytes:
+        return _ensure_default_sample_image(), "image/png"
     import tempfile
     import io
     try:
@@ -242,8 +247,7 @@ def normalize_image_16_9(input_path_or_bytes: str | bytes, target_width: int = 1
         if isinstance(input_path_or_bytes, bytes):
             img = Image.open(io.BytesIO(input_path_or_bytes))
         else:
-            img = Image.open(input_path_or_bytes)
-
+            img = Image.open(str(input_path_or_bytes))
         if img.mode in ("RGBA", "LA", "P"):
             bg = Image.new("RGB", img.size, (255, 255, 255))
             if img.mode == "P":
@@ -357,7 +361,7 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
         # Download from URL if media_url is provided
         if media_url and not media_file:
             import tempfile
-            suffix = Path(media_url.split("?")[0]).suffix
+            suffix = Path(media_url.split("?")[0]).suffix if media_url else ""
             if not suffix:
                 suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -366,6 +370,8 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
             logger.info("Downloading header %s from %s", cformat.lower(), media_url)
             try:
                 urlretrieve(media_url, media_file)
+                if cformat == "IMAGE":
+                    media_file, file_type = normalize_image_16_9(media_file)
             except Exception as e:
                 logger.warning("Could not download media_url %s: %s; using default sample", media_url, e)
                 if cformat == "VIDEO":
@@ -374,6 +380,18 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
                     media_file = _ensure_default_sample_pdf()
                 else:
                     media_file = _ensure_default_sample_image()
+
+        # Guarantee media_file is non-null and exists
+        if not media_file or not os.path.exists(str(media_file)):
+            if cformat == "VIDEO":
+                media_file = _ensure_default_sample_video()
+                file_type = "video/mp4"
+            elif cformat == "DOCUMENT":
+                media_file = _ensure_default_sample_pdf()
+                file_type = "application/pdf"
+            else:
+                media_file = _ensure_default_sample_image()
+                file_type = "image/png"
 
         # Upload and fill in the handle
         handle = upload_media(media_file, file_type, client=client)
