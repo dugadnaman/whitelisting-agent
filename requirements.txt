@@ -4,3 +4,4 @@ python-multipart
 requests
 openpyxl
 python-dotenv
+Pillow

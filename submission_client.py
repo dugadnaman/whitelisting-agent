@@ -227,7 +227,73 @@ def _ensure_default_sample_pdf() -> str:
         )
         default_path.write_bytes(pdf_content)
         logger.info("Created default sample document at %s", default_path.resolve())
-    return str(default_path.resolve())
+def normalize_image_16_9(input_path_or_bytes: str | bytes, target_width: int = 1280, target_height: int = 720) -> tuple[str, str]:
+    """
+    Ensure any image conforms to Meta's required 16:9 aspect ratio (1280x720).
+    If the image is square (1:1), portrait (9:16), or has non-standard dimensions,
+    it is fitted cleanly onto a 16:9 canvas with matching neutral background padding
+    so NO text, logo, or critical branding is cropped out by Meta.
+    Returns (normalized_file_path, mime_type).
+    """
+    import tempfile
+    import io
+    try:
+        from PIL import Image
+        if isinstance(input_path_or_bytes, bytes):
+            img = Image.open(io.BytesIO(input_path_or_bytes))
+        else:
+            img = Image.open(input_path_or_bytes)
+
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            bg.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+
+        w, h = img.size
+        current_ratio = w / h
+        target_ratio = target_width / target_height
+
+        # Sample corner pixel to blend background naturally
+        edge_color = (255, 255, 255)
+        try:
+            corner = img.getpixel((0, 0))
+            if isinstance(corner, tuple) and len(corner) >= 3:
+                edge_color = corner[:3]
+        except Exception:
+            pass
+
+        # If already approximately 16:9 (within 5% tolerance)
+        if abs(current_ratio - target_ratio) < 0.05:
+            if w > 1920:
+                img.thumbnail((1920, 1080), Image.Resampling.LANCZOS)
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                img.save(tmp, format="JPEG", quality=92, optimize=True)
+                return tmp.name, "image/jpeg"
+
+        # Fit inside 16:9 canvas (1280x720) without cropping or stretching
+        canvas = Image.new("RGB", (target_width, target_height), edge_color)
+        img_fit = img.copy()
+        img_fit.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
+
+        offset_x = (target_width - img_fit.width) // 2
+        offset_y = (target_height - img_fit.height) // 2
+        canvas.paste(img_fit, (offset_x, offset_y))
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            canvas.save(tmp, format="JPEG", quality=92, optimize=True)
+            logger.info("Image normalized from %dx%d (ratio %.2f) to 16:9 (1280x720) for Meta compliance.", w, h, current_ratio)
+            return tmp.name, "image/jpeg"
+    except Exception as exc:
+        logger.warning("Image 16:9 normalization skipped: %s", exc)
+        if isinstance(input_path_or_bytes, bytes):
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(input_path_or_bytes)
+                return tmp.name, "image/png"
+        return str(input_path_or_bytes), "image/png"
 
 
 def _resolve_header_media(components: list, client: str = "bajaj") -> list:
@@ -254,14 +320,11 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
         image_bytes = comp.pop("image_bytes", None)
 
         if cformat == "IMAGE":
-            default_type = "image/png"
             if image_bytes:
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                    tmp.write(image_bytes)
-                    media_file = tmp.name
-                file_type = "image/png"
-            if not media_file and not media_url:
+                media_file, file_type = normalize_image_16_9(image_bytes)
+            elif media_file:
+                media_file, file_type = normalize_image_16_9(media_file)
+            elif not media_url:
                 media_file = _ensure_default_sample_image()
                 file_type = "image/png"
         elif cformat == "VIDEO":
@@ -286,6 +349,7 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
             if not media_file and not media_url:
                 media_file = _ensure_default_sample_pdf()
                 file_type = "application/pdf"
+        else:
             default_type = "application/octet-stream"
 
         file_type = file_type or default_type
