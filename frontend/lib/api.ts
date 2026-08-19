@@ -6,6 +6,15 @@ export type AccountItem = {
   name: string;
   is_builtin?: boolean;
 };
+
+export type UserItem = {
+  id: string;
+  name: string;
+  role?: string;
+  created_at?: string;
+  last_active?: string;
+  actions_count?: number;
+};
 export type Template = {
   source_ref: string;
   template_name: string;
@@ -374,6 +383,22 @@ export async function deleteAccount(id: string, user?: string): Promise<{ ok: bo
   const qs = user ? `?user=${encodeURIComponent(user)}` : '';
   const res = await fetchWithRetry(getApiUrl(`/api/accounts/${encodeURIComponent(id)}${qs}`), {
     method: "DELETE",
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchUsers(): Promise<UserItem[]> {
+  const res = await fetchWithRetry(getApiUrl("/api/users"));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function registerUser(name: string, role: string = "Operator"): Promise<UserItem> {
+  const res = await fetchWithRetry(getApiUrl("/api/users"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, role }),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

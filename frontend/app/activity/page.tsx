@@ -82,7 +82,7 @@ function UserAvatar({ name, isCurrentUser }: { name: string; isCurrentUser?: boo
 }
 
 export default function ActivityLogsPage() {
-  const { user: currentAppUser } = useApp();
+  const { user: currentAppUser, users, accounts, getAccountLabel } = useApp();
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [stats, setStats] = useState<ActivityStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -319,9 +319,9 @@ export default function ActivityLogsPage() {
               className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Team Members</option>
-              {usersList.map((u) => (
-                <option key={u} value={u}>
-                  {u}
+              {users.map((u) => (
+                <option key={u.id || u.name} value={u.name}>
+                  {u.name}
                 </option>
               ))}
             </select>
@@ -338,6 +338,9 @@ export default function ActivityLogsPage() {
               <option value="STATUS_POLL">Status Poll</option>
               <option value="CREDENTIALS_UPDATE">Credentials Update</option>
               <option value="CREDENTIALS_TEST">Credentials Test</option>
+              <option value="ACCOUNT_CREATE">Account Created</option>
+              <option value="ACCOUNT_DELETE">Account Deleted</option>
+              <option value="USER_LOGIN">User Active</option>
             </select>
 
             {/* Account Filter */}
@@ -347,10 +350,12 @@ export default function ActivityLogsPage() {
               className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Accounts</option>
-              <option value="tata">Tata Capital</option>
-              <option value="bajaj">Bajaj</option>
+              {accounts.map((acc) => (
+                <option key={acc.id} value={acc.id}>
+                  {acc.name}
+                </option>
+              ))}
             </select>
-
             {/* Channel Filter */}
             <select
               value={filterChannel}

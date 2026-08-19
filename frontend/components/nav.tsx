@@ -52,20 +52,9 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
-  const { account, setAccount, channel, setChannel, user, setUser, accounts, getAccountLabel } = useApp();
-  const [isEditingUser, setIsEditingUser] = useState(false);
-  const [userNameInput, setUserNameInput] = useState('');
-
-  const handleSaveUser = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (userNameInput.trim()) {
-      setUser(userNameInput.trim());
-    }
-    setIsEditingUser(false);
-  };
+  const { account, setAccount, channel, setChannel, user, accounts, getAccountLabel, openUserModal } = useApp();
   return (
     <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-gray-200 flex flex-col z-30">
-      {/* Brand Header */}
       <div className="p-5 border-b border-gray-100">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
@@ -188,48 +177,13 @@ export default function Nav() {
           </div>
           <button
             type="button"
-            onClick={() => {
-              setUserNameInput(user);
-              setIsEditingUser(true);
-            }}
+            onClick={openUserModal}
             className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 transition-colors p-1"
-            title="Switch or rename user"
+            title="Switch or create operator profile"
           >
             Switch
           </button>
         </div>
-
-        {/* User Edit Modal / Popover */}
-        {isEditingUser && (
-          <div className="p-2.5 bg-white border border-blue-200 rounded-lg shadow-sm space-y-2">
-            <p className="text-[11px] font-semibold text-gray-700">Set Your Name / Identity:</p>
-            <form onSubmit={handleSaveUser} className="space-y-1.5">
-              <input
-                type="text"
-                value={userNameInput}
-                onChange={(e) => setUserNameInput(e.target.value)}
-                placeholder="e.g. Namann, M., Team..."
-                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                autoFocus
-              />
-              <div className="flex items-center justify-end gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setIsEditingUser(false)}
-                  className="text-[10px] font-semibold text-gray-500 px-2 py-1 hover:bg-gray-100 rounded"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="text-[10px] font-semibold text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded"
-                >
-                  Save
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
 
         <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1 border-t border-gray-200/60">
           <span>Target</span>

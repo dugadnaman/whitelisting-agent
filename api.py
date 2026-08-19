@@ -35,7 +35,13 @@ from models import ApprovalStatus
 from runner import poll_pending, run_file
 from submission_client import _STATUS_MAP
 from tracker import load_log, pending_entries
-from activity_tracker import log_activity, load_activities, get_activity_summary
+from activity_tracker import (
+    get_activity_summary,
+    get_all_users,
+    load_activities,
+    log_activity,
+    register_or_update_user,
+)
 # RCS pipeline imports
 from rcs_config import (
     KARIX_DLT_ACTION_URL,
@@ -116,7 +122,6 @@ def load_accounts() -> list[dict]:
             if acc_id not in accounts_map:
                 name = prefix.replace("_", " ").title()
                 accounts_map[acc_id] = {"id": acc_id, "name": name, "is_builtin": False}
-
     accounts = list(accounts_map.values())
     try:
         ACCOUNTS_FILE.write_text(json.dumps(accounts, indent=2) + "\n", encoding="utf-8")
@@ -139,6 +144,9 @@ def get_account_name(account_id: str) -> str:
 class AccountCreate(BaseModel):
     name: str
     id: str | None = None
+class UserRegister(BaseModel):
+    name: str
+    role: str | None = "Operator"
 
 class CredentialUpdate(BaseModel):
     account: str = "bajaj"  # e.g. "bajaj", "tata", or any custom account id
@@ -1051,6 +1059,28 @@ def get_activity_logs(
         limit=limit,
     )
     return [_json_safe(r) for r in records]
+
+@app.get("/api/users")
+def list_users():
+    """Return all registered operator accounts."""
+    return [_json_safe(u) for u in get_all_users()]
+
+@app.post("/api/users")
+def register_user_endpoint(body: UserRegister):
+    """Create or switch operator profile."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="User name cannot be empty.")
+    u = register_or_update_user(name, body.role or "Operator")
+    log_activity(
+        user=name,
+        action="USER_LOGIN",
+        account="all",
+        channel="all",
+        details={"name": name, "role": body.role or "Operator"},
+        status="success",
+    )
+    return _json_safe(u)
 
 
 @app.get("/api/activity/stats")
