@@ -32,13 +32,47 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [mounted, setMounted] = useState(false);
 
   const refreshAccounts = useCallback(async () => {
+    let localCustom: AccountItem[] = [];
+    try {
+      const stored = localStorage.getItem('karix_custom_accounts');
+      if (stored) {
+        localCustom = JSON.parse(stored);
+      }
+    } catch {}
+
     try {
       const data = await fetchAccounts();
       if (Array.isArray(data) && data.length > 0) {
-        setAccounts(data);
+        const mergedMap = new Map<string, AccountItem>();
+        for (const a of data) {
+          mergedMap.set(a.id, a);
+        }
+        for (const localA of localCustom) {
+          if (!mergedMap.has(localA.id)) {
+            mergedMap.set(localA.id, localA);
+            // Auto-heal / re-register missing custom account on backend
+            fetch('/api/accounts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: localA.name, id: localA.id }),
+            }).catch(() => {});
+          }
+        }
+        const merged = Array.from(mergedMap.values());
+        setAccounts(merged);
+        const customOnly = merged.filter((a) => !a.is_builtin);
+        try {
+          localStorage.setItem('karix_custom_accounts', JSON.stringify(customOnly));
+        } catch {}
       }
     } catch (err) {
       console.warn('Could not load accounts list:', err);
+      if (localCustom.length > 0) {
+        const fallbackMap = new Map<string, AccountItem>();
+        for (const d of DEFAULT_ACCOUNTS) fallbackMap.set(d.id, d);
+        for (const c of localCustom) fallbackMap.set(c.id, c);
+        setAccounts(Array.from(fallbackMap.values()));
+      }
     }
   }, []);
 

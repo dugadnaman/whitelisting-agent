@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { updateCredentials, testCredentials, createAccount, deleteAccount } from '@/lib/api';
-import type { Account, Channel } from '@/lib/api';
+import type { Account, Channel, AccountItem } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
@@ -29,7 +29,8 @@ export default function SettingsPage() {
   const [newAccountId, setNewAccountId] = useState('');
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-
+  const [accountToDelete, setAccountToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // WhatsApp form fields
   const [wabaAuthToken, setWabaAuthToken] = useState('');
   const [wabaId, setWabaId] = useState('');
@@ -46,6 +47,37 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
 
+  // Load cached credentials for selected account and channel from localStorage
+  useEffect(() => {
+    try {
+      const cacheKey = `karix_creds_${selectedAccount}_${selectedChannel}`;
+      const saved = localStorage.getItem(cacheKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (selectedChannel === 'whatsapp') {
+          setWabaAuthToken(parsed.waba_auth_token || '');
+          setWabaId(parsed.waba_id || '');
+          setBearerToken(parsed.bearer_token || '');
+          setSession(parsed.session || '');
+          setUser(parsed.user || '');
+        } else {
+          setEntityId(parsed.entity_id || '');
+          setLoungeCookie(parsed.lounge_cookie || '');
+        }
+      } else {
+        if (selectedChannel === 'whatsapp') {
+          setWabaAuthToken('');
+          setWabaId('');
+          setBearerToken('');
+          setSession('');
+          setUser('');
+        } else {
+          setEntityId('');
+          setLoungeCookie('');
+        }
+      }
+    } catch {}
+  }, [selectedAccount, selectedChannel]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isTata = selectedAccount === 'tata';
   const isBajaj = selectedAccount === 'bajaj';
@@ -85,9 +117,22 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleDeleteAccount(accId: string, accName: string) {
-    if (!confirm(`Are you sure you want to delete the account "${accName}"?`)) return;
+  async function handleConfirmDelete() {
+    if (!accountToDelete) return;
+    const accId = accountToDelete.id;
+    const accName = accountToDelete.name;
+    setDeleting(true);
     try {
+      try {
+        localStorage.removeItem(`karix_creds_${accId}_whatsapp`);
+        localStorage.removeItem(`karix_creds_${accId}_rcs`);
+        const stored = localStorage.getItem('karix_custom_accounts');
+        if (stored) {
+          const arr: AccountItem[] = JSON.parse(stored);
+          const filtered = arr.filter((a) => a.id !== accId);
+          localStorage.setItem('karix_custom_accounts', JSON.stringify(filtered));
+        }
+      } catch {}
       await deleteAccount(accId, currentOperator);
       await refreshAccounts();
       if (selectedAccount === accId) {
@@ -96,12 +141,15 @@ export default function SettingsPage() {
       if (activeAccount === accId) {
         setActiveAccount('bajaj');
       }
+      setAccountToDelete(null);
       setBanner({ type: 'success', message: `Account "${accName}" deleted.` });
     } catch (err) {
       setBanner({
         type: 'error',
         message: err instanceof Error ? err.message : 'Failed to delete account',
       });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -138,7 +186,7 @@ export default function SettingsPage() {
     setSaving(true);
     setBanner(null);
     try {
-      await updateCredentials({
+      const credsToSave = {
         account: selectedAccount,
         channel: selectedChannel,
         waba_auth_token: wabaAuthToken.trim() || undefined,
@@ -149,7 +197,14 @@ export default function SettingsPage() {
         entity_id: entityId.trim() || undefined,
         lounge_cookie: loungeCookie.trim() || undefined,
         user_name: currentOperator,
-      });
+      };
+      await updateCredentials(credsToSave);
+
+      // Save to localStorage cache so it never vanishes on page refresh
+      try {
+        const cacheKey = `karix_creds_${selectedAccount}_${selectedChannel}`;
+        localStorage.setItem(cacheKey, JSON.stringify(credsToSave));
+      } catch {}
 
       // Run immediate test to verify
       const testRes = await testCredentials(selectedAccount, selectedChannel, {
@@ -233,7 +288,7 @@ export default function SettingsPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleDeleteAccount(acc.id, acc.name);
+                        setAccountToDelete({ id: acc.id, name: acc.name });
                       }}
                       title="Delete custom account"
                       className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-600 transition-opacity p-0.5"
@@ -610,6 +665,48 @@ export default function SettingsPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {accountToDelete && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-gray-100 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-red-600" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Delete Account?</h3>
+                <p className="text-xs text-gray-500">This action cannot be undone.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-600 leading-relaxed">
+              Are you sure you want to delete <span className="font-bold text-gray-900">&quot;{accountToDelete.name}&quot;</span>? All saved WABA tokens, IDs, and configurations for this brand will be removed.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAccountToDelete(null)}
+                disabled={deleting}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {deleting ? 'Deleting...' : 'Delete Account'}
+              </button>
+            </div>
           </div>
         </div>
       )}

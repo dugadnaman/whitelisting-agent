@@ -78,32 +78,52 @@ DEFAULT_ACCOUNTS = [
 ]
 
 def load_accounts() -> list[dict]:
-    """Load accounts from accounts.json, guaranteeing default built-ins exist."""
-    if not ACCOUNTS_FILE.exists():
+    """Load accounts from accounts.json, credentials.json, and environment."""
+    _load_env_file()
+    accounts_map: dict[str, dict] = {d["id"]: dict(d) for d in DEFAULT_ACCOUNTS}
+
+    # 1. From accounts.json
+    if ACCOUNTS_FILE.exists():
         try:
-            ACCOUNTS_FILE.write_text(json.dumps(DEFAULT_ACCOUNTS, indent=2) + "\n", encoding="utf-8")
+            data = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                for a in data:
+                    if isinstance(a, dict) and a.get("id"):
+                        accounts_map[a["id"]] = a
+        except Exception as exc:
+            logger.warning("Error reading accounts.json: %s", exc)
+
+    # 2. Auto-discover custom accounts from credentials.json & os.environ
+    cred_json_path = Path("credentials.json")
+    all_keys = list(os.environ.keys())
+    if cred_json_path.exists():
+        try:
+            saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
+            if isinstance(saved_creds, dict):
+                all_keys.extend(saved_creds.keys())
         except Exception:
             pass
-        return [dict(a) for a in DEFAULT_ACCOUNTS]
+
+    for k in all_keys:
+        if k.endswith("_WABA_ID") and not k.startswith("BAJAJ_") and not k.startswith("TATA_") and k != "WABA_ID":
+            prefix = k[:-8]  # strip _WABA_ID
+            acc_id = prefix.lower()
+            if acc_id not in accounts_map:
+                name = prefix.replace("_", " ").title()
+                accounts_map[acc_id] = {"id": acc_id, "name": name, "is_builtin": False}
+
+    accounts = list(accounts_map.values())
     try:
-        data = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
-        if isinstance(data, list):
-            existing_ids = {a.get("id") for a in data if isinstance(a, dict)}
-            accounts = [dict(a) for a in data if isinstance(a, dict)]
-            for d in DEFAULT_ACCOUNTS:
-                if d["id"] not in existing_ids:
-                    accounts.append(dict(d))
-            return accounts
-    except Exception as exc:
-        logger.warning("Error reading accounts.json: %s", exc)
-    return [dict(a) for a in DEFAULT_ACCOUNTS]
+        ACCOUNTS_FILE.write_text(json.dumps(accounts, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return accounts
 
 def save_accounts(accounts: list[dict]) -> None:
     try:
         ACCOUNTS_FILE.write_text(json.dumps(accounts, indent=2) + "\n", encoding="utf-8")
     except Exception as exc:
         logger.error("Failed to write accounts.json: %s", exc)
-
 def get_account_name(account_id: str) -> str:
     accs = load_accounts()
     for a in accs:
@@ -700,6 +720,38 @@ def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
         raise HTTPException(status_code=404, detail=f"Account '{acc_id}' not found.")
     
     save_accounts(accounts)
+
+    # Scrub any credentials for this account from credentials.json and os.environ
+    prefix = _account_prefix(acc_id)
+    cred_json_path = Path("credentials.json")
+    if cred_json_path.exists():
+        try:
+            saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
+            if isinstance(saved_creds, dict):
+                keys_to_del = [k for k in saved_creds if k.startswith(f"{prefix}_")]
+                for k in keys_to_del:
+                    del saved_creds[k]
+                    os.environ.pop(k, None)
+                cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
+        except Exception as exc:
+            logger.warning("Error scrubbing credentials.json on account delete: %s", exc)
+
+    env_keys_to_del = [k for k in os.environ if k.startswith(f"{prefix}_")]
+    for k in env_keys_to_del:
+        os.environ.pop(k, None)
+
+    env_path = Path(".env")
+    if env_path.exists():
+        try:
+            lines = []
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                if "=" in line and line.strip().split("=")[0].strip().startswith(f"{prefix}_"):
+                    continue
+                lines.append(line)
+            env_path.write_text("\n".join(lines) + "\n")
+        except Exception:
+            pass
+
     log_activity(
         user=user,
         action="ACCOUNT_DELETE",
