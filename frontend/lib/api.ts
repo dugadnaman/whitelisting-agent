@@ -111,6 +111,39 @@ function getApiUrl(path: string): string {
   return `${base}${path}`;
 }
 
+function delay(ms: number): Promise<void> {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  setTimeout(resolve, ms);
+  return promise;
+}
+
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  retries = 2,
+  delayMs = 800
+): Promise<Response> {
+  let lastError: unknown;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(input, init);
+      // If server returned 502/503/504 (cold start or temporary restart), retry
+      if ((res.status === 502 || res.status === 503 || res.status === 504) && i < retries) {
+        await delay(delayMs * Math.pow(1.5, i));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      lastError = err;
+      if (i < retries) {
+        await delay(delayMs * Math.pow(1.5, i));
+        continue;
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "Network request failed"));
+}
+
 async function getErrorMessage(res: Response): Promise<string> {
   // Read the body ONCE — calling res.json() then res.text() on a failed
   // parse consumes the stream and loses the real server error.
@@ -144,7 +177,7 @@ export async function fetchStats(
   channel: Channel = "whatsapp"
 ): Promise<Stats> {
   const qs = new URLSearchParams({ account, channel }).toString();
-  const res = await fetch(getApiUrl(`/api/stats?${qs}`));
+  const res = await fetchWithRetry(getApiUrl(`/api/stats?${qs}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -161,7 +194,7 @@ export async function fetchTemplates(params?: {
   if (params?.status) qs.set("status", params.status);
   if (params?.search) qs.set("search", params.search);
 
-  const res = await fetch(getApiUrl(`/api/templates?${qs.toString()}`));
+  const res = await fetchWithRetry(getApiUrl(`/api/templates?${qs.toString()}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -174,7 +207,7 @@ export async function previewFile(
   const form = new FormData();
   form.append("file", file);
   const qs = new URLSearchParams({ account, channel }).toString();
-  const res = await fetch(getApiUrl(`/api/preview?${qs}`), {
+  const res = await fetchWithRetry(getApiUrl(`/api/preview?${qs}`), {
     method: "POST",
     body: form,
   });
@@ -191,7 +224,7 @@ export async function submitFile(
   const form = new FormData();
   form.append("file", file);
   const qs = new URLSearchParams({ account, channel, user }).toString();
-  const res = await fetch(getApiUrl(`/api/submit?${qs}`), {
+  const res = await fetchWithRetry(getApiUrl(`/api/submit?${qs}`), {
     method: "POST",
     headers: { "X-User": user },
     body: form,
@@ -206,7 +239,7 @@ export async function pollPending(
   user: string = "Namann"
 ): Promise<{ checked: number }> {
   const qs = new URLSearchParams({ account, channel, user }).toString();
-  const res = await fetch(getApiUrl(`/api/poll?${qs}`), {
+  const res = await fetchWithRetry(getApiUrl(`/api/poll?${qs}`), {
     method: "POST",
     headers: { "X-User": user },
   });
@@ -226,7 +259,7 @@ export async function updateCredentials(creds: {
   entity_id?: string;
   lounge_cookie?: string;
 }): Promise<{ ok: boolean }> {
-  const res = await fetch(getApiUrl(`/api/credentials`), {
+  const res = await fetchWithRetry(getApiUrl(`/api/credentials`), {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -256,7 +289,7 @@ export async function testCredentials(
   message: string;
 }> {
   const qs = new URLSearchParams({ account, channel, user: creds?.user_name || "Namann" }).toString();
-  const res = await fetch(getApiUrl(`/api/test-credentials?${qs}`), {
+  const res = await fetchWithRetry(getApiUrl(`/api/test-credentials?${qs}`), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -284,13 +317,13 @@ export async function fetchActivityLogs(params?: {
   if (params?.search) qs.set("search", params.search);
   if (params?.limit) qs.set("limit", String(params.limit));
 
-  const res = await fetch(getApiUrl(`/api/activity?${qs.toString()}`));
+  const res = await fetchWithRetry(getApiUrl(`/api/activity?${qs.toString()}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
 export async function fetchActivityStats(): Promise<ActivityStats> {
-  const res = await fetch(getApiUrl(`/api/activity/stats`));
+  const res = await fetchWithRetry(getApiUrl(`/api/activity/stats`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -300,14 +333,14 @@ export function getSampleCsvUrl(channel: Channel = "whatsapp"): string {
 }
 
 export async function fetchAccounts(): Promise<AccountItem[]> {
-  const res = await fetch(getApiUrl("/api/accounts"));
+  const res = await fetchWithRetry(getApiUrl("/api/accounts"));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
 export async function createAccount(name: string, id?: string, user?: string): Promise<AccountItem> {
   const qs = user ? `?user=${encodeURIComponent(user)}` : '';
-  const res = await fetch(getApiUrl(`/api/accounts${qs}`), {
+  const res = await fetchWithRetry(getApiUrl(`/api/accounts${qs}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, id }),
@@ -318,7 +351,7 @@ export async function createAccount(name: string, id?: string, user?: string): P
 
 export async function deleteAccount(id: string, user?: string): Promise<{ ok: boolean }> {
   const qs = user ? `?user=${encodeURIComponent(user)}` : '';
-  const res = await fetch(getApiUrl(`/api/accounts/${encodeURIComponent(id)}${qs}`), {
+  const res = await fetchWithRetry(getApiUrl(`/api/accounts/${encodeURIComponent(id)}${qs}`), {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));

@@ -66,6 +66,11 @@ app.add_middleware(
 LOG_PATH = "submission_log.jsonl"
 RCS_LOG_PATH = "rcs_submission_log.jsonl"
 
+@app.get("/api/health")
+@app.get("/healthz")
+def health_check():
+    """Health check endpoint for Render zero-downtime deploys and external uptime monitors."""
+    return {"status": "ok", "service": "karix-whitelisting-api", "version": "2.1.0"}
 
 # ---------------------------------------------------------------------------
 # Models & Account Store

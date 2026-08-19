@@ -46,7 +46,7 @@ from models import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Retry policy
+# Retry policy & Connection Pooling
 # ---------------------------------------------------------------------------
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 2  # doubles each retry: 2 s → 4 s → 8 s
@@ -56,10 +56,30 @@ MEDIA_UPLOAD_TIMEOUT = 120  # seconds — images can be large
 # HTTP status codes worth retrying (transport-level, not validation errors)
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
+_session: requests.Session | None = None
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def get_http_session() -> requests.Session:
+    """Return a shared connection-pooled HTTP session for high-throughput Karix/Meta requests."""
+    global _session
+    if _session is None:
+        from requests.adapters import HTTPAdapter
+        from urllib3.util import Retry
+        _session = requests.Session()
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(
+            pool_connections=25,
+            pool_maxsize=100,
+            max_retries=retry_strategy,
+        )
+        _session.mount("https://", adapter)
+        _session.mount("http://", adapter)
+    return _session
+
 
 def _is_retryable(exc: Exception | None, response: requests.Response | None) -> bool:
     """Return True only for transport-level failures we should retry."""
@@ -71,7 +91,6 @@ def _is_retryable(exc: Exception | None, response: requests.Response | None) -> 
 FALLBACK_PLACEHOLDER_HEADER_HANDLE = (
     "4::aW1hZ2UvcG5n:ARbniR2Mjs3AjmbXj_PT2co-Htm_UrVCspAqcYZ374tOY9ynPsS1fHzg3GhFomqWBiQjj6eUUZ3pNEkRraYDm90jI4H8yj21diMGmjLjCg0_zg:e:1787385539:379138877290302:100066839164237:ARYkaBy8mnS0GiuXUz0"
 )
-
 
 def upload_media(file_path: str, file_type: str = "image/png", client: str = "bajaj") -> str:
     """
@@ -90,7 +109,7 @@ def upload_media(file_path: str, file_type: str = "image/png", client: str = "ba
         url = f"{KARIX_BASE_URL}/mediaUpload"
         headers = get_portal_auth_headers(client)
         with open(path, "rb") as f:
-            resp = requests.post(
+            resp = get_http_session().post(
                 url,
                 headers=headers,
                 files={"file": (path.name, f, file_type)},
@@ -124,11 +143,11 @@ def upload_media(file_path: str, file_type: str = "image/png", client: str = "ba
         if token and token != "dummy_token":
             file_len = os.path.getsize(path)
             sess_url = f"https://graph.facebook.com/v19.0/app/uploads?file_length={file_len}&file_type={file_type}"
-            sess_resp = requests.post(sess_url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
+            sess_resp = get_http_session().post(sess_url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
             if sess_resp.ok:
                 session_id = sess_resp.json().get("id")
                 with open(path, "rb") as f:
-                    up_resp = requests.post(
+                    up_resp = get_http_session().post(
                         f"https://graph.facebook.com/v19.0/{session_id}",
                         headers={"Authorization": f"OAuth {token}", "file_offset": "0"},
                         data=f.read(),
@@ -516,13 +535,12 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             # useful error message.  Confirmed via browser DevTools traffic.
             # requests auto-sets Content-Type to multipart/form-data when
             # using files=, so we must NOT include Content-Type in headers.
-            resp = requests.post(
+            resp = get_http_session().post(
                 url,
                 headers=headers,
                 files={"request": (None, json.dumps(body), "application/json")},
                 timeout=REQUEST_TIMEOUT,
             )
-        except (requests.ConnectionError, requests.Timeout) as e:
             exc = e
             logger.warning("Attempt %d/%d transport error: %s", attempt + 1, MAX_RETRIES, e)
         except OSError as e:
@@ -693,7 +711,7 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
         try:
             headers = get_official_auth_headers(c)
             headers["Content-Type"] = "application/json"
-            response = requests.post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
+            response = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
         except (requests.ConnectionError, requests.Timeout) as exc:
             last_result = SubmissionResult(
                 source_ref=payload.source_ref,
@@ -797,7 +815,7 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     try:
         waba_id = get_waba_id(client)
         url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
-        response = requests.get(
+        response = get_http_session().get(
             url,
             headers=get_official_auth_headers(client),
             timeout=REQUEST_TIMEOUT,
