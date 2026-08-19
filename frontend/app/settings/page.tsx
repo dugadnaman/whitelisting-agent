@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, createAccount, deleteAccount } from '@/lib/api';
+import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials } from '@/lib/api';
 import type { Account, Channel, AccountItem } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
@@ -47,36 +47,48 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
 
-  // Load cached credentials for selected account and channel from localStorage
+  // Load server-configured credentials (synced across all devices & team members)
   useEffect(() => {
-    try {
-      const cacheKey = `karix_creds_${selectedAccount}_${selectedChannel}`;
-      const saved = localStorage.getItem(cacheKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
+    let ignore = false;
+    async function loadServerCreds() {
+      try {
+        const creds = await fetchCredentials(selectedAccount, selectedChannel);
+        if (ignore) return;
         if (selectedChannel === 'whatsapp') {
-          setWabaAuthToken(parsed.waba_auth_token || '');
-          setWabaId(parsed.waba_id || '');
-          setBearerToken(parsed.bearer_token || '');
-          setSession(parsed.session || '');
-          setUser(parsed.user || '');
+          setWabaAuthToken(creds.waba_auth_token || '');
+          setWabaId(creds.waba_id || '');
+          setBearerToken(creds.bearer_token || '');
+          setSession(creds.session || '');
+          setUser(creds.user || '');
         } else {
-          setEntityId(parsed.entity_id || '');
-          setLoungeCookie(parsed.lounge_cookie || '');
+          setEntityId(creds.entity_id || '');
+          setLoungeCookie(creds.lounge_cookie || '');
         }
-      } else {
-        if (selectedChannel === 'whatsapp') {
-          setWabaAuthToken('');
-          setWabaId('');
-          setBearerToken('');
-          setSession('');
-          setUser('');
-        } else {
-          setEntityId('');
-          setLoungeCookie('');
-        }
+      } catch {
+        if (ignore) return;
+        try {
+          const cacheKey = `karix_creds_${selectedAccount}_${selectedChannel}`;
+          const saved = localStorage.getItem(cacheKey);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (selectedChannel === 'whatsapp') {
+              setWabaAuthToken(parsed.waba_auth_token || '');
+              setWabaId(parsed.waba_id || '');
+              setBearerToken(parsed.bearer_token || '');
+              setSession(parsed.session || '');
+              setUser(parsed.user || '');
+            } else {
+              setEntityId(parsed.entity_id || '');
+              setLoungeCookie(parsed.lounge_cookie || '');
+            }
+          }
+        } catch {}
       }
-    } catch {}
+    }
+    loadServerCreds();
+    return () => {
+      ignore = true;
+    };
   }, [selectedAccount, selectedChannel]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isTata = selectedAccount === 'tata';

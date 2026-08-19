@@ -767,6 +767,51 @@ def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
     )
     return {"ok": True}
 
+@app.get("/api/credentials")
+def get_credentials(
+    account: str = Query("bajaj"),
+    channel: str = Query("whatsapp"),
+):
+    """
+    Return saved credentials from the server so any device/operator on the team
+    instantly shares the single source of truth without re-entering keys.
+    """
+    _load_env_file()
+    acc = account.lower().strip()
+    chan = channel.lower().strip()
+    prefix = _account_prefix(acc)
+    is_tata = acc == "tata"
+    is_bajaj = acc == "bajaj"
+
+    w_tok_key = "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+    w_id_key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
+    b_tok_key = "TATA_KARIX_BEARER_TOKEN" if is_tata else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
+    s_key = "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")
+    u_key = "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")
+    e_id_key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
+    l_ck_key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+
+    waba_id = os.environ.get(w_id_key) or (BAJAJ_WABA_ID if is_bajaj else "")
+    waba_auth_token = os.environ.get(w_tok_key) or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else "")
+    bearer_token = os.environ.get(b_tok_key) or (os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else "")
+    session = os.environ.get(s_key) or (os.environ.get("KARIX_SESSION") if is_bajaj else "")
+    user = os.environ.get(u_key) or (os.environ.get("KARIX_USER") if is_bajaj else "")
+    entity_id = os.environ.get(e_id_key) or ("110100001654" if is_bajaj else ("1001490234791338781" if is_tata else ""))
+    lounge_cookie = os.environ.get(l_ck_key) or (os.environ.get("KARIX_LOUNGE_COOKIE") if is_bajaj else "")
+
+    return {
+        "account": acc,
+        "channel": chan,
+        "waba_id": waba_id or "",
+        "waba_auth_token": waba_auth_token or "",
+        "bearer_token": bearer_token or "",
+        "session": session or "",
+        "user": user or "",
+        "entity_id": entity_id or "",
+        "lounge_cookie": lounge_cookie or "",
+        "is_configured": bool(waba_id and waba_auth_token) if chan == "whatsapp" else bool(entity_id),
+    }
+
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate):
     env_path = Path(".env")

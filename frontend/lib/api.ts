@@ -247,6 +247,27 @@ export async function pollPending(
   return res.json();
 }
 
+export async function fetchCredentials(
+  account: Account = "bajaj",
+  channel: Channel = "whatsapp"
+): Promise<{
+  account: string;
+  channel: string;
+  waba_id: string;
+  waba_auth_token: string;
+  bearer_token: string;
+  session: string;
+  user: string;
+  entity_id: string;
+  lounge_cookie: string;
+  is_configured: boolean;
+}> {
+  const qs = new URLSearchParams({ account, channel }).toString();
+  const res = await fetchWithRetry(getApiUrl(`/api/credentials?${qs}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
 export async function updateCredentials(creds: {
   account: Account;
   channel: Channel;
