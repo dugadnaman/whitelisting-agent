@@ -29,6 +29,8 @@ from config import (
     OFFICIAL_TEMPLATE_BASE_URL,
     _account_prefix,
     _load_env_file,
+    get_official_auth_headers,
+    get_waba_id,
 )
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus
