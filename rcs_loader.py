@@ -271,8 +271,9 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     bot_id = str(row.get("bot_id") or row.get("sender_id") or get_rcs_bot_id(c)).strip()
 
     raw_type = str(row.get("template_type") or row.get("type") or "").strip().lower()
+    header_type = str(row.get("header_type") or "").strip().lower()
     media_url = str(row.get("media_url") or row.get("image_url") or row.get("image") or "").strip() or None
-    card_title = str(row.get("card_title") or row.get("title") or "").strip() or None
+    card_title = str(row.get("card_title") or row.get("title") or row.get("header_text") or "").strip() or None
 
     is_carousel = (
         raw_type in ("carousel", "carousal", "carousel_cards", "multi_card")
@@ -281,16 +282,19 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         or ("|" in str(row.get("card_title") or "") and raw_type in ("carousel", "carousal"))
     )
 
+    public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
+
     if is_carousel:
         template_type = "carousel"
         carousel_cards = _build_carousel_cards_from_row(row)
-    elif raw_type in ("richcard", "card", "image") or media_url or card_title:
+    elif raw_type in ("richcard", "card", "image") or header_type in ("image", "media", "richcard") or media_url or card_title:
         template_type = "richcard"
         carousel_cards = []
+        if not media_url:
+            media_url = f"{public_base}/api/media/default_sample_header.png"
     else:
         template_type = "text"
         carousel_cards = []
-
     message = (
         row.get("text_message")
         or row.get("body")
@@ -404,50 +408,54 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
     all_raw_rows = list(sheet.iter_rows(values_only=True))
+    wb.close()
 
-    # Check if there is a row that contains multiple rich single-cell card blocks (like Book4)
+    first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
+    has_standard_headers = any(h in ("template_name", "templatename", "name", "body", "body_text", "components", "category", "language", "card_title", "card_description", "media_url", "header_type") for h in first_row)
+
+    # Check if there is a row that contains multiple rich single-cell card blocks (only when no standard column headers exist)
     block_row_cards = None
-    for r in all_raw_rows:
-        text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
-        if len(text_blocks) >= 2:
-            block_row_cards = text_blocks
-            break
+    if not has_standard_headers:
+        for r in all_raw_rows:
+            text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
+            if len(text_blocks) >= 2:
+                block_row_cards = text_blocks
+                break
+        if block_row_cards:
+            c_cards = []
+            for c_idx, block in enumerate(block_row_cards):
+                card_dict = parse_single_cell_card_block(block)
+                if c_idx < len(uploaded_file_names):
+                    card_dict["fileName"] = uploaded_file_names[c_idx]
 
-    if block_row_cards:
-        c_cards = []
-        for c_idx, block in enumerate(block_row_cards):
-            card_dict = parse_single_cell_card_block(block)
-            if c_idx < len(uploaded_file_names):
-                card_dict["fileName"] = uploaded_file_names[c_idx]
+                b_text = card_dict.get("button_text") or "Apply Now"
+                b_url = card_dict.get("button_url") or "https://www.tatacapital.com"
+                card_dict["suggestions"] = [
+                    {
+                        "suggestionType": "url_action",
+                        "text": b_text,
+                        "postbackData": b_text.lower().replace(" ", "_"),
+                        "url": b_url,
+                    }
+                ]
+                c_cards.append(card_dict)
 
-            b_text = card_dict.get("button_text") or "Apply Now"
-            b_url = card_dict.get("button_url") or "https://www.tatacapital.com"
-            card_dict["suggestions"] = [
-                {
-                    "suggestionType": "url_action",
-                    "text": b_text,
-                    "postbackData": b_text.lower().replace(" ", "_"),
-                    "url": b_url,
-                }
-            ]
-            c_cards.append(card_dict)
+            base_name = Path(path).stem
+            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_')
+            t_name = f"tata_{clean_name}_carousel"[:25].rstrip('_')
 
-        base_name = Path(path).stem
-        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_')
-        t_name = f"tata_{clean_name}_carousel"[:25].rstrip('_')
-
-        sub = RcsTemplateSubmission(
-            template_name=t_name,
-            bot_id=get_rcs_bot_id(client),
-            template_type="carousel",
-            carousel_cards=c_cards,
-            template_category="TRANSACTIONAL",
-            entity_id=get_rcs_entity_id(client),
-            client=client.lower(),
-            channel="rcs",
-            source_ref=t_name,
-        )
-        return [sub]
+            sub = RcsTemplateSubmission(
+                template_name=t_name,
+                bot_id=get_rcs_bot_id(client),
+                template_type="carousel",
+                carousel_cards=c_cards,
+                template_category="TRANSACTIONAL",
+                entity_id=get_rcs_entity_id(client),
+                client=client.lower(),
+                channel="rcs",
+                source_ref=t_name,
+            )
+            return [sub]
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
     for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 1):

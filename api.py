@@ -84,13 +84,30 @@ def health_check():
 MEDIA_CACHE_DIR = Path("media_cache")
 MEDIA_CACHE_DIR.mkdir(exist_ok=True)
 
+def _init_media_cache():
+    try:
+        from submission_client import _ensure_default_sample_image, _ensure_default_sample_video, _ensure_default_sample_pdf
+        img_p = _ensure_default_sample_image()
+        target = MEDIA_CACHE_DIR / "default_sample_header.png"
+        if not target.exists() and Path(img_p).exists():
+            target.write_bytes(Path(img_p).read_bytes())
+    except Exception:
+        pass
+
+_init_media_cache()
+
 @app.get("/api/media/{filename}")
 def get_public_media(filename: str):
     """Serve cached template header images/videos/documents directly to Meta and frontend previews."""
     clean_fn = Path(filename).name
     file_p = MEDIA_CACHE_DIR / clean_fn
     if not file_p.exists():
-        raise HTTPException(status_code=404, detail="Media not found")
+        # Check root directory fallback
+        root_p = Path(clean_fn)
+        if root_p.exists():
+            file_p = root_p
+        else:
+            raise HTTPException(status_code=404, detail="Media not found")
     media_type = "image/png"
     if clean_fn.endswith((".jpg", ".jpeg")):
         media_type = "image/jpeg"
