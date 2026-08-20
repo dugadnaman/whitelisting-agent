@@ -363,73 +363,74 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
     all_raw_rows = list(sheet.iter_rows(values_only=True))
+    first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
+    has_standard_headers = any(h in ("template_name", "name", "body", "body_text", "components", "category", "language") for h in first_row)
 
-    # Check if this sheet is a multi-block single-cell layout (like Book 4 where 2+ cells contain long copy)
+    # Check if this sheet is a multi-block single-cell layout (only when no standard column headers exist)
     block_row_cells = None
-    for r in all_raw_rows:
-        text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
-        if len(text_blocks) >= 2:
-            block_row_cells = text_blocks
-            break
+    if not has_standard_headers:
+        for r in all_raw_rows:
+            text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
+            if len(text_blocks) >= 2:
+                block_row_cells = text_blocks
+                break
+        if block_row_cells:
+            base_name = Path(path).stem
+            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_').lower()
 
-    if block_row_cells:
-        base_name = Path(path).stem
-        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_').lower()
+            submissions = []
+            for idx, block in enumerate(block_row_cells, 1):
+                parsed = parse_single_cell_whatsapp_block(block, client=client)
+                t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
 
-        submissions = []
-        for idx, block in enumerate(block_row_cells, 1):
-            parsed = parse_single_cell_whatsapp_block(block, client=client)
-            t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
-
-            components = []
-            if (idx - 1) < len(extracted_media):
-                m = extracted_media[idx - 1]
+                components = []
+                if (idx - 1) < len(extracted_media):
+                    m = extracted_media[idx - 1]
+                    components.append({
+                        "type": "HEADER",
+                        "format": m["kind"],
+                        "image_bytes": m["bytes"],
+                        "file_type": m["mime_type"],
+                    })
+                elif parsed.get("header"):
+                    components.append({
+                        "type": "HEADER",
+                        "format": "TEXT",
+                        "text": parsed["header"],
+                    })
                 components.append({
-                    "type": "HEADER",
-                    "format": m["kind"],
-                    "image_bytes": m["bytes"],
-                    "file_type": m["mime_type"],
+                    "type": "BODY",
+                    "text": parsed["body"],
                 })
-            elif parsed.get("header"):
+
                 components.append({
-                    "type": "HEADER",
-                    "format": "TEXT",
-                    "text": parsed["header"],
+                    "type": "FOOTER",
+                    "text": "T&Cs apply",
                 })
-            components.append({
-                "type": "BODY",
-                "text": parsed["body"],
-            })
 
-            components.append({
-                "type": "FOOTER",
-                "text": "T&Cs apply",
-            })
+                components.append({
+                    "type": "BUTTONS",
+                    "buttons": [{
+                        "type": "URL",
+                        "text": parsed["button_text"],
+                        "url": parsed["button_url"],
+                        "example": [parsed["button_example"]],
+                    }],
+                })
 
-            components.append({
-                "type": "BUTTONS",
-                "buttons": [{
-                    "type": "URL",
-                    "text": parsed["button_text"],
-                    "url": parsed["button_url"],
-                    "example": [parsed["button_example"]],
-                }],
-            })
+                sub = TemplateSubmission(
+                    client=client.lower(),
+                    channel="whatsapp",
+                    template_name=t_name,
+                    language="en",
+                    category="MARKETING",
+                    waba_id=_resolve_row_waba(client, waba_cache),
+                    components=components,
+                    source_ref=t_name,
+                )
+                submissions.append(sub)
 
-            sub = TemplateSubmission(
-                client=client.lower(),
-                channel="whatsapp",
-                template_name=t_name,
-                language="en",
-                category="MARKETING",
-                waba_id=_resolve_row_waba(client, waba_cache),
-                components=components,
-                source_ref=t_name,
-            )
-            submissions.append(sub)
-
-        return submissions
-
+            return submissions
     # Standard row-based spreadsheet
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
