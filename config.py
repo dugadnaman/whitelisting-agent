@@ -151,6 +151,7 @@ def get_waba_id(client: str = "bajaj") -> str:
 def get_esmeaddr(client: str = "bajaj") -> str:
     """Return ESME address for the given client."""
     _load_env_file()
+    c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
     if c == "tata":
         val = os.environ.get("TATA_ESMEADDR")
@@ -166,7 +167,6 @@ def get_esmeaddr(client: str = "bajaj") -> str:
         return os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
     else:
         return os.environ.get(f"{prefix}_ESMEADDR") or os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
-
 
 def get_template_namespace_id(client: str = "bajaj") -> str:
     """Return template namespace ID for the given client."""
