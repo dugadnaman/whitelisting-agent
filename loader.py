@@ -360,13 +360,12 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     videos = [m for m in extracted_media if m["kind"] == "VIDEO"]
     images = [m for m in extracted_media if m["kind"] == "IMAGE"]
     docs = [m for m in extracted_media if m["kind"] == "DOCUMENT"]
-
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
     all_raw_rows = list(sheet.iter_rows(values_only=True))
+    wb.close()
     first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
     has_standard_headers = any(h in ("template_name", "name", "body", "body_text", "components", "category", "language") for h in first_row)
-
     # Check if this sheet is a multi-block single-cell layout (only when no standard column headers exist)
     block_row_cells = None
     if not has_standard_headers:

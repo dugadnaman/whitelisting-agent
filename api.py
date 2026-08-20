@@ -34,7 +34,7 @@ from config import (
 )
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus
-from runner import poll_pending, run_file
+from runner import poll_pending, run, run_file
 from submission_client import _STATUS_MAP
 from tracker import load_log, pending_entries
 from activity_tracker import (
@@ -694,16 +694,25 @@ async def submit_file(
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
-            subs = load_from_excel(tmp_path, client=acc)
+            subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc)
         else:
-            subs = load_from_csv(tmp_path, client=acc)
+            subs = await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
         if not subs:
             raise HTTPException(
                 status_code=400,
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
             )
         before_count = len(load_log(LOG_PATH))
-        await asyncio.to_thread(run_file, tmp_path, LOG_PATH, client=acc, user=user, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        await asyncio.to_thread(
+            run,
+            [asdict(s) for s in subs],
+            LOG_PATH,
+            client=acc,
+            user=user,
+            source_file=file.filename or "upload.csv",
+            fix_aspect_ratio=fix_aspect_ratio,
+            fix_grammar=fix_grammar,
+        )
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
         cleaned_entries = []
