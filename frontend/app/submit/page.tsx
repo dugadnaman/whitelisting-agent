@@ -52,8 +52,8 @@ export default function SubmitPage() {
   const [dragging, setDragging] = useState(false);
   const [autoFixAspectRatio, setAutoFixAspectRatio] = useState(true);
   const [autoFixGrammar, setAutoFixGrammar] = useState(true);
+  const [showAspectRatioModal, setShowAspectRatioModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Reset state if account/channel changes while on submit page
   useEffect(() => {
     setState({ step: 'idle' });
     setFile(null);
@@ -118,12 +118,12 @@ export default function SubmitPage() {
     if (inputRef.current) inputRef.current.value = '';
   }, []);
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
-
-  const handleSubmit = useCallback(async () => {
+  const executeSubmit = useCallback(async (fixRatio: boolean, fixGrammar: boolean) => {
     if (!file || !currentPreviews) return;
+    setShowAspectRatioModal(false);
     setState({ step: 'submitting' });
     try {
-      const res = await submitFile(file, account, channel, user, autoFixAspectRatio, autoFixGrammar);
+      const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar);
       setState({ step: 'submitted', submitted: res.submitted, results: res.results });
     } catch (err) {
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
@@ -133,7 +133,18 @@ export default function SubmitPage() {
         previews: currentPreviews,
       });
     }
-  }, [file, account, channel, user, currentPreviews, autoFixAspectRatio, autoFixGrammar]);
+  }, [file, account, channel, user, currentPreviews]);
+
+  const handleInitiateSubmit = useCallback(() => {
+    if (!file || !currentPreviews) return;
+    // If non-16:9 images are detected, explicitly prompt the user before modifying creatives
+    const warned = currentPreviews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0);
+    if (warned.length > 0) {
+      setShowAspectRatioModal(true);
+      return;
+    }
+    executeSubmit(autoFixAspectRatio, autoFixGrammar);
+  }, [file, currentPreviews, autoFixAspectRatio, autoFixGrammar, executeSubmit]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -414,7 +425,7 @@ export default function SubmitPage() {
                   Clear
                 </button>
                 <button
-                  onClick={handleSubmit}
+                  onClick={handleInitiateSubmit}
                   className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
                 >
                   <span>Submit All ({state.previews.length})</span>
@@ -684,6 +695,119 @@ export default function SubmitPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Aspect Ratio Adjustment Confirmation Modal */}
+      {showAspectRatioModal && currentPreviews && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 space-y-5">
+            <div className="flex items-start justify-between pb-3 border-b border-gray-100">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-lg shrink-0 mt-0.5 shadow-xs">
+                  ⚠️
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900">
+                    Non-16:9 Images Detected ({currentPreviews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0).length} templates)
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    How would you like to handle creatives that do not match the recommended 16:9 ratio?
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAspectRatioModal(false)}
+                className="text-gray-400 hover:text-gray-600 font-bold p-1"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Option 1: Auto-Pad (Recommended) */}
+              <label
+                onClick={() => setAutoFixAspectRatio(true)}
+                className={`p-4 rounded-xl border text-left cursor-pointer transition-all block ${
+                  autoFixAspectRatio
+                    ? 'bg-blue-50/70 border-blue-500 ring-2 ring-blue-500/20'
+                    : 'bg-gray-50/60 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="aspect_choice"
+                      checked={autoFixAspectRatio}
+                      onChange={() => setAutoFixAspectRatio(true)}
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-xs font-bold text-gray-900">
+                      Auto-Pad to 16:9 Canvas (Recommended)
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase">
+                    Safe for Devices
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-600 pl-5 leading-relaxed">
+                  Places non-16:9 images centered onto a clean 16:9 canvas with matching background color. Prevents WhatsApp from cropping your logo, text, or buttons.
+                </p>
+              </label>
+
+              {/* Option 2: Keep Original Raw */}
+              <label
+                onClick={() => setAutoFixAspectRatio(false)}
+                className={`p-4 rounded-xl border text-left cursor-pointer transition-all block ${
+                  !autoFixAspectRatio
+                    ? 'bg-amber-50/70 border-amber-500 ring-2 ring-amber-500/20'
+                    : 'bg-gray-50/60 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="aspect_choice"
+                      checked={!autoFixAspectRatio}
+                      onChange={() => setAutoFixAspectRatio(false)}
+                      className="text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="text-xs font-bold text-gray-900">
+                      Keep Original Dimensions (Raw Upload)
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 uppercase">
+                    Unmodified
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-600 pl-5 leading-relaxed">
+                  Uploads the original image files as-is without any canvas modification. End-user device screens may automatically crop the top and bottom edges.
+                </p>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setShowAspectRatioModal(false)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => executeSubmit(autoFixAspectRatio, autoFixGrammar)}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2"
+              >
+                <span>Confirm &amp; Submit ({currentPreviews.length})</span>
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </button>
             </div>
           </div>
         </div>
