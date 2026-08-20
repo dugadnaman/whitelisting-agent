@@ -102,7 +102,34 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     if not path.exists():
         path = Path(_ensure_default_sample_image())
 
-    # 1. Try Meta Graph API Resumable Upload with official token for this client
+    # 1. Try Karix Portal mediaUpload (Karix BSP official media upload)
+    try:
+        headers = get_portal_auth_headers(client)
+        url = f"{KARIX_BASE_URL}/mediaUpload"
+        with open(path, "rb") as f:
+            resp = get_http_session().post(
+                url,
+                headers=headers,
+                files={"file": (path.name, f, file_type)},
+                data={
+                    "esmeaddr": get_esmeaddr(client),
+                    "waba_id": get_waba_id(client),
+                    "template_namespace_id": get_template_namespace_id(client),
+                    "file_type": file_type,
+                },
+                timeout=MEDIA_UPLOAD_TIMEOUT,
+            )
+        if resp.ok:
+            data = resp.json()
+            handle_str = data.get("Success")
+            if handle_str:
+                first_handle = handle_str.strip().split("\n")[0].strip()
+                logger.info("Media uploaded via Karix portal for %s: handle=%s...", client, first_handle[:60])
+                return first_handle
+    except Exception as e:
+        logger.debug("Karix portal mediaUpload note (%s): %s", client, e)
+
+    # 2. Try Meta Graph API Resumable Upload with official token for this client
     try:
         auth_headers = get_official_auth_headers(client)
         token = auth_headers.get("Authentication", "").replace("Bearer ", "").strip()
@@ -126,32 +153,6 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
                         return h
     except Exception as e:
         logger.debug("Meta Resumable Upload notice (%s): %s", client, e)
-
-    # 2. Try Karix Portal mediaUpload if portal headers exist
-    try:
-        headers = get_portal_auth_headers(client)
-        url = f"{KARIX_BASE_URL}/mediaUpload"
-        with open(path, "rb") as f:
-            resp = get_http_session().post(
-                url,
-                headers=headers,
-                files={"file": (path.name, f, file_type)},
-                data={
-                    "esmeaddr": get_esmeaddr(client),
-                    "waba_id": get_waba_id(client),
-                    "template_namespace_id": get_template_namespace_id(client),
-                    "file_type": file_type,
-                },
-                timeout=MEDIA_UPLOAD_TIMEOUT,
-            )
-        if resp.ok:
-            data = resp.json()
-            handle_str = data.get("Success")
-            if handle_str:
-                first_handle = handle_str.strip().split("\n")[0].strip()
-                return first_handle
-    except Exception:
-        pass
 
     # 3. Fallback to active verified placeholder header handle
     return FALLBACK_PLACEHOLDER_HEADER_HANDLE
@@ -554,8 +555,11 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
                 d["media_url"] = comp.media_url
             if getattr(comp, "media_file", None) is not None:
                 d["media_file"] = comp.media_file
+            if getattr(comp, "image_bytes", None) is not None:
+                d["image_bytes"] = comp.image_bytes
+            if getattr(comp, "file_type", None) is not None:
+                d["file_type"] = comp.file_type
             components_raw.append(d)
-
     return {
         "requestType": "createTemplate",
         "esmeaddr": get_esmeaddr(client),

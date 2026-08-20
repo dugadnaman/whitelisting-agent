@@ -195,7 +195,7 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
 
 
 def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
-    _TC_FIELDS = {"type", "text", "format", "variables", "buttons", "example", "media_url", "media_file"}
+    _TC_FIELDS = {"type", "text", "format", "variables", "buttons", "example", "media_url", "media_file", "image_bytes", "file_type"}
 
     components = []
     for c in row.get("components", []):

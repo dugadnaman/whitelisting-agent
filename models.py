@@ -40,7 +40,8 @@ class TemplateComponent:
     example: dict | None = None
     media_url: str | None = None
     media_file: str | None = None
-
+    image_bytes: bytes | None = None
+    file_type: str | None = None
 @dataclass
 class TemplateSubmission:
     """One template to be submitted for whitelisting."""
