@@ -42,6 +42,7 @@ from activity_tracker import (
     log_activity,
     register_or_update_user,
 )
+from grammar_checker import lint_and_fix_body
 # RCS pipeline imports
 from rcs_config import (
     KARIX_DLT_ACTION_URL,
@@ -481,17 +482,17 @@ def get_templates(
         logger.exception("Error in get_templates for %s (%s): %s", acc, chan, exc)
         return []
 
-def _inspect_template_aspect_ratios(submissions: list, channel: str = "whatsapp") -> list[dict]:
+def _inspect_template_quality_and_warnings(submissions: list, channel: str = "whatsapp") -> list[dict]:
     """
-    Inspect image dimensions across all template components.
-    If an image is not in the recommended 16:9 / 2:1 aspect ratio, attach clear
-    diagnostic warnings so the user is notified before submission.
+    Inspect image dimensions and text grammar/spelling/Meta compliance across all template components.
+    Attaches aspect ratio warnings, spelling typos, repeated words, and suggested fixes.
     """
     import base64
     results = []
     for s in submissions:
         item = asdict(s) if not isinstance(s, dict) else dict(s)
         aspect_warnings = []
+        grammar_warnings = []
 
         # WhatsApp components
         components = item.get("components") or []
@@ -500,6 +501,17 @@ def _inspect_template_aspect_ratios(submissions: list, channel: str = "whatsapp"
                 continue
             ctype = comp.get("type")
             cformat = str(comp.get("format", "")).upper()
+
+            # Check text grammar & spelling on BODY and HEADER TEXT
+            if ctype == "BODY" or (ctype == "HEADER" and cformat == "TEXT"):
+                raw_text = comp.get("text", "")
+                if raw_text:
+                    cleaned, g_warns = lint_and_fix_body(raw_text)
+                    if g_warns:
+                        grammar_warnings.extend(g_warns)
+                        comp["suggested_text"] = cleaned
+
+            # Check Image Aspect Ratio on HEADER IMAGE
             if ctype == "HEADER" and cformat == "IMAGE":
                 img_bytes = comp.get("image_bytes")
                 if img_bytes:
@@ -527,8 +539,7 @@ def _inspect_template_aspect_ratios(submissions: list, channel: str = "whatsapp"
                                 "recommended_ratio": "16:9 (1280x720px)",
                                 "action": "Auto-pad onto 16:9 canvas with matching background so no text/logo is cropped by Meta.",
                             })
-                        
-                        # Provide a thumbnail data URL and strip raw unencodable bytes
+
                         f_type = comp.get("file_type") or "image/png"
                         comp["thumbnail_url"] = f"data:{f_type};base64,{base64.b64encode(img_bytes).decode()}"
                     except Exception as exc:
@@ -538,7 +549,16 @@ def _inspect_template_aspect_ratios(submissions: list, channel: str = "whatsapp"
             elif "image_bytes" in comp:
                 comp.pop("image_bytes", None)
 
+        # RCS components check
+        if channel == "rcs":
+            for text_field in ("text_message", "template_message", "card_title", "card_description"):
+                val = item.get(text_field)
+                if val and isinstance(val, str):
+                    _, g_warns = lint_and_fix_body(val)
+                    grammar_warnings.extend(g_warns)
+
         item["aspect_ratio_warnings"] = aspect_warnings
+        item["grammar_warnings"] = grammar_warnings
         results.append(_json_safe(item))
     return results
 
@@ -576,7 +596,7 @@ async def preview_file(
                 details={"filename": file.filename or "upload.csv", "count": len(submissions)},
                 status="success",
             )
-            return _inspect_template_aspect_ratios(submissions, channel="rcs")
+            return _inspect_template_quality_and_warnings(submissions, channel="rcs")
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
@@ -602,7 +622,8 @@ async def preview_file(
         )
         for s in submissions:
             s.client = account
-        return _inspect_template_aspect_ratios(submissions, channel="whatsapp")
+        return _inspect_template_quality_and_warnings(submissions, channel="whatsapp")
+    except HTTPException:
         raise
     except Exception as exc:
         # Don't leak a bare 500 for malformed/non-template uploads — surface a clean error.
@@ -622,6 +643,7 @@ async def submit_file(
     channel: str = Query("whatsapp"),
     user: str = Query("Anonymous Operator"),
     fix_aspect_ratio: bool = Query(True),
+    fix_grammar: bool = Query(True),
 ):
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -679,7 +701,7 @@ async def submit_file(
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
             )
         before_count = len(load_log(LOG_PATH))
-        await asyncio.to_thread(run_file, tmp_path, LOG_PATH, client=acc, user=user, fix_aspect_ratio=fix_aspect_ratio)
+        await asyncio.to_thread(run_file, tmp_path, LOG_PATH, client=acc, user=user, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
         cleaned_entries = []

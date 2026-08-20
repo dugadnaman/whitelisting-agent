@@ -485,11 +485,12 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
     return normalized, samples
 
 
-def _resolve_body_variables(components: list, client: str = "bajaj") -> list:
+def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar: bool = True) -> list:
     """
     Ensure any BODY or BUTTON component containing variables ({{1}}, {{2}}, <name>, etc.)
-    is properly formatted and has example samples populated for Meta whitelisting.
+    is properly formatted, optionally grammar-fixed, and has example samples populated for Meta whitelisting.
     """
+    from grammar_checker import lint_and_fix_body
     for comp in components:
         if not isinstance(comp, dict):
             continue
@@ -499,6 +500,8 @@ def _resolve_body_variables(components: list, client: str = "bajaj") -> list:
         # BODY component with variables
         if ctype == "BODY":
             raw_text = comp.get("text", "")
+            if fix_grammar:
+                raw_text, _ = lint_and_fix_body(raw_text)
             normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text, client=client)
             comp["text"] = normalized_text
 
@@ -511,6 +514,8 @@ def _resolve_body_variables(components: list, client: str = "bajaj") -> list:
         # HEADER text component with variables
         elif ctype == "HEADER" and comp.get("format") == "TEXT":
             raw_text = comp.get("text", "")
+            if fix_grammar:
+                raw_text, _ = lint_and_fix_body(raw_text)
             normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text, client=client)
             comp["text"] = normalized_text
             if auto_samples:
@@ -747,9 +752,45 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             channel="whatsapp",
             retry_count=attempt,
         )
-    # All retries exhausted
-    return last_result
 
+
+def _build_official_create_body(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> dict:
+    """
+    Build the documented JSON body for POST /api/v1.0/template/{wabaId}.
+
+    Portal-only account fields and the literal sessionId are deliberately absent.
+    """
+    components = copy.deepcopy(_build_portal_create_body(payload, client=client)["components"])
+    components = _resolve_header_media(components, client=client, fix_aspect_ratio=fix_aspect_ratio)
+    components = _resolve_body_variables(components, client=client, fix_grammar=fix_grammar)
+
+    return {
+        "template_name": payload.template_name,
+        "language": payload.language,
+        "category": payload.category,
+        "components": components,
+    }
+def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> SubmissionResult:
+    """Submit a text-only template through the verified official Karix API."""
+    c = (client or getattr(payload, "client", None) or "bajaj").lower()
+    try:
+        waba_id = (payload.waba_id if getattr(payload, "waba_id", None) and payload.waba_id not in ("", BAJAJ_WABA_ID) and c == "tata" else None) or get_waba_id(c)
+        headers = get_official_auth_headers(c)
+    except OSError as exc:
+        return SubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=SubmissionStatus.FAILED,
+            error=str(exc),
+            approval_status=ApprovalStatus.UNKNOWN,
+            client=c,
+            channel="whatsapp",
+            retry_count=0,
+        )
+
+    url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
+    body = _build_official_create_body(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+    last_result: SubmissionResult | None = None
 
 def _requires_portal_media(payload: TemplateSubmission) -> bool:
     """Return whether the template needs an unverified official media handle."""
@@ -860,7 +901,7 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
-                error="Official create response missing templateId",
+                error="No templateId returned in official API response",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
                 client=c,
@@ -883,15 +924,14 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
     return last_result
 
 
-def submit_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True) -> SubmissionResult:
+def submit_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> SubmissionResult:
     """
     Submit one template to Karix and return the result.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
     if c == "bajaj" and _requires_portal_media(payload):
         return _submit_portal_template(payload, client=c)
-    return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio)
-
+    return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
     Fetch the full official template list for a client's WABA exactly once.

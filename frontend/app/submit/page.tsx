@@ -51,6 +51,7 @@ export default function SubmitPage() {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [autoFixAspectRatio, setAutoFixAspectRatio] = useState(true);
+  const [autoFixGrammar, setAutoFixGrammar] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
   // Reset state if account/channel changes while on submit page
   useEffect(() => {
@@ -122,8 +123,7 @@ export default function SubmitPage() {
     if (!file || !currentPreviews) return;
     setState({ step: 'submitting' });
     try {
-      const res = await submitFile(file, account, channel, user, autoFixAspectRatio);
-      setState({ step: 'submitted', submitted: res.submitted, results: res.results });
+      const res = await submitFile(file, account, channel, user, autoFixAspectRatio, autoFixGrammar);
     } catch (err) {
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
       setState({
@@ -132,7 +132,7 @@ export default function SubmitPage() {
         previews: currentPreviews,
       });
     }
-  }, [file, account, channel, user, currentPreviews, autoFixAspectRatio]);
+  }, [file, account, channel, user, currentPreviews, autoFixAspectRatio, autoFixGrammar]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -340,6 +340,58 @@ export default function SubmitPage() {
             );
           })()}
 
+          {/* Grammar & Content Quality Alert Banner if typos/rejection rules are detected */}
+          {(() => {
+            const grammarWarned = state.previews.filter(p => p.grammar_warnings && p.grammar_warnings.length > 0);
+            if (!grammarWarned.length) return null;
+            return (
+              <div className="p-4 bg-blue-50/80 border border-blue-200 rounded-xl space-y-3 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
+                      📝
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-blue-950">
+                        Grammar &amp; Formatting Suggestions ({grammarWarned.length} of {state.previews.length} template{grammarWarned.length === 1 ? '' : 's'} flagged)
+                      </h4>
+                      <p className="text-[11px] text-blue-800/90 mt-0.5 leading-relaxed">
+                        Spelling typos, repeated words, punctuation spacing, or Meta variable formatting rules detected in template text.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Auto-fix Toggle */}
+                  <label className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-blue-300 text-xs font-semibold text-blue-900 shadow-xs cursor-pointer shrink-0 hover:bg-blue-50/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={autoFixGrammar}
+                      onChange={(e) => setAutoFixGrammar(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Auto-Fix Grammar &amp; Typos (Recommended)</span>
+                  </label>
+                </div>
+
+                {autoFixGrammar ? (
+                  <div className="text-[11px] text-blue-900 bg-blue-100/70 p-2.5 rounded-lg border border-blue-200/80 flex items-center gap-2">
+                    <span className="text-xs">✨</span>
+                    <span>
+                      <strong>Auto-Correction Enabled:</strong> Typos (e.g. &ldquo;recieved&rdquo; &rarr; &ldquo;received&rdquo;), repeated words, and spacing will be automatically cleaned before submission to maximize Meta approval speed.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-blue-900 bg-white/80 p-2.5 rounded-lg border border-blue-200 flex items-center gap-2">
+                    <span className="text-xs">⚠️</span>
+                    <span>
+                      <strong>Raw Text Mode:</strong> Text will be submitted exactly as written in your spreadsheet without typo corrections.
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           <div className="bg-white rounded-xl border border-blue-200 shadow-xs overflow-hidden">
             <div className="p-4 bg-blue-50/60 border-b border-blue-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
@@ -443,6 +495,28 @@ export default function SubmitPage() {
                                       </span>
                                     </span>
                                   ))}
+                                </div>
+                              )}
+
+                              {p.grammar_warnings && p.grammar_warnings.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {p.grammar_warnings.slice(0, 3).map((gw, gIdx) => (
+                                    <span
+                                      key={gIdx}
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-50 text-blue-800 border border-blue-200"
+                                      title={gw.issue}
+                                    >
+                                      <span>📝 {gw.suggestion}</span>
+                                      <span className={`px-1 py-0.2 rounded font-semibold ${autoFixGrammar ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}`}>
+                                        {autoFixGrammar ? 'Fix Active' : 'Raw'}
+                                      </span>
+                                    </span>
+                                  ))}
+                                  {p.grammar_warnings.length > 3 && (
+                                    <span className="text-[9px] font-semibold text-blue-600 px-1">
+                                      +{p.grammar_warnings.length - 3} more
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </div>

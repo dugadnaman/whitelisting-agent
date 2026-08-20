@@ -58,6 +58,14 @@ export type AspectRatioWarning = {
   action: string;
 };
 
+export type GrammarWarning = {
+  type: string;
+  issue: string;
+  suggestion: string;
+  original: string;
+  replacement: string;
+};
+
 export type TemplatePreview = {
   template_name: string;
   category?: string;
@@ -67,10 +75,12 @@ export type TemplatePreview = {
   waba_id?: string;
   source_ref?: string;
   aspect_ratio_warnings?: AspectRatioWarning[];
+  grammar_warnings?: GrammarWarning[];
   components?: Array<{
     type: string;
     text?: string;
     format?: string;
+    suggested_text?: string;
     [key: string]: unknown;
   }>;
   // RCS preview fields
@@ -238,7 +248,8 @@ export async function submitFile(
   account: Account = "bajaj",
   channel: Channel = "whatsapp",
   user: string = "Namann",
-  fixAspectRatio: boolean = true
+  fixAspectRatio: boolean = true,
+  fixGrammar: boolean = true
 ): Promise<{ submitted: number; results: Template[] }> {
   const form = new FormData();
   form.append("file", file);
@@ -247,6 +258,7 @@ export async function submitFile(
     channel,
     user,
     fix_aspect_ratio: String(fixAspectRatio),
+    fix_grammar: String(fixGrammar),
   }).toString();
   const res = await fetchWithRetry(getApiUrl(`/api/submit?${qs}`), {
     method: "POST",
