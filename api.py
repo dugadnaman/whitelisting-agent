@@ -93,15 +93,13 @@ def _init_media_cache():
             target.write_bytes(Path(img_p).read_bytes())
     except Exception:
         pass
-    # RCS ratio-specific fallbacks: 2:1 standalone cards, 3:4 carousel cards
+    # RCS ratio-specific fallbacks per official specs
     try:
         from PIL import Image
-        img_2x1 = MEDIA_CACHE_DIR / "default_rcs_2x1.png"
-        if not img_2x1.exists():
-            Image.new("RGB", (1200, 600), (0, 120, 242)).save(img_2x1, format="PNG")
-        img_3x4 = MEDIA_CACHE_DIR / "default_rcs_3x4.png"
-        if not img_3x4.exists():
-            Image.new("RGB", (900, 1200), (16, 185, 129)).save(img_3x4, format="PNG")
+        for fname, size in (("default_rcs_3x1.png", (1440, 480)), ("default_rcs_2x1.png", (1440, 720)), ("default_rcs_3x4.png", (768, 1024))):
+            img_p = MEDIA_CACHE_DIR / fname
+            if not img_p.exists():
+                Image.new("RGB", size, (0, 120, 242)).save(img_p, format="PNG")
     except Exception:
         pass
 

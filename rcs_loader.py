@@ -287,6 +287,16 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
 
     public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
 
+    # Resolve default media fallback per official spec ratio
+    orientation_key = str(row.get("orientation") or "VERTICAL").strip().upper()
+    height_key = str(row.get("height") or "MEDIUM").strip().upper()
+    if orientation_key == "HORIZONTAL":
+        _fallback_media = f"{public_base}/api/media/default_rcs_3x4.png"
+    elif height_key == "SHORT":
+        _fallback_media = f"{public_base}/api/media/default_rcs_3x1.png"
+    else:
+        _fallback_media = f"{public_base}/api/media/default_rcs_2x1.png"
+
     if is_carousel:
         template_type = "carousel"
         carousel_cards = _build_carousel_cards_from_row(row)
@@ -294,7 +304,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         template_type = "richcard"
         carousel_cards = []
         if not media_url:
-            media_url = f"{public_base}/api/media/default_rcs_2x1.png"
+            media_url = _fallback_media
     else:
         template_type = "text"
         carousel_cards = []
@@ -342,6 +352,98 @@ def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmis
             rows.append(_row_to_rcs_submission(raw_row, client=client, fallback_idx=idx))
     return rows
 
+# ---------------------------------------------------------------------------
+# Official Karix RCS media specifications (RCS specifications docx)
+#   Rich Card: VERTICAL SHORT=3:1(1440x480)  VERTICAL MEDIUM=2:1(1440x720)  HORIZONTAL=3:4(768x1024)  max 2MB
+#   Carousel : SHORT SMALL=8:5(1160x720)  SHORT MEDIUM=5:2(1800x720)  MEDIUM SMALL=1:1(770x720)  MEDIUM MEDIUM=16:9(1280x720)  max 1MB
+# ---------------------------------------------------------------------------
+
+RICH_CARD_IMAGE_SPECS: dict[tuple, dict] = {
+    ("VERTICAL", "SHORT"): {"ratio": (3, 1), "optimal": (1440, 480), "max_bytes": 2 * 1024 * 1024},
+    ("VERTICAL", "MEDIUM"): {"ratio": (2, 1), "optimal": (1440, 720), "max_bytes": 2 * 1024 * 1024},
+    ("HORIZONTAL", "SHORT"): {"ratio": (3, 4), "optimal": (768, 1024), "max_bytes": 2 * 1024 * 1024},
+    ("HORIZONTAL", "MEDIUM"): {"ratio": (3, 4), "optimal": (768, 1024), "max_bytes": 2 * 1024 * 1024},
+}
+
+CAROUSEL_IMAGE_SPECS: dict[tuple, dict] = {
+    ("SHORT", "SMALL"): {"ratio": (8, 5), "optimal": (1160, 720), "max_bytes": 1 * 1024 * 1024},
+    ("SHORT", "MEDIUM"): {"ratio": (5, 2), "optimal": (1800, 720), "max_bytes": 1 * 1024 * 1024},
+    ("MEDIUM", "SMALL"): {"ratio": (1, 1), "optimal": (770, 720), "max_bytes": 1 * 1024 * 1024},
+    ("MEDIUM", "MEDIUM"): {"ratio": (16, 9), "optimal": (1280, 720), "max_bytes": 1 * 1024 * 1024},
+}
+
+ACCEPTED_IMAGE_FORMATS = (".jpg", ".jpeg", ".png", ".gif")
+ACCEPTED_VIDEO_FORMATS = (".mp4", ".m4v", ".mpeg", ".webm", ".h263", ".m4p")
+
+def _spec_for_richcard(sub: RcsTemplateSubmission) -> dict:
+    orientation = (getattr(sub, "orientation", "VERTICAL") or "VERTICAL").upper()
+    height = (getattr(sub, "height", "MEDIUM") or "MEDIUM").upper()
+    return RICH_CARD_IMAGE_SPECS.get(
+        (orientation, height),
+        RICH_CARD_IMAGE_SPECS[("VERTICAL", "MEDIUM")],
+    )
+
+def _spec_for_carousel(sub: RcsTemplateSubmission) -> dict:
+    height = (getattr(sub, "height", "MEDIUM") or "MEDIUM").upper()
+    width = (getattr(sub, "width", "MEDIUM") or "MEDIUM").upper()
+    return CAROUSEL_IMAGE_SPECS.get(
+        (height, width),
+        CAROUSEL_IMAGE_SPECS[("MEDIUM", "MEDIUM")],
+    )
+
+def _fit_rcs_image(img_bytes: bytes, spec: dict) -> bytes:
+    """
+    Fit image to the official spec ratio, resize to optimal resolution, and compress
+    below the max file size using progressive JPEG quality reduction.
+    """
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(img_bytes))
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            bg.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+
+        current_w, current_h = img.size
+        ratio_w, ratio_h = spec["ratio"]
+        target_aspect = ratio_w / ratio_h
+        current_aspect = current_w / current_h
+
+        # Center-crop to the required aspect ratio
+        if abs(current_aspect - target_aspect) > 0.02:
+            if current_aspect > target_aspect:
+                new_w = int(current_h * target_aspect)
+                left = (current_w - new_w) // 2
+                img = img.crop((left, 0, left + new_w, current_h))
+            else:
+                new_h = int(current_w / target_aspect)
+                top = (current_h - new_h) // 2
+                img = img.crop((0, top, current_w, top + new_h))
+
+        # Resize down to optimal resolution if larger
+        opt_w, opt_h = spec["optimal"]
+        if img.width > opt_w or img.height > opt_h:
+            img.thumbnail((opt_w, opt_h), Image.Resampling.LANCZOS)
+
+        max_bytes = spec["max_bytes"]
+        # Progressive quality reduction until under max file size
+        quality = 92
+        while quality >= 45:
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            data = buf.getvalue()
+            if len(data) <= max_bytes:
+                return data
+            quality -= 10
+        return data
+    except Exception:
+        return img_bytes
+
 def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> bytes:
     """
     Auto-fit image bytes to the REQUESTED target ratio (e.g. 2:1 for standalone rich cards,
@@ -380,8 +482,8 @@ def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> byt
 
 
 def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
-    """Extract embedded images from an Excel (.xlsx) file in order, preserving original bytes exactly."""
-    images = []
+    """Extract embedded media (images/videos) from an Excel (.xlsx) file in order, preserving original bytes."""
+    media = []
     try:
         import zipfile
         with zipfile.ZipFile(path, "r") as z:
@@ -391,53 +493,63 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
             media_names.sort(key=natural_key)
             for name in media_names:
                 filename = name.split("/")[-1]
-                raw_data = z.read(name)
-                images.append((filename, raw_data))
+                media.append((filename, z.read(name)))
     except Exception as e:
-        logger.warning("Could not extract embedded images from xlsx: %s", e)
-    return images
+        logger.warning("Could not extract embedded media from xlsx: %s", e)
+    return media
 
-def _upload_and_bind_rcs_images(raw_images: list[tuple[str, bytes]], subs: list[RcsTemplateSubmission], client: str) -> None:
+def _upload_and_bind_rcs_images(raw_media: list[tuple[str, bytes]], subs: list[RcsTemplateSubmission], client: str) -> None:
     """
-    Fit each extracted image to the exact ratio required by the template type
-    (2:1 for standalone rich cards, 3:4 for carousel cards) and bind the uploaded
+    Fit each extracted image to the official RCS spec ratio for the template's
+    orientation/height/width, compress to the max file size, upload, and bind the
     Karix fileName back onto the templates.
     """
-    if not raw_images:
+    if not raw_media:
         return
     try:
         from rcs_client import upload_rcs_media
     except Exception:
         return
-
     for sub in subs:
-        if sub.template_type == "richcard" and raw_images:
+        if sub.template_type == "richcard" and raw_media:
             try:
-                fname, img_data = raw_images[0]
-                fitted = _ensure_aspect_ratio(img_data, (2, 1))
+                fname, media_data = raw_media[0]
+                ext = Path(fname).suffix.lower()
+                if ext in ACCEPTED_VIDEO_FORMATS:
+                    fitted = media_data
+                    ratio_label = "video"
+                else:
+                    spec = _spec_for_richcard(sub)
+                    fitted = _fit_rcs_image(media_data, spec)
+                    ratio_label = str(spec["ratio"])
                 k_name = upload_rcs_media(fitted, filename=fname, client=client)
                 setattr(sub, "file_name", k_name)
-                logger.info("Bound 2:1 rich card image %s -> %s", fname, k_name)
+                logger.info("Bound rich card media %s -> %s (ratio %s)", fname, k_name, ratio_label)
             except Exception as ex:
-                logger.warning("Failed to bind rich card image: %s", ex)
+                logger.warning("Failed to bind rich card media: %s", ex)
         elif sub.template_type == "carousel" and sub.carousel_cards:
+            spec = _spec_for_carousel(sub)
             for c_idx, card in enumerate(sub.carousel_cards):
-                if c_idx >= len(raw_images):
+                if c_idx >= len(raw_media):
                     break
                 try:
-                    fname, img_data = raw_images[c_idx]
-                    fitted = _ensure_aspect_ratio(img_data, (3, 4))
+                    fname, media_data = raw_media[c_idx]
+                    ext = Path(fname).suffix.lower()
+                    if ext in ACCEPTED_VIDEO_FORMATS:
+                        fitted = media_data
+                    else:
+                        fitted = _fit_rcs_image(media_data, spec)
                     k_name = upload_rcs_media(fitted, filename=fname, client=client)
                     card["fileName"] = k_name
                 except Exception as ex:
-                    logger.warning("Failed to bind carousel card image %s: %s", fname, ex)
+                    logger.warning("Failed to bind carousel card media %s: %s", fname, ex)
 
 def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
 
-    # Extract raw embedded images without transforming them
-    raw_images = _extract_images_from_xlsx(path)
+    # Extract raw embedded media without transforming them
+    raw_media = _extract_images_from_xlsx(path)
 
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
@@ -487,7 +599,7 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
                 channel="rcs",
                 source_ref=t_name,
             )
-            _upload_and_bind_rcs_images(raw_images, [sub], client)
+            _upload_and_bind_rcs_images(raw_media, [sub], client)
             return [sub]
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
@@ -506,7 +618,7 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
         sub = _row_to_rcs_submission(raw_row, client=client, fallback_idx=idx)
         rows.append(sub)
 
-    _upload_and_bind_rcs_images(raw_images, rows, client)
+    _upload_and_bind_rcs_images(raw_media, rows, client)
     return rows
 
 

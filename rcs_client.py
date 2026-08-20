@@ -35,7 +35,7 @@ BACKOFF_SECONDS = 2
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str = "tata") -> str:
     """
-    Upload a binary image to Karix RCS media storage (gRBM).
+    Upload a binary image or video to Karix RCS media storage (gRBM).
     Returns the generated fileName string from Karix.
     """
     import io
@@ -47,14 +47,29 @@ def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str
     stream.seek(0)
 
     clean_filename = filename.split("/")[-1].split("\\")[-1] or "image.png"
-    if clean_filename.lower().endswith((".jpg", ".jpeg")):
+    lower_name = clean_filename.lower()
+
+    VIDEO_MIMES = {
+        ".mp4": "video/mp4",
+        ".m4v": "video/m4v",
+        ".m4p": "video/m4p",
+        ".mpeg": "video/mpeg",
+        ".webm": "video/webm",
+        ".h263": "video/h263",
+    }
+
+    if lower_name.endswith((".jpg", ".jpeg")):
         mime_type = "image/jpeg"
-    elif clean_filename.lower().endswith(".gif"):
+    elif lower_name.endswith(".gif"):
         mime_type = "image/gif"
+    elif lower_name.endswith(".png"):
+        mime_type = "image/png"
+    elif any(lower_name.endswith(ext) for ext in VIDEO_MIMES):
+        ext = next(e for e in VIDEO_MIMES if lower_name.endswith(e))
+        mime_type = VIDEO_MIMES[ext]
     else:
         mime_type = "image/png"
-        if not clean_filename.lower().endswith(".png"):
-            clean_filename += ".png"
+        clean_filename += ".png"
 
     resp = requests.post(
         "https://rcsgui.karix.solutions/v1.0/templates/mediaUpload",
@@ -74,7 +89,7 @@ def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str
     file_name = data.get("fileName") or data.get("filename")
     if not file_name:
         raise RuntimeError(f"RCS media upload response missing fileName: {data}")
-    logger.info("Uploaded RCS media: fileName=%s", file_name)
+    logger.info("Uploaded RCS media: fileName=%s mime=%s", file_name, mime_type)
     return str(file_name)
 
 def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[str, list[str], int]:
