@@ -117,11 +117,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore localStorage failures
     }
+    // Auto-sync all saved credentials from browser storage to backend in background
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('karix_creds_')) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            try {
+              const creds = JSON.parse(raw);
+              if (creds && creds.account) {
+                fetch('/api/credentials', {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(creds),
+                }).catch(() => {});
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+
     setMounted(true);
     refreshAccounts();
     refreshUsers();
   }, [refreshAccounts, refreshUsers]);
-
   const setAccount = (newAccount: Account) => {
     setAccountState(newAccount);
     try {

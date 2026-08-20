@@ -100,27 +100,24 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
 def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
     Build headers for the official WhatsApp Template API for the given client.
-    Auto-inherits brand credentials if a sub-account has not entered custom keys.
+    Strictly isolated per account. Never cross-contaminates another WABA account.
     """
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
 
-    token = (
-        os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
-        or os.environ.get(f"{prefix}_AUTH_TOKEN")
-        or (os.environ.get("TATA_WABA_AUTH_TOKEN") or os.environ.get("TATA_AUTH_TOKEN") if c == "tata" or c.startswith("tata") else None)
-        or (os.environ.get("BAJAJ_WABA_AUTH_TOKEN") if c == "bajaj" or c.startswith("bajaj") else None)
-        or os.environ.get("WABA_AUTH_TOKEN")
-        or os.environ.get("TATA_WABA_AUTH_TOKEN")
-        or os.environ.get("BAJAJ_WABA_AUTH_TOKEN")
-    )
+    if c == "tata":
+        token = os.environ.get("TATA_WABA_AUTH_TOKEN") or os.environ.get("TATA_AUTH_TOKEN")
+    elif c == "bajaj":
+        token = os.environ.get("BAJAJ_WABA_AUTH_TOKEN") or os.environ.get("WABA_AUTH_TOKEN")
+    else:
+        token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN") or os.environ.get(f"{prefix}_AUTH_TOKEN")
 
     if not token:
         expected_key = f"{prefix}_WABA_AUTH_TOKEN" if c not in ("bajaj", "tata") else ("TATA_WABA_AUTH_TOKEN" if c == "tata" else "BAJAJ_WABA_AUTH_TOKEN")
         raise OSError(
-            f"Missing required API Token for {client} ({expected_key}). "
-            f"Please enter the WABA API Token in Settings under {client} before submitting."
+            f"Missing required WABA API Token for {client} ({expected_key}). "
+            f"Please enter the API Token in Settings under {client} before submitting."
         )
     return {"Authentication": f"Bearer {token}"}
 
@@ -128,23 +125,27 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
 def get_waba_id(client: str = "bajaj") -> str:
     """
     Return WABA ID for the given client.
-    Auto-inherits brand WABA ID if a sub-account has not entered custom keys.
+    Strictly isolated per account. Never uses another account's WABA ID.
     """
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
 
-    val = (
-        os.environ.get(f"{prefix}_WABA_ID")
-        or (os.environ.get("TATA_WABA_ID") if c == "tata" or c.startswith("tata") else None)
-        or (os.environ.get("BAJAJ_WABA_ID") if c == "bajaj" or c.startswith("bajaj") else None)
-        or os.environ.get("WABA_ID")
-        or (BAJAJ_WABA_ID if c == "bajaj" or c.startswith("bajaj") else None)
-    )
-
-    if not val:
-        val = os.environ.get("TATA_WABA_ID") or os.environ.get("BAJAJ_WABA_ID") or BAJAJ_WABA_ID
-    return val
+    if c == "tata":
+        val = os.environ.get("TATA_WABA_ID")
+        if not val:
+            raise OSError("Missing required Tata Capital WABA ID: Please set TATA_WABA_ID in Settings.")
+        return val
+    elif c == "bajaj":
+        return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
+    else:
+        val = os.environ.get(f"{prefix}_WABA_ID")
+        if not val:
+            raise OSError(
+                f"Missing required WABA ID for {client} ({prefix}_WABA_ID). "
+                f"Please enter the WABA ID in Settings under {client} before submitting."
+            )
+        return val
 
 
 def get_esmeaddr(client: str = "bajaj") -> str:
