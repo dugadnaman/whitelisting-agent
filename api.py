@@ -559,10 +559,16 @@ def _inspect_template_quality_and_warnings(submissions: list, channel: str = "wh
                         img = Image.open(io.BytesIO(img_bytes))
                         w, h = img.size
                         ratio = w / h
-                        target_ratio = 16 / 9  # 1.7778
-                        ratio_diff = abs(ratio - target_ratio)
 
-                        if ratio_diff > 0.06:
+                        # Standard compliant aspect ratios for WhatsApp and RCS:
+                        # 16:9 = 1.7778 (WhatsApp standard & RCS standard)
+                        # 2:1  = 2.0000 (RCS Standalone Card standard & WhatsApp Wide)
+                        # 3:4  = 0.7500 (RCS Carousel Card standard)
+                        is_16_9 = abs(ratio - (16 / 9)) < 0.08
+                        is_2_1 = abs(ratio - 2.0) < 0.08
+                        is_3_4 = abs(ratio - 0.75) < 0.08
+
+                        if not is_16_9 and not is_2_1 and not is_3_4:
                             if abs(ratio - 1.0) < 0.05:
                                 shape_name = "1:1 (Square)"
                             elif ratio < 1.0:
@@ -574,10 +580,9 @@ def _inspect_template_quality_and_warnings(submissions: list, channel: str = "wh
                                 "component": "HEADER (IMAGE)",
                                 "original_size": f"{w}x{h}px",
                                 "current_ratio": shape_name,
-                                "recommended_ratio": "16:9 (1280x720px)",
-                                "action": "Auto-pad onto 16:9 canvas with matching background so no text/logo is cropped by Meta.",
+                                "recommended_ratio": "16:9 (1280x720) or 2:1 (1200x600)",
+                                "action": "Auto-pad onto standard canvas with matching background so no text/logo is cropped.",
                             })
-
                         f_type = comp.get("file_type") or "image/png"
                         comp["thumbnail_url"] = f"data:{f_type};base64,{base64.b64encode(img_bytes).decode()}"
                     except Exception as exc:

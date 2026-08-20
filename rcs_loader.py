@@ -340,16 +340,21 @@ def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmis
     return rows
 
 def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> bytes:
-    """Auto-fit image bytes to match target aspect ratio (16:9 for Carousel) if needed."""
+    """Auto-fit image bytes if ratio is non-standard. Preserves 2:1, 16:9, and 3:4 images completely unmodified."""
     try:
         from PIL import Image
         import io
         img = Image.open(io.BytesIO(img_bytes))
-        target_w, target_h = target_ratio
         current_w, current_h = img.size
-        target_aspect = target_w / target_h
         current_aspect = current_w / current_h
-        if abs(current_aspect - target_aspect) > 0.02:
+
+        # If already standard 2:1 (2.0), 16:9 (1.7778), or 3:4 (0.75), leave completely untouched!
+        if abs(current_aspect - 2.0) < 0.08 or abs(current_aspect - (16/9)) < 0.08 or abs(current_aspect - 0.75) < 0.08:
+            return img_bytes
+
+        target_w, target_h = target_ratio
+        target_aspect = target_w / target_h
+        if abs(current_aspect - target_aspect) > 0.05:
             if current_aspect > target_aspect:
                 new_w = int(current_h * target_aspect)
                 left = (current_w - new_w) // 2
