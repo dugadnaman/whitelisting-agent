@@ -656,22 +656,16 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
 
         try:
             headers = get_portal_auth_headers(c)
-            # CRITICAL: The /create endpoint expects multipart/form-data with
-            # the JSON payload in a field called "request" — NOT a raw JSON
-            # body.  Sending application/json returns 400 Bad Request with no
-            # useful error message.  Confirmed via browser DevTools traffic.
-            # requests auto-sets Content-Type to multipart/form-data when
-            # using files=, so we must NOT include Content-Type in headers.
             resp = get_http_session().post(
                 url,
                 headers=headers,
                 files={"request": (None, json.dumps(body), "application/json")},
                 timeout=REQUEST_TIMEOUT,
             )
+        except (requests.ConnectionError, requests.Timeout) as e:
             exc = e
             logger.warning("Attempt %d/%d transport error: %s", attempt + 1, MAX_RETRIES, e)
         except OSError as e:
-            # Missing credentials — no point retrying
             return SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
@@ -682,7 +676,6 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 channel="whatsapp",
                 retry_count=attempt,
             )
-
         # ---- Handle transport errors (retry) ----
         if exc is not None:
             last_result = SubmissionResult(
@@ -920,10 +913,16 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
 def submit_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> SubmissionResult:
     """
     Submit one template to Karix and return the result.
+    When submitting media headers (IMAGE, VIDEO, DOCUMENT), uses Portal API if session
+    headers exist so Karix stores and displays the full-color creative thumbnail in the GUI.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
-    if c == "bajaj" and _requires_portal_media(payload):
-        return _submit_portal_template(payload, client=c)
+    if _requires_portal_media(payload):
+        try:
+            get_portal_auth_headers(c)
+            return _submit_portal_template(payload, client=c)
+        except OSError:
+            pass
     return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
