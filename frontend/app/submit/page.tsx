@@ -124,6 +124,7 @@ export default function SubmitPage() {
     setState({ step: 'submitting' });
     try {
       const res = await submitFile(file, account, channel, user, autoFixAspectRatio, autoFixGrammar);
+      setState({ step: 'submitted', submitted: res.submitted, results: res.results });
     } catch (err) {
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
       setState({
