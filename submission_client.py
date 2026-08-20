@@ -97,10 +97,12 @@ FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE = (
     "4::YXBwbGljYXRpb24vcGRm:ARagUnYcCe-_Jwa2bxH7KdPu3w9f-CMLaBRiHDj67GJ_71h7lWlu1kP0SujG4rIolI8cKNOzvm0q73cl7iIjykI0VY64qGMHRsWPRW1_QMEHXg:e:1787465292:379138877290302:100066839164237:ARabH-vpch9ACwHceRc"
 )
 FALLBACK_PLACEHOLDER_HEADER_HANDLE = FALLBACK_PLACEHOLDER_IMAGE_HANDLE
+
 def upload_media(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
     """
-    Upload a media file to Meta/Karix for use as a template HEADER image/video/document.
-    Uses Meta Resumable Upload with client-specific token, fast fallback on timeout.
+    Upload a media file to Karix/Meta using Karix's Official Template Media API:
+    POST https://rcsgui.karix.solutions/api/v1.0/template/{wabaId}/media
+    Uses official WABA API Token (Authentication: Bearer {token}) with multipart form upload.
     """
     if not file_path or not str(file_path).strip():
         file_path = _ensure_default_sample_image()
@@ -108,7 +110,44 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     if not path.exists():
         path = Path(_ensure_default_sample_image())
 
-    # 1. Try Karix Portal mediaUpload (Karix BSP official media upload)
+    # 1. Primary: Karix Official Template Media Upload API (POST /api/v1.0/template/{wabaId}/media)
+    try:
+        waba_id = get_waba_id(client)
+        headers = get_official_auth_headers(client)
+        url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}/media"
+
+        mime = "image/jpeg" if ("jpeg" in file_type or "jpg" in file_type) else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
+        with open(path, "rb") as f:
+            resp = get_http_session().post(
+                url,
+                headers=headers,
+                files={"file": (path.name, f, mime)},
+                data={"file_type": mime},
+                timeout=MEDIA_UPLOAD_TIMEOUT,
+            )
+        if resp.ok:
+            data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
+            h = None
+            if isinstance(data, dict):
+                if data.get("header_handle"):
+                    val = data["header_handle"]
+                    h = val[0] if isinstance(val, list) else str(val)
+                elif data.get("Success"):
+                    h = data["Success"].strip().split("\n")[0].strip()
+                elif data.get("handle"):
+                    h = data["handle"]
+                elif data.get("response") and isinstance(data["response"], dict):
+                    resp_obj = data["response"]
+                    h = resp_obj.get("header_handle") or resp_obj.get("handle") or resp_obj.get("Success")
+                    if isinstance(h, list):
+                        h = h[0]
+            if h and str(h).startswith("4::"):
+                logger.info("Media uploaded via Karix Official API (%s): handle=%s...", client, str(h)[:60])
+                return str(h)
+    except Exception as e:
+        logger.debug("Karix Official Media Upload notice (%s): %s", client, e)
+
+    # 2. Secondary: Karix Portal mediaUpload if portal headers exist
     try:
         headers = get_portal_auth_headers(client)
         url = f"{KARIX_BASE_URL}/mediaUpload"
@@ -132,33 +171,8 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
                 first_handle = handle_str.strip().split("\n")[0].strip()
                 logger.info("Media uploaded via Karix portal for %s: handle=%s...", client, first_handle[:60])
                 return first_handle
-    except Exception as e:
-        logger.debug("Karix portal mediaUpload note (%s): %s", client, e)
-
-    # 2. Try Meta Graph API Resumable Upload with official token for this client
-    try:
-        auth_headers = get_official_auth_headers(client)
-        token = auth_headers.get("Authentication", "").replace("Bearer ", "").strip()
-        if token and token != "dummy_token":
-            file_len = os.path.getsize(path)
-            sess_url = f"https://graph.facebook.com/v19.0/app/uploads?file_length={file_len}&file_type={file_type}"
-            sess_resp = get_http_session().post(sess_url, headers={"Authorization": f"Bearer {token}"}, timeout=8)
-            if sess_resp.ok:
-                session_id = sess_resp.json().get("id")
-                with open(path, "rb") as f:
-                    up_resp = get_http_session().post(
-                        f"https://graph.facebook.com/v19.0/{session_id}",
-                        headers={"Authorization": f"OAuth {token}", "file_offset": "0"},
-                        data=f.read(),
-                        timeout=MEDIA_UPLOAD_TIMEOUT,
-                    )
-                if up_resp.ok:
-                    h = up_resp.json().get("h")
-                    if h:
-                        logger.info("Media uploaded via Meta Resumable Upload for %s: handle=%s...", client, h[:60])
-                        return h
-    except Exception as e:
-        logger.debug("Meta Resumable Upload notice (%s): %s", client, e)
+    except Exception:
+        pass
 
     # 3. Fallback to format-specific verified placeholder header handle
     ft = (file_type or "").lower()
@@ -167,7 +181,6 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     if "pdf" in ft or str(path).endswith(".pdf"):
         return FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE
     return FALLBACK_PLACEHOLDER_IMAGE_HANDLE
-
 
 def _ensure_default_sample_image() -> str:
     """
