@@ -690,7 +690,7 @@ async def submit_file(
                 },
                 status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
             )
-            return {"submitted": len(cleaned_entries), "results": cleaned_entries}
+            return {"submitted": len(cleaned_entries), "results": [_json_safe(e) for e in cleaned_entries]}
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
@@ -727,7 +727,7 @@ async def submit_file(
             },
             status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
         )
-        return {"submitted": len(cleaned_entries), "results": cleaned_entries}
+        return {"submitted": len(cleaned_entries), "results": [_json_safe(e) for e in cleaned_entries]}
     except HTTPException:
         raise
     except Exception as exc:

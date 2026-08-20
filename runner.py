@@ -30,10 +30,11 @@ _TERMINAL_STATUSES = {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}
 
 def run(templates_raw: list[dict], log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator", source_file: str | None = None, fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> None:
     """Phase 2, step 1: submit each template, log the attempt."""
+    import concurrent.futures
     submissions = load_from_list(templates_raw)
     print(f"Submitting {len(submissions)} template(s) for {client} (by {user})...")
 
-    for submission in submissions:
+    def _submit_single(submission):
         submission.client = client
         result = submit_template(submission, client=client, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
         result.client = client
@@ -43,9 +44,13 @@ def run(templates_raw: list[dict], log_path: str = "submission_log.jsonl", clien
         log_result(result, log_path)
         note = f" ({result.retry_count} retries)" if result.retry_count else ""
         print(f"  {result.template_name}: {result.status.value}{note}")
+        return result
+
+    workers = min(10, max(1, len(submissions)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(_submit_single, submissions))
 
     print(f"Done. Results appended to {log_path}")
-
 
 def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") -> None:
     """
@@ -101,8 +106,9 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
 
 
 def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> None:
-    """Phase 2, step 1 (from CSV or XLSX): load templates from file, submit each, log attempt."""
+    """Phase 2, step 1 (from CSV or XLSX): load templates from file, submit in parallel pool, log results."""
     from loader import load_from_csv, load_from_excel
+    import concurrent.futures
 
     if file_path.lower().endswith((".xlsx", ".xls")):
         submissions = load_from_excel(file_path, client=client)
@@ -111,18 +117,23 @@ def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str
 
     print(f"Loaded {len(submissions)} template(s) for {client} from {file_path} to submit (by {user}).")
 
-    for submission in submissions:
+    def _submit_single(submission):
         submission.client = client
         result = submit_template(submission, client=client, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        result.client = client
         result.channel = "whatsapp"
         result.submitted_by = user
         result.source_file = Path(file_path).name
         log_result(result, log_path)
         note = f" ({result.retry_count} retries)" if result.retry_count else ""
         print(f"  {result.template_name}: {result.status.value}{note}")
+        return result
+
+    workers = min(10, max(1, len(submissions)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(_submit_single, submissions))
 
     print(f"Done. Results appended to {log_path}")
-
 
 if __name__ == "__main__":
     import os
