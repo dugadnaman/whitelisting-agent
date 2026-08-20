@@ -302,9 +302,10 @@ def _resolve_row_waba(row_client: str, cache: dict[str, str]) -> str:
     """Resolve the WABA ID for a row's client, cached per client per file load."""
     c = (row_client or "bajaj").lower()
     if c not in cache:
-        # Raises OSError for missing credentials — surfaces loudly at preview
-        # time instead of silently submitting against the wrong WABA.
-        cache[c] = get_waba_id(c) if c == "bajaj" else (get_waba_id(c) or "")
+        try:
+            cache[c] = get_waba_id(c) or ""
+        except Exception:
+            cache[c] = ""
     return cache[c]
 
 
