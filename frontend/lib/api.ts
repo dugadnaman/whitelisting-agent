@@ -155,8 +155,8 @@ async function fetchWithRetry(
   for (let i = 0; i <= retries; i++) {
     try {
       const res = await fetch(input, init);
-      // If server returned 502/503/504 (cold start or temporary restart), retry
-      if ((res.status === 502 || res.status === 503 || res.status === 504) && i < retries) {
+      // If server returned 500/502/503/504 (cold start, proxy blip, or temporary container swap), retry
+      if ((res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) && i < retries) {
         await delay(delayMs * Math.pow(1.5, i));
         continue;
       }
