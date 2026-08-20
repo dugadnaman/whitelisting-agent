@@ -8,9 +8,9 @@ Supports text messages, rich cards, suggestions (URL, Reply, Dialer), and variab
 import csv
 import json
 import logging
+import os
 import re
 from pathlib import Path
-
 from rcs_config import get_rcs_bot_id, get_rcs_entity_id
 from rcs_models import RcsTemplateSubmission
 
