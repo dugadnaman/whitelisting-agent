@@ -394,12 +394,39 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
                 media_file = _ensure_default_sample_image()
                 file_type = "image/png"
 
-        # Upload and fill in the handle
+        # Cache media to persistent public directory and generate public URL for Meta
+        import hashlib
+        MEDIA_CACHE_DIR = Path("media_cache")
+        MEDIA_CACHE_DIR.mkdir(exist_ok=True)
+
+        public_url = None
+        if media_file and os.path.exists(str(media_file)):
+            try:
+                raw_bytes = Path(media_file).read_bytes()
+                media_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
+                ext = ".jpg" if "jpeg" in file_type else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
+                cache_file = MEDIA_CACHE_DIR / f"{media_hash}{ext}"
+                cache_file.write_bytes(raw_bytes)
+
+                public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
+                public_url = f"{public_base}/api/media/{media_hash}{ext}"
+            except Exception as e:
+                logger.debug("Media caching notice: %s", e)
+
+        # Upload via Karix BSP / Resumable upload
         handle = upload_media(media_file, file_type, client=client)
-        comp["example"] = {"header_handle": [handle]}
-        logger.info("Header %s uploaded for template (%s), handle set.", cformat, client)
+
+        example_dict: dict = {}
+        if handle:
+            example_dict["header_handle"] = [handle]
+        if public_url:
+            example_dict["header_url"] = [public_url]
+
+        comp["example"] = example_dict
+        logger.info("Header %s resolved for template (%s) with handle and public URL: %s", cformat, client, public_url)
 
     return components
+
 
 def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple[str, list[str]]:
     """

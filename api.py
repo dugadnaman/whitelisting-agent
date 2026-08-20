@@ -81,6 +81,25 @@ def health_check():
     """Health check endpoint for Render zero-downtime deploys and external uptime monitors."""
     return {"status": "ok", "service": "karix-whitelisting-api", "version": "2.1.0"}
 
+MEDIA_CACHE_DIR = Path("media_cache")
+MEDIA_CACHE_DIR.mkdir(exist_ok=True)
+
+@app.get("/api/media/{filename}")
+def get_public_media(filename: str):
+    """Serve cached template header images/videos/documents directly to Meta and frontend previews."""
+    clean_fn = Path(filename).name
+    file_p = MEDIA_CACHE_DIR / clean_fn
+    if not file_p.exists():
+        raise HTTPException(status_code=404, detail="Media not found")
+    media_type = "image/png"
+    if clean_fn.endswith((".jpg", ".jpeg")):
+        media_type = "image/jpeg"
+    elif clean_fn.endswith(".mp4"):
+        media_type = "video/mp4"
+    elif clean_fn.endswith(".pdf"):
+        media_type = "application/pdf"
+    return FileResponse(str(file_p), media_type=media_type)
+
 # ---------------------------------------------------------------------------
 # Models & Account Store
 # ---------------------------------------------------------------------------
