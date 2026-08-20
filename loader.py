@@ -214,7 +214,7 @@ def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
         template_name=template_name,
         language=row.get("language", "en"),
         category=row.get("category", "MARKETING"),
-        waba_id=row.get("waba_id") or get_waba_id(c_client),
+        waba_id=row.get("waba_id") or _resolve_row_waba(c_client, {}),
         components=components,
         source_ref=row.get("source_ref") or template_name,
     )
