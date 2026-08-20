@@ -1,0 +1,220 @@
+{
+  "communities": {
+    "0": [
+      "models_rationale_57",
+      "models_submissionresult",
+      "runner",
+      "runner_poll_pending",
+      "runner_rationale_1",
+      "runner_rationale_30",
+      "runner_rationale_60",
+      "runner_run_file",
+      "tracker",
+      "tracker_load_log",
+      "tracker_log_result",
+      "tracker_pending_entries",
+      "tracker_rationale_1",
+      "tracker_rationale_19",
+      "tracker_rationale_25",
+      "tracker_rationale_33",
+      "tracker_rationale_57",
+      "tracker_update_result"
+    ],
+    "1": [
+      "loader",
+      "loader_flat_row_to_components",
+      "loader_load_from_csv",
+      "loader_load_from_excel",
+      "loader_load_from_json",
+      "loader_load_from_list",
+      "loader_rationale_1",
+      "loader_rationale_115",
+      "loader_rationale_154",
+      "loader_rationale_217",
+      "loader_rationale_48",
+      "loader_rationale_54",
+      "loader_row_to_submission",
+      "models_rationale_35",
+      "models_rationale_44",
+      "models_templatecomponent",
+      "models_templatesubmission"
+    ],
+    "2": [
+      "config",
+      "config_get_auth_headers",
+      "config_load_env_file",
+      "config_rationale_1",
+      "config_rationale_28",
+      "config_rationale_44",
+      "config_rationale_69",
+      "submission_client_check_status",
+      "submission_client_rationale_479",
+      "test_integration",
+      "test_integration_rationale_46",
+      "test_integration_rationale_80",
+      "test_integration_test_check_status",
+      "test_integration_test_list_all_templates"
+    ],
+    "3": [
+      "enum",
+      "models",
+      "models_approvalstatus",
+      "models_rationale_1",
+      "models_rationale_16",
+      "models_rationale_22",
+      "models_submissionstatus",
+      "str"
+    ],
+    "4": [
+      "submission_client",
+      "submission_client_ensure_default_sample_image",
+      "submission_client_rationale_1",
+      "submission_client_rationale_123",
+      "submission_client_rationale_156",
+      "submission_client_rationale_64",
+      "submission_client_resolve_header_media",
+      "submission_client_upload_media"
+    ],
+    "5": [
+      "runner_rationale_16",
+      "runner_run",
+      "submission_client_build_create_body",
+      "submission_client_rationale_252",
+      "submission_client_rationale_314",
+      "submission_client_submit_template"
+    ],
+    "6": [
+      "exception",
+      "response",
+      "submission_client_is_retryable",
+      "submission_client_rationale_54"
+    ],
+    "7": [
+      "submission_client_rationale_212",
+      "submission_client_resolve_body_variables"
+    ]
+  },
+  "cohesion": {
+    "0": 0.16993464052287582,
+    "1": 0.20588235294117646,
+    "2": 0.18681318681318682,
+    "3": 0.35714285714285715,
+    "4": 0.32142857142857145,
+    "5": 0.3333333333333333,
+    "6": 0.5,
+    "7": 1.0
+  },
+  "gods": [
+    {
+      "id": "models_templatesubmission",
+      "label": "TemplateSubmission",
+      "degree": 11
+    },
+    {
+      "id": "submission_client_submit_template",
+      "label": "submit_template()",
+      "degree": 11
+    },
+    {
+      "id": "config_get_auth_headers",
+      "label": "get_auth_headers()",
+      "degree": 9
+    },
+    {
+      "id": "submission_client_check_status",
+      "label": "check_status()",
+      "degree": 8
+    },
+    {
+      "id": "loader_row_to_submission",
+      "label": "_row_to_submission()",
+      "degree": 7
+    },
+    {
+      "id": "loader_load_from_csv",
+      "label": "load_from_csv()",
+      "degree": 7
+    },
+    {
+      "id": "loader_load_from_excel",
+      "label": "load_from_excel()",
+      "degree": 7
+    },
+    {
+      "id": "models_approvalstatus",
+      "label": "ApprovalStatus",
+      "degree": 7
+    },
+    {
+      "id": "loader_load_from_list",
+      "label": "load_from_list()",
+      "degree": 6
+    },
+    {
+      "id": "models_submissionresult",
+      "label": "SubmissionResult",
+      "degree": 6
+    }
+  ],
+  "surprises": [
+    {
+      "source": "submit_template()",
+      "target": "get_auth_headers()",
+      "source_files": [
+        "submission_client.py",
+        "config.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "upload_media()",
+      "target": "get_auth_headers()",
+      "source_files": [
+        "submission_client.py",
+        "config.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "run_file()",
+      "target": "load_from_csv()",
+      "source_files": [
+        "runner.py",
+        "loader.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "run_file()",
+      "target": "load_from_excel()",
+      "source_files": [
+        "runner.py",
+        "loader.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "run()",
+      "target": "load_from_list()",
+      "source_files": [
+        "runner.py",
+        "loader.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "why": "connects across different repos/directories; bridges separate communities"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}

@@ -60,24 +60,25 @@ hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
 <div class="container">
 
 <h1>karix — Complete Call Flow &amp; Architecture Documentation</h1>
-<p class="subtitle">Generated from graphify knowledge graph: 282 nodes, 449 edges, 17 communities. Commit: unknown</p>
+<p class="subtitle">Generated from graphify knowledge graph: 494 nodes, 989 edges, 34 communities. Commit: 7069547</p>
 
 <div class="nav">
     <a href="#overview">Architecture Overview</a>
+    <a href="#extract-pipeline">Extraction Pipeline</a>
     <a href="#build-graph">Graph Build</a>
     <a href="#cli-skills">CLI &amp; Skill Installers</a>
     <a href="#serve-api">Serving API</a>
     <a href="#tests-fixtures">Tests &amp; Fixtures</a>
     <a href="#karix-whatsapp-template-whitelisting-project-rul">Karix WhatsApp Template Whitelisting — Project Rules</a>
-    <a href="#layout-tsx">layout.tsx</a>
+    <a href="#quick-start">Quick Start</a>
+    <a href="#poll-pending">poll_pending</a>
     <a href="#agents-md">AGENTS.md</a>
     <a href="#is-retryable">_is_retryable</a>
+    <a href="#rcssuggestion">RcsSuggestion</a>
     <a href="#rules-graphify-md">rules/graphify.md</a>
     <a href="#workflows-graphify-md">workflows/graphify.md</a>
     <a href="#next-config-mjs">next.config.mjs</a>
-    <a href="#next-env-d-ts">next-env.d.ts</a>
-    <a href="#postcss-config-mjs">postcss.config.mjs</a>
-    <a href="#tailwind-config-ts">tailwind.config.ts</a>
+    <a href="#other">Other</a>
 </div>
 
 <!-- ====== Architecture Overview ====== -->
@@ -87,37 +88,48 @@ hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
 
 %%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
 flowchart LR
-    BUILD_GRAPH_321CBB04("Graph Build<br/><small>57 nodes</small>")
+    EXTRACT_PIPELINE_5F350230("Extraction Pipeline<br/><small>19 nodes</small>")
+    class EXTRACT_PIPELINE_5F350230 module;
+    BUILD_GRAPH_321CBB04("Graph Build<br/><small>135 nodes</small>")
     class BUILD_GRAPH_321CBB04 module;
-    CLI_SKILLS_9964CBB8("CLI &amp; Skill Installers<br/><small>7 nodes</small>")
+    CLI_SKILLS_9964CBB8("CLI &amp; Skill Installers<br/><small>34 nodes</small>")
     class CLI_SKILLS_9964CBB8 module;
-    SERVE_API_35EC8E86("Serving API<br/><small>75 nodes</small>")
+    SERVE_API_35EC8E86("Serving API<br/><small>139 nodes</small>")
     class SERVE_API_35EC8E86 module;
-    TESTS_FIXTURES_B84B1DCC("Tests &amp; Fixtures<br/><small>104 nodes</small>")
+    TESTS_FIXTURES_B84B1DCC("Tests &amp; Fixtures<br/><small>113 nodes</small>")
     class TESTS_FIXTURES_B84B1DCC module;
     KARIX_WHATSAPP_TEMPLATE_WHITELISTING_PROJECT_RUL_AC7D3562("Karix WhatsApp Template Whitelisting — Project Rules<br/><small>11 nodes</small>")
     class KARIX_WHATSAPP_TEMPLATE_WHITELISTING_PROJECT_RUL_AC7D3562 module;
-    LAYOUT_TSX_1561C0B8("layout.tsx<br/><small>7 nodes</small>")
-    class LAYOUT_TSX_1561C0B8 module;
+    QUICK_START_8C45E5A8("Quick Start<br/><small>10 nodes</small>")
+    class QUICK_START_8C45E5A8 module;
+    POLL_PENDING_0944791A("poll_pending<br/><small>7 nodes</small>")
+    class POLL_PENDING_0944791A module;
     AGENTS_MD_8C25758D("AGENTS.md<br/><small>5 nodes</small>")
     class AGENTS_MD_8C25758D module;
     IS_RETRYABLE_49EBA1CD("_is_retryable<br/><small>4 nodes</small>")
     class IS_RETRYABLE_49EBA1CD module;
+    RCSSUGGESTION_C334548B("RcsSuggestion<br/><small>3 nodes</small>")
+    class RCSSUGGESTION_C334548B module;
     RULES_GRAPHIFY_MD_3459230E("rules/graphify.md<br/><small>2 nodes</small>")
     class RULES_GRAPHIFY_MD_3459230E module;
     WORKFLOWS_GRAPHIFY_MD_C6A40BAC("workflows/graphify.md<br/><small>2 nodes</small>")
     class WORKFLOWS_GRAPHIFY_MD_C6A40BAC module;
     NEXT_CONFIG_MJS_D24FB38C("next.config.mjs<br/><small>2 nodes</small>")
     class NEXT_CONFIG_MJS_D24FB38C module;
-    NEXT_ENV_D_TS_374BC5C3("next-env.d.ts<br/><small>2 nodes</small>")
-    class NEXT_ENV_D_TS_374BC5C3 module;
-    POSTCSS_CONFIG_MJS_47380EE3("postcss.config.mjs<br/><small>2 nodes</small>")
-    class POSTCSS_CONFIG_MJS_47380EE3 module;
-    TAILWIND_CONFIG_TS_50974F0F("tailwind.config.ts<br/><small>2 nodes</small>")
-    class TAILWIND_CONFIG_TS_50974F0F module;
-    SERVE_API_35EC8E86 -->|imports x13| TESTS_FIXTURES_B84B1DCC
-    TESTS_FIXTURES_B84B1DCC -->|contains x5| SERVE_API_35EC8E86
-    TESTS_FIXTURES_B84B1DCC -->|contains| IS_RETRYABLE_49EBA1CD
+    OTHER_D0941E68("Other<br/><small>8 nodes</small>")
+    class OTHER_D0941E68 module;
+    BUILD_GRAPH_321CBB04 -->|imports x28| TESTS_FIXTURES_B84B1DCC
+    SERVE_API_35EC8E86 -->|imports x21| BUILD_GRAPH_321CBB04
+    SERVE_API_35EC8E86 -->|calls x21| TESTS_FIXTURES_B84B1DCC
+    TESTS_FIXTURES_B84B1DCC -->|calls x18| BUILD_GRAPH_321CBB04
+    BUILD_GRAPH_321CBB04 -->|calls x9| EXTRACT_PIPELINE_5F350230
+    BUILD_GRAPH_321CBB04 -->|calls x8| SERVE_API_35EC8E86
+    TESTS_FIXTURES_B84B1DCC -->|calls x8| SERVE_API_35EC8E86
+    EXTRACT_PIPELINE_5F350230 -->|references x8| TESTS_FIXTURES_B84B1DCC
+    BUILD_GRAPH_321CBB04 -->|contains x4| POLL_PENDING_0944791A
+    SERVE_API_35EC8E86 -->|imports x3| POLL_PENDING_0944791A
+    POLL_PENDING_0944791A -->|calls x3| SERVE_API_35EC8E86
+    EXTRACT_PIPELINE_5F350230 -->|contains x3| BUILD_GRAPH_321CBB04
     classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
     classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
     classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
@@ -134,82 +146,349 @@ flowchart LR
     <h4>Architecture Layers</h4>
     <table style="width:100%;font-size:0.85rem;">
       <tr><th>Layer</th><th>Nodes</th><th>Communities</th></tr>
-      <tr><td>Graph Build</td><td>57</td><td><code>3, 4</code></td></tr><tr><td>CLI &amp; Skill Installers</td><td>7</td><td><code>9</code></td></tr><tr><td>Serving API</td><td>75</td><td><code>0, 5</code></td></tr><tr><td>Tests &amp; Fixtures</td><td>104</td><td><code>1, 2</code></td></tr><tr><td>Karix WhatsApp Template Whitelisting — Project Rules</td><td>11</td><td><code>7</code></td></tr><tr><td>layout.tsx</td><td>7</td><td><code>8</code></td></tr><tr><td>AGENTS.md</td><td>5</td><td><code>10</code></td></tr><tr><td>_is_retryable</td><td>4</td><td><code>6</code></td></tr><tr><td>rules/graphify.md</td><td>2</td><td><code>11</code></td></tr><tr><td>workflows/graphify.md</td><td>2</td><td><code>12</code></td></tr><tr><td>next.config.mjs</td><td>2</td><td><code>13</code></td></tr><tr><td>next-env.d.ts</td><td>2</td><td><code>14</code></td></tr><tr><td>postcss.config.mjs</td><td>2</td><td><code>15</code></td></tr><tr><td>tailwind.config.ts</td><td>2</td><td><code>16</code></td></tr>
+      <tr><td>Extraction Pipeline</td><td>19</td><td><code>26</code></td></tr><tr><td>Graph Build</td><td>135</td><td><code>3, 0, 17, 4, 8</code></td></tr><tr><td>CLI &amp; Skill Installers</td><td>34</td><td><code>21, 22, 9, 23, 24</code></td></tr><tr><td>Serving API</td><td>139</td><td><code>5, 6, 1, 27, 28, 33</code></td></tr><tr><td>Tests &amp; Fixtures</td><td>113</td><td><code>2, 18, 19, 32</code></td></tr><tr><td>Karix WhatsApp Template Whitelisting — Project Rules</td><td>11</td><td><code>7</code></td></tr><tr><td>Quick Start</td><td>10</td><td><code>20</code></td></tr><tr><td>poll_pending</td><td>7</td><td><code>29</code></td></tr><tr><td>AGENTS.md</td><td>5</td><td><code>10</code></td></tr><tr><td>_is_retryable</td><td>4</td><td><code>30</code></td></tr><tr><td>RcsSuggestion</td><td>3</td><td><code>25</code></td></tr><tr><td>rules/graphify.md</td><td>2</td><td><code>11</code></td></tr><tr><td>workflows/graphify.md</td><td>2</td><td><code>12</code></td></tr><tr><td>next.config.mjs</td><td>2</td><td><code>13</code></td></tr><tr><td>Other</td><td>8</td><td><code>14, 15, 16, 31</code></td></tr>
     </table>
   </div>
   <div class="card">
     <h4>Core Flow</h4>
-    <div class="arrow-chain">Graph Build -&gt; CLI &amp; Skill Installers -&gt; Serving API -&gt; Tests &amp; Fixtures -&gt; _is_retryable -&gt; Karix WhatsApp Template Whitelisting — Project Rules -&gt; layout.tsx</div>
+    <div class="arrow-chain">CLI &amp; Skill Installers -&gt; Extraction Pipeline -&gt; Tests &amp; Fixtures -&gt; Graph Build -&gt; Serving API -&gt; poll_pending -&gt; Karix WhatsApp Template Whitelisting — Project Rules</div>
   </div>
 </div>
 <div class="grid">
   <div class="card">
     <h4>Graph Report Highlights</h4>
     <ul>
-      <li>282 nodes · 449 edges · 17 communities (11 shown, 6 thin omitted)</li>
-      <li>Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 3 edges (avg confidence: 0.5)</li>
+      <li>494 nodes · 989 edges · 34 communities (25 shown, 9 thin omitted)</li>
+      <li>Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 14 edges (avg confidence: 0.67)</li>
       <li>Token cost: 0 input · 0 output</li>
-      <li>1. `compilerOptions` - 16 edges</li>
-      <li>2. `RcsTemplateSubmission` - 16 edges</li>
-      <li>3. `get_auth_headers()` - 11 edges</li>
+      <li>1. `getApiUrl()` - 17 edges</li>
+      <li>2. `fetchWithRetry()` - 17 edges</li>
+      <li>3. `getErrorMessage()` - 16 edges</li>
     </ul>
   </div>
 </div>
 <hr>
-<!-- ====== 2. Graph Build ====== -->
-<h2 id="build-graph">2. Graph Build</h2>
-<p>Graph Build groups implementation around frontend, packagejson, tsconfigjson, react, mostly in frontend/package.json, frontend/tsconfig.json. This section covers 57 nodes and 55 internal edges; the diagram shows only representative relationships to stay readable.</p>
+<!-- ====== 2. Extraction Pipeline ====== -->
+<h2 id="extract-pipeline">2. Extraction Pipeline</h2>
+<p>Extraction Pipeline groups implementation around loaderpy, media, block, extract, mostly in loader.py, models.py. This section covers 19 nodes and 25 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
 %%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
 flowchart LR
-    %% Section: Graph Build (57 nodes, 55 edges)
-    frontend_package_dependencies_next_d84044d5("next<br/><small>frontend/package.json</small>")
-    frontend_package_dependencies_react_f565c299("react<br/><small>frontend/package.json</small>")
-    frontend_package_dependencies_react_dom_eefcf95b("react-dom<br/><small>frontend/package.json</small>")
-    frontend_package_devdependencies_autoprefixer_371cee21("autoprefixer<br/><small>frontend/package.json</small>")
-    frontend_package_devdependencies_postcss_0ea9bb0c("postcss<br/><small>frontend/package.json</small>")
-    frontend_package_devdependencies_tailwindcss_043fa3c7("tailwindcss<br/><small>frontend/package.json</small>")
-    next_edee9402("next<br/><small>frontend/package.json</small>")
-    react_6b810c90("react<br/><small>frontend/package.json</small>")
-    react_dom_1c239ab9("react-dom<br/><small>frontend/package.json</small>")
-    frontend_package_devdependencies_types_node_cb2d41d4("@types/node<br/><small>frontend/package.json</small>")
-    types_node_eed9011c("@types/node<br/><small>frontend/package.json</small>")
-    frontend_package_devdependencies_types_react_3125cf76("@types/react<br/><small>frontend/package.json</small>")
-    types_react_cf3431a2("@types/react<br/><small>frontend/package.json</small>")
-    frontend_package_devdependencies_types_react_dom_72f231ca("@types/react-dom<br/><small>frontend/package.json</small>")
-    types_react_dom_c31b8d8e("@types/react-dom<br/><small>frontend/package.json</small>")
-    autoprefixer_87dfe145("autoprefixer<br/><small>frontend/package.json</small>")
-    postcss_eee6200b("postcss<br/><small>frontend/package.json</small>")
-    tailwindcss_34a67857("tailwindcss<br/><small>frontend/package.json</small>")
-    frontend_package_dependencies_next_d84044d5 -->|imports| next_edee9402
-    frontend_package_dependencies_react_f565c299 -->|imports| react_6b810c90
-    frontend_package_dependencies_react_dom_eefcf95b -->|imports| react_dom_1c239ab9
-    frontend_package_devdependencies_types_node_cb2d41d4 -->|imports| types_node_eed9011c
-    frontend_package_devdependencies_types_react_3125cf76 -->|imports| types_react_cf3431a2
-    frontend_package_devdependencies_types_react_dom_72f231ca -->|imports| types_react_dom_c31b8d8e
-    frontend_package_devdependencies_autoprefixer_371cee21 -->|imports| autoprefixer_87dfe145
-    frontend_package_devdependencies_postcss_0ea9bb0c -->|imports| postcss_eee6200b
-    frontend_package_devdependencies_tailwindcss_043fa3c7 -->|imports| tailwindcss_34a67857
-    %% Omitted for readability: 39 nodes, 0 edges
-    class frontend_package_dependencies_next_d84044d5 function;
-    class frontend_package_dependencies_react_f565c299 function;
-    class frontend_package_dependencies_react_dom_eefcf95b function;
-    class frontend_package_devdependencies_autoprefixer_371cee21 function;
-    class frontend_package_devdependencies_postcss_0ea9bb0c function;
-    class frontend_package_devdependencies_tailwindcss_043fa3c7 function;
-    class next_edee9402 function;
-    class react_6b810c90 function;
-    class react_dom_1c239ab9 function;
-    class frontend_package_devdependencies_types_node_cb2d41d4 function;
-    class types_node_eed9011c function;
-    class frontend_package_devdependencies_types_react_3125cf76 function;
-    class types_react_cf3431a2 function;
-    class frontend_package_devdependencies_types_react_dom_72f231ca function;
-    class types_react_dom_c31b8d8e function;
-    class autoprefixer_87dfe145 function;
-    class postcss_eee6200b function;
-    class tailwindcss_34a67857 function;
+    %% Section: Extraction Pipeline (19 nodes, 25 edges)
+    subgraph extract_pipeline_loader_py_1add0d1f["loader.py"]
+        loader_c57e08af("loader.py")
+        loader_extract_images_from_xlsx_9270d77a("_extract_images_from_xlsx()<br/><small>loader.py</small>")
+        loader_load_from_json_a56d9b64("load_from_json()<br/><small>loader.py</small>")
+        loader_load_from_list_ca8ef21f("load_from_list()<br/><small>loader.py</small>")
+        loader_parse_single_cell_whatsapp_block_410f5391("cell whatsapp block()<br/><small>loader.py</small>")
+        loader_row_to_submission_7bfcd355("_row_to_submission()<br/><small>loader.py</small>")
+        loader_infer_whatsapp_cta_e1c59464("infer_whatsapp_cta()<br/><small>loader.py</small>")
+        loader_extract_media_from_xlsx_a84634ce("_extract_media_from_xlsx()<br/><small>loader.py</small>")
+        loader_detect_media_kind_27928206("_detect_media_kind()<br/><small>loader.py</small>")
+        loader_resolve_row_waba_94dfc563("_resolve_row_waba()<br/><small>loader.py</small>")
+        loader_rationale_52_7081af4a("Decompose an unstructured marketing car...<br/><small>loader.py</small>")
+        loader_rationale_128_be6875b8("Detect whether raw media bytes are IMAG...<br/><small>loader.py</small>")
+        loader_rationale_163_e21123a7("Extract all embedded media (images, vid...<br/><small>loader.py</small>")
+        loader_rationale_24_cf9d1b84("If no explicit CTA is provided: Infers...<br/><small>loader.py</small>")
+        loader_rationale_1_3194bfe2("Input loader: turns raw rows (CSV, JSON...<br/><small>loader.py</small>")
+        loader_rationale_193_a0dcfa73("Legacy image extractor helper.<br/><small>loader.py</small>")
+        loader_rationale_302_fab5592d("Resolve the WABA ID for a row's client,...<br/><small>loader.py</small>")
+    end
+    models_templatecomponent_fd71d9d3("TemplateComponent<br/><small>models.py</small>")
+    loader_parse_single_cell_whatsapp_block_410f5391 -->|calls| loader_infer_whatsapp_cta_e1c59464
+    loader_extract_media_from_xlsx_a84634ce -->|calls| loader_detect_media_kind_27928206
+    loader_extract_images_from_xlsx_9270d77a -->|calls| loader_extract_media_from_xlsx_a84634ce
+    loader_row_to_submission_7bfcd355 -->|calls| loader_resolve_row_waba_94dfc563
+    loader_row_to_submission_7bfcd355 -->|calls| models_templatecomponent_fd71d9d3
+    loader_load_from_json_a56d9b64 -->|calls| loader_row_to_submission_7bfcd355
+    loader_load_from_list_ca8ef21f -->|calls| loader_row_to_submission_7bfcd355
+    loader_c57e08af -->|imports| models_templatecomponent_fd71d9d3
+    %% Omitted for readability: 1 nodes, 0 edges
+    class loader_c57e08af module;
+    class loader_extract_images_from_xlsx_9270d77a function;
+    class loader_load_from_json_a56d9b64 function;
+    class loader_load_from_list_ca8ef21f function;
+    class loader_parse_single_cell_whatsapp_block_410f5391 function;
+    class loader_row_to_submission_7bfcd355 function;
+    class loader_infer_whatsapp_cta_e1c59464 function;
+    class loader_extract_media_from_xlsx_a84634ce function;
+    class loader_detect_media_kind_27928206 function;
+    class loader_resolve_row_waba_94dfc563 function;
+    class loader_rationale_52_7081af4a concept;
+    class loader_rationale_128_be6875b8 concept;
+    class loader_rationale_163_e21123a7 concept;
+    class loader_rationale_24_cf9d1b84 concept;
+    class loader_rationale_1_3194bfe2 concept;
+    class loader_rationale_193_a0dcfa73 concept;
+    class loader_rationale_302_fab5592d concept;
+    class models_templatecomponent_fd71d9d3 ui;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>loader.py</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>runner.py</code><br><small style="color:var(--muted)">runner.py</small></td>
+  <td><code>config.py</code><br><small style="color:var(--muted)">config.py</small><br><code>get_waba_id()</code><br><small style="color:var(--muted)">config.py</small><br><code>models.py</code><br><small style="color:var(--muted)">models.py</small><br>+2 more</td>
+  <td>Module file in loader.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>infer_whatsapp_cta()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>cell whatsapp block()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>infer_whatsapp_cta() node in loader.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>parse_single_cell_whatsapp_block()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><code>infer_whatsapp_cta()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>parse_single_cell_whatsapp_block() node in loader.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>_detect_media_kind()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_extract_media_from_xlsx()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>_detect_media_kind() node in loader.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>_extract_media_from_xlsx()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_extract_images_from_xlsx()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><code>_detect_media_kind()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>_extract_media_from_xlsx() node in loader.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>_extract_images_from_xlsx()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>_extract_media_from_xlsx()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>_extract_images_from_xlsx() node in loader.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>load_from_csv()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_json()</code><br><small style="color:var(--muted)">loader.py</small><br>+1 more</td>
+  <td><code>_resolve_row_waba()</code><br><small style="color:var(--muted)">loader.py</small><br><code>TemplateComponent</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td>_row_to_submission() node in loader.py.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>_resolve_row_waba()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_csv()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><code>get_waba_id()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td>_resolve_row_waba() node in loader.py.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>load_from_json()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>load_from_json() node in loader.py.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>load_from_list()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>run()</code><br><small style="color:var(--muted)">runner.py</small><br><code>runner.py</code><br><small style="color:var(--muted)">runner.py</small></td>
+  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>load_from_list() node in loader.py.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>Input loader: turns raw rows (CSV, JSON list, or Excel files) into validated…</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Input loader: turns raw rows (CSV, JSON list, or Excel files) into validated….</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>If no explicit CTA is provided: Infers the appropriate button text, dynamic…</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for If no explicit CTA is provided: Infers the appropriate button text, dynamic….</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>Decompose an unstructured marketing card text block (from Excel cells) into…</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Decompose an unstructured marketing card text block (from Excel cells) into….</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>Detect whether raw media bytes are IMAGE, VIDEO, or DOCUMENT, and return (kind,…</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Detect whether raw media bytes are IMAGE, VIDEO, or DOCUMENT, and return (kind,….</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>Extract all embedded media (images, videos, documents) from an Excel (.xlsx)…</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Extract all embedded media (images, videos, documents) from an Excel (.xlsx)….</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>Legacy image extractor helper.</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Legacy image extractor helper..</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>Resolve the WABA ID for a row&#x27;s client, cached per client per file load.</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Resolve the WABA ID for a row&#x27;s client, cached per client per file load..</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>TemplateComponent</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small><br><code>loader.py</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>TemplateComponent node in models.py.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>One block of a template: HEADER, BODY, FOOTER, or BUTTONS.</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for One block of a template: HEADER, BODY, FOOTER, or BUTTONS..</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>loader.py</code></td><td>17 nodes</td></tr>
+<tr><td><code>models.py</code></td><td>2 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x9, explains x8, calls x7, imports x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 3. Graph Build ====== -->
+<h2 id="build-graph">3. Graph Build</h2>
+<p>Graph Build groups implementation around rcs, frontend, packagejson, loaderpy, mostly in frontend/package.json, frontend/tsconfig.json, rcs_loader.py. This section covers 135 nodes and 183 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Graph Build (135 nodes, 183 edges)
+    subgraph build_graph_rcs_client_py_8986d5d2["rcs_client.py"]
+        rcs_client_build_rcs_save_payload_d94bc9ba("_build_rcs_save_payload()<br/><small>rcs_client.py</small>")
+        rcs_client_3bcc1079("rcs_client.py")
+        rcs_client_upload_rcs_media_5d70ecc0("upload_rcs_media()<br/><small>rcs_client.py</small>")
+        rcs_client_extract_and_number_rcs_variables_9d928f81("number rcs variables()<br/><small>rcs_client.py</small>")
+        rcs_client_ensure_url_variable_1a2fc978("_ensure_url_variable()<br/><small>rcs_client.py</small>")
+        rcs_client_build_single_suggestion_e24c6d97("_build_single_suggestion()<br/><small>rcs_client.py</small>")
+    end
+    subgraph build_graph_loader_py_cdab4485["loader.py"]
+        loader_load_from_csv_8bbc50fb("load_from_csv()<br/><small>loader.py</small>")
+        loader_flat_row_to_components_3addddf2("_flat_row_to_components()<br/><small>loader.py</small>")
+        loader_load_from_excel_7a0c51e0("load_from_excel()<br/><small>loader.py</small>")
+    end
+    subgraph build_graph_rcs_loader_py_e5881a67["rcs_loader.py"]
+        rcs_loader_load_rcs_from_excel_75356c0b("load_rcs_from_excel()<br/><small>rcs_loader.py</small>")
+        rcs_loader_row_to_rcs_submission_8dc37499("_row_to_rcs_submission()<br/><small>rcs_loader.py</small>")
+        rcs_loader_1fe7a5c7("rcs_loader.py")
+    end
+    subgraph build_graph_rcs_config_py_cf586e20["rcs_config.py"]
+        rcs_config_get_rcs_auth_headers_4fd42cd7("get_rcs_auth_headers()<br/><small>rcs_config.py</small>")
+        rcs_config_get_rcs_bot_id_e2fde9f4("get_rcs_bot_id()<br/><small>rcs_config.py</small>")
+    end
+    api_submit_file_23d712b8("submit_file()<br/><small>api.py</small>")
+    config_get_esmeaddr_8fbc1300("get_esmeaddr()<br/><small>config.py</small>")
+    runner_63a5fd3b("runner.py")
+    tracker_load_log_aabc7771("load_log()<br/><small>tracker.py</small>")
+    api_submit_file_23d712b8 -->|calls| rcs_loader_load_rcs_from_excel_75356c0b
+    api_submit_file_23d712b8 -->|calls| tracker_load_log_aabc7771
+    loader_load_from_csv_8bbc50fb -->|calls| loader_flat_row_to_components_3addddf2
+    loader_load_from_excel_7a0c51e0 -->|calls| loader_flat_row_to_components_3addddf2
+    rcs_client_upload_rcs_media_5d70ecc0 -->|calls| config_get_esmeaddr_8fbc1300
+    rcs_client_upload_rcs_media_5d70ecc0 -->|calls| rcs_config_get_rcs_auth_headers_4fd42cd7
+    rcs_client_build_rcs_save_payload_d94bc9ba -->|calls| config_get_esmeaddr_8fbc1300
+    rcs_client_build_rcs_save_payload_d94bc9ba -->|calls| rcs_client_extract_and_number_rcs_variables_9d928f81
+    rcs_client_build_rcs_save_payload_d94bc9ba -->|calls| rcs_client_ensure_url_variable_1a2fc978
+    rcs_client_build_rcs_save_payload_d94bc9ba -->|calls| rcs_client_build_single_suggestion_e24c6d97
+    rcs_client_build_rcs_save_payload_d94bc9ba -->|calls| rcs_config_get_rcs_bot_id_e2fde9f4
+    rcs_loader_row_to_rcs_submission_8dc37499 -->|calls| rcs_config_get_rcs_bot_id_e2fde9f4
+    rcs_loader_load_rcs_from_excel_75356c0b -->|calls| rcs_client_upload_rcs_media_5d70ecc0
+    rcs_loader_load_rcs_from_excel_75356c0b -->|calls| rcs_config_get_rcs_bot_id_e2fde9f4
+    rcs_loader_load_rcs_from_excel_75356c0b -->|calls| rcs_loader_row_to_rcs_submission_8dc37499
+    rcs_client_3bcc1079 -->|imports| config_get_esmeaddr_8fbc1300
+    rcs_client_3bcc1079 -->|imports| rcs_config_get_rcs_auth_headers_4fd42cd7
+    rcs_client_3bcc1079 -->|imports| rcs_config_get_rcs_bot_id_e2fde9f4
+    rcs_loader_1fe7a5c7 -->|imports| rcs_client_upload_rcs_media_5d70ecc0
+    rcs_loader_1fe7a5c7 -->|imports| rcs_config_get_rcs_bot_id_e2fde9f4
+    runner_63a5fd3b -->|imports| loader_load_from_csv_8bbc50fb
+    runner_63a5fd3b -->|imports| loader_load_from_excel_7a0c51e0
+    %% Omitted for readability: 117 nodes, 0 edges
+    class rcs_client_build_rcs_save_payload_d94bc9ba function;
+    class rcs_client_3bcc1079 entry;
+    class rcs_client_upload_rcs_media_5d70ecc0 function;
+    class rcs_client_extract_and_number_rcs_variables_9d928f81 function;
+    class rcs_client_ensure_url_variable_1a2fc978 function;
+    class rcs_client_build_single_suggestion_e24c6d97 function;
+    class loader_load_from_csv_8bbc50fb function;
+    class loader_flat_row_to_components_3addddf2 ui;
+    class loader_load_from_excel_7a0c51e0 function;
+    class rcs_loader_load_rcs_from_excel_75356c0b function;
+    class rcs_loader_row_to_rcs_submission_8dc37499 function;
+    class rcs_loader_1fe7a5c7 module;
+    class rcs_config_get_rcs_auth_headers_4fd42cd7 function;
+    class rcs_config_get_rcs_bot_id_e2fde9f4 function;
+    class api_submit_file_23d712b8 function;
+    class config_get_esmeaddr_8fbc1300 function;
+    class runner_63a5fd3b module;
+    class tracker_load_log_aabc7771 function;
     classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
     classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
     classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
@@ -480,43 +759,85 @@ flowchart LR
       <tr><th>File</th><th>Coverage</th></tr>
       <tr><td><code>frontend/package.json</code></td><td>30 nodes</td></tr>
 <tr><td><code>frontend/tsconfig.json</code></td><td>27 nodes</td></tr>
+<tr><td><code>rcs_loader.py</code></td><td>22 nodes</td></tr>
+<tr><td><code>rcs_client.py</code></td><td>14 nodes</td></tr>
+<tr><td><code>tracker.py</code></td><td>14 nodes</td></tr>
+<tr><td><code>rcs_config.py</code></td><td>11 nodes</td></tr>
+<tr><td><code>loader.py</code></td><td>6 nodes</td></tr>
+<tr><td><code>runner.py</code></td><td>6 nodes</td></tr>
     </table>
   </div>
   <div class="card">
     <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: contains x37, imports x10, extends x8. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x67, calls x46, explains x36, imports x20. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
   </div>
 </div>
 <hr>
 
-<!-- ====== 3. CLI & Skill Installers ====== -->
-<h2 id="cli-skills">3. CLI &amp; Skill Installers</h2>
-<p>CLI &amp; Skill Installers groups implementation around skillmd, design, critique, frontend, mostly in skill.md. This section covers 7 nodes and 6 internal edges; the diagram shows only representative relationships to stay readable.</p>
+<!-- ====== 4. CLI & Skill Installers ====== -->
+<h2 id="cli-skills">4. CLI &amp; Skill Installers</h2>
+<p>CLI &amp; Skill Installers groups implementation around skill, 2md, 1md, skillmd, mostly in SKILL (1).md, skill 2.md, skill.md. This section covers 34 nodes and 29 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
 %%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
 flowchart LR
-    %% Section: CLI &amp; Skill Installers (7 nodes, 6 edges)
+    %% Section: CLI &amp; Skill Installers (34 nodes, 29 edges)
+    subgraph cli_skills_SKILL_1_md_2eeedd11["SKILL (1).md"]
+        skill_1_web_application_testing_0650488f("Web Application Testing<br/><small>SKILL (1).md</small>")
+        skill_1_best_practices_cdd2e3fb("Best Practices<br/><small>SKILL (1).md</small>")
+        skill_1_common_pitfall_11efa63d("Common Pitfall<br/><small>SKILL (1).md</small>")
+        skill_1_decision_tree_choosing_your_approach_bb799cb7("Decision Tree: Choosing Your Approach<br/><small>SKILL (1).md</small>")
+        skill_1_example_using_with_server_py_b80a03d9("Example: Using with_server.py<br/><small>SKILL (1).md</small>")
+        skill_1_reconnaissance_then_action_pattern_ae7fce85("Reconnaissance-Then-Action Pattern<br/><small>SKILL (1).md</small>")
+        skill_1_reference_files_50db1735("Reference Files<br/><small>SKILL (1).md</small>")
+        skill_1_8c8bf7b1("SKILL (1).md")
+    end
+    subgraph cli_skills_CLAUDE_md_27387765["CLAUDE.md"]
+        claude_claude_md_dbf0debe("CLAUDE.md")
+        claude_f1dda22f("CLAUDE.md")
+        claude_1_think_before_coding_6430c66e("1. Think Before Coding<br/><small>CLAUDE.md</small>")
+        claude_2_simplicity_first_52c69c89("2. Simplicity First<br/><small>CLAUDE.md</small>")
+        claude_3_surgical_changes_c30fd65c("3. Surgical Changes<br/><small>CLAUDE.md</small>")
+        claude_4_goal_driven_execution_1fff71b1("4. Goal-Driven Execution<br/><small>CLAUDE.md</small>")
+    end
+    subgraph cli_skills_SKILL_2_md_1a6627a8["SKILL (2).md"]
+        skill_2_karpathy_guidelines_a3d0579f("Karpathy Guidelines<br/><small>SKILL (2).md</small>")
+        skill_2_1_think_before_coding_4c7d527e("1. Think Before Coding<br/><small>SKILL (2).md</small>")
+    end
+    skill_2_frontend_design_ca51a8b2("Frontend Design<br/><small>skill 2.md</small>")
     skill_frontend_design_2460c9ef("Frontend Design<br/><small>skill.md</small>")
-    skill_34b33e00("skill.md")
-    skill_design_principles_1f57b507("Design principles<br/><small>skill.md</small>")
-    skill_ground_it_in_the_subject_45092f0c("Ground it in the subject<br/><small>skill.md</small>")
-    skill_more_on_writing_in_design_66b63e12("More on writing in design<br/><small>skill.md</small>")
-    skill_process_brainstorm_explore_plan_critique_b_355196db("Process: brainstorm, explore, plan, cri...<br/><small>skill.md</small>")
-    skill_restraint_and_self_critique_16d16b8e("Restraint and self-critique<br/><small>skill.md</small>")
-    skill_34b33e00 -->|contains| skill_frontend_design_2460c9ef
-    skill_frontend_design_2460c9ef -->|contains| skill_design_principles_1f57b507
-    skill_frontend_design_2460c9ef -->|contains| skill_ground_it_in_the_subject_45092f0c
-    skill_frontend_design_2460c9ef -->|contains| skill_more_on_writing_in_design_66b63e12
-    skill_frontend_design_2460c9ef -->|contains| skill_process_brainstorm_explore_plan_critique_b_355196db
-    skill_frontend_design_2460c9ef -->|contains| skill_restraint_and_self_critique_16d16b8e
+    claude_f1dda22f -->|contains| claude_claude_md_dbf0debe
+    claude_claude_md_dbf0debe -->|contains| claude_1_think_before_coding_6430c66e
+    claude_claude_md_dbf0debe -->|contains| claude_2_simplicity_first_52c69c89
+    claude_claude_md_dbf0debe -->|contains| claude_3_surgical_changes_c30fd65c
+    claude_claude_md_dbf0debe -->|contains| claude_4_goal_driven_execution_1fff71b1
+    skill_1_8c8bf7b1 -->|contains| skill_1_web_application_testing_0650488f
+    skill_1_web_application_testing_0650488f -->|contains| skill_1_best_practices_cdd2e3fb
+    skill_1_web_application_testing_0650488f -->|contains| skill_1_common_pitfall_11efa63d
+    skill_1_web_application_testing_0650488f -->|contains| skill_1_decision_tree_choosing_your_approach_bb799cb7
+    skill_1_web_application_testing_0650488f -->|contains| skill_1_example_using_with_server_py_b80a03d9
+    skill_1_web_application_testing_0650488f -->|contains| skill_1_reconnaissance_then_action_pattern_ae7fce85
+    skill_1_web_application_testing_0650488f -->|contains| skill_1_reference_files_50db1735
+    skill_2_karpathy_guidelines_a3d0579f -->|contains| skill_2_1_think_before_coding_4c7d527e
+    %% Omitted for readability: 16 nodes, 0 edges
+    class skill_1_web_application_testing_0650488f concept;
+    class skill_1_best_practices_cdd2e3fb concept;
+    class skill_1_common_pitfall_11efa63d concept;
+    class skill_1_decision_tree_choosing_your_approach_bb799cb7 concept;
+    class skill_1_example_using_with_server_py_b80a03d9 concept;
+    class skill_1_reconnaissance_then_action_pattern_ae7fce85 concept;
+    class skill_1_reference_files_50db1735 concept;
+    class skill_1_8c8bf7b1 concept;
+    class claude_claude_md_dbf0debe concept;
+    class claude_f1dda22f concept;
+    class claude_1_think_before_coding_6430c66e concept;
+    class claude_2_simplicity_first_52c69c89 concept;
+    class claude_3_surgical_changes_c30fd65c concept;
+    class claude_4_goal_driven_execution_1fff71b1 concept;
+    class skill_2_karpathy_guidelines_a3d0579f concept;
+    class skill_2_1_think_before_coding_4c7d527e concept;
+    class skill_2_frontend_design_ca51a8b2 concept;
     class skill_frontend_design_2460c9ef concept;
-    class skill_34b33e00 concept;
-    class skill_design_principles_1f57b507 concept;
-    class skill_ground_it_in_the_subject_45092f0c concept;
-    class skill_more_on_writing_in_design_66b63e12 concept;
-    class skill_process_brainstorm_explore_plan_critique_b_355196db concept;
-    class skill_restraint_and_self_critique_16d16b8e concept;
     classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
     classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
     classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
@@ -540,6 +861,126 @@ flowchart LR
 </tr>
 <tr>
   <td>1</td>
+  <td><code>SKILL (1).md</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing SKILL (1).md.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>Web Application Testing</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Web Application Testing.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>Decision Tree: Choosing Your Approach</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Decision Tree: Choosing Your Approach.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>Example: Using with_server.py</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Example: Using with_server.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>Reconnaissance-Then-Action Pattern</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Reconnaissance-Then-Action Pattern.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>Common Pitfall</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Common Pitfall.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>Best Practices</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Best Practices.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>Reference Files</code><br><small style="color:var(--muted)">SKILL (1).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Reference Files.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>skill 2.md</code><br><small style="color:var(--muted)">skill 2.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing skill 2.md.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>Frontend Design</code><br><small style="color:var(--muted)">skill 2.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Frontend Design.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>Ground it in the subject</code><br><small style="color:var(--muted)">skill 2.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Ground it in the subject.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>Design principles</code><br><small style="color:var(--muted)">skill 2.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Design principles.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>Process: brainstorm, explore, plan, critique, build, critique again</code><br><small style="color:var(--muted)">skill 2.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Process: brainstorm, explore, plan, critique, build, critique again.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>Restraint and self-critique</code><br><small style="color:var(--muted)">skill 2.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Restraint and self-critique.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>More on writing in design</code><br><small style="color:var(--muted)">skill 2.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing More on writing in design.</td>
+</tr>
+<tr>
+  <td>16</td>
   <td><code>skill.md</code><br><small style="color:var(--muted)">skill.md</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
@@ -547,7 +988,7 @@ flowchart LR
   <td>Documentation node describing skill.md.</td>
 </tr>
 <tr>
-  <td>2</td>
+  <td>17</td>
   <td><code>Frontend Design</code><br><small style="color:var(--muted)">skill.md</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
@@ -555,7 +996,7 @@ flowchart LR
   <td>Documentation node describing Frontend Design.</td>
 </tr>
 <tr>
-  <td>3</td>
+  <td>18</td>
   <td><code>Ground it in the subject</code><br><small style="color:var(--muted)">skill.md</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
@@ -563,7 +1004,7 @@ flowchart LR
   <td>Documentation node describing Ground it in the subject.</td>
 </tr>
 <tr>
-  <td>4</td>
+  <td>19</td>
   <td><code>Design principles</code><br><small style="color:var(--muted)">skill.md</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
@@ -571,7 +1012,7 @@ flowchart LR
   <td>Documentation node describing Design principles.</td>
 </tr>
 <tr>
-  <td>5</td>
+  <td>20</td>
   <td><code>Process: brainstorm, explore, plan, critique, build, critique again</code><br><small style="color:var(--muted)">skill.md</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
@@ -579,7 +1020,7 @@ flowchart LR
   <td>Documentation node describing Process: brainstorm, explore, plan, critique, build, critique again.</td>
 </tr>
 <tr>
-  <td>6</td>
+  <td>21</td>
   <td><code>Restraint and self-critique</code><br><small style="color:var(--muted)">skill.md</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
@@ -587,13 +1028,77 @@ flowchart LR
   <td>Documentation node describing Restraint and self-critique.</td>
 </tr>
 <tr>
-  <td>7</td>
+  <td>22</td>
   <td><code>More on writing in design</code><br><small style="color:var(--muted)">skill.md</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
   <td>Documentation node describing More on writing in design.</td>
 </tr>
+<tr>
+  <td>23</td>
+  <td><code>CLAUDE.md</code><br><small style="color:var(--muted)">CLAUDE.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing CLAUDE.md.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>CLAUDE.md</code><br><small style="color:var(--muted)">CLAUDE.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing CLAUDE.md.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>1. Think Before Coding</code><br><small style="color:var(--muted)">CLAUDE.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing 1. Think Before Coding.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>2. Simplicity First</code><br><small style="color:var(--muted)">CLAUDE.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing 2. Simplicity First.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>3. Surgical Changes</code><br><small style="color:var(--muted)">CLAUDE.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing 3. Surgical Changes.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>4. Goal-Driven Execution</code><br><small style="color:var(--muted)">CLAUDE.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing 4. Goal-Driven Execution.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>SKILL (2).md</code><br><small style="color:var(--muted)">SKILL (2).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing SKILL (2).md.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>Karpathy Guidelines</code><br><small style="color:var(--muted)">SKILL (2).md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Karpathy Guidelines.</td>
+</tr>
 </table>
 
 <div class="grid">
@@ -601,96 +1106,94 @@ flowchart LR
     <h4>Key Files</h4>
     <table style="width:100%;font-size:0.85rem;">
       <tr><th>File</th><th>Coverage</th></tr>
-      <tr><td><code>skill.md</code></td><td>7 nodes</td></tr>
+      <tr><td><code>SKILL (1).md</code></td><td>8 nodes</td></tr>
+<tr><td><code>skill 2.md</code></td><td>7 nodes</td></tr>
+<tr><td><code>skill.md</code></td><td>7 nodes</td></tr>
+<tr><td><code>CLAUDE.md</code></td><td>6 nodes</td></tr>
+<tr><td><code>SKILL (2).md</code></td><td>6 nodes</td></tr>
     </table>
   </div>
   <div class="card">
     <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: contains x6. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x29. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
   </div>
 </div>
 <hr>
 
-<!-- ====== 4. Serving API ====== -->
-<h2 id="serve-api">4. Serving API</h2>
-<p>Serving API groups implementation around frontend, pagetsx, app, loaderpy, mostly in loader.py, frontend/lib/api.ts, api.py. This section covers 75 nodes and 142 internal edges; the diagram shows only representative relationships to stay readable.</p>
+<!-- ====== 5. Serving API ====== -->
+<h2 id="serve-api">5. Serving API</h2>
+<p>Serving API groups implementation around frontend, apipy, apits, activity, mostly in api.py, frontend/lib/api.ts, activity_tracker.py. This section covers 139 nodes and 344 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
 %%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
 flowchart LR
-    %% Section: Serving API (75 nodes, 142 edges)
+    %% Section: Serving API (139 nodes, 344 edges)
+    subgraph serve_api_activity_tracker_py_82622cc7["activity_tracker.py"]
+        activity_tracker_init_store_7af02200("init_store()<br/><small>activity_tracker.py</small>")
+        activity_tracker_get_db_876f7ae5("_get_db()<br/><small>activity_tracker.py</small>")
+        activity_tracker_migrate_jsonl_to_sqlite_dc914b04("_migrate_jsonl_to_sqlite()<br/><small>activity_tracker.py</small>")
+        activity_tracker_register_or_update_user_875188be("register_or_update_user()<br/><small>activity_tracker.py</small>")
+        activity_tracker_get_all_users_7ae3ec44("get_all_users()<br/><small>activity_tracker.py</small>")
+        activity_tracker_log_activity_dcdddaa4("log_activity()<br/><small>activity_tracker.py</small>")
+        activity_tracker_load_activities_59c4cb48("load_activities()<br/><small>activity_tracker.py</small>")
+        activity_tracker_get_activity_summary_6dd64b72("get_activity_summary()<br/><small>activity_tracker.py</small>")
+    end
     subgraph serve_api_api_py_46f06b28["api.py"]
         api_a033a528("api.py")
-        api_get_stats_aaec9464("get_stats()<br/><small>api.py</small>")
-        api_get_templates_7638edff("get_templates()<br/><small>api.py</small>")
-        api_preview_file_40967237("preview_file()<br/><small>api.py</small>")
-        api_submit_file_23d712b8("submit_file()<br/><small>api.py</small>")
-        api_poll_f5494fdb("poll()<br/><small>api.py</small>")
+        api_load_accounts_384b4318("load_accounts()<br/><small>api.py</small>")
+        api_get_account_name_2e423749("get_account_name()<br/><small>api.py</small>")
     end
     subgraph serve_api_frontend_app_page_tsx_6e4967f2["frontend/app/page.tsx"]
         frontend_app_page_1bfacff6("page.tsx")
         frontend_app_page_dashboardpage_0935100c("DashboardPage()<br/><small>frontend/app/page.tsx</small>")
-        frontend_app_page_formatdate_3e6cfe6d("formatDate()<br/><small>frontend/app/page.tsx</small>")
     end
-    subgraph serve_api_runner_py_ea1b3c95["runner.py"]
-        runner_63a5fd3b("runner.py")
-        runner_run_file_d385cc28("run_file()<br/><small>runner.py</small>")
-        runner_poll_pending_1e34fd3e("poll_pending()<br/><small>runner.py</small>")
-    end
-    subgraph serve_api_app_submit_page_tsx_3366343a["app/submit/page.tsx"]
-        frontend_app_submit_page_ad3934ae("page.tsx")
-        frontend_app_submit_page_submitpage_cf39a83e("SubmitPage()<br/><small>app/submit/page.tsx</small>")
-    end
-    subgraph serve_api_loader_py_21ca5bdf["loader.py"]
-        loader_load_from_csv_8bbc50fb("load_from_csv()<br/><small>loader.py</small>")
-        loader_load_from_excel_7a0c51e0("load_from_excel()<br/><small>loader.py</small>")
-    end
-    subgraph serve_api_tracker_py_c838a67c["tracker.py"]
-        tracker_load_log_aabc7771("load_log()<br/><small>tracker.py</small>")
-        tracker_pending_entries_265588ea("pending_entries()<br/><small>tracker.py</small>")
-    end
-    api_get_stats_aaec9464 -->|calls| tracker_load_log_aabc7771
-    api_get_templates_7638edff -->|calls| tracker_load_log_aabc7771
-    api_preview_file_40967237 -->|calls| loader_load_from_csv_8bbc50fb
-    api_preview_file_40967237 -->|calls| loader_load_from_excel_7a0c51e0
-    api_submit_file_23d712b8 -->|calls| runner_run_file_d385cc28
-    api_submit_file_23d712b8 -->|calls| tracker_load_log_aabc7771
-    api_poll_f5494fdb -->|calls| runner_poll_pending_1e34fd3e
-    api_poll_f5494fdb -->|calls| tracker_pending_entries_265588ea
-    frontend_app_page_dashboardpage_0935100c -->|calls| frontend_app_page_formatdate_3e6cfe6d
-    runner_poll_pending_1e34fd3e -->|calls| tracker_pending_entries_265588ea
-    runner_run_file_d385cc28 -->|calls| loader_load_from_csv_8bbc50fb
-    runner_run_file_d385cc28 -->|calls| loader_load_from_excel_7a0c51e0
-    tracker_pending_entries_265588ea -->|calls| tracker_load_log_aabc7771
-    api_a033a528 -->|imports| loader_load_from_csv_8bbc50fb
-    api_a033a528 -->|imports| loader_load_from_excel_7a0c51e0
-    api_a033a528 -->|imports| runner_63a5fd3b
-    api_a033a528 -->|imports| runner_poll_pending_1e34fd3e
-    api_a033a528 -->|imports| runner_run_file_d385cc28
-    api_a033a528 -->|imports| tracker_load_log_aabc7771
-    api_a033a528 -->|imports| tracker_pending_entries_265588ea
-    runner_63a5fd3b -->|imports| loader_load_from_csv_8bbc50fb
-    runner_63a5fd3b -->|imports| loader_load_from_excel_7a0c51e0
-    runner_63a5fd3b -->|imports| tracker_pending_entries_265588ea
-    %% Omitted for readability: 57 nodes, 0 edges
+    get_783923e5("get")
+    frontend_app_activity_page_3dde8e7c("page.tsx")
+    frontend_app_settings_page_4bfa9404("page.tsx")
+    frontend_app_submit_page_ad3934ae("page.tsx")
+    config_load_env_file_69e44007("_load_env_file()<br/><small>config.py</small>")
+    activity_tracker_init_store_7af02200 -->|calls| activity_tracker_get_db_876f7ae5
+    activity_tracker_init_store_7af02200 -->|calls| activity_tracker_migrate_jsonl_to_sqlite_dc914b04
+    activity_tracker_migrate_jsonl_to_sqlite_dc914b04 -->|calls| activity_tracker_get_db_876f7ae5
+    activity_tracker_register_or_update_user_875188be -->|calls| activity_tracker_get_db_876f7ae5
+    activity_tracker_get_all_users_7ae3ec44 -->|calls| activity_tracker_get_db_876f7ae5
+    activity_tracker_get_all_users_7ae3ec44 -->|calls| activity_tracker_init_store_7af02200
+    activity_tracker_log_activity_dcdddaa4 -->|calls| activity_tracker_get_db_876f7ae5
+    activity_tracker_log_activity_dcdddaa4 -->|calls| activity_tracker_init_store_7af02200
+    activity_tracker_load_activities_59c4cb48 -->|calls| activity_tracker_get_db_876f7ae5
+    activity_tracker_load_activities_59c4cb48 -->|calls| activity_tracker_init_store_7af02200
+    activity_tracker_get_activity_summary_6dd64b72 -->|calls| activity_tracker_get_db_876f7ae5
+    activity_tracker_get_activity_summary_6dd64b72 -->|calls| activity_tracker_init_store_7af02200
+    activity_tracker_get_activity_summary_6dd64b72 -->|calls| activity_tracker_load_activities_59c4cb48
+    api_load_accounts_384b4318 -->|calls| get_783923e5
+    api_load_accounts_384b4318 -->|calls| config_load_env_file_69e44007
+    api_get_account_name_2e423749 -->|calls| get_783923e5
+    api_get_account_name_2e423749 -->|calls| api_load_accounts_384b4318
+    api_a033a528 -->|imports| activity_tracker_register_or_update_user_875188be
+    api_a033a528 -->|imports| activity_tracker_get_all_users_7ae3ec44
+    api_a033a528 -->|imports| activity_tracker_log_activity_dcdddaa4
+    api_a033a528 -->|imports| activity_tracker_load_activities_59c4cb48
+    api_a033a528 -->|imports| activity_tracker_get_activity_summary_6dd64b72
+    api_a033a528 -->|imports| config_load_env_file_69e44007
+    %% Omitted for readability: 121 nodes, 0 edges
+    class activity_tracker_init_store_7af02200 ui;
+    class activity_tracker_get_db_876f7ae5 function;
+    class activity_tracker_migrate_jsonl_to_sqlite_dc914b04 function;
+    class activity_tracker_register_or_update_user_875188be function;
+    class activity_tracker_get_all_users_7ae3ec44 function;
+    class activity_tracker_log_activity_dcdddaa4 function;
+    class activity_tracker_load_activities_59c4cb48 function;
+    class activity_tracker_get_activity_summary_6dd64b72 function;
     class api_a033a528 api;
-    class api_get_stats_aaec9464 function;
-    class api_get_templates_7638edff function;
-    class api_preview_file_40967237 function;
-    class api_submit_file_23d712b8 function;
-    class api_poll_f5494fdb function;
+    class api_load_accounts_384b4318 function;
+    class api_get_account_name_2e423749 function;
     class frontend_app_page_1bfacff6 ui;
     class frontend_app_page_dashboardpage_0935100c ui;
-    class frontend_app_page_formatdate_3e6cfe6d ui;
-    class runner_63a5fd3b module;
-    class runner_run_file_d385cc28 function;
-    class runner_poll_pending_1e34fd3e function;
+    class get_783923e5 function;
+    class frontend_app_activity_page_3dde8e7c ui;
+    class frontend_app_settings_page_4bfa9404 ui;
     class frontend_app_submit_page_ad3934ae ui;
-    class frontend_app_submit_page_submitpage_cf39a83e ui;
-    class loader_load_from_csv_8bbc50fb function;
-    class loader_load_from_excel_7a0c51e0 function;
-    class tracker_load_log_aabc7771 function;
-    class tracker_pending_entries_265588ea function;
+    class config_load_env_file_69e44007 function;
     classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
     classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
     classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
@@ -714,604 +1217,605 @@ flowchart LR
 </tr>
 <tr>
   <td>1</td>
-  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-endpoint">API</span></td>
+  <td><code>activity/page.tsx</code><br><small style="color:var(--muted)">app/activity/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>config.py</code><br><small style="color:var(--muted)">config.py</small><br><code>get_auth_headers()</code><br><small style="color:var(--muted)">config.py</small><br><code>load_from_csv()</code><br><small style="color:var(--muted)">loader.py</small><br>+8 more</td>
-  <td>Module file in api.py.</td>
+  <td><code>Account</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>ActivityLog</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>ActivityStats</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br>+6 more</td>
+  <td>Module file in app/activity/page.tsx.</td>
 </tr>
 <tr>
   <td>2</td>
-  <td><code>CredentialUpdate</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-class">Class</span></td>
-  <td>External entry / no inbound edge</td>
+  <td><code>formatTimestamp()</code><br><small style="color:var(--muted)">app/activity/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>ActivityLogsPage()</code><br><small style="color:var(--muted)">app/activity/page.tsx</small></td>
   <td>No direct outbound edge</td>
-  <td>CredentialUpdate node in api.py.</td>
+  <td>formatTimestamp() node in app/activity/page.tsx.</td>
 </tr>
 <tr>
   <td>3</td>
-  <td><code>BaseModel</code><br><small style="color:var(--muted)"></small></td>
-  <td><span class="tag tag-class">Class</span></td>
+  <td><code>ActionBadge()</code><br><small style="color:var(--muted)">app/activity/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>BaseModel node in project.</td>
+  <td>ActionBadge() node in app/activity/page.tsx.</td>
 </tr>
 <tr>
   <td>4</td>
-  <td><code>get</code><br><small style="color:var(--muted)"></small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>UserAvatar()</code><br><small style="color:var(--muted)">app/activity/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>get node in project.</td>
+  <td>UserAvatar() node in app/activity/page.tsx.</td>
 </tr>
 <tr>
   <td>5</td>
-  <td><code>get_stats()</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ActivityLogsPage()</code><br><small style="color:var(--muted)">app/activity/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>load_log()</code><br><small style="color:var(--muted)">tracker.py</small></td>
-  <td>get_stats() node in api.py.</td>
+  <td><code>fetchActivityLogs()</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>fetchActivityStats()</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>formatTimestamp()</code><br><small style="color:var(--muted)">app/activity/page.tsx</small><br>+1 more</td>
+  <td>Organizes documentation pages, navigation, or content lookup.</td>
 </tr>
 <tr>
   <td>6</td>
-  <td><code>get_templates()</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>layout.tsx</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>load_log()</code><br><small style="color:var(--muted)">tracker.py</small></td>
-  <td>get_templates() node in api.py.</td>
+  <td><code>AppProvider()</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small><br><code>context.tsx</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small><br><code>Nav()</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small><br>+1 more</td>
+  <td>Module file in frontend/app/layout.tsx.</td>
 </tr>
 <tr>
   <td>7</td>
-  <td><code>post</code><br><small style="color:var(--muted)"></small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>inter</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>post node in project.</td>
+  <td>inter node in frontend/app/layout.tsx.</td>
 </tr>
 <tr>
   <td>8</td>
-  <td><code>preview_file()</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>metadata</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>load_from_csv()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td>preview_file() node in api.py.</td>
+  <td>No direct outbound edge</td>
+  <td>metadata node in frontend/app/layout.tsx.</td>
 </tr>
 <tr>
   <td>9</td>
-  <td><code>UploadFile</code><br><small style="color:var(--muted)"></small></td>
-  <td><span class="tag tag-class">Class</span></td>
+  <td><code>RootLayout()</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>UploadFile node in project.</td>
+  <td>RootLayout() node in frontend/app/layout.tsx.</td>
 </tr>
 <tr>
   <td>10</td>
-  <td><code>submit_file()</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>app/page.tsx</code><br><small style="color:var(--muted)">frontend/app/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>load_log()</code><br><small style="color:var(--muted)">tracker.py</small><br><code>run_file()</code><br><small style="color:var(--muted)">runner.py</small></td>
-  <td>submit_file() node in api.py.</td>
+  <td><code>ActivityLog</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>ActivityStats</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>api.ts</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br>+14 more</td>
+  <td>Module file in frontend/app/page.tsx.</td>
 </tr>
 <tr>
   <td>11</td>
-  <td><code>poll()</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>StatusBadge()</code><br><small style="color:var(--muted)">frontend/app/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>pending_entries()</code><br><small style="color:var(--muted)">tracker.py</small><br><code>poll_pending()</code><br><small style="color:var(--muted)">runner.py</small></td>
-  <td>poll() node in api.py.</td>
+  <td>No direct outbound edge</td>
+  <td>StatusBadge() node in frontend/app/page.tsx.</td>
 </tr>
 <tr>
   <td>12</td>
-  <td><code>put</code><br><small style="color:var(--muted)"></small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>LiveBadge()</code><br><small style="color:var(--muted)">frontend/app/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>put node in project.</td>
+  <td>LiveBadge() node in frontend/app/page.tsx.</td>
 </tr>
 <tr>
   <td>13</td>
-  <td><code>update_credentials()</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ActivityIcon()</code><br><small style="color:var(--muted)">frontend/app/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>update_credentials() node in api.py.</td>
+  <td>ActivityIcon() node in frontend/app/page.tsx.</td>
 </tr>
 <tr>
   <td>14</td>
-  <td><code>test_credentials()</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Test</span></td>
+  <td><code>DashboardPage()</code><br><small style="color:var(--muted)">frontend/app/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>get_auth_headers()</code><br><small style="color:var(--muted)">config.py</small></td>
-  <td>Verifies imports, entry points, or version behavior.</td>
+  <td><code>fetchActivityLogs()</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>fetchActivityStats()</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>fetchStats()</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br>+7 more</td>
+  <td>Organizes documentation pages, navigation, or content lookup.</td>
 </tr>
 <tr>
   <td>15</td>
-  <td><code>FastAPI backend for the Karix WhatsApp template whitelisting tool. Wraps the…</code><br><small style="color:var(--muted)">api.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
+  <td><code>settings/page.tsx</code><br><small style="color:var(--muted)">app/settings/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for FastAPI backend for the Karix WhatsApp template whitelisting tool. Wraps the….</td>
+  <td><code>Account</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>AccountItem</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>api.ts</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br>+8 more</td>
+  <td>Module file in app/settings/page.tsx.</td>
 </tr>
 <tr>
   <td>16</td>
-  <td><code>loader.py</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-class">Module</span></td>
-  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>runner.py</code><br><small style="color:var(--muted)">runner.py</small></td>
-  <td><code>models.py</code><br><small style="color:var(--muted)">models.py</small><br><code>TemplateComponent</code><br><small style="color:var(--muted)">models.py</small><br><code>TemplateSubmission</code><br><small style="color:var(--muted)">models.py</small></td>
-  <td>Module file in loader.py.</td>
+  <td><code>Banner</code><br><small style="color:var(--muted)">app/settings/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Banner node in app/settings/page.tsx.</td>
 </tr>
 <tr>
   <td>17</td>
-  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>load_from_csv()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_json()</code><br><small style="color:var(--muted)">loader.py</small><br>+1 more</td>
-  <td><code>TemplateComponent</code><br><small style="color:var(--muted)">models.py</small></td>
-  <td>_row_to_submission() node in loader.py.</td>
+  <td><code>SettingsPage()</code><br><small style="color:var(--muted)">app/settings/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>useApp()</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small></td>
+  <td>Organizes documentation pages, navigation, or content lookup.</td>
 </tr>
 <tr>
   <td>18</td>
-  <td><code>load_from_json()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
+  <td><code>submit/page.tsx</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td>load_from_json() node in loader.py.</td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>context.tsx</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small><br><code>format.ts</code><br><small style="color:var(--muted)">frontend/lib/format.ts</small><br>+7 more</td>
+  <td>Module file in app/submit/page.tsx.</td>
 </tr>
 <tr>
   <td>19</td>
-  <td><code>_flat_row_to_components()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><code>StatusBadge()</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
   <td><span class="tag tag-hook">UI</span></td>
-  <td><code>load_from_csv()</code><br><small style="color:var(--muted)">loader.py</small><br><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>_flat_row_to_components() node in loader.py.</td>
+  <td>StatusBadge() node in app/submit/page.tsx.</td>
 </tr>
 <tr>
   <td>20</td>
-  <td><code>load_from_csv()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>preview_file()</code><br><small style="color:var(--muted)">api.py</small><br><code>run_file()</code><br><small style="color:var(--muted)">runner.py</small><br>+1 more</td>
-  <td><code>_flat_row_to_components()</code><br><small style="color:var(--muted)">loader.py</small><br><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td>load_from_csv() node in loader.py.</td>
+  <td><code>State</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>State node in app/submit/page.tsx.</td>
 </tr>
 <tr>
   <td>21</td>
-  <td><code>load_from_excel()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>preview_file()</code><br><small style="color:var(--muted)">api.py</small><br><code>run_file()</code><br><small style="color:var(--muted)">runner.py</small><br>+1 more</td>
-  <td><code>_flat_row_to_components()</code><br><small style="color:var(--muted)">loader.py</small><br><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td>load_from_excel() node in loader.py.</td>
+  <td><code>formatBytes()</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>SubmitPage()</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>formatBytes() node in app/submit/page.tsx.</td>
 </tr>
 <tr>
   <td>22</td>
-  <td><code>load_from_list()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>run()</code><br><small style="color:var(--muted)">runner.py</small><br><code>runner.py</code><br><small style="color:var(--muted)">runner.py</small></td>
-  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td>load_from_list() node in loader.py.</td>
+  <td><code>ACCEPTED_EXTENSIONS</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>ACCEPTED_EXTENSIONS node in app/submit/page.tsx.</td>
 </tr>
 <tr>
   <td>23</td>
-  <td><code>Input loader: turns raw rows (CSV, JSON list, or a list of dicts you already…</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
+  <td><code>isAcceptedFile()</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>SubmitPage()</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
   <td>No direct outbound edge</td>
-  <td>Design note for Input loader: turns raw rows (CSV, JSON list, or a list of dicts you already….</td>
+  <td>isAcceptedFile() node in app/submit/page.tsx.</td>
 </tr>
 <tr>
   <td>24</td>
-  <td><code>Load a JSON file containing a list of template objects.</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
+  <td><code>SubmitPage()</code><br><small style="color:var(--muted)">app/submit/page.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Load a JSON file containing a list of template objects..</td>
+  <td><code>formatBytes()</code><br><small style="color:var(--muted)">app/submit/page.tsx</small><br><code>formatError()</code><br><small style="color:var(--muted)">frontend/lib/format.ts</small><br><code>getSampleCsvUrl()</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br>+4 more</td>
+  <td>Organizes documentation pages, navigation, or content lookup.</td>
 </tr>
 <tr>
   <td>25</td>
-  <td><code>Convert flat CSV columns into the Karix components array.</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Convert flat CSV columns into the Karix components array..</td>
+  <td><code>nav.tsx</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>layout.tsx</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><code>Account</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>api.ts</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br><code>Channel</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small><br>+2 more</td>
+  <td>Module file in frontend/components/nav.tsx.</td>
 </tr>
 <tr>
   <td>26</td>
-  <td><code>Load templates from a CSV file. Supports two CSV structures: 1. Flat CSV…</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
+  <td><code>links</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Load templates from a CSV file. Supports two CSV structures: 1. Flat CSV….</td>
+  <td>links node in frontend/components/nav.tsx.</td>
 </tr>
 <tr>
   <td>27</td>
-  <td><code>Load templates directly from an Excel (.xlsx) file. Supports flat columns:…</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Load templates directly from an Excel (.xlsx) file. Supports flat columns:….</td>
+  <td><code>Nav()</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>layout.tsx</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><code>useApp()</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small></td>
+  <td>Nav() node in frontend/components/nav.tsx.</td>
 </tr>
 <tr>
   <td>28</td>
-  <td><code>Load from a list of dicts already in memory (e.g. from a mock).</code><br><small style="color:var(--muted)">loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small></td>
+  <td><span class="tag tag-endpoint">API</span></td>
+  <td><code>context.tsx</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small><br><code>nav.tsx</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small><br><code>page.tsx</code><br><small style="color:var(--muted)">app/submit/page.tsx</small><br>+3 more</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Load from a list of dicts already in memory (e.g. from a mock)..</td>
+  <td>Module file in frontend/lib/api.ts.</td>
 </tr>
 <tr>
   <td>29</td>
-  <td><code>TemplateComponent</code><br><small style="color:var(--muted)">models.py</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
-  <td><code>_row_to_submission()</code><br><small style="color:var(--muted)">loader.py</small><br><code>loader.py</code><br><small style="color:var(--muted)">loader.py</small></td>
+  <td><code>Account</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>context.tsx</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small><br><code>nav.tsx</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small><br><code>page.tsx</code><br><small style="color:var(--muted)">app/activity/page.tsx</small><br>+1 more</td>
   <td>No direct outbound edge</td>
-  <td>TemplateComponent node in models.py.</td>
+  <td>Account node in frontend/lib/api.ts.</td>
 </tr>
 <tr>
   <td>30</td>
+  <td><code>Channel</code><br><small style="color:var(--muted)">frontend/lib/api.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>context.tsx</code><br><small style="color:var(--muted)">frontend/lib/context.tsx</small><br><code>nav.tsx</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small><br><code>page.tsx</code><br><small style="color:var(--muted)">app/activity/page.tsx</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>Channel node in frontend/lib/api.ts.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>api.py</code></td><td>39 nodes</td></tr>
+<tr><td><code>frontend/lib/api.ts</code></td><td>32 nodes</td></tr>
+<tr><td><code>activity_tracker.py</code></td><td>18 nodes</td></tr>
+<tr><td><code>app/submit/page.tsx</code></td><td>7 nodes</td></tr>
+<tr><td><code>frontend/lib/context.tsx</code></td><td>6 nodes</td></tr>
+<tr><td><code>app/activity/page.tsx</code></td><td>5 nodes</td></tr>
+<tr><td><code>frontend/app/page.tsx</code></td><td>5 nodes</td></tr>
+<tr><td><code>frontend/lib/format.ts</code></td><td>5 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x127, contains x96, imports x56, references x24. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 6. Tests & Fixtures ====== -->
+<h2 id="tests-fixtures">6. Tests &amp; Fixtures</h2>
+<p>Tests &amp; Fixtures groups implementation around rcs, submission, clientpy, template, mostly in submission_client.py, config.py, rcs_tracker.py. This section covers 113 nodes and 215 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Tests &amp; Fixtures (113 nodes, 215 edges)
+    subgraph tests_fixtures_config_py_e98f47f0["config.py"]
+        config_get_portal_auth_headers_c8461851("get_portal_auth_headers()<br/><small>config.py</small>")
+        config_account_prefix_8da4741c("_account_prefix()<br/><small>config.py</small>")
+        config_get_official_auth_headers_edaeeb12("get_official_auth_headers()<br/><small>config.py</small>")
+        config_get_waba_id_9a600f23("get_waba_id()<br/><small>config.py</small>")
+        config_get_template_namespace_id_8ba456c5("get_template_namespace_id()<br/><small>config.py</small>")
+    end
+    subgraph tests_fixtures_rcs_runner_py_256a379e["rcs_runner.py"]
+        rcs_runner_7ed4eac6("rcs_runner.py")
+        rcs_runner_run_rcs_930aaa35("run_rcs()<br/><small>rcs_runner.py</small>")
+        rcs_runner_run_rcs_file_b2f49693("run_rcs_file()<br/><small>rcs_runner.py</small>")
+    end
+    subgraph tests_fixtures_submission_client_py_fe6f57ea["submission_client.py"]
+        submission_client_fa1da68c("submission_client.py")
+        submission_client_upload_media_a18f9715("upload_media()<br/><small>submission_client.py</small>")
+        submission_client_submit_portal_template_2797d69d("_submit_portal_template()<br/><small>submission_client.py</small>")
+    end
+    subgraph tests_fixtures_rcs_models_py_21d63ff4["rcs_models.py"]
+        rcs_models_rcstemplatesubmission_420cd42e("RcsTemplateSubmission<br/><small>rcs_models.py</small>")
+        rcs_models_rcstemplatesubmission_post_init_a2bf3630("__post_init__()<br/><small>rcs_models.py</small>")
+    end
+    rcs_client_submit_rcs_template_1243ce01("submit_rcs_template()<br/><small>rcs_client.py</small>")
+    rcs_loader_load_rcs_from_list_072d5d81("load_rcs_from_list()<br/><small>rcs_loader.py</small>")
+    rcs_tracker_log_rcs_result_d04e7ef5("log_rcs_result()<br/><small>rcs_tracker.py</small>")
+    test_integration_154c64c7("test_integration.py")
+    test_rcs_ce18ffc6("test_rcs.py")
+    config_get_portal_auth_headers_c8461851 -->|calls| config_account_prefix_8da4741c
+    config_get_official_auth_headers_edaeeb12 -->|calls| config_account_prefix_8da4741c
+    config_get_waba_id_9a600f23 -->|calls| config_account_prefix_8da4741c
+    config_get_template_namespace_id_8ba456c5 -->|calls| config_account_prefix_8da4741c
+    rcs_models_rcstemplatesubmission_420cd42e -->|method| rcs_models_rcstemplatesubmission_post_init_a2bf3630
+    rcs_runner_run_rcs_930aaa35 -->|calls| rcs_client_submit_rcs_template_1243ce01
+    rcs_runner_run_rcs_930aaa35 -->|calls| rcs_loader_load_rcs_from_list_072d5d81
+    rcs_runner_run_rcs_930aaa35 -->|calls| rcs_tracker_log_rcs_result_d04e7ef5
+    rcs_runner_run_rcs_file_b2f49693 -->|calls| rcs_client_submit_rcs_template_1243ce01
+    rcs_runner_run_rcs_file_b2f49693 -->|calls| rcs_tracker_log_rcs_result_d04e7ef5
+    submission_client_upload_media_a18f9715 -->|calls| config_get_portal_auth_headers_c8461851
+    submission_client_upload_media_a18f9715 -->|calls| config_get_official_auth_headers_edaeeb12
+    submission_client_upload_media_a18f9715 -->|calls| config_get_waba_id_9a600f23
+    submission_client_upload_media_a18f9715 -->|calls| config_get_template_namespace_id_8ba456c5
+    submission_client_submit_portal_template_2797d69d -->|calls| config_get_portal_auth_headers_c8461851
+    rcs_runner_7ed4eac6 -->|imports| rcs_client_submit_rcs_template_1243ce01
+    rcs_runner_7ed4eac6 -->|imports| rcs_loader_load_rcs_from_list_072d5d81
+    rcs_runner_7ed4eac6 -->|imports| rcs_tracker_log_rcs_result_d04e7ef5
+    submission_client_fa1da68c -->|imports| config_get_portal_auth_headers_c8461851
+    submission_client_fa1da68c -->|imports| config_get_official_auth_headers_edaeeb12
+    submission_client_fa1da68c -->|imports| config_get_waba_id_9a600f23
+    submission_client_fa1da68c -->|imports| config_get_template_namespace_id_8ba456c5
+    test_integration_154c64c7 -->|imports| config_get_official_auth_headers_edaeeb12
+    test_integration_154c64c7 -->|imports| submission_client_fa1da68c
+    %% Omitted for readability: 95 nodes, 4 edges
+    class config_get_portal_auth_headers_c8461851 function;
+    class config_account_prefix_8da4741c function;
+    class config_get_official_auth_headers_edaeeb12 function;
+    class config_get_waba_id_9a600f23 function;
+    class config_get_template_namespace_id_8ba456c5 function;
+    class rcs_runner_7ed4eac6 module;
+    class rcs_runner_run_rcs_930aaa35 function;
+    class rcs_runner_run_rcs_file_b2f49693 function;
+    class submission_client_fa1da68c entry;
+    class submission_client_upload_media_a18f9715 function;
+    class submission_client_submit_portal_template_2797d69d function;
+    class rcs_models_rcstemplatesubmission_420cd42e klass;
+    class rcs_models_rcstemplatesubmission_post_init_a2bf3630 function;
+    class rcs_client_submit_rcs_template_1243ce01 function;
+    class rcs_loader_load_rcs_from_list_072d5d81 function;
+    class rcs_tracker_log_rcs_result_d04e7ef5 function;
+    class test_integration_154c64c7 test;
+    class test_rcs_ce18ffc6 test;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>config.py</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>loader.py</code><br><small style="color:var(--muted)">loader.py</small><br><code>rcs_client.py</code><br><small style="color:var(--muted)">rcs_client.py</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>Module file in config.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>_account_prefix()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>delete_account()</code><br><small style="color:var(--muted)">api.py</small><br><code>get_credentials()</code><br><small style="color:var(--muted)">api.py</small><br>+7 more</td>
+  <td>No direct outbound edge</td>
+  <td>_account_prefix() node in config.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>get_portal_auth_headers()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_submit_portal_template()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>submission_client.py</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>submit_template()</code><br><small style="color:var(--muted)">submission_client.py</small><br>+1 more</td>
+  <td><code>_account_prefix()</code><br><small style="color:var(--muted)">config.py</small><br><code>_load_env_file()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td>get_portal_auth_headers() node in config.py.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>get_official_auth_headers()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_submit_official_template()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>fetch_template_list()</code><br><small style="color:var(--muted)">submission_client.py</small><br>+5 more</td>
+  <td><code>_account_prefix()</code><br><small style="color:var(--muted)">config.py</small><br><code>_load_env_file()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td>get_official_auth_headers() node in config.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>get_waba_id()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_build_portal_create_body()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>_resolve_row_waba()</code><br><small style="color:var(--muted)">loader.py</small><br><code>_submit_official_template()</code><br><small style="color:var(--muted)">submission_client.py</small><br>+6 more</td>
+  <td><code>_account_prefix()</code><br><small style="color:var(--muted)">config.py</small><br><code>_load_env_file()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td>get_waba_id() node in config.py.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>get_template_namespace_id()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_build_portal_create_body()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>submission_client.py</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>upload_media()</code><br><small style="color:var(--muted)">submission_client.py</small></td>
+  <td><code>_account_prefix()</code><br><small style="color:var(--muted)">config.py</small><br><code>_load_env_file()</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td>get_template_namespace_id() node in config.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>Configuration for the Karix WhatsApp template submission pipeline. All secrets…</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Configuration for the Karix WhatsApp template submission pipeline. All secrets….</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>Sanitize client name into uppercase environment variable prefix.</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Sanitize client name into uppercase environment variable prefix..</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>Build HTTP headers for the legacy portal media-upload endpoint.</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Build HTTP headers for the legacy portal media-upload endpoint..</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>Build headers for the official WhatsApp Template API for the given client.…</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Build headers for the official WhatsApp Template API for the given client.….</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>Return WABA ID for the given client. Strictly isolated per account. Never uses…</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Return WABA ID for the given client. Strictly isolated per account. Never uses….</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>Return template namespace ID for the given client.</code><br><small style="color:var(--muted)">config.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Return template namespace ID for the given client..</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>grammar_checker.py</code><br><small style="color:var(--muted)">grammar_checker.py</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>Module file in grammar_checker.py.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>lint_and_fix_body()</code><br><small style="color:var(--muted)">grammar_checker.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_resolve_body_variables()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>quality and warnings()</code><br><small style="color:var(--muted)">api.py</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>lint_and_fix_body() node in grammar_checker.py.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>Grammar, Spelling &amp; Meta Template Quality Linter. Detects repeated words,…</code><br><small style="color:var(--muted)">grammar_checker.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Grammar, Spelling &amp; Meta Template Quality Linter. Detects repeated words,….</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>Analyze text for grammatical mistakes, repeated words, spelling typos,…</code><br><small style="color:var(--muted)">grammar_checker.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Analyze text for grammatical mistakes, repeated words, spelling typos,….</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>models.py</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>loader.py</code><br><small style="color:var(--muted)">loader.py</small><br><code>runner.py</code><br><small style="color:var(--muted)">runner.py</small><br>+3 more</td>
+  <td><code>Enum</code></td>
+  <td>Module file in models.py.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>SubmissionStatus</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>submission_client.py</code><br><small style="color:var(--muted)">submission_client.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>SubmissionStatus node in models.py.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>str</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>str node in project.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>Enum</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>models.py</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>Enum node in project.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>ApprovalStatus</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>AccountCreate</code><br><small style="color:var(--muted)">api.py</small><br><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>CredentialUpdate</code><br><small style="color:var(--muted)">api.py</small><br>+4 more</td>
+  <td>No direct outbound edge</td>
+  <td>ApprovalStatus node in models.py.</td>
+</tr>
+<tr>
+  <td>22</td>
   <td><code>TemplateSubmission</code><br><small style="color:var(--muted)">models.py</small></td>
   <td><span class="tag tag-class">Class</span></td>
   <td><code>loader.py</code><br><small style="color:var(--muted)">loader.py</small><br><code>submission_client.py</code><br><small style="color:var(--muted)">submission_client.py</small></td>
   <td>No direct outbound edge</td>
   <td>TemplateSubmission node in models.py.</td>
 </tr>
-</table>
-
-<div class="grid">
-  <div class="card">
-    <h4>Key Files</h4>
-    <table style="width:100%;font-size:0.85rem;">
-      <tr><th>File</th><th>Coverage</th></tr>
-      <tr><td><code>loader.py</code></td><td>13 nodes</td></tr>
-<tr><td><code>frontend/lib/api.ts</code></td><td>11 nodes</td></tr>
-<tr><td><code>api.py</code></td><td>10 nodes</td></tr>
-<tr><td><code>tracker.py</code></td><td>10 nodes</td></tr>
-<tr><td><code>runner.py</code></td><td>8 nodes</td></tr>
-<tr><td><code>app/submit/page.tsx</code></td><td>7 nodes</td></tr>
-<tr><td><code>frontend/app/page.tsx</code></td><td>4 nodes</td></tr>
-<tr><td><code>models.py</code></td><td>4 nodes</td></tr>
-    </table>
-  </div>
-  <div class="card">
-    <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: contains x42, calls x32, imports x25, explains x18. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
-  </div>
-</div>
-<hr>
-
-<!-- ====== 5. Tests & Fixtures ====== -->
-<h2 id="tests-fixtures">5. Tests &amp; Fixtures</h2>
-<p>Tests &amp; Fixtures groups implementation around rcs, template, submission, clientpy, mostly in rcs_loader.py, submission_client.py, rcs_models.py. This section covers 104 nodes and 197 internal edges; the diagram shows only representative relationships to stay readable.</p>
-
-<div class="mermaid">
-%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
-flowchart LR
-    %% Section: Tests &amp; Fixtures (104 nodes, 197 edges)
-    subgraph tests_fixtures_rcs_loader_py_92ddc5f1["rcs_loader.py"]
-        rcs_loader_row_to_rcs_submission_8dc37499("_row_to_rcs_submission()<br/><small>rcs_loader.py</small>")
-        rcs_loader_normalize_template_type_674eb27f("_normalize_template_type()<br/><small>rcs_loader.py</small>")
-        rcs_loader_normalize_message_type_6d492510("_normalize_message_type()<br/><small>rcs_loader.py</small>")
-        rcs_loader_parse_sender_ids_fd4d13af("_parse_sender_ids()<br/><small>rcs_loader.py</small>")
-        rcs_loader_clean_template_id_881d74f9("_clean_template_id()<br/><small>rcs_loader.py</small>")
-        rcs_loader_load_rcs_from_csv_1dfdc80e("load_rcs_from_csv()<br/><small>rcs_loader.py</small>")
-    end
-    subgraph tests_fixtures_rcs_client_py_b297908e["rcs_client.py"]
-        rcs_client_3bcc1079("rcs_client.py")
-        rcs_client_submit_rcs_template_1243ce01("submit_rcs_template()<br/><small>rcs_client.py</small>")
-        rcs_client_build_dlt_payload_c1a516aa("_build_dlt_payload()<br/><small>rcs_client.py</small>")
-    end
-    subgraph tests_fixtures_config_py_e98f47f0["config.py"]
-        config_get_auth_headers_b7cbfad3("get_auth_headers()<br/><small>config.py</small>")
-        config_load_env_file_69e44007("_load_env_file()<br/><small>config.py</small>")
-    end
-    subgraph tests_fixtures_rcs_config_py_565232f6["rcs_config.py"]
-        rcs_config_get_rcs_auth_headers_4fd42cd7("get_rcs_auth_headers()<br/><small>rcs_config.py</small>")
-        rcs_config_load_env_file_149df993("_load_env_file()<br/><small>rcs_config.py</small>")
-    end
-    subgraph tests_fixtures_test_rcs_py_0ddff22a["test_rcs.py"]
-        test_rcs_ce18ffc6("test_rcs.py")
-        test_rcs_testrcspipeline_7736f233("TestRcsPipeline<br/><small>test_rcs.py</small>")
-    end
-    rcs_runner_7ed4eac6("rcs_runner.py")
-    submission_client_fa1da68c("submission_client.py")
-    test_integration_154c64c7("test_integration.py")
-    config_get_auth_headers_b7cbfad3 -->|calls| config_load_env_file_69e44007
-    rcs_client_submit_rcs_template_1243ce01 -->|calls| rcs_client_build_dlt_payload_c1a516aa
-    rcs_client_submit_rcs_template_1243ce01 -->|calls| rcs_config_get_rcs_auth_headers_4fd42cd7
-    rcs_config_get_rcs_auth_headers_4fd42cd7 -->|calls| rcs_config_load_env_file_149df993
-    rcs_loader_row_to_rcs_submission_8dc37499 -->|calls| rcs_loader_normalize_template_type_674eb27f
-    rcs_loader_row_to_rcs_submission_8dc37499 -->|calls| rcs_loader_normalize_message_type_6d492510
-    rcs_loader_row_to_rcs_submission_8dc37499 -->|calls| rcs_loader_parse_sender_ids_fd4d13af
-    rcs_loader_row_to_rcs_submission_8dc37499 -->|calls| rcs_loader_clean_template_id_881d74f9
-    rcs_loader_load_rcs_from_csv_1dfdc80e -->|calls| rcs_loader_row_to_rcs_submission_8dc37499
-    rcs_client_3bcc1079 -->|imports| rcs_config_get_rcs_auth_headers_4fd42cd7
-    rcs_runner_7ed4eac6 -->|imports| rcs_client_3bcc1079
-    rcs_runner_7ed4eac6 -->|imports| rcs_client_submit_rcs_template_1243ce01
-    rcs_runner_7ed4eac6 -->|imports| rcs_loader_load_rcs_from_csv_1dfdc80e
-    submission_client_fa1da68c -->|imports| config_get_auth_headers_b7cbfad3
-    test_integration_154c64c7 -->|imports| config_get_auth_headers_b7cbfad3
-    test_integration_154c64c7 -->|imports| submission_client_fa1da68c
-    test_rcs_ce18ffc6 -->|imports| rcs_client_3bcc1079
-    test_rcs_ce18ffc6 -->|imports| rcs_client_build_dlt_payload_c1a516aa
-    test_rcs_ce18ffc6 -->|imports| rcs_client_submit_rcs_template_1243ce01
-    test_rcs_ce18ffc6 -->|imports| rcs_loader_parse_sender_ids_fd4d13af
-    test_rcs_ce18ffc6 -->|imports| rcs_loader_load_rcs_from_csv_1dfdc80e
-    %% Omitted for readability: 86 nodes, 0 edges
-    class rcs_loader_row_to_rcs_submission_8dc37499 function;
-    class rcs_loader_normalize_template_type_674eb27f function;
-    class rcs_loader_normalize_message_type_6d492510 function;
-    class rcs_loader_parse_sender_ids_fd4d13af function;
-    class rcs_loader_clean_template_id_881d74f9 function;
-    class rcs_loader_load_rcs_from_csv_1dfdc80e function;
-    class rcs_client_3bcc1079 entry;
-    class rcs_client_submit_rcs_template_1243ce01 function;
-    class rcs_client_build_dlt_payload_c1a516aa function;
-    class config_get_auth_headers_b7cbfad3 function;
-    class config_load_env_file_69e44007 function;
-    class rcs_config_get_rcs_auth_headers_4fd42cd7 function;
-    class rcs_config_load_env_file_149df993 function;
-    class test_rcs_ce18ffc6 test;
-    class test_rcs_testrcspipeline_7736f233 test;
-    class rcs_runner_7ed4eac6 module;
-    class submission_client_fa1da68c entry;
-    class test_integration_154c64c7 test;
-    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
-    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
-    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
-    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
-    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
-    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
-    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
-    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
-    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
-</div>
-
-<h3>Call Details</h3>
-<table class="call-table">
-<tr>
-  <th style="width:5%">#</th>
-  <th style="width:28%">Node</th>
-  <th style="width:10%">Type</th>
-  <th style="width:17%">Caller</th>
-  <th style="width:20%">Callees</th>
-  <th style="width:20%">Description</th>
-</tr>
-<tr>
-  <td>1</td>
-  <td><code>rcs_client.py</code><br><small style="color:var(--muted)">rcs_client.py</small></td>
-  <td><span class="tag tag-cmd">Entry</span></td>
-  <td><code>rcs_runner.py</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>test_rcs.py</code><br><small style="color:var(--muted)">test_rcs.py</small></td>
-  <td><code>get_rcs_auth_headers()</code><br><small style="color:var(--muted)">rcs_config.py</small><br><code>rcs_config.py</code><br><small style="color:var(--muted)">rcs_config.py</small><br><code>rcs_models.py</code><br><small style="color:var(--muted)">rcs_models.py</small><br>+3 more</td>
-  <td>Module file in rcs_client.py.</td>
-</tr>
-<tr>
-  <td>2</td>
-  <td><code>_build_dlt_payload()</code><br><small style="color:var(--muted)">rcs_client.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>submit_rcs_template()</code><br><small style="color:var(--muted)">rcs_client.py</small><br><code>test_build_dlt_payload()</code><br><small style="color:var(--muted)">test_rcs.py</small><br><code>test_rcs.py</code><br><small style="color:var(--muted)">test_rcs.py</small></td>
-  <td>No direct outbound edge</td>
-  <td>_build_dlt_payload() node in rcs_client.py.</td>
-</tr>
-<tr>
-  <td>3</td>
-  <td><code>submit_rcs_template()</code><br><small style="color:var(--muted)">rcs_client.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>rcs_runner.py</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>run_rcs()</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>run_rcs_file()</code><br><small style="color:var(--muted)">rcs_runner.py</small><br>+2 more</td>
-  <td><code>_build_dlt_payload()</code><br><small style="color:var(--muted)">rcs_client.py</small><br><code>get_rcs_auth_headers()</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td>submit_rcs_template() node in rcs_client.py.</td>
-</tr>
-<tr>
-  <td>4</td>
-  <td><code>Client for Karix Lounge RCS / DLT template registration. Sends…</code><br><small style="color:var(--muted)">rcs_client.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Client for Karix Lounge RCS / DLT template registration. Sends….</td>
-</tr>
-<tr>
-  <td>5</td>
-  <td><code>Build the payload for Karix Lounge DLT registration.</code><br><small style="color:var(--muted)">rcs_client.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Build the payload for Karix Lounge DLT registration..</td>
-</tr>
-<tr>
-  <td>6</td>
-  <td><code>Submit one RCS DLT template for configuration/whitelisting on Karix Lounge.…</code><br><small style="color:var(--muted)">rcs_client.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Submit one RCS DLT template for configuration/whitelisting on Karix Lounge.….</td>
-</tr>
-<tr>
-  <td>7</td>
-  <td><code>rcs_config.py</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td><span class="tag tag-class">Module</span></td>
-  <td><code>rcs_client.py</code><br><small style="color:var(--muted)">rcs_client.py</small><br><code>rcs_loader.py</code><br><small style="color:var(--muted)">rcs_loader.py</small><br><code>test_rcs.py</code><br><small style="color:var(--muted)">test_rcs.py</small></td>
-  <td>No direct outbound edge</td>
-  <td>Module file in rcs_config.py.</td>
-</tr>
-<tr>
-  <td>8</td>
-  <td><code>_load_env_file()</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>get_rcs_auth_headers()</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td>No direct outbound edge</td>
-  <td>_load_env_file() node in rcs_config.py.</td>
-</tr>
-<tr>
-  <td>9</td>
-  <td><code>get_rcs_auth_headers()</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>rcs_client.py</code><br><small style="color:var(--muted)">rcs_client.py</small><br><code>submit_rcs_template()</code><br><small style="color:var(--muted)">rcs_client.py</small></td>
-  <td><code>_load_env_file()</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td>get_rcs_auth_headers() node in rcs_config.py.</td>
-</tr>
-<tr>
-  <td>10</td>
-  <td><code>Configuration for the Karix RCS / DLT template configuration pipeline. Loads…</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Configuration for the Karix RCS / DLT template configuration pipeline. Loads….</td>
-</tr>
-<tr>
-  <td>11</td>
-  <td><code>Load key-value pairs from a local .env file if present.</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Load key-value pairs from a local .env file if present..</td>
-</tr>
-<tr>
-  <td>12</td>
-  <td><code>Build the HTTP headers required for Karix Lounge DLT requests. Supports session…</code><br><small style="color:var(--muted)">rcs_config.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Build the HTTP headers required for Karix Lounge DLT requests. Supports session….</td>
-</tr>
-<tr>
-  <td>13</td>
-  <td><code>rcs_loader.py</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-class">Module</span></td>
-  <td><code>rcs_runner.py</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>test_rcs.py</code><br><small style="color:var(--muted)">test_rcs.py</small></td>
-  <td><code>rcs_config.py</code><br><small style="color:var(--muted)">rcs_config.py</small><br><code>rcs_models.py</code><br><small style="color:var(--muted)">rcs_models.py</small><br><code>RcsTemplateSubmission</code><br><small style="color:var(--muted)">rcs_models.py</small></td>
-  <td>Module file in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>14</td>
-  <td><code>_normalize_template_type()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td>No direct outbound edge</td>
-  <td>_normalize_template_type() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>15</td>
-  <td><code>_normalize_message_type()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td>No direct outbound edge</td>
-  <td>_normalize_message_type() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>16</td>
-  <td><code>_parse_sender_ids()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small><br><code>test_parse_sender_ids()</code><br><small style="color:var(--muted)">test_rcs.py</small><br><code>test_rcs.py</code><br><small style="color:var(--muted)">test_rcs.py</small></td>
-  <td>No direct outbound edge</td>
-  <td>_parse_sender_ids() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>17</td>
-  <td><code>_clean_template_id()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td>No direct outbound edge</td>
-  <td>_clean_template_id() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>18</td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>load_rcs_from_csv()</code><br><small style="color:var(--muted)">rcs_loader.py</small><br><code>load_rcs_from_excel()</code><br><small style="color:var(--muted)">rcs_loader.py</small><br><code>load_rcs_from_json()</code><br><small style="color:var(--muted)">rcs_loader.py</small><br>+1 more</td>
-  <td><code>_clean_template_id()</code><br><small style="color:var(--muted)">rcs_loader.py</small><br><code>_normalize_message_type()</code><br><small style="color:var(--muted)">rcs_loader.py</small><br><code>_normalize_template_type()</code><br><small style="color:var(--muted)">rcs_loader.py</small><br>+1 more</td>
-  <td>_row_to_rcs_submission() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>19</td>
-  <td><code>load_rcs_from_csv()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>rcs_runner.py</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>run_rcs_file()</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>test_load_sample_csv()</code><br><small style="color:var(--muted)">test_rcs.py</small><br>+1 more</td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td>load_rcs_from_csv() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>20</td>
-  <td><code>load_rcs_from_excel()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>rcs_runner.py</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>run_rcs_file()</code><br><small style="color:var(--muted)">rcs_runner.py</small></td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td>load_rcs_from_excel() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>21</td>
-  <td><code>load_rcs_from_json()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td>External entry / no inbound edge</td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td>load_rcs_from_json() node in rcs_loader.py.</td>
-</tr>
-<tr>
-  <td>22</td>
-  <td><code>load_rcs_from_list()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td><code>rcs_runner.py</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>run_rcs()</code><br><small style="color:var(--muted)">rcs_runner.py</small><br><code>test_rcs.py</code><br><small style="color:var(--muted)">test_rcs.py</small></td>
-  <td><code>_row_to_rcs_submission()</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td>load_rcs_from_list() node in rcs_loader.py.</td>
-</tr>
 <tr>
   <td>23</td>
-  <td><code>Input loader for RCS / DLT templates. Turns raw rows (CSV, Excel, JSON list, or…</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
+  <td><code>SubmissionResult</code><br><small style="color:var(--muted)">models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>submission_client.py</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>tracker.py</code><br><small style="color:var(--muted)">tracker.py</small></td>
   <td>No direct outbound edge</td>
-  <td>Design note for Input loader for RCS / DLT templates. Turns raw rows (CSV, Excel, JSON list, or….</td>
+  <td>SubmissionResult node in models.py.</td>
 </tr>
 <tr>
   <td>24</td>
-  <td><code>Normalize template type to Karix Lounge display format.</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
+  <td><code>Shared data models for the Phase-2 (submission-only) pipeline. Kept…</code><br><small style="color:var(--muted)">models.py</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Normalize template type to Karix Lounge display format..</td>
+  <td>Design note for Shared data models for the Phase-2 (submission-only) pipeline. Kept….</td>
 </tr>
 <tr>
   <td>25</td>
-  <td><code>Normalize template message type to Text or Unicode.</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
+  <td><code>Outcome of the SUBMIT attempt itself (did the API call succeed).</code><br><small style="color:var(--muted)">models.py</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Normalize template message type to Text or Unicode..</td>
+  <td>Design note for Outcome of the SUBMIT attempt itself (did the API call succeed)..</td>
 </tr>
 <tr>
   <td>26</td>
-  <td><code>Parse comma/pipe separated sender IDs or list, enforcing max 5.</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
+  <td><code>Outcome of the actual template REVIEW (separate from submission). A template…</code><br><small style="color:var(--muted)">models.py</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Parse comma/pipe separated sender IDs or list, enforcing max 5..</td>
+  <td>Design note for Outcome of the actual template REVIEW (separate from submission). A template….</td>
 </tr>
 <tr>
   <td>27</td>
-  <td><code>Clean DLT template ID, handling scientific notation or float conversions.</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
+  <td><code>One template to be submitted for whitelisting.</code><br><small style="color:var(--muted)">models.py</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Clean DLT template ID, handling scientific notation or float conversions..</td>
+  <td>Design note for One template to be submitted for whitelisting..</td>
 </tr>
 <tr>
   <td>28</td>
-  <td><code>Convert a normalized dict to an RcsTemplateSubmission.</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
+  <td><code>Outcome of attempting to submit one template, plus its latest known review…</code><br><small style="color:var(--muted)">models.py</small></td>
   <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Convert a normalized dict to an RcsTemplateSubmission..</td>
+  <td>Design note for Outcome of attempting to submit one template, plus its latest known review….</td>
 </tr>
 <tr>
   <td>29</td>
-  <td><code>Load RCS DLT templates from a CSV file.</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Design note for Load RCS DLT templates from a CSV file..</td>
+  <td><code>submission_client.py</code><br><small style="color:var(--muted)">submission_client.py</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>runner.py</code><br><small style="color:var(--muted)">runner.py</small><br><code>test_integration.py</code><br><small style="color:var(--muted)">test_integration.py</small></td>
+  <td><code>ApprovalStatus</code><br><small style="color:var(--muted)">models.py</small><br><code>config.py</code><br><small style="color:var(--muted)">config.py</small><br><code>get_esmeaddr()</code><br><small style="color:var(--muted)">config.py</small><br>+9 more</td>
+  <td>Module file in submission_client.py.</td>
 </tr>
 <tr>
   <td>30</td>
-  <td><code>Load RCS DLT templates from an Excel (.xlsx) file.</code><br><small style="color:var(--muted)">rcs_loader.py</small></td>
-  <td><span class="tag tag-func">Concept</span></td>
-  <td>External entry / no inbound edge</td>
+  <td><code>get_http_session()</code><br><small style="color:var(--muted)">submission_client.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>_submit_official_template()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>_submit_portal_template()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>fetch_template_list()</code><br><small style="color:var(--muted)">submission_client.py</small><br>+1 more</td>
   <td>No direct outbound edge</td>
-  <td>Design note for Load RCS DLT templates from an Excel (.xlsx) file..</td>
+  <td>get_http_session() node in submission_client.py.</td>
 </tr>
 </table>
 
@@ -1320,25 +1824,25 @@ flowchart LR
     <h4>Key Files</h4>
     <table style="width:100%;font-size:0.85rem;">
       <tr><th>File</th><th>Coverage</th></tr>
-      <tr><td><code>rcs_loader.py</code></td><td>20 nodes</td></tr>
-<tr><td><code>submission_client.py</code></td><td>16 nodes</td></tr>
+      <tr><td><code>submission_client.py</code></td><td>36 nodes</td></tr>
+<tr><td><code>config.py</code></td><td>12 nodes</td></tr>
+<tr><td><code>rcs_tracker.py</code></td><td>11 nodes</td></tr>
+<tr><td><code>models.py</code></td><td>10 nodes</td></tr>
 <tr><td><code>rcs_models.py</code></td><td>9 nodes</td></tr>
-<tr><td><code>models.py</code></td><td>8 nodes</td></tr>
-<tr><td><code>rcs_tracker.py</code></td><td>8 nodes</td></tr>
-<tr><td><code>test_rcs.py</code></td><td>8 nodes</td></tr>
-<tr><td><code>config.py</code></td><td>7 nodes</td></tr>
-<tr><td><code>rcs_client.py</code></td><td>6 nodes</td></tr>
+<tr><td><code>rcs_runner.py</code></td><td>6 nodes</td></tr>
+<tr><td><code>test_rcs.py</code></td><td>6 nodes</td></tr>
+<tr><td><code>test_integration.py</code></td><td>5 nodes</td></tr>
     </table>
   </div>
   <div class="card">
     <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: explains x46, calls x40, contains x36, imports x29. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x60, explains x48, contains x42, imports x25. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
   </div>
 </div>
 <hr>
 
-<!-- ====== 6. Karix WhatsApp Template Whitelisting — Project Rules ====== -->
-<h2 id="karix-whatsapp-template-whitelisting-project-rul">6. Karix WhatsApp Template Whitelisting — Project Rules</h2>
+<!-- ====== 7. Karix WhatsApp Template Whitelisting — Project Rules ====== -->
+<h2 id="karix-whatsapp-template-whitelisting-project-rul">7. Karix WhatsApp Template Whitelisting — Project Rules</h2>
 <p>Karix WhatsApp Template Whitelisting — Project Rules groups implementation around agents, agentsmd, karix, project, mostly in .agents/AGENTS.md. This section covers 11 nodes and 10 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
@@ -1503,34 +2007,43 @@ flowchart LR
 </div>
 <hr>
 
-<!-- ====== 7. layout.tsx ====== -->
-<h2 id="layout-tsx">7. layout.tsx</h2>
-<p>layout.tsx groups implementation around frontend, layouttsx, app, navtsx, mostly in frontend/app/layout.tsx, frontend/components/nav.tsx. This section covers 7 nodes and 7 internal edges; the diagram shows only representative relationships to stay readable.</p>
+<!-- ====== 8. Quick Start ====== -->
+<h2 id="quick-start">8. Quick Start</h2>
+<p>Quick Start groups implementation around frontendmd, step, artifact, web, mostly in frontend.md. This section covers 10 nodes and 9 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
 %%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
 flowchart LR
-    %% Section: layout.tsx (7 nodes, 7 edges)
-    subgraph layout_tsx_frontend_app_layout_tsx_9fa9be75["frontend/app/layout.tsx"]
-        frontend_app_layout_5c2240e9("layout.tsx")
-        frontend_app_layout_rootlayout_d24545d5("RootLayout()<br/><small>frontend/app/layout.tsx</small>")
-        frontend_app_layout_inter_0d31f9b2("inter<br/><small>frontend/app/layout.tsx</small>")
-        frontend_app_layout_metadata_446ec363("metadata<br/><small>frontend/app/layout.tsx</small>")
-    end
-    subgraph layout_tsx_frontend_components_nav_tsx_550073a0["frontend/components/nav.tsx"]
-        frontend_components_nav_7b73e6fa("nav.tsx")
-        frontend_components_nav_nav_9e6b363f("Nav()<br/><small>frontend/components/nav.tsx</small>")
-        frontend_components_nav_links_da0b5627("links<br/><small>frontend/components/nav.tsx</small>")
-    end
-    frontend_app_layout_5c2240e9 -->|imports| frontend_components_nav_7b73e6fa
-    frontend_app_layout_5c2240e9 -->|imports| frontend_components_nav_nav_9e6b363f
-    class frontend_app_layout_5c2240e9 ui;
-    class frontend_app_layout_rootlayout_d24545d5 ui;
-    class frontend_app_layout_inter_0d31f9b2 ui;
-    class frontend_app_layout_metadata_446ec363 ui;
-    class frontend_components_nav_7b73e6fa ui;
-    class frontend_components_nav_nav_9e6b363f ui;
-    class frontend_components_nav_links_da0b5627 ui;
+    %% Section: Quick Start (10 nodes, 9 edges)
+    frontend_quick_start_cff43cf4("Quick Start<br/><small>frontend.md</small>")
+    frontend_web_artifacts_builder_4752a528("Web Artifacts Builder<br/><small>frontend.md</small>")
+    frontend_9ecc8459("frontend.md")
+    frontend_design_style_guidelines_3ed4c851("Design &amp; Style Guidelines<br/><small>frontend.md</small>")
+    frontend_reference_5a9e1f5e("Reference<br/><small>frontend.md</small>")
+    frontend_step_1_initialize_project_b0fbf0c0("Step 1: Initialize Project<br/><small>frontend.md</small>")
+    frontend_step_2_develop_your_artifact_6cf680f0("Step 2: Develop Your Artifact<br/><small>frontend.md</small>")
+    frontend_step_3_bundle_to_single_html_file_c2522256("Step 3: Bundle to Single HTML File<br/><small>frontend.md</small>")
+    frontend_step_4_share_artifact_with_user_4a59157d("Step 4: Share Artifact with User<br/><small>frontend.md</small>")
+    frontend_step_5_testing_visualizing_the_artifact_12018930("Step 5: Testing/Visualizing the Artifac...<br/><small>frontend.md</small>")
+    frontend_9ecc8459 -->|contains| frontend_web_artifacts_builder_4752a528
+    frontend_web_artifacts_builder_4752a528 -->|contains| frontend_design_style_guidelines_3ed4c851
+    frontend_web_artifacts_builder_4752a528 -->|contains| frontend_quick_start_cff43cf4
+    frontend_web_artifacts_builder_4752a528 -->|contains| frontend_reference_5a9e1f5e
+    frontend_quick_start_cff43cf4 -->|contains| frontend_step_1_initialize_project_b0fbf0c0
+    frontend_quick_start_cff43cf4 -->|contains| frontend_step_2_develop_your_artifact_6cf680f0
+    frontend_quick_start_cff43cf4 -->|contains| frontend_step_3_bundle_to_single_html_file_c2522256
+    frontend_quick_start_cff43cf4 -->|contains| frontend_step_4_share_artifact_with_user_4a59157d
+    frontend_quick_start_cff43cf4 -->|contains| frontend_step_5_testing_visualizing_the_artifact_12018930
+    class frontend_quick_start_cff43cf4 concept;
+    class frontend_web_artifacts_builder_4752a528 concept;
+    class frontend_9ecc8459 concept;
+    class frontend_design_style_guidelines_3ed4c851 concept;
+    class frontend_reference_5a9e1f5e concept;
+    class frontend_step_1_initialize_project_b0fbf0c0 concept;
+    class frontend_step_2_develop_your_artifact_6cf680f0 concept;
+    class frontend_step_3_bundle_to_single_html_file_c2522256 concept;
+    class frontend_step_4_share_artifact_with_user_4a59157d concept;
+    class frontend_step_5_testing_visualizing_the_artifact_12018930 concept;
     classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
     classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
     classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
@@ -1554,59 +2067,83 @@ flowchart LR
 </tr>
 <tr>
   <td>1</td>
-  <td><code>layout.tsx</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>frontend.md</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
-  <td><code>Nav()</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small><br><code>nav.tsx</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small></td>
-  <td>Module file in frontend/app/layout.tsx.</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing frontend.md.</td>
 </tr>
 <tr>
   <td>2</td>
-  <td><code>inter</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>Web Artifacts Builder</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>inter node in frontend/app/layout.tsx.</td>
+  <td>Documentation node describing Web Artifacts Builder.</td>
 </tr>
 <tr>
   <td>3</td>
-  <td><code>metadata</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>Design &amp; Style Guidelines</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>metadata node in frontend/app/layout.tsx.</td>
+  <td>Documentation node describing Design &amp; Style Guidelines.</td>
 </tr>
 <tr>
   <td>4</td>
-  <td><code>RootLayout()</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>Quick Start</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>RootLayout() node in frontend/app/layout.tsx.</td>
+  <td>Documentation node describing Quick Start.</td>
 </tr>
 <tr>
   <td>5</td>
-  <td><code>nav.tsx</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
-  <td><code>layout.tsx</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><code>Step 1: Initialize Project</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Module file in frontend/components/nav.tsx.</td>
+  <td>Documentation node describing Step 1: Initialize Project.</td>
 </tr>
 <tr>
   <td>6</td>
-  <td><code>links</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>Step 2: Develop Your Artifact</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
   <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>links node in frontend/components/nav.tsx.</td>
+  <td>Documentation node describing Step 2: Develop Your Artifact.</td>
 </tr>
 <tr>
   <td>7</td>
-  <td><code>Nav()</code><br><small style="color:var(--muted)">frontend/components/nav.tsx</small></td>
-  <td><span class="tag tag-hook">UI</span></td>
-  <td><code>layout.tsx</code><br><small style="color:var(--muted)">frontend/app/layout.tsx</small></td>
+  <td><code>Step 3: Bundle to Single HTML File</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
   <td>No direct outbound edge</td>
-  <td>Nav() node in frontend/components/nav.tsx.</td>
+  <td>Documentation node describing Step 3: Bundle to Single HTML File.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>Step 4: Share Artifact with User</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Step 4: Share Artifact with User.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>Step 5: Testing/Visualizing the Artifact (Optional)</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Step 5: Testing/Visualizing the Artifact (Optional).</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>Reference</code><br><small style="color:var(--muted)">frontend.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Reference.</td>
 </tr>
 </table>
 
@@ -1615,19 +2152,147 @@ flowchart LR
     <h4>Key Files</h4>
     <table style="width:100%;font-size:0.85rem;">
       <tr><th>File</th><th>Coverage</th></tr>
-      <tr><td><code>frontend/app/layout.tsx</code></td><td>4 nodes</td></tr>
-<tr><td><code>frontend/components/nav.tsx</code></td><td>3 nodes</td></tr>
+      <tr><td><code>frontend.md</code></td><td>10 nodes</td></tr>
     </table>
   </div>
   <div class="card">
     <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: contains x5, imports x1, imports x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x9. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
   </div>
 </div>
 <hr>
 
-<!-- ====== 8. AGENTS.md ====== -->
-<h2 id="agents-md">8. AGENTS.md</h2>
+<!-- ====== 9. poll_pending ====== -->
+<h2 id="poll-pending">9. poll_pending</h2>
+<p>poll_pending groups implementation around pending, template, poll, runnerpy, mostly in runner.py, submission_client.py, tracker.py. This section covers 7 nodes and 7 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: poll_pending (7 nodes, 7 edges)
+    subgraph poll_pending_runner_py_1b45649c["runner.py"]
+        runner_poll_pending_1e34fd3e("poll_pending()<br/><small>runner.py</small>")
+        runner_rationale_56_60778693("Phase 2, step 2: check approval status...<br/><small>runner.py</small>")
+    end
+    subgraph poll_pending_submission_client_py_e2e0a637["submission_client.py"]
+        submission_client_match_template_9f6d854e("_match_template()<br/><small>submission_client.py</small>")
+        submission_client_rationale_976_0e6b9f54("Match a provider ref against fb_templat...<br/><small>submission_client.py</small>")
+    end
+    subgraph poll_pending_tracker_py_197c69f9["tracker.py"]
+        tracker_pending_entries_265588ea("pending_entries()<br/><small>tracker.py</small>")
+        tracker_rationale_112_681cec04("Entries still awaiting a final approval...<br/><small>tracker.py</small>")
+    end
+    api_poll_f5494fdb("poll()<br/><small>api.py</small>")
+    api_poll_f5494fdb -->|calls| runner_poll_pending_1e34fd3e
+    api_poll_f5494fdb -->|calls| tracker_pending_entries_265588ea
+    runner_poll_pending_1e34fd3e -->|calls| submission_client_match_template_9f6d854e
+    runner_poll_pending_1e34fd3e -->|calls| tracker_pending_entries_265588ea
+    class runner_poll_pending_1e34fd3e function;
+    class runner_rationale_56_60778693 concept;
+    class submission_client_match_template_9f6d854e function;
+    class submission_client_rationale_976_0e6b9f54 concept;
+    class tracker_pending_entries_265588ea function;
+    class tracker_rationale_112_681cec04 concept;
+    class api_poll_f5494fdb function;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>poll()</code><br><small style="color:var(--muted)">api.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>get</code><br><code>log_activity()</code><br><small style="color:var(--muted)">activity_tracker.py</small><br><code>pending_entries()</code><br><small style="color:var(--muted)">tracker.py</small><br>+1 more</td>
+  <td>poll() node in api.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>poll_pending()</code><br><small style="color:var(--muted)">runner.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>poll()</code><br><small style="color:var(--muted)">api.py</small></td>
+  <td><code>_match_template()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>fetch_template_list()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>pending_entries()</code><br><small style="color:var(--muted)">tracker.py</small><br>+1 more</td>
+  <td>poll_pending() node in runner.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>Phase 2, step 2: check approval status for everything still pending. ONE remote…</code><br><small style="color:var(--muted)">runner.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Phase 2, step 2: check approval status for everything still pending. ONE remote….</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>_match_template()</code><br><small style="color:var(--muted)">submission_client.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>check_status()</code><br><small style="color:var(--muted)">submission_client.py</small><br><code>poll_pending()</code><br><small style="color:var(--muted)">runner.py</small><br><code>runner.py</code><br><small style="color:var(--muted)">runner.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>_match_template() node in submission_client.py.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>Match a provider ref against fb_template_id, sno, or template name.</code><br><small style="color:var(--muted)">submission_client.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Match a provider ref against fb_template_id, sno, or template name..</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>pending_entries()</code><br><small style="color:var(--muted)">tracker.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>api.py</code><br><small style="color:var(--muted)">api.py</small><br><code>poll()</code><br><small style="color:var(--muted)">api.py</small><br><code>poll_pending()</code><br><small style="color:var(--muted)">runner.py</small><br>+1 more</td>
+  <td><code>load_log()</code><br><small style="color:var(--muted)">tracker.py</small></td>
+  <td>pending_entries() node in tracker.py.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>Entries still awaiting a final approval outcome.</code><br><small style="color:var(--muted)">tracker.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for Entries still awaiting a final approval outcome..</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>runner.py</code></td><td>2 nodes</td></tr>
+<tr><td><code>submission_client.py</code></td><td>2 nodes</td></tr>
+<tr><td><code>tracker.py</code></td><td>2 nodes</td></tr>
+<tr><td><code>api.py</code></td><td>1 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x4, explains x3. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 10. AGENTS.md ====== -->
+<h2 id="agents-md">10. AGENTS.md</h2>
 <p>AGENTS.md groups implementation around agentsmd, think, before, coding, mostly in AGENTS.md. This section covers 5 nodes and 4 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
@@ -1726,8 +2391,8 @@ flowchart LR
 </div>
 <hr>
 
-<!-- ====== 9. _is_retryable ====== -->
-<h2 id="is-retryable">9. _is_retryable</h2>
+<!-- ====== 11. _is_retryable ====== -->
+<h2 id="is-retryable">11. _is_retryable</h2>
 <p>_is_retryable groups implementation around submission, clientpy, retryable, exception, mostly in submission_client.py. This section covers 4 nodes and 3 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
@@ -1740,15 +2405,15 @@ flowchart LR
     end
     subgraph is_retryable_submission_client_py_1637dbb2["submission_client.py"]
         submission_client_is_retryable_b285af0b("_is_retryable()<br/><small>submission_client.py</small>")
-        submission_client_rationale_58_fe8365cd("Return True only for transport-level fa...<br/><small>submission_client.py</small>")
+        submission_client_rationale_84_c27f82b7("Return True only for transport-level fa...<br/><small>submission_client.py</small>")
     end
     submission_client_is_retryable_b285af0b -->|references| exception_5d42ad17
     submission_client_is_retryable_b285af0b -->|references| response_0ec6d150
-    submission_client_rationale_58_fe8365cd -->|explains| submission_client_is_retryable_b285af0b
+    submission_client_rationale_84_c27f82b7 -->|explains| submission_client_is_retryable_b285af0b
     class exception_5d42ad17 klass;
     class response_0ec6d150 klass;
     class submission_client_is_retryable_b285af0b function;
-    class submission_client_rationale_58_fe8365cd concept;
+    class submission_client_rationale_84_c27f82b7 concept;
     classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
     classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
     classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
@@ -1819,8 +2484,85 @@ flowchart LR
 </div>
 <hr>
 
-<!-- ====== 10. rules/graphify.md ====== -->
-<h2 id="rules-graphify-md">10. rules/graphify.md</h2>
+<!-- ====== 12. RcsSuggestion ====== -->
+<h2 id="rcssuggestion">12. RcsSuggestion</h2>
+<p>RcsSuggestion groups implementation around rcs, modelspy, rcssuggestion, dict, mostly in rcs_models.py. This section covers 3 nodes and 2 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: RcsSuggestion (3 nodes, 2 edges)
+    rcs_models_rcssuggestion_b740d165("RcsSuggestion<br/><small>rcs_models.py</small>")
+    rcs_models_rcssuggestion_to_dict_9461a8c2("to_dict()<br/><small>rcs_models.py</small>")
+    rcs_models_rationale_21_8a922aca("One suggested reply or action for an RC...<br/><small>rcs_models.py</small>")
+    rcs_models_rcssuggestion_b740d165 -->|method| rcs_models_rcssuggestion_to_dict_9461a8c2
+    class rcs_models_rcssuggestion_b740d165 klass;
+    class rcs_models_rcssuggestion_to_dict_9461a8c2 function;
+    class rcs_models_rationale_21_8a922aca concept;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>RcsSuggestion</code><br><small style="color:var(--muted)">rcs_models.py</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>to_dict()</code><br><small style="color:var(--muted)">rcs_models.py</small></td>
+  <td>RcsSuggestion node in rcs_models.py.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>.to_dict()</code><br><small style="color:var(--muted)">rcs_models.py</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RcsSuggestion</code><br><small style="color:var(--muted)">rcs_models.py</small></td>
+  <td>No direct outbound edge</td>
+  <td>.to_dict() node in rcs_models.py.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>One suggested reply or action for an RCS template.</code><br><small style="color:var(--muted)">rcs_models.py</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Design note for One suggested reply or action for an RCS template..</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>rcs_models.py</code></td><td>3 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: method x1, explains x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 13. rules/graphify.md ====== -->
+<h2 id="rules-graphify-md">13. rules/graphify.md</h2>
 <p>rules/graphify.md groups implementation around rules, graphifymd, agents, graphify, mostly in .agents/rules/graphify.md. This section covers 2 nodes and 1 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
@@ -1886,8 +2628,8 @@ flowchart LR
 </div>
 <hr>
 
-<!-- ====== 11. workflows/graphify.md ====== -->
-<h2 id="workflows-graphify-md">11. workflows/graphify.md</h2>
+<!-- ====== 14. workflows/graphify.md ====== -->
+<h2 id="workflows-graphify-md">14. workflows/graphify.md</h2>
 <p>workflows/graphify.md groups implementation around workflows, graphifymd, agents, workflow, mostly in .agents/workflows/graphify.md. This section covers 2 nodes and 1 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
@@ -1953,8 +2695,8 @@ flowchart LR
 </div>
 <hr>
 
-<!-- ====== 12. next.config.mjs ====== -->
-<h2 id="next-config-mjs">12. next.config.mjs</h2>
+<!-- ====== 15. next.config.mjs ====== -->
+<h2 id="next-config-mjs">15. next.config.mjs</h2>
 <p>next.config.mjs groups implementation around nextconfigmjs, frontend, nextconfig, mostly in frontend/next.config.mjs. This section covers 2 nodes and 1 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
@@ -2020,19 +2762,42 @@ flowchart LR
 </div>
 <hr>
 
-<!-- ====== 13. next-env.d.ts ====== -->
-<h2 id="next-env-d-ts">13. next-env.d.ts</h2>
-<p>next-env.d.ts groups implementation around next, envdts, frontend, note, mostly in frontend/next-env.d.ts. This section covers 2 nodes and 1 internal edges; the diagram shows only representative relationships to stay readable.</p>
+<!-- ====== 16. Other ====== -->
+<h2 id="other">16. Other</h2>
+<p>Other groups implementation around frontend, tata, whatsapp, templates, mostly in frontend/next-env.d.ts, frontend/postcss.config.mjs, frontend/tailwind.config.ts. This section covers 8 nodes and 4 internal edges; the diagram shows only representative relationships to stay readable.</p>
 
 <div class="mermaid">
 %%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
 flowchart LR
-    %% Section: next-env.d.ts (2 nodes, 1 edges)
-    frontend_next_env_d_rationale_4_1422a628("NOTE: This file should not be edited<br/><small>frontend/next-env.d.ts</small>")
-    frontend_next_env_d_42f0fa62("next-env.d.ts")
+    %% Section: Other (8 nodes, 4 edges)
+    subgraph other_frontend_next_env_d_ts_350018fb["frontend/next-env.d.ts"]
+        frontend_next_env_d_rationale_4_1422a628("NOTE: This file should not be edited<br/><small>frontend/next-env.d.ts</small>")
+        frontend_next_env_d_42f0fa62("next-env.d.ts")
+    end
+    subgraph other_frontend_postcss_config_mjs_85c9ead1["frontend/postcss.config.mjs"]
+        frontend_postcss_config_21b874e7("postcss.config.mjs")
+        frontend_postcss_config_config_a9fa6735("config<br/><small>frontend/postcss.config.mjs</small>")
+    end
+    subgraph other_frontend_tailwind_config_ts_ed487a93["frontend/tailwind.config.ts"]
+        frontend_tailwind_config_891dbb99("tailwind.config.ts")
+        frontend_tailwind_config_config_431be840("config<br/><small>frontend/tailwind.config.ts</small>")
+    end
+    subgraph other_graphify_out_converted_tata_whatsapp_50_te_68fc8714["graphify-out/converted/tata_whatsapp_50_templates_2206035a.md"]
+        graphify_out_converted_tata_whatsapp_50_template_1f0414f8("50 templates 2206035a.md<br/><small>graphify-out/converted/tata_whatsapp_50_templates_2206035a.md</small>")
+        graphify_out_converted_tata_whatsapp_50_template_f3574fa9("Sheet: Tata WhatsApp Templates<br/><small>graphify-out/converted/tata_whatsapp_50_templates_2206035a.md</small>")
+    end
+    frontend_postcss_config_21b874e7 -->|contains| frontend_postcss_config_config_a9fa6735
+    frontend_tailwind_config_891dbb99 -->|contains| frontend_tailwind_config_config_431be840
+    graphify_out_converted_tata_whatsapp_50_template_1f0414f8 -->|contains| graphify_out_converted_tata_whatsapp_50_template_f3574fa9
     frontend_next_env_d_rationale_4_1422a628 -->|explains| frontend_next_env_d_42f0fa62
     class frontend_next_env_d_rationale_4_1422a628 concept;
     class frontend_next_env_d_42f0fa62 module;
+    class frontend_postcss_config_21b874e7 function;
+    class frontend_postcss_config_config_a9fa6735 function;
+    class frontend_tailwind_config_891dbb99 module;
+    class frontend_tailwind_config_config_431be840 function;
+    class graphify_out_converted_tata_whatsapp_50_template_1f0414f8 concept;
+    class graphify_out_converted_tata_whatsapp_50_template_f3574fa9 concept;
     classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
     classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
     classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
@@ -2070,6 +2835,54 @@ flowchart LR
   <td>No direct outbound edge</td>
   <td>Design note for NOTE: This file should not be edited.</td>
 </tr>
+<tr>
+  <td>3</td>
+  <td><code>postcss.config.mjs</code><br><small style="color:var(--muted)">frontend/postcss.config.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Reads, resolves, or persists project configuration.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>config</code><br><small style="color:var(--muted)">frontend/postcss.config.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Reads, resolves, or persists project configuration.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>tailwind.config.ts</code><br><small style="color:var(--muted)">frontend/tailwind.config.ts</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Module file in frontend/tailwind.config.ts.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>config</code><br><small style="color:var(--muted)">frontend/tailwind.config.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Reads, resolves, or persists project configuration.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>tata_whatsapp_50_templates_2206035a.md</code><br><small style="color:var(--muted)">graphify-out/converted/tata_whatsapp_50_templates_2206035a.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing tata_whatsapp_50_templates_2206035a.md.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>Sheet: Tata WhatsApp Templates</code><br><small style="color:var(--muted)">graphify-out/converted/tata_whatsapp_50_templates_2206035a.md</small></td>
+  <td><span class="tag tag-func">Concept</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Documentation node describing Sheet: Tata WhatsApp Templates.</td>
+</tr>
 </table>
 
 <div class="grid">
@@ -2078,145 +2891,14 @@ flowchart LR
     <table style="width:100%;font-size:0.85rem;">
       <tr><th>File</th><th>Coverage</th></tr>
       <tr><td><code>frontend/next-env.d.ts</code></td><td>2 nodes</td></tr>
+<tr><td><code>frontend/postcss.config.mjs</code></td><td>2 nodes</td></tr>
+<tr><td><code>frontend/tailwind.config.ts</code></td><td>2 nodes</td></tr>
+<tr><td><code>graphify-out/converted/tata_whatsapp_50_templates_2206035a.md</code></td><td>2 nodes</td></tr>
     </table>
   </div>
   <div class="card">
     <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: explains x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
-  </div>
-</div>
-<hr>
-
-<!-- ====== 14. postcss.config.mjs ====== -->
-<h2 id="postcss-config-mjs">14. postcss.config.mjs</h2>
-<p>postcss.config.mjs groups implementation around postcssconfigmjs, frontend, config, mostly in frontend/postcss.config.mjs. This section covers 2 nodes and 1 internal edges; the diagram shows only representative relationships to stay readable.</p>
-
-<div class="mermaid">
-%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
-flowchart LR
-    %% Section: postcss.config.mjs (2 nodes, 1 edges)
-    frontend_postcss_config_21b874e7("postcss.config.mjs")
-    frontend_postcss_config_config_a9fa6735("config<br/><small>frontend/postcss.config.mjs</small>")
-    frontend_postcss_config_21b874e7 -->|contains| frontend_postcss_config_config_a9fa6735
-    class frontend_postcss_config_21b874e7 function;
-    class frontend_postcss_config_config_a9fa6735 function;
-    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
-    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
-    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
-    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
-    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
-    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
-    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
-    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
-    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
-</div>
-
-<h3>Call Details</h3>
-<table class="call-table">
-<tr>
-  <th style="width:5%">#</th>
-  <th style="width:28%">Node</th>
-  <th style="width:10%">Type</th>
-  <th style="width:17%">Caller</th>
-  <th style="width:20%">Callees</th>
-  <th style="width:20%">Description</th>
-</tr>
-<tr>
-  <td>1</td>
-  <td><code>postcss.config.mjs</code><br><small style="color:var(--muted)">frontend/postcss.config.mjs</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Reads, resolves, or persists project configuration.</td>
-</tr>
-<tr>
-  <td>2</td>
-  <td><code>config</code><br><small style="color:var(--muted)">frontend/postcss.config.mjs</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Reads, resolves, or persists project configuration.</td>
-</tr>
-</table>
-
-<div class="grid">
-  <div class="card">
-    <h4>Key Files</h4>
-    <table style="width:100%;font-size:0.85rem;">
-      <tr><th>File</th><th>Coverage</th></tr>
-      <tr><td><code>frontend/postcss.config.mjs</code></td><td>2 nodes</td></tr>
-    </table>
-  </div>
-  <div class="card">
-    <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: contains x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
-  </div>
-</div>
-<hr>
-
-<!-- ====== 15. tailwind.config.ts ====== -->
-<h2 id="tailwind-config-ts">15. tailwind.config.ts</h2>
-<p>tailwind.config.ts groups implementation around tailwindconfigts, frontend, config, mostly in frontend/tailwind.config.ts. This section covers 2 nodes and 1 internal edges; the diagram shows only representative relationships to stay readable.</p>
-
-<div class="mermaid">
-%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
-flowchart LR
-    %% Section: tailwind.config.ts (2 nodes, 1 edges)
-    frontend_tailwind_config_891dbb99("tailwind.config.ts")
-    frontend_tailwind_config_config_431be840("config<br/><small>frontend/tailwind.config.ts</small>")
-    frontend_tailwind_config_891dbb99 -->|contains| frontend_tailwind_config_config_431be840
-    class frontend_tailwind_config_891dbb99 module;
-    class frontend_tailwind_config_config_431be840 function;
-    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
-    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
-    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
-    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
-    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
-    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
-    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
-    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
-    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
-</div>
-
-<h3>Call Details</h3>
-<table class="call-table">
-<tr>
-  <th style="width:5%">#</th>
-  <th style="width:28%">Node</th>
-  <th style="width:10%">Type</th>
-  <th style="width:17%">Caller</th>
-  <th style="width:20%">Callees</th>
-  <th style="width:20%">Description</th>
-</tr>
-<tr>
-  <td>1</td>
-  <td><code>tailwind.config.ts</code><br><small style="color:var(--muted)">frontend/tailwind.config.ts</small></td>
-  <td><span class="tag tag-class">Module</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Module file in frontend/tailwind.config.ts.</td>
-</tr>
-<tr>
-  <td>2</td>
-  <td><code>config</code><br><small style="color:var(--muted)">frontend/tailwind.config.ts</small></td>
-  <td><span class="tag tag-func">Function</span></td>
-  <td>External entry / no inbound edge</td>
-  <td>No direct outbound edge</td>
-  <td>Reads, resolves, or persists project configuration.</td>
-</tr>
-</table>
-
-<div class="grid">
-  <div class="card">
-    <h4>Key Files</h4>
-    <table style="width:100%;font-size:0.85rem;">
-      <tr><th>File</th><th>Coverage</th></tr>
-      <tr><td><code>frontend/tailwind.config.ts</code></td><td>2 nodes</td></tr>
-    </table>
-  </div>
-  <div class="card">
-    <h4>Design Notes</h4>
-    <p>This section comes from graphify community clustering. Relationship summary: contains x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x3, explains x1. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
   </div>
 </div>
 <hr>
@@ -2227,18 +2909,18 @@ flowchart LR
   <div class="card">
     <h4>Graph</h4>
     <table style="width:100%;font-size:0.85rem;">
-      <tr><td>Nodes</td><td>282</td></tr>
-      <tr><td>Edges</td><td>449</td></tr>
+      <tr><td>Nodes</td><td>494</td></tr>
+      <tr><td>Edges</td><td>989</td></tr>
       <tr><td>Hyperedges</td><td>0</td></tr>
-      <tr><td>Communities</td><td>17</td></tr>
-      <tr><td>Documented Sections</td><td>14</td></tr>
+      <tr><td>Communities</td><td>34</td></tr>
+      <tr><td>Documented Sections</td><td>15</td></tr>
     </table>
   </div>
   <div class="card">
     <h4>Edge Confidence</h4>
     <table style="width:100%;font-size:0.85rem;">
-      <tr><td>EXTRACTED</td><td>446</td></tr>
-      <tr><td>INFERRED</td><td>3</td></tr>
+      <tr><td>EXTRACTED</td><td>975</td></tr>
+      <tr><td>INFERRED</td><td>14</td></tr>
       <tr><td>AMBIGUOUS</td><td>0</td></tr>
     </table>
   </div>
@@ -2246,7 +2928,7 @@ flowchart LR
 
 <div style="text-align:center; padding:40px 0; color: var(--muted); font-size:0.9rem;">
   <p>karix — Architecture Documentation</p>
-  <p>Generated: 2026-08-17 06:43 UTC · graphify callflow-html</p>
+  <p>Generated: 2026-08-20 11:55 UTC · graphify callflow-html</p>
 </div>
 
 </div><!-- .container -->
