@@ -86,15 +86,24 @@ MEDIA_CACHE_DIR.mkdir(exist_ok=True)
 
 def _init_media_cache():
     try:
-        from submission_client import _ensure_default_sample_image, _ensure_default_sample_video, _ensure_default_sample_pdf
+        from submission_client import _ensure_default_sample_image
         img_p = _ensure_default_sample_image()
         target = MEDIA_CACHE_DIR / "default_sample_header.png"
         if not target.exists() and Path(img_p).exists():
             target.write_bytes(Path(img_p).read_bytes())
     except Exception:
         pass
-
-_init_media_cache()
+    # RCS ratio-specific fallbacks: 2:1 standalone cards, 3:4 carousel cards
+    try:
+        from PIL import Image
+        img_2x1 = MEDIA_CACHE_DIR / "default_rcs_2x1.png"
+        if not img_2x1.exists():
+            Image.new("RGB", (1200, 600), (0, 120, 242)).save(img_2x1, format="PNG")
+        img_3x4 = MEDIA_CACHE_DIR / "default_rcs_3x4.png"
+        if not img_3x4.exists():
+            Image.new("RGB", (900, 1200), (16, 185, 129)).save(img_3x4, format="PNG")
+    except Exception:
+        pass
 
 @app.get("/api/media/{filename}")
 def get_public_media(filename: str):

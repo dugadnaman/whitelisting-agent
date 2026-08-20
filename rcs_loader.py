@@ -158,12 +158,15 @@ def _normalize_row_keys(row: dict) -> dict:
     """Normalize spreadsheet header keys: strip whitespace, map common aliases to canonical names."""
     aliases = {
         "templatename": "template_name",
+        "temlatename": "template_name",
+        "templte_name": "template_name",
         "campaignname": "campaign_name",
         "botid": "bot_id",
         "senderid": "sender_id",
         "templatetype": "template_type",
         "mediaurl": "media_url",
         "imageurl": "image_url",
+        "image": "image",
         "cardtitle": "card_title",
         "carddescription": "card_description",
         "textmessage": "text_message",
@@ -291,7 +294,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         template_type = "richcard"
         carousel_cards = []
         if not media_url:
-            media_url = f"{public_base}/api/media/default_sample_header.png"
+            media_url = f"{public_base}/api/media/default_rcs_2x1.png"
     else:
         template_type = "text"
         carousel_cards = []
@@ -340,7 +343,10 @@ def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmis
     return rows
 
 def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> bytes:
-    """Auto-fit image bytes if ratio is non-standard. Preserves 2:1, 16:9, and 3:4 images completely unmodified."""
+    """
+    Auto-fit image bytes to the REQUESTED target ratio (e.g. 2:1 for standalone rich cards,
+    3:4 for carousel cards). Preserves the image only if it already matches the target.
+    """
     try:
         from PIL import Image
         import io
@@ -348,21 +354,23 @@ def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> byt
         current_w, current_h = img.size
         current_aspect = current_w / current_h
 
-        # If already standard 2:1 (2.0), 16:9 (1.7778), or 3:4 (0.75), leave completely untouched!
-        if abs(current_aspect - 2.0) < 0.08 or abs(current_aspect - (16/9)) < 0.08 or abs(current_aspect - 0.75) < 0.08:
-            return img_bytes
-
         target_w, target_h = target_ratio
         target_aspect = target_w / target_h
-        if abs(current_aspect - target_aspect) > 0.05:
-            if current_aspect > target_aspect:
-                new_w = int(current_h * target_aspect)
-                left = (current_w - new_w) // 2
-                img = img.crop((left, 0, left + new_w, current_h))
-            else:
-                new_h = int(current_w / target_aspect)
-                top = (current_h - new_h) // 2
-                img = img.crop((0, top, current_w, top + new_h))
+
+        # Only preserve if the image already matches the requested target ratio
+        if abs(current_aspect - target_aspect) < 0.08:
+            return img_bytes
+
+        # Crop to the requested target ratio (center crop)
+        if current_aspect > target_aspect:
+            new_w = int(current_h * target_aspect)
+            left = (current_w - new_w) // 2
+            img = img.crop((left, 0, left + new_w, current_h))
+        else:
+            new_h = int(current_w / target_aspect)
+            top = (current_h - new_h) // 2
+            img = img.crop((0, top, current_w, top + new_h))
+
         buf = io.BytesIO()
         fmt = "PNG" if img.format == "PNG" else "JPEG"
         img.save(buf, format=fmt, quality=95)
@@ -372,7 +380,7 @@ def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> byt
 
 
 def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
-    """Extract embedded images from an Excel (.xlsx) file in order."""
+    """Extract embedded images from an Excel (.xlsx) file in order, preserving original bytes exactly."""
     images = []
     try:
         import zipfile
@@ -384,31 +392,52 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
             for name in media_names:
                 filename = name.split("/")[-1]
                 raw_data = z.read(name)
-                fitted_data = _ensure_aspect_ratio(raw_data, (16, 9))
-                images.append((filename, fitted_data))
+                images.append((filename, raw_data))
     except Exception as e:
         logger.warning("Could not extract embedded images from xlsx: %s", e)
     return images
+
+def _upload_and_bind_rcs_images(raw_images: list[tuple[str, bytes]], subs: list[RcsTemplateSubmission], client: str) -> None:
+    """
+    Fit each extracted image to the exact ratio required by the template type
+    (2:1 for standalone rich cards, 3:4 for carousel cards) and bind the uploaded
+    Karix fileName back onto the templates.
+    """
+    if not raw_images:
+        return
+    try:
+        from rcs_client import upload_rcs_media
+    except Exception:
+        return
+
+    for sub in subs:
+        if sub.template_type == "richcard" and raw_images:
+            try:
+                fname, img_data = raw_images[0]
+                fitted = _ensure_aspect_ratio(img_data, (2, 1))
+                k_name = upload_rcs_media(fitted, filename=fname, client=client)
+                setattr(sub, "file_name", k_name)
+                logger.info("Bound 2:1 rich card image %s -> %s", fname, k_name)
+            except Exception as ex:
+                logger.warning("Failed to bind rich card image: %s", ex)
+        elif sub.template_type == "carousel" and sub.carousel_cards:
+            for c_idx, card in enumerate(sub.carousel_cards):
+                if c_idx >= len(raw_images):
+                    break
+                try:
+                    fname, img_data = raw_images[c_idx]
+                    fitted = _ensure_aspect_ratio(img_data, (3, 4))
+                    k_name = upload_rcs_media(fitted, filename=fname, client=client)
+                    card["fileName"] = k_name
+                except Exception as ex:
+                    logger.warning("Failed to bind carousel card image %s: %s", fname, ex)
 
 def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
 
-    # Auto-extract and upload any images embedded in the Excel spreadsheet
-    extracted_images = _extract_images_from_xlsx(path)
-    uploaded_file_names = []
-    if extracted_images:
-        try:
-            from rcs_client import upload_rcs_media
-            for fname, img_data in extracted_images:
-                try:
-                    k_name = upload_rcs_media(img_data, filename=fname, client=client)
-                    uploaded_file_names.append(k_name)
-                    logger.info("Auto-uploaded embedded image %s -> %s", fname, k_name)
-                except Exception as ex:
-                    logger.warning("Failed to auto-upload embedded image %s: %s", fname, ex)
-        except Exception as e:
-            logger.warning("Could not upload extracted xlsx images: %s", e)
+    # Extract raw embedded images without transforming them
+    raw_images = _extract_images_from_xlsx(path)
 
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
@@ -430,8 +459,6 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
             c_cards = []
             for c_idx, block in enumerate(block_row_cards):
                 card_dict = parse_single_cell_card_block(block)
-                if c_idx < len(uploaded_file_names):
-                    card_dict["fileName"] = uploaded_file_names[c_idx]
 
                 b_text = card_dict.get("button_text") or "Apply Now"
                 b_url = card_dict.get("button_url") or "https://www.tatacapital.com"
@@ -460,6 +487,7 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
                 channel="rcs",
                 source_ref=t_name,
             )
+            _upload_and_bind_rcs_images(raw_images, [sub], client)
             return [sub]
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
@@ -476,18 +504,9 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
             continue
 
         sub = _row_to_rcs_submission(raw_row, client=client, fallback_idx=idx)
-
-        # Auto-bind uploaded image fileNames to carousel cards or richcard if not manually set
-        if uploaded_file_names:
-            if sub.template_type == "carousel" and sub.carousel_cards:
-                for c_idx, card in enumerate(sub.carousel_cards):
-                    if c_idx < len(uploaded_file_names):
-                        card["fileName"] = uploaded_file_names[c_idx]
-            elif sub.template_type == "richcard" and not sub.media_url:
-                setattr(sub, "file_name", uploaded_file_names[0])
-
         rows.append(sub)
 
+    _upload_and_bind_rcs_images(raw_images, rows, client)
     return rows
 
 
