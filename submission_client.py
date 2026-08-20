@@ -87,10 +87,16 @@ def _is_retryable(exc: Exception | None, response: requests.Response | None) -> 
         return True
     return bool(response is not None and response.status_code in _RETRYABLE_STATUS_CODES)
 
-FALLBACK_PLACEHOLDER_HEADER_HANDLE = (
+FALLBACK_PLACEHOLDER_IMAGE_HANDLE = (
     "4::aW1hZ2UvcG5n:ARbniR2Mjs3AjmbXj_PT2co-Htm_UrVCspAqcYZ374tOY9ynPsS1fHzg3GhFomqWBiQjj6eUUZ3pNEkRraYDm90jI4H8yj21diMGmjLjCg0_zg:e:1787385539:379138877290302:100066839164237:ARYkaBy8mnS0GiuXUz0"
 )
-
+FALLBACK_PLACEHOLDER_VIDEO_HANDLE = (
+    "4::dmlkZW8vbXA0:ARZtyVaCTL6vxhfjdYm26r3hB7nQ5zecCIxRCNIAtbBpeHODRi8Q4OwMLv_BeADs92ugK330J5mHHEBEHZskpiUSKDPonPEFm6fj6__WL_KDFw:e:1787465291:204883164914271:100066839164237:ARYZ_1MJHg5wBQY8JPA"
+)
+FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE = (
+    "4::YXBwbGljYXRpb24vcGRm:ARagUnYcCe-_Jwa2bxH7KdPu3w9f-CMLaBRiHDj67GJ_71h7lWlu1kP0SujG4rIolI8cKNOzvm0q73cl7iIjykI0VY64qGMHRsWPRW1_QMEHXg:e:1787465292:379138877290302:100066839164237:ARabH-vpch9ACwHceRc"
+)
+FALLBACK_PLACEHOLDER_HEADER_HANDLE = FALLBACK_PLACEHOLDER_IMAGE_HANDLE
 def upload_media(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
     """
     Upload a media file to Meta/Karix for use as a template HEADER image/video/document.
@@ -154,8 +160,13 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     except Exception as e:
         logger.debug("Meta Resumable Upload notice (%s): %s", client, e)
 
-    # 3. Fallback to active verified placeholder header handle
-    return FALLBACK_PLACEHOLDER_HEADER_HANDLE
+    # 3. Fallback to format-specific verified placeholder header handle
+    ft = (file_type or "").lower()
+    if "video" in ft or str(path).endswith(".mp4"):
+        return FALLBACK_PLACEHOLDER_VIDEO_HANDLE
+    if "pdf" in ft or str(path).endswith(".pdf"):
+        return FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE
+    return FALLBACK_PLACEHOLDER_IMAGE_HANDLE
 
 
 def _ensure_default_sample_image() -> str:
@@ -416,15 +427,13 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
         # Upload via Karix BSP / Resumable upload
         handle = upload_media(media_file, file_type, client=client)
 
-        example_dict: dict = {}
+        # Meta Rule: example MUST contain EITHER header_handle OR header_url, NEVER BOTH!
         if handle:
-            example_dict["header_handle"] = [handle]
-        if public_url:
-            example_dict["header_url"] = [public_url]
+            comp["example"] = {"header_handle": [handle]}
+        elif public_url:
+            comp["example"] = {"header_url": [public_url]}
 
-        comp["example"] = example_dict
-        logger.info("Header %s resolved for template (%s) with handle and public URL: %s", cformat, client, public_url)
-
+        logger.info("Header %s resolved for template (%s) with example keys: %s", cformat, client, list(comp.get("example", {}).keys()))
     return components
 
 
