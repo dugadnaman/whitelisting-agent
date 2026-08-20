@@ -50,8 +50,8 @@ export default function SubmitPage() {
   const [state, setState] = useState<State>({ step: 'idle' });
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [autoFixAspectRatio, setAutoFixAspectRatio] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
-
   // Reset state if account/channel changes while on submit page
   useEffect(() => {
     setState({ step: 'idle' });
@@ -122,7 +122,7 @@ export default function SubmitPage() {
     if (!file || !currentPreviews) return;
     setState({ step: 'submitting' });
     try {
-      const res = await submitFile(file, account, channel, user);
+      const res = await submitFile(file, account, channel, user, autoFixAspectRatio);
       setState({ step: 'submitted', submitted: res.submitted, results: res.results });
     } catch (err) {
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
@@ -132,8 +132,7 @@ export default function SubmitPage() {
         previews: currentPreviews,
       });
     }
-  }, [file, account, channel, user, currentPreviews]);
-
+  }, [file, account, channel, user, currentPreviews, autoFixAspectRatio]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -288,38 +287,90 @@ export default function SubmitPage() {
 
       {/* STEP 2: Preview Table */}
       {state.step === 'previewed' && (
-        <div className="bg-white rounded-xl border border-blue-200 shadow-xs overflow-hidden">
-          <div className="p-4 bg-blue-50/60 border-b border-blue-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
-                <h3 className="text-sm font-bold text-blue-950">
-                  {state.previews.length} Template{state.previews.length === 1 ? '' : 's'} Found
-                </h3>
-              </div>
-              <p className="text-xs text-blue-700/80 mt-0.5">
-                Ready to submit to {accountLabel} on {channelLabel}. Review before final submission.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleClear}
-                className="px-3.5 py-2 rounded-lg text-xs font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors"
-              >
-                Clear
-              </button>
-              <button
-                onClick={handleSubmit}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
-              >
-                <span>Submit All ({state.previews.length})</span>
-                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </button>
-            </div>
-          </div>
+        <div className="space-y-4">
+          {/* Aspect Ratio Alert Banner if non-16:9 images are detected */}
+          {(() => {
+            const warned = state.previews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0);
+            if (!warned.length) return null;
+            return (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
+                      ⚠️
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-amber-950">
+                        Image Aspect Ratio Warning ({warned.length} of {state.previews.length} template{warned.length === 1 ? '' : 's'} non-standard)
+                      </h4>
+                      <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
+                        WhatsApp and RCS recommend a <strong>16:9 aspect ratio (1280x720)</strong> for header creatives. Images with square (1:1), portrait (9:16), or irregular dimensions can result in unexpected edge cropping on end-user devices.
+                      </p>
+                    </div>
+                  </div>
 
+                  {/* Auto-fix Toggle */}
+                  <label className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-amber-300 text-xs font-semibold text-amber-900 shadow-xs cursor-pointer shrink-0 hover:bg-amber-50/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={autoFixAspectRatio}
+                      onChange={(e) => setAutoFixAspectRatio(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Auto-Pad to 16:9 Canvas (Recommended)</span>
+                  </label>
+                </div>
+
+                {autoFixAspectRatio ? (
+                  <div className="text-[11px] text-amber-900 bg-amber-100/70 p-2.5 rounded-lg border border-amber-200/80 flex items-center gap-2">
+                    <span className="text-xs">✨</span>
+                    <span>
+                      <strong>Auto-Adjustment Enabled:</strong> The system will place non-standard images centered onto a clean 16:9 canvas with matching background padding so <strong>100% of your text, buttons, and logos</strong> remain visible on mobile devices.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-amber-900 bg-white/80 p-2.5 rounded-lg border border-amber-200 flex items-center gap-2">
+                    <span className="text-xs">⚠️</span>
+                    <span>
+                      <strong>Raw Upload Active:</strong> Images will be submitted without canvas padding. WhatsApp and RCS mobile apps may crop top/bottom edges of non-16:9 creatives.
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <div className="bg-white rounded-xl border border-blue-200 shadow-xs overflow-hidden">
+            <div className="p-4 bg-blue-50/60 border-b border-blue-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600" />
+                  <h3 className="text-sm font-bold text-blue-950">
+                    {state.previews.length} Template{state.previews.length === 1 ? '' : 's'} Found
+                  </h3>
+                </div>
+                <p className="text-xs text-blue-700/80 mt-0.5">
+                  Ready to submit to {accountLabel} on {channelLabel}. Review before final submission.
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleClear}
+                  className="px-3.5 py-2 rounded-lg text-xs font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleSubmit}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
+                >
+                  <span>Submit All ({state.previews.length})</span>
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead>
@@ -354,26 +405,46 @@ export default function SubmitPage() {
                         <td className="px-5 py-3 text-gray-700">{p.language || 'en'}</td>
                         <td className="px-5 py-3 text-gray-600">
                           {p.components?.length ? (
-                            <div className="flex flex-wrap gap-1">
-                              {p.components.map((c, cIdx) => {
-                                const isHeader = c.type === 'HEADER';
-                                const format = c.format ? ` (${c.format})` : '';
-                                const color = isHeader
-                                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                                  : c.type === 'BODY'
-                                  ? 'bg-blue-100 text-blue-800 border-blue-200'
-                                  : c.type === 'BUTTONS'
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                  : 'bg-gray-100 text-gray-700 border-gray-200';
-                                return (
-                                  <span
-                                    key={cIdx}
-                                    className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${color}`}
-                                  >
-                                    {c.type}{format}
-                                  </span>
-                                );
-                              })}
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap gap-1">
+                                {p.components.map((c, cIdx) => {
+                                  const isHeader = c.type === 'HEADER';
+                                  const format = c.format ? ` (${c.format})` : '';
+                                  const color = isHeader
+                                    ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                    : c.type === 'BODY'
+                                    ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                    : c.type === 'BUTTONS'
+                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                    : 'bg-gray-100 text-gray-700 border-gray-200';
+                                  return (
+                                    <span
+                                      key={cIdx}
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${color}`}
+                                    >
+                                      {c.type}{format}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+
+                              {p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {p.aspect_ratio_warnings.map((w, wIdx) => (
+                                    <span
+                                      key={wIdx}
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200"
+                                      title={w.action}
+                                    >
+                                      <span>⚠️ Ratio {w.current_ratio}</span>
+                                      <span className="font-normal text-amber-700">({w.original_size})</span>
+                                      <span className={`px-1 py-0.2 rounded font-semibold ${autoFixAspectRatio ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}`}>
+                                        {autoFixAspectRatio ? '→ Fix to 16:9' : '→ Keep Raw'}
+                                      </span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           ) : (
                             'Standard'
@@ -403,8 +474,8 @@ export default function SubmitPage() {
             </table>
           </div>
         </div>
+        </div>
       )}
-
       {/* Loading state: Submitting */}
       {state.step === 'submitting' && (
         <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-12 text-center text-gray-500">

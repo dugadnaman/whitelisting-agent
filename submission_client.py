@@ -300,7 +300,7 @@ def normalize_image_16_9(input_path_or_bytes: str | bytes | None, target_width: 
         return str(input_path_or_bytes), "image/png"
 
 
-def _resolve_header_media(components: list, client: str = "bajaj") -> list:
+def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ratio: bool = True) -> list:
     """
     Pre-process components before submission: for any HEADER component with
     format in (IMAGE, VIDEO, DOCUMENT), ensure a valid media handle is attached.
@@ -324,13 +324,24 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
         image_bytes = comp.pop("image_bytes", None)
 
         if cformat == "IMAGE":
-            if image_bytes:
-                media_file, file_type = normalize_image_16_9(image_bytes)
-            elif media_file:
-                media_file, file_type = normalize_image_16_9(media_file)
-            elif not media_url:
-                media_file = _ensure_default_sample_image()
-                file_type = "image/png"
+            if fix_aspect_ratio:
+                if image_bytes:
+                    media_file, file_type = normalize_image_16_9(image_bytes)
+                elif media_file:
+                    media_file, file_type = normalize_image_16_9(media_file)
+                elif not media_url:
+                    media_file = _ensure_default_sample_image()
+                    file_type = "image/png"
+            else:
+                if image_bytes:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                        tmp.write(image_bytes)
+                        media_file = tmp.name
+                    file_type = "image/png"
+                elif not media_file and not media_url:
+                    media_file = _ensure_default_sample_image()
+                    file_type = "image/png"
         elif cformat == "VIDEO":
             default_type = "video/mp4"
             if image_bytes:
@@ -342,7 +353,6 @@ def _resolve_header_media(components: list, client: str = "bajaj") -> list:
             if not media_file and not media_url:
                 media_file = _ensure_default_sample_video()
                 file_type = "video/mp4"
-        elif cformat == "DOCUMENT":
             default_type = "application/pdf"
             if image_bytes:
                 import tempfile
@@ -751,14 +761,14 @@ def _requires_portal_media(payload: TemplateSubmission) -> bool:
     return False
 
 
-def _build_official_create_body(payload: TemplateSubmission, client: str = "bajaj") -> dict:
+def _build_official_create_body(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True) -> dict:
     """
     Build the documented JSON body for POST /api/v1.0/template/{wabaId}.
 
     Portal-only account fields and the literal sessionId are deliberately absent.
     """
     components = copy.deepcopy(_build_portal_create_body(payload, client=client)["components"])
-    components = _resolve_header_media(components, client=client)
+    components = _resolve_header_media(components, client=client, fix_aspect_ratio=fix_aspect_ratio)
     components = _resolve_body_variables(components, client=client)
 
     return {
@@ -767,7 +777,7 @@ def _build_official_create_body(payload: TemplateSubmission, client: str = "baja
         "category": payload.category,
         "components": components,
     }
-def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj") -> SubmissionResult:
+def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True) -> SubmissionResult:
     """Submit a text-only template through the verified official Karix API."""
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
     try:
@@ -786,9 +796,8 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
         )
 
     url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
-    body = _build_official_create_body(payload, client=c)
+    body = _build_official_create_body(payload, client=c, fix_aspect_ratio=fix_aspect_ratio)
     last_result: SubmissionResult | None = None
-
     for attempt in range(MAX_RETRIES):
         try:
             headers = get_official_auth_headers(c)
@@ -874,17 +883,14 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
     return last_result
 
 
-def submit_template(payload: TemplateSubmission, client: str | None = None) -> SubmissionResult:
+def submit_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True) -> SubmissionResult:
     """
-    Submit a template for whitelisting.
-
-    All Tata Capital submissions and text-only Bajaj templates use the official
-    API. Legacy Bajaj portal media templates use the portal session endpoint.
+    Submit one template to Karix and return the result.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
     if c == "bajaj" and _requires_portal_media(payload):
         return _submit_portal_template(payload, client=c)
-    return _submit_official_template(payload, client=c)
+    return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio)
 
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """

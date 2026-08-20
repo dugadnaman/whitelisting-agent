@@ -100,7 +100,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
         print(f"Applied {updated} status update(s).")
 
 
-def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator") -> None:
+def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator", fix_aspect_ratio: bool = True) -> None:
     """Phase 2, step 1 (from CSV or XLSX): load templates from file, submit each, log attempt."""
     from loader import load_from_csv, load_from_excel
 
@@ -113,8 +113,7 @@ def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str
 
     for submission in submissions:
         submission.client = client
-        result = submit_template(submission, client=client)
-        result.client = client
+        result = submit_template(submission, client=client, fix_aspect_ratio=fix_aspect_ratio)
         result.channel = "whatsapp"
         result.submitted_by = user
         result.source_file = Path(file_path).name

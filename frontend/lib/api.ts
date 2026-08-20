@@ -50,6 +50,14 @@ export type Stats = {
   duplicate: number;
   error?: string | null;
 };
+export type AspectRatioWarning = {
+  component: string;
+  original_size: string;
+  current_ratio: string;
+  recommended_ratio: string;
+  action: string;
+};
+
 export type TemplatePreview = {
   template_name: string;
   category?: string;
@@ -58,6 +66,7 @@ export type TemplatePreview = {
   channel?: string;
   waba_id?: string;
   source_ref?: string;
+  aspect_ratio_warnings?: AspectRatioWarning[];
   components?: Array<{
     type: string;
     text?: string;
@@ -228,11 +237,17 @@ export async function submitFile(
   file: File,
   account: Account = "bajaj",
   channel: Channel = "whatsapp",
-  user: string = "Namann"
+  user: string = "Namann",
+  fixAspectRatio: boolean = true
 ): Promise<{ submitted: number; results: Template[] }> {
   const form = new FormData();
   form.append("file", file);
-  const qs = new URLSearchParams({ account, channel, user }).toString();
+  const qs = new URLSearchParams({
+    account,
+    channel,
+    user,
+    fix_aspect_ratio: String(fixAspectRatio),
+  }).toString();
   const res = await fetchWithRetry(getApiUrl(`/api/submit?${qs}`), {
     method: "POST",
     headers: { "X-User": user },

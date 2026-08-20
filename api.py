@@ -203,10 +203,13 @@ def _json_safe(obj):
     """
     Recursively coerce arbitrary values to plain JSON-safe primitives so the
     response encoder can never raise (e.g. a None in a sort key, a datetime,
-    an enum, or any exotic nested value from a provider payload).
+    an enum, raw bytes, or any exotic nested value from a provider payload).
     """
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
+    if isinstance(obj, bytes):
+        import base64
+        return f"base64:{base64.b64encode(obj).decode()}"
     if isinstance(obj, dict):
         return {str(k): _json_safe(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple, set, frozenset)):
@@ -478,6 +481,67 @@ def get_templates(
         logger.exception("Error in get_templates for %s (%s): %s", acc, chan, exc)
         return []
 
+def _inspect_template_aspect_ratios(submissions: list, channel: str = "whatsapp") -> list[dict]:
+    """
+    Inspect image dimensions across all template components.
+    If an image is not in the recommended 16:9 / 2:1 aspect ratio, attach clear
+    diagnostic warnings so the user is notified before submission.
+    """
+    import base64
+    results = []
+    for s in submissions:
+        item = asdict(s) if not isinstance(s, dict) else dict(s)
+        aspect_warnings = []
+
+        # WhatsApp components
+        components = item.get("components") or []
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            ctype = comp.get("type")
+            cformat = str(comp.get("format", "")).upper()
+            if ctype == "HEADER" and cformat == "IMAGE":
+                img_bytes = comp.get("image_bytes")
+                if img_bytes:
+                    try:
+                        from PIL import Image
+                        import io
+                        img = Image.open(io.BytesIO(img_bytes))
+                        w, h = img.size
+                        ratio = w / h
+                        target_ratio = 16 / 9  # 1.7778
+                        ratio_diff = abs(ratio - target_ratio)
+
+                        if ratio_diff > 0.06:
+                            if abs(ratio - 1.0) < 0.05:
+                                shape_name = "1:1 (Square)"
+                            elif ratio < 1.0:
+                                shape_name = "Portrait / Vertical"
+                            else:
+                                shape_name = f"Non-standard ({ratio:.2f}:1)"
+
+                            aspect_warnings.append({
+                                "component": "HEADER (IMAGE)",
+                                "original_size": f"{w}x{h}px",
+                                "current_ratio": shape_name,
+                                "recommended_ratio": "16:9 (1280x720px)",
+                                "action": "Auto-pad onto 16:9 canvas with matching background so no text/logo is cropped by Meta.",
+                            })
+                        
+                        # Provide a thumbnail data URL and strip raw unencodable bytes
+                        f_type = comp.get("file_type") or "image/png"
+                        comp["thumbnail_url"] = f"data:{f_type};base64,{base64.b64encode(img_bytes).decode()}"
+                    except Exception as exc:
+                        logger.debug("Aspect ratio inspection notice: %s", exc)
+                    finally:
+                        comp.pop("image_bytes", None)
+            elif "image_bytes" in comp:
+                comp.pop("image_bytes", None)
+
+        item["aspect_ratio_warnings"] = aspect_warnings
+        results.append(_json_safe(item))
+    return results
+
 @app.post("/api/preview")
 async def preview_file(
     file: UploadFile = File(...),
@@ -512,7 +576,7 @@ async def preview_file(
                 details={"filename": file.filename or "upload.csv", "count": len(submissions)},
                 status="success",
             )
-            return [asdict(s) for s in submissions]
+            return _inspect_template_aspect_ratios(submissions, channel="rcs")
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
@@ -538,8 +602,7 @@ async def preview_file(
         )
         for s in submissions:
             s.client = account
-        return [asdict(s) for s in submissions]
-    except HTTPException:
+        return _inspect_template_aspect_ratios(submissions, channel="whatsapp")
         raise
     except Exception as exc:
         # Don't leak a bare 500 for malformed/non-template uploads — surface a clean error.
@@ -558,6 +621,7 @@ async def submit_file(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
     user: str = Query("Anonymous Operator"),
+    fix_aspect_ratio: bool = Query(True),
 ):
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -615,7 +679,7 @@ async def submit_file(
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
             )
         before_count = len(load_log(LOG_PATH))
-        await asyncio.to_thread(run_file, tmp_path, LOG_PATH, client=acc, user=user)
+        await asyncio.to_thread(run_file, tmp_path, LOG_PATH, client=acc, user=user, fix_aspect_ratio=fix_aspect_ratio)
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
         cleaned_entries = []
