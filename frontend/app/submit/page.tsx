@@ -552,15 +552,24 @@ export default function SubmitPage() {
       )}
       {/* Loading state: Submitting */}
       {state.step === 'submitting' && (
-        <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-12 text-center text-gray-500">
+        <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-10 text-center text-gray-500 space-y-4">
           <div className="flex flex-col items-center gap-3">
             <svg className="animate-spin h-8 w-8 text-blue-600" viewBox="0 0 24 24" fill="none">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
             </svg>
             <p className="text-sm font-semibold text-gray-800">Submitting templates to Karix API...</p>
-            <p className="text-xs text-gray-400">Processing batch submission for {accountLabel}</p>
+            <p className="text-xs text-gray-400">Processing concurrent batch submission for {accountLabel}</p>
           </div>
+          {currentPreviews && (
+            <button
+              type="button"
+              onClick={() => setState({ step: 'previewed', previews: currentPreviews })}
+              className="text-xs font-semibold text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-1.5 shadow-xs"
+            >
+              Cancel &amp; Return to Preview
+            </button>
+          )}
         </div>
       )}
 

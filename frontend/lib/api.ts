@@ -149,12 +149,25 @@ async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit,
   retries = 2,
-  delayMs = 800
+  delayMs = 800,
+  timeoutMs = 60000
 ): Promise<Response> {
   let lastError: unknown;
   for (let i = 0; i <= retries; i++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
     try {
-      const res = await fetch(input, init);
+      const customInit: RequestInit = {
+        ...init,
+        signal: init?.signal || controller.signal,
+      };
+
+      const res = await fetch(input, customInit);
+      clearTimeout(timeoutId);
+
       // If server returned 500/502/503/504 (cold start, proxy blip, or temporary container swap), retry
       if ((res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) && i < retries) {
         await delay(delayMs * Math.pow(1.5, i));
@@ -162,6 +175,7 @@ async function fetchWithRetry(
       }
       return res;
     } catch (err) {
+      clearTimeout(timeoutId);
       lastError = err;
       if (i < retries) {
         await delay(delayMs * Math.pow(1.5, i));
@@ -169,7 +183,7 @@ async function fetchWithRetry(
       }
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError || "Network request failed"));
+  throw lastError instanceof Error ? lastError : new Error(String(lastError || "Network request timed out or failed"));
 }
 
 async function getErrorMessage(res: Response): Promise<string> {
