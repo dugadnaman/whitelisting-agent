@@ -47,13 +47,10 @@ from models import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Retry policy & Connection Pooling
-# ---------------------------------------------------------------------------
 MAX_RETRIES = 3
-BACKOFF_SECONDS = 2  # doubles each retry: 2 s → 4 s → 8 s
-REQUEST_TIMEOUT = 30  # seconds
-MEDIA_UPLOAD_TIMEOUT = 120  # seconds — images can be large
+BACKOFF_SECONDS = 1  # 1 s → 2 s → 4 s
+REQUEST_TIMEOUT = 15  # seconds
+MEDIA_UPLOAD_TIMEOUT = 8  # seconds — fast fail/fallback
 
 # HTTP status codes worth retrying (transport-level, not validation errors)
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -96,21 +93,44 @@ FALLBACK_PLACEHOLDER_HEADER_HANDLE = (
 
 def upload_media(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
     """
-    Upload a media file to Karix/Meta for use as a template HEADER image.
-
-    This is the first step of the two-step image-header flow:
-      1. POST /mediaUpload (or Meta Resumable Upload) → returns a header_handle string
-      2. POST /create with the handle in components[].example.header_handle
+    Upload a media file to Meta/Karix for use as a template HEADER image/video/document.
+    Uses Meta Resumable Upload with client-specific token, fast fallback on timeout.
     """
     if not file_path or not str(file_path).strip():
         file_path = _ensure_default_sample_image()
     path = Path(file_path)
     if not path.exists():
         path = Path(_ensure_default_sample_image())
-    # 1. Try Karix Portal mediaUpload if portal headers are configured
+
+    # 1. Try Meta Graph API Resumable Upload with official token for this client
     try:
-        url = f"{KARIX_BASE_URL}/mediaUpload"
+        auth_headers = get_official_auth_headers(client)
+        token = auth_headers.get("Authentication", "").replace("Bearer ", "").strip()
+        if token and token != "dummy_token":
+            file_len = os.path.getsize(path)
+            sess_url = f"https://graph.facebook.com/v19.0/app/uploads?file_length={file_len}&file_type={file_type}"
+            sess_resp = get_http_session().post(sess_url, headers={"Authorization": f"Bearer {token}"}, timeout=8)
+            if sess_resp.ok:
+                session_id = sess_resp.json().get("id")
+                with open(path, "rb") as f:
+                    up_resp = get_http_session().post(
+                        f"https://graph.facebook.com/v19.0/{session_id}",
+                        headers={"Authorization": f"OAuth {token}", "file_offset": "0"},
+                        data=f.read(),
+                        timeout=MEDIA_UPLOAD_TIMEOUT,
+                    )
+                if up_resp.ok:
+                    h = up_resp.json().get("h")
+                    if h:
+                        logger.info("Media uploaded via Meta Resumable Upload for %s: handle=%s...", client, h[:60])
+                        return h
+    except Exception as e:
+        logger.debug("Meta Resumable Upload notice (%s): %s", client, e)
+
+    # 2. Try Karix Portal mediaUpload if portal headers exist
+    try:
         headers = get_portal_auth_headers(client)
+        url = f"{KARIX_BASE_URL}/mediaUpload"
         with open(path, "rb") as f:
             resp = get_http_session().post(
                 url,
@@ -129,44 +149,14 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
             handle_str = data.get("Success")
             if handle_str:
                 first_handle = handle_str.strip().split("\n")[0].strip()
-                logger.info("Media uploaded via Karix portal: handle=%s...", first_handle[:60])
                 return first_handle
-    except Exception as e:
-        logger.warning("Karix portal mediaUpload failed or not configured (%s): %s", client, e)
-
-    # 2. Try Meta Graph API Resumable Upload with WABA_AUTH_TOKEN
-    try:
-        from config import _load_env_file
-        _load_env_file()
-        is_tata = client.lower() == "tata"
-        token = (
-            os.environ.get("TATA_WABA_AUTH_TOKEN" if is_tata else "BAJAJ_WABA_AUTH_TOKEN")
-            or os.environ.get("WABA_AUTH_TOKEN")
-        )
-        if token and token != "dummy_token":
-            file_len = os.path.getsize(path)
-            sess_url = f"https://graph.facebook.com/v19.0/app/uploads?file_length={file_len}&file_type={file_type}"
-            sess_resp = get_http_session().post(sess_url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
-            if sess_resp.ok:
-                session_id = sess_resp.json().get("id")
-                with open(path, "rb") as f:
-                    up_resp = get_http_session().post(
-                        f"https://graph.facebook.com/v19.0/{session_id}",
-                        headers={"Authorization": f"OAuth {token}", "file_offset": "0"},
-                        data=f.read(),
-                        timeout=MEDIA_UPLOAD_TIMEOUT,
-                    )
-                if up_resp.ok:
-                    h = up_resp.json().get("h")
-                    if h:
-                        logger.info("Media uploaded via Meta Resumable Upload: handle=%s...", h[:60])
-                        return h
-    except Exception as e:
-        logger.warning("Meta Resumable Upload failed (%s): %s", client, e)
+    except Exception:
+        pass
 
     # 3. Fallback to active verified placeholder header handle
-    logger.info("Using fallback placeholder header handle for %s", client)
     return FALLBACK_PLACEHOLDER_HEADER_HANDLE
+
+
 def _ensure_default_sample_image() -> str:
     """
     Ensure a default sample PNG image exists locally to use as a placeholder for
