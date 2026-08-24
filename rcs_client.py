@@ -9,11 +9,11 @@ import json
 import logging
 import re
 import time
+
 import requests
 
 from config import get_esmeaddr
 from rcs_config import (
-    KARIX_RCS_FETCH_URL,
     KARIX_RCS_SAVE_URL,
     get_rcs_auth_headers,
     get_rcs_bot_id,
@@ -33,12 +33,15 @@ REQUEST_TIMEOUT = 30  # seconds
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 2
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
 def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str = "tata") -> str:
     """
     Upload a binary image or video to Karix RCS media storage (gRBM).
     Returns the generated fileName string from Karix.
     """
     import io
+
     c = client.lower()
     headers = dict(get_rcs_auth_headers(c))
     headers.pop("Content-Type", None)
@@ -92,6 +95,7 @@ def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str
     logger.info("Uploaded RCS media: fileName=%s mime=%s", file_name, mime_type)
     return str(file_name)
 
+
 def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[str, list[str], int]:
     """
     Extract and sequentially number any bracket placeholder:
@@ -104,7 +108,7 @@ def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[
     current_idx = start_index
     param_numbers = []
 
-    pattern = r'(<[^>]+>|\[[^\]]+\]|\{[^}]+\}|\{#[^#]+#\})'
+    pattern = r"(<[^>]+>|\[[^\]]+\]|\{[^}]+\}|\{#[^#]+#\})"
 
     def repl(m):
         nonlocal current_idx
@@ -114,9 +118,9 @@ def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[
         return f"[{v_str}]"
 
     # Spacing around tight tags
-    spaced_text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', text)
-    spaced_text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', spaced_text)
-    spaced_text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', spaced_text)
+    spaced_text = re.sub(r"([A-Za-z0-9])(<[^>]+>)", r"\1 \2", text)
+    spaced_text = re.sub(r"(<[^>]+>)([A-Za-z0-9])", r"\1 \2", spaced_text)
+    spaced_text = re.sub(r"([A-Za-z0-9])(\{#[^#]+#\})", r"\1 \2", spaced_text)
 
     normalized_text = re.sub(pattern, repl, spaced_text)
     return normalized_text, param_numbers, current_idx
@@ -125,8 +129,9 @@ def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[
 def _ensure_url_variable(url: str, var_number: int) -> str:
     """Ensure URL has sequential variable at the end: e.g. https://www.tatacapital.com[4]"""
     base = (url or "https://www.tatacapital.com").strip().rstrip("/")
-    clean_base = re.sub(r'\[\w+\]$', '', base)
+    clean_base = re.sub(r"\[\w+\]$", "", base)
     return f"{clean_base}[{var_number}]"
+
 
 def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
     """Helper to convert flat button fields on a payload into suggestions array."""
@@ -141,31 +146,39 @@ def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
             for item in btext.split("|"):
                 clean = item.strip()
                 if clean:
-                    suggestions.append({
-                        "suggestionType": "reply",
-                        "text": clean,
-                        "postbackData": clean.lower().replace(" ", "_"),
-                    })
+                    suggestions.append(
+                        {
+                            "suggestionType": "reply",
+                            "text": clean,
+                            "postbackData": clean.lower().replace(" ", "_"),
+                        }
+                    )
         elif btype in ("URL", "URL_ACTION", "LINK") or burl:
-            suggestions.append({
-                "suggestionType": "url_action",
-                "text": btext or "Open Link",
-                "postbackData": btext.lower().replace(" ", "_") if btext else "open_url",
-                "url": burl or "https://www.tatacapital.com",
-            })
+            suggestions.append(
+                {
+                    "suggestionType": "url_action",
+                    "text": btext or "Open Link",
+                    "postbackData": btext.lower().replace(" ", "_") if btext else "open_url",
+                    "url": burl or "https://www.tatacapital.com",
+                }
+            )
         elif btype in ("DIALER", "DIALER_ACTION", "CALL", "PHONE") or bphone:
-            suggestions.append({
-                "suggestionType": "dialer_action",
-                "text": btext or "Call Now",
-                "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
-                "phoneNumber": bphone or "+919999999999",
-            })
+            suggestions.append(
+                {
+                    "suggestionType": "dialer_action",
+                    "text": btext or "Call Now",
+                    "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
+                    "phoneNumber": bphone or "+919999999999",
+                }
+            )
         else:
-            suggestions.append({
-                "suggestionType": "reply",
-                "text": btext,
-                "postbackData": btext.lower().replace(" ", "_"),
-            })
+            suggestions.append(
+                {
+                    "suggestionType": "reply",
+                    "text": btext,
+                    "postbackData": btext.lower().replace(" ", "_"),
+                }
+            )
     return suggestions
 
 
@@ -183,20 +196,12 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         esme_addr = 72516600000000 if c == "tata" else 72148300000000
 
     # Sanitize and enforce max 25 chars for RCS template name
-    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', payload.template_name)[:25]
+    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", payload.template_name)[:25]
 
     # Determine template format
-    is_carousel = (
-        payload.template_type.lower() == "carousel"
-        or bool(getattr(payload, "carousel_cards", None))
-    )
-    is_richcard = (
-        not is_carousel
-        and (
-            payload.template_type.lower() == "richcard"
-            or bool(payload.media_url)
-            or bool(payload.card_title)
-        )
+    is_carousel = payload.template_type.lower() == "carousel" or bool(getattr(payload, "carousel_cards", None))
+    is_richcard = not is_carousel and (
+        payload.template_type.lower() == "richcard" or bool(payload.media_url) or bool(payload.card_title)
     )
 
     # Assemble viTemplate
@@ -210,11 +215,13 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
 
             # Number variables in description sequentially
-            c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(c_desc_raw, start_index=next_var_idx)
+            c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(
+                c_desc_raw, start_index=next_var_idx
+            )
             all_params.extend(desc_params)
 
             # Title (clean tags)
-            c_title_norm = re.sub(r'<[^>]+>|\[[^\]]+\]', '', c_title_raw).strip()[:100]
+            c_title_norm = re.sub(r"<[^>]+>|\[[^\]]+\]", "", c_title_raw).strip()[:100]
             if not c_title_norm:
                 c_title_norm = f"Special Offer {c_idx}"
 
@@ -224,7 +231,13 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             if not raw_suggs and getattr(payload, "button_text", None):
                 raw_suggs = _build_single_suggestion(payload)
             if not raw_suggs:
-                raw_suggs = [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
+                raw_suggs = [
+                    {
+                        "suggestionType": "url_action",
+                        "text": "Apply Now",
+                        "url": "https://www.tatacapital.com",
+                    }
+                ]
 
             for s in raw_suggs:
                 stext = s.get("text") or "Apply Now"
@@ -235,25 +248,31 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
                     all_params.append(url_var_num)
                     next_var_idx += 1
                     b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
-                    clean_suggs.append({
-                        "suggestionType": "url_action",
-                        "text": stext,
-                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                        "url": b_url,
-                    })
+                    clean_suggs.append(
+                        {
+                            "suggestionType": "url_action",
+                            "text": stext,
+                            "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                            "url": b_url,
+                        }
+                    )
                 elif stype == "dialer_action" or s.get("phoneNumber"):
-                    clean_suggs.append({
-                        "suggestionType": "dialer_action",
-                        "text": stext,
-                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                        "phoneNumber": s.get("phoneNumber") or "+919999999999",
-                    })
+                    clean_suggs.append(
+                        {
+                            "suggestionType": "dialer_action",
+                            "text": stext,
+                            "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                            "phoneNumber": s.get("phoneNumber") or "+919999999999",
+                        }
+                    )
                 else:
-                    clean_suggs.append({
-                        "suggestionType": "reply",
-                        "text": stext,
-                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                    })
+                    clean_suggs.append(
+                        {
+                            "suggestionType": "reply",
+                            "text": stext,
+                            "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                        }
+                    )
 
             c_entry = {
                 "cardTitle": c_title_norm,
@@ -272,17 +291,21 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             cards_list.append(c_entry)
 
         if len(cards_list) < 2:
-            cards_list.append({
-                "cardTitle": "Instant Approval",
-                "cardDescription": "Fast disbursement with flexible repayment terms.",
-                "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
-                "suggestions": [{
-                    "suggestionType": "url_action",
-                    "text": "Apply Now",
-                    "postbackData": "apply_now",
-                    "url": f"https://www.tatacapital.com[{next_var_idx}]",
-                }],
-            })
+            cards_list.append(
+                {
+                    "cardTitle": "Instant Approval",
+                    "cardDescription": "Fast disbursement with flexible repayment terms.",
+                    "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
+                    "suggestions": [
+                        {
+                            "suggestionType": "url_action",
+                            "text": "Apply Now",
+                            "postbackData": "apply_now",
+                            "url": f"https://www.tatacapital.com[{next_var_idx}]",
+                        }
+                    ],
+                }
+            )
             all_params.append(str(next_var_idx))
             next_var_idx += 1
 
@@ -296,18 +319,20 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             "carouselCard": cards_list,
         }
     elif is_richcard:
-        raw_text = (
-            payload.card_description
-            or payload.text_message
-            or getattr(payload, "template_message", "")
-        )
+        raw_text = payload.card_description or payload.text_message or getattr(payload, "template_message", "")
         normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
 
         raw_suggs = payload.suggestions or []
         if not raw_suggs and getattr(payload, "button_text", None):
             raw_suggs = _build_single_suggestion(payload)
         if not raw_suggs:
-            raw_suggs = [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
+            raw_suggs = [
+                {
+                    "suggestionType": "url_action",
+                    "text": "Apply Now",
+                    "url": "https://www.tatacapital.com",
+                }
+            ]
 
         clean_suggs = []
         for s in raw_suggs:
@@ -318,18 +343,22 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
                 param_names.append(url_var_num)
                 next_var_idx += 1
                 b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
-                clean_suggs.append({
-                    "suggestionType": "url_action",
-                    "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                    "url": b_url,
-                })
+                clean_suggs.append(
+                    {
+                        "suggestionType": "url_action",
+                        "text": stext,
+                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                        "url": b_url,
+                    }
+                )
             else:
-                clean_suggs.append({
-                    "suggestionType": stype,
-                    "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                })
+                clean_suggs.append(
+                    {
+                        "suggestionType": stype,
+                        "text": stext,
+                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    }
+                )
 
         card_entry = {
             "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
@@ -337,7 +366,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
             "suggestions": clean_suggs,
         }
         if getattr(payload, "file_name", None):
-            card_entry["fileName"] = getattr(payload, "file_name")
+            card_entry["fileName"] = payload.file_name
         elif payload.media_url:
             card_entry["mediaUrl"] = payload.media_url
         else:
@@ -370,18 +399,22 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
                 param_names.append(url_var_num)
                 next_var_idx += 1
                 b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
-                clean_suggs.append({
-                    "suggestionType": "url_action",
-                    "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                    "url": b_url,
-                })
+                clean_suggs.append(
+                    {
+                        "suggestionType": "url_action",
+                        "text": stext,
+                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                        "url": b_url,
+                    }
+                )
             else:
-                clean_suggs.append({
-                    "suggestionType": stype,
-                    "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                })
+                clean_suggs.append(
+                    {
+                        "suggestionType": stype,
+                        "text": stext,
+                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    }
+                )
 
         vi_template = {
             "name": safe_name,
@@ -446,7 +479,7 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2 ** attempt))
+                time.sleep(BACKOFF_SECONDS * (2**attempt))
             continue
 
         # Parse response
@@ -459,7 +492,10 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
         if resp.status_code in _RETRYABLE_STATUS_CODES:
             logger.warning(
                 "Attempt %d/%d retryable HTTP %d: %s",
-                attempt + 1, MAX_RETRIES, resp.status_code, resp.text[:200],
+                attempt + 1,
+                MAX_RETRIES,
+                resp.status_code,
+                resp.text[:200],
             )
             last_result = RcsSubmissionResult(
                 source_ref=payload.source_ref,
@@ -472,13 +508,17 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2 ** attempt))
+                time.sleep(BACKOFF_SECONDS * (2**attempt))
             continue
 
         # Non-200 responses
         if not resp.ok:
             error_msg = data.get("errorMessage") or data.get("error") or data.get("reason") or resp.text[:300]
-            status_enum = RcsSubmissionStatus.DUPLICATE if "already exist" in str(error_msg).lower() else RcsSubmissionStatus.FAILED
+            status_enum = (
+                RcsSubmissionStatus.DUPLICATE
+                if "already exist" in str(error_msg).lower()
+                else RcsSubmissionStatus.FAILED
+            )
             return RcsSubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
@@ -536,7 +576,11 @@ def fetch_rcs_templates(bot_id: str | None = None, client: str = "tata") -> list
             timeout=REQUEST_TIMEOUT,
         )
         if not resp.ok:
-            logger.error("Failed to fetch RCS templates: HTTP %d: %s", resp.status_code, resp.text[:300])
+            logger.error(
+                "Failed to fetch RCS templates: HTTP %d: %s",
+                resp.status_code,
+                resp.text[:300],
+            )
             return []
         data = resp.json()
         return data.get("templateInfo", [])

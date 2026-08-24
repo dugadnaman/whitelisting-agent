@@ -13,7 +13,13 @@ from rcs_loader import load_rcs_from_csv, load_rcs_from_excel, load_rcs_from_lis
 from rcs_tracker import log_rcs_result
 
 
-def run_rcs(templates_raw: list[dict], log_path: str = "rcs_submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator", source_file: str | None = None) -> None:
+def run_rcs(
+    templates_raw: list[dict],
+    log_path: str = "rcs_submission_log.jsonl",
+    client: str = "bajaj",
+    user: str = "Anonymous Operator",
+    source_file: str | None = None,
+) -> None:
     """Submit each RCS DLT template, log the attempt."""
     submissions = load_rcs_from_list(templates_raw, client=client)
     print(f"Loaded {len(submissions)} RCS template(s) for {client} to submit (by {user}).")
@@ -32,7 +38,12 @@ def run_rcs(templates_raw: list[dict], log_path: str = "rcs_submission_log.jsonl
     print(f"Done. Results appended to {log_path}")
 
 
-def run_rcs_file(file_path: str, log_path: str = "rcs_submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator") -> None:
+def run_rcs_file(
+    file_path: str,
+    log_path: str = "rcs_submission_log.jsonl",
+    client: str = "bajaj",
+    user: str = "Anonymous Operator",
+) -> None:
     """Load RCS templates from CSV or Excel file, submit each, and log attempt."""
     if file_path.lower().endswith((".xlsx", ".xls")):
         submissions = load_rcs_from_excel(file_path, client=client)

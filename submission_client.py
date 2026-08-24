@@ -27,8 +27,6 @@ from urllib.request import urlretrieve
 import requests
 
 from config import (
-    BAJAJ_ESMEADDR,
-    BAJAJ_TEMPLATE_NAMESPACE_ID,
     BAJAJ_WABA_ID,
     KARIX_BASE_URL,
     OFFICIAL_TEMPLATE_BASE_URL,
@@ -57,12 +55,14 @@ _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 _session: requests.Session | None = None
 
+
 def get_http_session() -> requests.Session:
     """Return a shared connection-pooled HTTP session for high-throughput Karix/Meta requests."""
     global _session
     if _session is None:
         from requests.adapters import HTTPAdapter
         from urllib3.util import Retry
+
         _session = requests.Session()
         retry_strategy = Retry(
             total=3,
@@ -87,16 +87,12 @@ def _is_retryable(exc: Exception | None, response: requests.Response | None) -> 
         return True
     return bool(response is not None and response.status_code in _RETRYABLE_STATUS_CODES)
 
-FALLBACK_PLACEHOLDER_IMAGE_HANDLE = (
-    "4::aW1hZ2UvcG5n:ARbniR2Mjs3AjmbXj_PT2co-Htm_UrVCspAqcYZ374tOY9ynPsS1fHzg3GhFomqWBiQjj6eUUZ3pNEkRraYDm90jI4H8yj21diMGmjLjCg0_zg:e:1787385539:379138877290302:100066839164237:ARYkaBy8mnS0GiuXUz0"
-)
-FALLBACK_PLACEHOLDER_VIDEO_HANDLE = (
-    "4::dmlkZW8vbXA0:ARZtyVaCTL6vxhfjdYm26r3hB7nQ5zecCIxRCNIAtbBpeHODRi8Q4OwMLv_BeADs92ugK330J5mHHEBEHZskpiUSKDPonPEFm6fj6__WL_KDFw:e:1787465291:204883164914271:100066839164237:ARYZ_1MJHg5wBQY8JPA"
-)
-FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE = (
-    "4::YXBwbGljYXRpb24vcGRm:ARagUnYcCe-_Jwa2bxH7KdPu3w9f-CMLaBRiHDj67GJ_71h7lWlu1kP0SujG4rIolI8cKNOzvm0q73cl7iIjykI0VY64qGMHRsWPRW1_QMEHXg:e:1787465292:379138877290302:100066839164237:ARabH-vpch9ACwHceRc"
-)
+
+FALLBACK_PLACEHOLDER_IMAGE_HANDLE = "4::aW1hZ2UvcG5n:ARbniR2Mjs3AjmbXj_PT2co-Htm_UrVCspAqcYZ374tOY9ynPsS1fHzg3GhFomqWBiQjj6eUUZ3pNEkRraYDm90jI4H8yj21diMGmjLjCg0_zg:e:1787385539:379138877290302:100066839164237:ARYkaBy8mnS0GiuXUz0"
+FALLBACK_PLACEHOLDER_VIDEO_HANDLE = "4::dmlkZW8vbXA0:ARZtyVaCTL6vxhfjdYm26r3hB7nQ5zecCIxRCNIAtbBpeHODRi8Q4OwMLv_BeADs92ugK330J5mHHEBEHZskpiUSKDPonPEFm6fj6__WL_KDFw:e:1787465291:204883164914271:100066839164237:ARYZ_1MJHg5wBQY8JPA"
+FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE = "4::YXBwbGljYXRpb24vcGRm:ARagUnYcCe-_Jwa2bxH7KdPu3w9f-CMLaBRiHDj67GJ_71h7lWlu1kP0SujG4rIolI8cKNOzvm0q73cl7iIjykI0VY64qGMHRsWPRW1_QMEHXg:e:1787465292:379138877290302:100066839164237:ARabH-vpch9ACwHceRc"
 FALLBACK_PLACEHOLDER_HEADER_HANDLE = FALLBACK_PLACEHOLDER_IMAGE_HANDLE
+
 
 def upload_media(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
     """
@@ -116,7 +112,11 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
         headers = get_official_auth_headers(client)
         url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}/media"
 
-        mime = "image/jpeg" if ("jpeg" in file_type or "jpg" in file_type) else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
+        mime = (
+            "image/jpeg"
+            if ("jpeg" in file_type or "jpg" in file_type)
+            else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
+        )
         with open(path, "rb") as f:
             resp = get_http_session().post(
                 url,
@@ -142,7 +142,11 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
                     if isinstance(h, list):
                         h = h[0]
             if h and str(h).startswith("4::"):
-                logger.info("Media uploaded via Karix Official API (%s): handle=%s...", client, str(h)[:60])
+                logger.info(
+                    "Media uploaded via Karix Official API (%s): handle=%s...",
+                    client,
+                    str(h)[:60],
+                )
                 return str(h)
     except Exception as e:
         logger.debug("Karix Official Media Upload notice (%s): %s", client, e)
@@ -169,7 +173,11 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
             handle_str = data.get("Success")
             if handle_str:
                 first_handle = handle_str.strip().split("\n")[0].strip()
-                logger.info("Media uploaded via Karix portal for %s: handle=%s...", client, first_handle[:60])
+                logger.info(
+                    "Media uploaded via Karix portal for %s: handle=%s...",
+                    client,
+                    first_handle[:60],
+                )
                 return first_handle
     except Exception:
         pass
@@ -182,6 +190,7 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
         return FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE
     return FALLBACK_PLACEHOLDER_IMAGE_HANDLE
 
+
 def _ensure_default_sample_image() -> str:
     """
     Ensure a default sample PNG image exists locally to use as a placeholder for
@@ -191,13 +200,14 @@ def _ensure_default_sample_image() -> str:
     if not default_path.exists():
         import struct
         import zlib
+
         width, height = 200, 200
         r, g, b = 0, 102, 204  # Blue fill
         ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
         raw = b""
-        for y in range(height):
+        for _y in range(height):
             raw += b"\x00"
-            for x in range(width):
+            for _x in range(width):
                 raw += bytes([r, g, b])
         compressed = zlib.compress(raw)
 
@@ -221,6 +231,7 @@ def _ensure_default_sample_video() -> str:
     default_path = Path("default_sample_header.mp4")
     if not default_path.exists():
         import base64
+
         # Valid minimal MP4 container
         minimal_mp4_b64 = "AAAAHGZ0eXBpc29tAAAAAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAhtZGF0AAAAIG1vb3YAAABsbXZoZAAAAABAAAAAAAEAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAA=="
         try:
@@ -245,7 +256,13 @@ def _ensure_default_sample_pdf() -> str:
         )
         default_path.write_bytes(pdf_content)
         logger.info("Created default sample document at %s", default_path.resolve())
-def normalize_image_16_9(input_path_or_bytes: str | bytes | None, target_width: int = 1280, target_height: int = 720) -> tuple[str, str]:
+
+
+def normalize_image_16_9(
+    input_path_or_bytes: str | bytes | None,
+    target_width: int = 1280,
+    target_height: int = 720,
+) -> tuple[str, str]:
     """
     Ensure any image conforms to Meta's required 16:9 aspect ratio (1280x720).
     If the image is square (1:1), portrait (9:16), or has non-standard dimensions,
@@ -256,9 +273,10 @@ def normalize_image_16_9(input_path_or_bytes: str | bytes | None, target_width: 
     if not input_path_or_bytes:
         return _ensure_default_sample_image(), "image/png"
     import tempfile
-    import io
+
     try:
         from PIL import Image
+
         if isinstance(input_path_or_bytes, bytes):
             img = Image.open(io.BytesIO(input_path_or_bytes))
         else:
@@ -304,7 +322,12 @@ def normalize_image_16_9(input_path_or_bytes: str | bytes | None, target_width: 
 
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             canvas.save(tmp, format="JPEG", quality=92, optimize=True)
-            logger.info("Image normalized from %dx%d (ratio %.2f) to 16:9 (1280x720) for Meta compliance.", w, h, current_ratio)
+            logger.info(
+                "Image normalized from %dx%d (ratio %.2f) to 16:9 (1280x720) for Meta compliance.",
+                w,
+                h,
+                current_ratio,
+            )
             return tmp.name, "image/jpeg"
     except Exception as exc:
         logger.warning("Image 16:9 normalization skipped: %s", exc)
@@ -350,6 +373,7 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
             else:
                 if image_bytes:
                     import tempfile
+
                     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                         tmp.write(image_bytes)
                         media_file = tmp.name
@@ -361,6 +385,7 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
             default_type = "video/mp4"
             if image_bytes:
                 import tempfile
+
                 with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
                     tmp.write(image_bytes)
                     media_file = tmp.name
@@ -371,6 +396,7 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
             default_type = "application/pdf"
             if image_bytes:
                 import tempfile
+
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                     tmp.write(image_bytes)
                     media_file = tmp.name
@@ -386,6 +412,7 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
         # Download from URL if media_url is provided
         if media_url and not media_file:
             import tempfile
+
             suffix = Path(media_url.split("?")[0]).suffix if media_url else ""
             if not suffix:
                 suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
@@ -398,7 +425,11 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
                 if cformat == "IMAGE":
                     media_file, file_type = normalize_image_16_9(media_file)
             except Exception as e:
-                logger.warning("Could not download media_url %s: %s; using default sample", media_url, e)
+                logger.warning(
+                    "Could not download media_url %s: %s; using default sample",
+                    media_url,
+                    e,
+                )
                 if cformat == "VIDEO":
                     media_file = _ensure_default_sample_video()
                 elif cformat == "DOCUMENT":
@@ -420,6 +451,7 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
 
         # Cache media to persistent public directory and generate public URL for Meta
         import hashlib
+
         MEDIA_CACHE_DIR = Path("media_cache")
         MEDIA_CACHE_DIR.mkdir(exist_ok=True)
 
@@ -428,11 +460,19 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
             try:
                 raw_bytes = Path(media_file).read_bytes()
                 media_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
-                ext = ".jpg" if "jpeg" in file_type else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
+                ext = (
+                    ".jpg"
+                    if "jpeg" in file_type
+                    else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
+                )
                 cache_file = MEDIA_CACHE_DIR / f"{media_hash}{ext}"
                 cache_file.write_bytes(raw_bytes)
 
-                public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
+                public_base = (
+                    os.environ.get("RENDER_EXTERNAL_URL")
+                    or os.environ.get("PUBLIC_APP_URL")
+                    or "https://whitelisting-agent.onrender.com"
+                )
                 public_url = f"{public_base}/api/media/{media_hash}{ext}"
             except Exception as e:
                 logger.debug("Media caching notice: %s", e)
@@ -446,7 +486,12 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
         elif public_url:
             comp["example"] = {"header_url": [public_url]}
 
-        logger.info("Header %s resolved for template (%s) with example keys: %s", cformat, client, list(comp.get("example", {}).keys()))
+        logger.info(
+            "Header %s resolved for template (%s) with example keys: %s",
+            cformat,
+            client,
+            list(comp.get("example", {}).keys()),
+        )
     return components
 
 
@@ -459,16 +504,16 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
         return text, []
 
     # 1. Normalize line endings and collapse 3+ consecutive newlines (Meta Rule: max 2)
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-    text = re.sub(r'[ \t]+\n', '\n', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    text = re.sub(r'[ \t]+([.,!?:;])', r'\1', text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+([.,!?:;])", r"\1", text)
 
     # 2. Add spacing around tight tags (e.g. "Hi<name>" -> "Hi <name>")
-    text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', text)
-    text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', text)
-    text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', text)
-    pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
+    text = re.sub(r"([A-Za-z0-9])(<[^>]+>)", r"\1 \2", text)
+    text = re.sub(r"(<[^>]+>)([A-Za-z0-9])", r"\1 \2", text)
+    text = re.sub(r"([A-Za-z0-9])(\{#[^#]+#\})", r"\1 \2", text)
+    pattern = r"(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})"
 
     matches = list(re.finditer(pattern, text))
     samples = []
@@ -479,43 +524,74 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
         raw_tag = match.group(0)
         start, end = match.span()
 
-        before_text = text[max(0, start - 30):start]
-        after_text = text[end:min(len(text), end + 30)]
+        before_text = text[max(0, start - 30) : start]
+        after_text = text[end : min(len(text), end + 30)]
 
-        line_prefix = before_text.split('\n')[-1].lower().strip()
-        line_suffix = after_text.split('\n')[0].lower().strip()
-        tag_clean = re.sub(r'[^a-zA-Z0-9_]', '', raw_tag).lower()
+        line_prefix = before_text.split("\n")[-1].lower().strip()
+        line_suffix = after_text.split("\n")[0].lower().strip()
+        tag_clean = re.sub(r"[^a-zA-Z0-9_]", "", raw_tag).lower()
 
         # 1. Suffix cues (e.g. {{2}} T&Cs apply). NOTE: bare "apply" is too
         #    common ("Apply now" CTA text) — require explicit T&C phrasing.
-        if any(w in line_suffix for w in ('t&c', 't & c', 'terms', 'terms and conditions', 'conditions apply', 'disclaimer', 'ltd.')):
+        if any(
+            w in line_suffix
+            for w in (
+                "t&c",
+                "t & c",
+                "terms",
+                "terms and conditions",
+                "conditions apply",
+                "disclaimer",
+                "ltd.",
+            )
+        ):
             samples.append(company_name)
-        elif any(w in line_suffix for w in ('days', 'months', 'years', 'hours', 'mins', 'minutes')):
+        elif any(w in line_suffix for w in ("days", "months", "years", "hours", "mins", "minutes")):
             samples.append("30")
-        elif any(w in line_suffix for w in ('%', 'percent', 'p.a.', 'rate')):
+        elif any(w in line_suffix for w in ("%", "percent", "p.a.", "rate")):
             samples.append("9.5%")
-        elif any(w in line_suffix for w in ('emi', 'per month', '/month')):
+        elif any(w in line_suffix for w in ("emi", "per month", "/month")):
             samples.append("12,500")
 
         # 2. Prefix cues (e.g. ₹{{1}} or Dear {{1}})
-        elif any(w in line_prefix for w in ('₹', 'rs.', 'rs', 'inr', 'amount', 'price', 'worth', 'upto', 'up to', 'loan', 'limit', 'of')):
+        elif any(
+            w in line_prefix
+            for w in (
+                "₹",
+                "rs.",
+                "rs",
+                "inr",
+                "amount",
+                "price",
+                "worth",
+                "upto",
+                "up to",
+                "loan",
+                "limit",
+                "of",
+            )
+        ):
             samples.append("5,00,000")
-        elif any(w in line_prefix for w in ('hi', 'dear', 'hello', 'mr', 'ms', 'user', 'customer', 'hey')) or 'name' in tag_clean:
+        elif (
+            any(w in line_prefix for w in ("hi", "dear", "hello", "mr", "ms", "user", "customer", "hey"))
+            or "name" in tag_clean
+        ):
             samples.append("John")
-        elif any(w in line_prefix for w in ('interest', 'rate', 'roi')):
+        elif any(w in line_prefix for w in ("interest", "rate", "roi")):
             samples.append("9.5%")
 
         # 3. Tag content cues
-        elif any(w in tag_clean for w in ('otp', 'code', 'pin')):
+        elif any(w in tag_clean for w in ("otp", "code", "pin")):
             samples.append("482910")
-        elif any(w in tag_clean for w in ('date', 'day', 'time', 'month', 'year')):
+        elif any(w in tag_clean for w in ("date", "day", "time", "month", "year")):
             samples.append("25 August 2026")
-        elif any(w in tag_clean for w in ('account', 'acct', 'card', 'id', 'num')):
+        elif any(w in tag_clean for w in ("account", "acct", "card", "id", "num")):
             samples.append("12345678")
         else:
             samples.append("5,00,000" if idx == 1 else company_name)
 
     placeholders = []
+
     def repl(m):
         idx = len(placeholders) + 1
         placeholders.append(m.group(0))
@@ -531,6 +607,7 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
     is properly formatted, optionally grammar-fixed, and has example samples populated for Meta whitelisting.
     """
     from grammar_checker import lint_and_fix_body
+
     for comp in components:
         if not isinstance(comp, dict):
             continue
@@ -549,7 +626,10 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
                 example = comp.setdefault("example", {})
                 if "body_text" not in example or not example["body_text"]:
                     example["body_text"] = [auto_samples]
-                    logger.info("Auto-normalized text and generated %d body variable sample(s)", len(auto_samples))
+                    logger.info(
+                        "Auto-normalized text and generated %d body variable sample(s)",
+                        len(auto_samples),
+                    )
 
         # HEADER text component with variables
         elif ctype == "HEADER" and comp.get("format") == "TEXT":
@@ -571,7 +651,11 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
                     url = b.get("url", "")
                     if "{{1}}" in url or "{{0}}" in url or "<" in url:
                         if not b.get("example") or not b["example"]:
-                            b["example"] = ["https://www.tatacapital.com/personal-loan.html" if client.lower() == "tata" else "https://www.bajajfinservmarkets.in/"]
+                            b["example"] = [
+                                "https://www.tatacapital.com/personal-loan.html"
+                                if client.lower() == "tata"
+                                else "https://www.bajajfinservmarkets.in/"
+                            ]
                             logger.info("Auto-generated URL variable sample for button")
                     else:
                         # Meta Rule: static URL buttons MUST NOT have 'example' parameter
@@ -623,6 +707,7 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         "components": components_raw,
     }
 
+
 # Status mapping
 # ---------------------------------------------------------------------------
 
@@ -636,6 +721,7 @@ _STATUS_MAP = {
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") -> SubmissionResult:
     """
@@ -660,8 +746,6 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             client=c,
             channel="whatsapp",
         )
-
-    last_result: SubmissionResult | None = None
 
     for attempt in range(MAX_RETRIES):
         exc: Exception | None = None
@@ -691,7 +775,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             )
         # ---- Handle transport errors (retry) ----
         if exc is not None:
-            last_result = SubmissionResult(
+            SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
@@ -702,7 +786,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2 ** attempt))
+                time.sleep(BACKOFF_SECONDS * (2**attempt))
             continue
 
         # ---- We got a response — parse it ----
@@ -715,9 +799,12 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
         if resp.status_code in _RETRYABLE_STATUS_CODES:
             logger.warning(
                 "Attempt %d/%d retryable HTTP %d: %s",
-                attempt + 1, MAX_RETRIES, resp.status_code, resp.text[:500],
+                attempt + 1,
+                MAX_RETRIES,
+                resp.status_code,
+                resp.text[:500],
             )
-            last_result = SubmissionResult(
+            SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
@@ -729,18 +816,26 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2 ** attempt))
+                time.sleep(BACKOFF_SECONDS * (2**attempt))
             continue
 
         # Self-healing check on 401 Unauthorized / Expired Session
         if resp.status_code == 401 and not getattr(payload, "_auto_refreshed_auth", False):
-            logger.warning("Received 401 Unauthorized for %s (%s). Attempting self-healing auth refresh...", payload.template_name, c)
+            logger.warning(
+                "Received 401 Unauthorized for %s (%s). Attempting self-healing auth refresh...",
+                payload.template_name,
+                c,
+            )
             try:
                 from auth_refresher import refresh_karix_session
+
                 refresh_res = refresh_karix_session(account=c)
                 if refresh_res.get("success"):
-                    logger.info("Self-healing auth refresh succeeded! Retrying template submission for %s...", payload.template_name)
-                    setattr(payload, "_auto_refreshed_auth", True)
+                    logger.info(
+                        "Self-healing auth refresh succeeded! Retrying template submission for %s...",
+                        payload.template_name,
+                    )
+                    payload._auto_refreshed_auth = True
                     return _submit_portal_template(payload, client=c)
             except Exception as ref_exc:
                 logger.error("Self-healing auth attempt failed: %s", ref_exc)
@@ -801,17 +896,27 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             retry_count=attempt,
         )
 
+
 def _requires_portal_media(payload: TemplateSubmission) -> bool:
     """Return whether the template needs an unverified official media handle."""
     for component in payload.components:
         ctype = component.get("type") if isinstance(component, dict) else getattr(component, "type", "")
         cformat = component.get("format") if isinstance(component, dict) else getattr(component, "format", "")
-        if str(ctype).upper() == "HEADER" and str(cformat).upper() in {"IMAGE", "DOCUMENT", "VIDEO"}:
+        if str(ctype).upper() == "HEADER" and str(cformat).upper() in {
+            "IMAGE",
+            "DOCUMENT",
+            "VIDEO",
+        }:
             return True
     return False
 
 
-def _build_official_create_body(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> dict:
+def _build_official_create_body(
+    payload: TemplateSubmission,
+    client: str = "bajaj",
+    fix_aspect_ratio: bool = True,
+    fix_grammar: bool = True,
+) -> dict:
     """
     Build the documented JSON body for POST /api/v1.0/template/{wabaId}.
 
@@ -829,11 +934,20 @@ def _build_official_create_body(payload: TemplateSubmission, client: str = "baja
     }
 
 
-def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> SubmissionResult:
+def _submit_official_template(
+    payload: TemplateSubmission,
+    client: str = "bajaj",
+    fix_aspect_ratio: bool = True,
+    fix_grammar: bool = True,
+) -> SubmissionResult:
     """Submit a text-only template through the verified official Karix API."""
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
     try:
-        waba_id = (payload.waba_id if getattr(payload, "waba_id", None) and payload.waba_id not in ("", BAJAJ_WABA_ID) and c != "bajaj" else None) or get_waba_id(c)
+        waba_id = (
+            payload.waba_id
+            if getattr(payload, "waba_id", None) and payload.waba_id not in ("", BAJAJ_WABA_ID) and c != "bajaj"
+            else None
+        ) or get_waba_id(c)
         headers = get_official_auth_headers(c)
     except OSError as exc:
         return SubmissionResult(
@@ -867,7 +981,7 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2 ** attempt))
+                time.sleep(BACKOFF_SECONDS * (2**attempt))
             continue
         try:
             data = response.json()
@@ -890,18 +1004,31 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 retry_count=attempt,
             )
             if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2 ** attempt))
+                time.sleep(BACKOFF_SECONDS * (2**attempt))
             continue
         # Self-healing check on 401 Unauthorized
         if response.status_code == 401 and not getattr(payload, "_auto_refreshed_auth", False):
-            logger.warning("Received 401 on official API for %s (%s). Attempting self-healing auth refresh...", payload.template_name, c)
+            logger.warning(
+                "Received 401 on official API for %s (%s). Attempting self-healing auth refresh...",
+                payload.template_name,
+                c,
+            )
             try:
                 from auth_refresher import refresh_karix_session
+
                 refresh_res = refresh_karix_session(account=c)
                 if refresh_res.get("success"):
-                    logger.info("Self-healing auth refresh succeeded! Retrying official template submission for %s...", payload.template_name)
-                    setattr(payload, "_auto_refreshed_auth", True)
-                    return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+                    logger.info(
+                        "Self-healing auth refresh succeeded! Retrying official template submission for %s...",
+                        payload.template_name,
+                    )
+                    payload._auto_refreshed_auth = True
+                    return _submit_official_template(
+                        payload,
+                        client=c,
+                        fix_aspect_ratio=fix_aspect_ratio,
+                        fix_grammar=fix_grammar,
+                    )
             except Exception as ref_exc:
                 logger.error("Self-healing auth attempt failed: %s", ref_exc)
 
@@ -946,7 +1073,12 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
     return last_result
 
 
-def submit_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> SubmissionResult:
+def submit_template(
+    payload: TemplateSubmission,
+    client: str = "bajaj",
+    fix_aspect_ratio: bool = True,
+    fix_grammar: bool = True,
+) -> SubmissionResult:
     """
     Submit one template to Karix and return the result.
     When submitting media headers (IMAGE, VIDEO, DOCUMENT), uses Portal API if session
@@ -960,6 +1092,8 @@ def submit_template(payload: TemplateSubmission, client: str = "bajaj", fix_aspe
         except OSError:
             pass
     return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+
+
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
     Fetch the full official template list for a client's WABA exactly once.
@@ -1028,7 +1162,15 @@ def check_status(provider_ref_id: str, client: str = "bajaj") -> tuple[ApprovalS
             provider_ref_id,
             len(templates),
         )
-        return ApprovalStatus.UNKNOWN, f"Template {provider_ref_id} not found in response", {"_not_found": True}
+        return (
+            ApprovalStatus.UNKNOWN,
+            f"Template {provider_ref_id} not found in response",
+            {"_not_found": True},
+        )
 
     raw_status = str(matched.get("template_create_status", "")).upper()
-    return _STATUS_MAP.get(raw_status, ApprovalStatus.UNKNOWN), matched.get("template_status_reason"), matched
+    return (
+        _STATUS_MAP.get(raw_status, ApprovalStatus.UNKNOWN),
+        matched.get("template_status_reason"),
+        matched,
+    )

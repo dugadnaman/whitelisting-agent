@@ -5,12 +5,13 @@ Storage-agnostic dataclasses for text messages, rich cards, suggestions, and sub
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 
 
-class RcsSubmissionStatus(str, Enum):
+class RcsSubmissionStatus(StrEnum):
     """Outcome of the RCS template submission attempt."""
+
     SUBMITTED = "submitted"
     FAILED = "failed"
     DUPLICATE = "duplicate"
@@ -19,6 +20,7 @@ class RcsSubmissionStatus(str, Enum):
 @dataclass
 class RcsSuggestion:
     """One suggested reply or action for an RCS template."""
+
     suggestion_type: str  # "reply" | "url_action" | "dialer_action"
     text: str
     postback_data: str = ""
@@ -41,6 +43,7 @@ class RcsSuggestion:
 @dataclass
 class RcsTemplateSubmission:
     """One RCS template to be submitted to Karix RCS Bot Builder."""
+
     template_name: str
     bot_id: str = ""
     template_type: str = "text"  # "text" | "richcard" | "carousel" | "Transactional" | "Promotional"
@@ -70,6 +73,7 @@ class RcsTemplateSubmission:
 @dataclass
 class RcsSubmissionResult:
     """Outcome of attempting to submit one RCS template."""
+
     source_ref: str
     template_name: str
     template_id: str | None
@@ -81,6 +85,4 @@ class RcsSubmissionResult:
     channel: str = "rcs"
     submitted_by: str = "Anonymous Operator"
     source_file: str | None = None  # name of the uploaded spreadsheet, for dashboard attribution
-    submitted_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    submitted_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())

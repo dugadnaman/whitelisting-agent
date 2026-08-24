@@ -7,10 +7,9 @@ Guarantees zero log loss, full attribution, and unlimited historical auditing.
 
 import json
 import logging
-import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -63,7 +62,7 @@ def init_store() -> None:
         # Auto-seed default operators if empty
         conn.execute("""
             INSERT OR IGNORE INTO users (id, name, role, created_at, last_active, actions_count)
-            VALUES 
+            VALUES
                 ('u_namann', 'Namann', 'Lead Operator', '2026-08-15T00:00:00+00:00', '2026-08-19T00:00:00+00:00', 10)
         """)
 
@@ -79,7 +78,7 @@ def _migrate_jsonl_to_sqlite() -> None:
     try:
         lines = jsonl_path.read_text(encoding="utf-8").splitlines()
         records_to_insert = []
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         users_map = {}
 
         for line in lines:
@@ -104,20 +103,26 @@ def _migrate_jsonl_to_sqlite() -> None:
 
         if records_to_insert:
             with _get_db() as conn:
-                conn.executemany("""
+                conn.executemany(
+                    """
                     INSERT OR IGNORE INTO activities (id, timestamp, user, action, account, channel, details, status, ip_address)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, records_to_insert)
+                """,
+                    records_to_insert,
+                )
 
                 for u_name, count in users_map.items():
                     if u_name and u_name != "Anonymous Operator":
-                        conn.execute("""
+                        conn.execute(
+                            """
                             INSERT INTO users (id, name, role, created_at, last_active, actions_count)
                             VALUES (?, ?, 'Operator', ?, ?, ?)
-                            ON CONFLICT(name) DO UPDATE SET 
+                            ON CONFLICT(name) DO UPDATE SET
                                 actions_count = actions_count + excluded.actions_count,
                                 last_active = excluded.last_active
-                        """, (f"u_{uuid.uuid4().hex[:6]}", u_name, now, now, count))
+                        """,
+                            (f"u_{uuid.uuid4().hex[:6]}", u_name, now, now, count),
+                        )
     except Exception as exc:
         logger.warning("Error migrating activity_log.jsonl to SQLite: %s", exc)
 
@@ -128,17 +133,20 @@ def register_or_update_user(name: str, role: str = "Operator") -> dict:
     if not clean_name:
         raise ValueError("User name cannot be empty")
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     uid = f"u_{uuid.uuid4().hex[:8]}"
 
     with _get_db() as conn:
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO users (id, name, role, created_at, last_active, actions_count)
             VALUES (?, ?, ?, ?, ?, 0)
-            ON CONFLICT(name) DO UPDATE SET 
+            ON CONFLICT(name) DO UPDATE SET
                 last_active = excluded.last_active,
                 role = CASE WHEN users.role = 'Admin' THEN 'Admin' ELSE excluded.role END
-        """, (uid, clean_name, role, now, now))
+        """,
+            (uid, clean_name, role, now, now),
+        )
 
         cur = conn.execute("SELECT * FROM users WHERE name = ?", (clean_name,))
         row = cur.fetchone()
@@ -173,26 +181,42 @@ def log_activity(
         clean_user = "Namann"
 
     record_id = str(uuid.uuid4())
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
     details_dict = details or {}
     details_json = json.dumps(details_dict, default=str)
 
     # 1. Insert into SQLite
     try:
         with _get_db() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO activities (id, timestamp, user, action, account, channel, details, status, ip_address)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (record_id, ts, clean_user, action, account, channel, details_json, status, ip_address))
+            """,
+                (
+                    record_id,
+                    ts,
+                    clean_user,
+                    action,
+                    account,
+                    channel,
+                    details_json,
+                    status,
+                    ip_address,
+                ),
+            )
 
             if clean_user != "Anonymous Operator":
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO users (id, name, role, created_at, last_active, actions_count)
                     VALUES (?, ?, 'Operator', ?, ?, 1)
-                    ON CONFLICT(name) DO UPDATE SET 
+                    ON CONFLICT(name) DO UPDATE SET
                         last_active = excluded.last_active,
                         actions_count = actions_count + 1
-                """, (f"u_{uuid.uuid4().hex[:6]}", clean_user, ts, ts))
+                """,
+                    (f"u_{uuid.uuid4().hex[:6]}", clean_user, ts, ts),
+                )
     except Exception as exc:
         logger.error("Failed to insert activity into SQLite: %s", exc)
 
@@ -302,31 +326,36 @@ def get_activity_summary(log_path: str = ACTIVITY_LOG_PATH) -> dict:
 
             # 3. User activity ranking
             cur = conn.execute("""
-                SELECT user, COUNT(*) as actions 
-                FROM activities 
+                SELECT user, COUNT(*) as actions
+                FROM activities
                 WHERE user != 'Anonymous Operator'
-                GROUP BY user 
+                GROUP BY user
                 ORDER BY actions DESC
             """)
             user_activity = []
             for r in cur.fetchall():
                 u_name = r["user"]
                 # Count templates for this user
-                t_cur = conn.execute("""
-                    SELECT details FROM activities 
+                t_cur = conn.execute(
+                    """
+                    SELECT details FROM activities
                     WHERE user = ? AND action = 'TEMPLATE_SUBMISSION'
-                """, (u_name,))
+                """,
+                    (u_name,),
+                )
                 u_templates = 0
                 for tr in t_cur.fetchall():
                     try:
                         u_templates += int(json.loads(tr[0]).get("count", 0))
                     except Exception:
                         pass
-                user_activity.append({
-                    "user": u_name,
-                    "actions": r["actions"],
-                    "templates": u_templates,
-                })
+                user_activity.append(
+                    {
+                        "user": u_name,
+                        "actions": r["actions"],
+                        "templates": u_templates,
+                    }
+                )
 
             # 4. Action breakdown
             cur = conn.execute("SELECT action, COUNT(*) as count FROM activities GROUP BY action")

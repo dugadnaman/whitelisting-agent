@@ -15,12 +15,17 @@ Efficiency notes (post-audit):
     stay "pending" so a later poll retries them.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loader import load_from_list
 from models import ApprovalStatus
-from submission_client import _STATUS_MAP, _match_template, fetch_template_list, submit_template
+from submission_client import (
+    _STATUS_MAP,
+    _match_template,
+    fetch_template_list,
+    submit_template,
+)
 from tracker import log_result, pending_entries, update_results
 
 # Approval outcomes worth persisting. Anything else (transport errors,
@@ -28,15 +33,29 @@ from tracker import log_result, pending_entries, update_results
 _TERMINAL_STATUSES = {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}
 
 
-def run(templates_raw: list[dict], log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator", source_file: str | None = None, fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> None:
+def run(
+    templates_raw: list[dict],
+    log_path: str = "submission_log.jsonl",
+    client: str = "bajaj",
+    user: str = "Anonymous Operator",
+    source_file: str | None = None,
+    fix_aspect_ratio: bool = True,
+    fix_grammar: bool = True,
+) -> None:
     """Phase 2, step 1: submit each template, log the attempt."""
     import concurrent.futures
+
     submissions = load_from_list(templates_raw)
     print(f"Submitting {len(submissions)} template(s) for {client} (by {user})...")
 
     def _submit_single(submission):
         submission.client = client
-        result = submit_template(submission, client=client, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        result = submit_template(
+            submission,
+            client=client,
+            fix_aspect_ratio=fix_aspect_ratio,
+            fix_grammar=fix_grammar,
+        )
         result.client = client
         result.channel = "whatsapp"
         result.submitted_by = user
@@ -52,6 +71,7 @@ def run(templates_raw: list[dict], log_path: str = "submission_log.jsonl", clien
 
     print(f"Done. Results appended to {log_path}")
 
+
 def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") -> None:
     """
     Phase 2, step 2: check approval status for everything still pending.
@@ -60,10 +80,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
     pending. Transient failures leave entries pollable for the next run.
     """
     c = client.lower()
-    to_check = [
-        e for e in pending_entries(log_path)
-        if (e.get("client", "bajaj") or "bajaj").lower() == c
-    ]
+    to_check = [e for e in pending_entries(log_path) if (e.get("client", "bajaj") or "bajaj").lower() == c]
     if not to_check:
         print(f"Nothing pending for {client}.")
         return
@@ -76,7 +93,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
         print(f"  Poll deferred for {client}: {err}")
         return
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     updates: dict[str, dict] = {}
     for entry in to_check:
         ref = entry["source_ref"]
@@ -105,10 +122,18 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
         print(f"Applied {updated} status update(s).")
 
 
-def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str = "bajaj", user: str = "Anonymous Operator", fix_aspect_ratio: bool = True, fix_grammar: bool = True) -> None:
+def run_file(
+    file_path: str,
+    log_path: str = "submission_log.jsonl",
+    client: str = "bajaj",
+    user: str = "Anonymous Operator",
+    fix_aspect_ratio: bool = True,
+    fix_grammar: bool = True,
+) -> None:
     """Phase 2, step 1 (from CSV or XLSX): load templates from file, submit in parallel pool, log results."""
-    from loader import load_from_csv, load_from_excel
     import concurrent.futures
+
+    from loader import load_from_csv, load_from_excel
 
     if file_path.lower().endswith((".xlsx", ".xls")):
         submissions = load_from_excel(file_path, client=client)
@@ -119,7 +144,12 @@ def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str
 
     def _submit_single(submission):
         submission.client = client
-        result = submit_template(submission, client=client, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        result = submit_template(
+            submission,
+            client=client,
+            fix_aspect_ratio=fix_aspect_ratio,
+            fix_grammar=fix_grammar,
+        )
         result.client = client
         result.channel = "whatsapp"
         result.submitted_by = user
@@ -134,6 +164,7 @@ def run_file(file_path: str, log_path: str = "submission_log.jsonl", client: str
         list(executor.map(_submit_single, submissions))
 
     print(f"Done. Results appended to {log_path}")
+
 
 if __name__ == "__main__":
     import os

@@ -11,6 +11,7 @@ import logging
 import os
 import re
 from pathlib import Path
+
 from rcs_config import get_rcs_bot_id, get_rcs_entity_id
 from rcs_models import RcsTemplateSubmission
 
@@ -66,7 +67,11 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
     for line in lines:
         is_cta = False
         # 1. Match CTA Button <Text> or CTA button<Text> or CTA<Text>
-        m_cta = re.search(r'CTA\s*(?:Button|button)?\s*[:<\[]\s*([^>\]<]+)\s*[>\]]', line, re.IGNORECASE)
+        m_cta = re.search(
+            r"CTA\s*(?:Button|button)?\s*[:<\[]\s*([^>\]<]+)\s*[>\]]",
+            line,
+            re.IGNORECASE,
+        )
         if m_cta:
             cand = m_cta.group(1).strip()
             if cand.lower() not in ("link", "url"):
@@ -74,7 +79,7 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
             is_cta = True
 
         # 2. Match [Button Text] <link> or <Button Text> <link>
-        m_link = re.search(r'[\[<]([^>\]<]+)[\]>]\s*(?:<link>|\[link\])', line, re.IGNORECASE)
+        m_link = re.search(r"[\[<]([^>\]<]+)[\]>]\s*(?:<link>|\[link\])", line, re.IGNORECASE)
         if m_link and not is_cta:
             cand = m_link.group(1).strip()
             if cand.lower() not in ("link", "url"):
@@ -82,7 +87,11 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
             is_cta = True
 
         # 3. Match prompt lines like "Tap to proceed ⬇️" or "Tap below to check eligibility⬇️"
-        if re.search(r'^(?:Tap|Click|Press)\s+(?:below|here|to\s+proceed|to\s+check|to\s+apply).*?(?:⬇️|->|:|here)?$', line, re.IGNORECASE):
+        if re.search(
+            r"^(?:Tap|Click|Press)\s+(?:below|here|to\s+proceed|to\s+check|to\s+apply).*?(?:⬇️|->|:|here)?$",
+            line,
+            re.IGNORECASE,
+        ):
             is_cta = True
 
         if not is_cta:
@@ -90,9 +99,9 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
 
     full_desc = "\n\n".join(clean_lines)
     first_line = clean_lines[0] if clean_lines else "Special Offer"
-    clean_title = re.sub(r'<[^>]+>|\[[^\]]+\]|\{[^}]+\}', '', first_line).strip()
-    clean_title = re.sub(r'^[,\s:–—\-]+|[,\s:–—\-]+$', '', clean_title)
-    if re.match(r'^(?:Dear|Hi|Hello)\b', clean_title, re.IGNORECASE) or len(clean_title) < 4:
+    clean_title = re.sub(r"<[^>]+>|\[[^\]]+\]|\{[^}]+\}", "", first_line).strip()
+    clean_title = re.sub(r"^[,\s:–—\-]+|[,\s:–—\-]+$", "", clean_title)
+    if re.match(r"^(?:Dear|Hi|Hello)\b", clean_title, re.IGNORECASE) or len(clean_title) < 4:
         clean_title = "Pre-Approved Loan Offer ✨"
 
     return {
@@ -101,6 +110,7 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
         "button_text": button_text,
         "button_url": button_url,
     }
+
 
 def _build_suggestions_from_row(row: dict) -> list[dict]:
     """Parse button columns into Karix RCS suggestion dictionaries."""
@@ -125,31 +135,39 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
             for item in btext.split("|"):
                 clean = item.strip()
                 if clean:
-                    suggestions.append({
-                        "suggestionType": "reply",
-                        "text": clean,
-                        "postbackData": clean.lower().replace(" ", "_"),
-                    })
+                    suggestions.append(
+                        {
+                            "suggestionType": "reply",
+                            "text": clean,
+                            "postbackData": clean.lower().replace(" ", "_"),
+                        }
+                    )
         elif btype in ("DIALER", "DIALER_ACTION", "CALL", "PHONE") or bphone:
-            suggestions.append({
-                "suggestionType": "dialer_action",
-                "text": btext or "Call Now",
-                "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
-                "phoneNumber": bphone or "+919999999999",
-            })
+            suggestions.append(
+                {
+                    "suggestionType": "dialer_action",
+                    "text": btext or "Call Now",
+                    "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
+                    "phoneNumber": bphone or "+919999999999",
+                }
+            )
         elif btype in ("URL", "URL_ACTION", "LINK") or burl:
-            suggestions.append({
-                "suggestionType": "url_action",
-                "text": btext or "Apply Now",
-                "postbackData": btext.lower().replace(" ", "_") if btext else "apply_now",
-                "url": burl or "https://www.tatacapital.com",
-            })
+            suggestions.append(
+                {
+                    "suggestionType": "url_action",
+                    "text": btext or "Apply Now",
+                    "postbackData": btext.lower().replace(" ", "_") if btext else "apply_now",
+                    "url": burl or "https://www.tatacapital.com",
+                }
+            )
         else:
-            suggestions.append({
-                "suggestionType": "reply",
-                "text": btext,
-                "postbackData": btext.lower().replace(" ", "_"),
-            })
+            suggestions.append(
+                {
+                    "suggestionType": "reply",
+                    "text": btext,
+                    "postbackData": btext.lower().replace(" ", "_"),
+                }
+            )
 
     return suggestions
 
@@ -199,8 +217,6 @@ def _parse_sender_ids(raw) -> list[str]:
     return [x.strip() for x in re.split(r"[|,]", str(raw)) if x.strip()]
 
 
-
-
 def _build_carousel_cards_from_row(row: dict) -> list[dict]:
     """Parse multiple cards for carousel templates from pipe-separated columns or JSON."""
     if row.get("carousel_cards"):
@@ -212,9 +228,21 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
             pass
 
     titles = [t.strip() for t in str(row.get("card_title") or row.get("title") or "").split("|") if t.strip()]
-    descriptions = [d.strip() for d in str(row.get("body") or row.get("card_description") or row.get("text_message") or row.get("description") or "").split("|") if d.strip()]
-    media_urls = [u.strip() for u in str(row.get("media_url") or row.get("image_url") or row.get("image") or "").split("|") if u.strip()]
-    button_texts = [b.strip() for b in str(row.get("button_text") or row.get("button_name") or "").split("|") if b.strip()]
+    descriptions = [
+        d.strip()
+        for d in str(
+            row.get("body") or row.get("card_description") or row.get("text_message") or row.get("description") or ""
+        ).split("|")
+        if d.strip()
+    ]
+    media_urls = [
+        u.strip()
+        for u in str(row.get("media_url") or row.get("image_url") or row.get("image") or "").split("|")
+        if u.strip()
+    ]
+    button_texts = [
+        b.strip() for b in str(row.get("button_text") or row.get("button_name") or "").split("|") if b.strip()
+    ]
     button_urls = [u.strip() for u in str(row.get("button_url") or row.get("link") or "").split("|") if u.strip()]
     button_types = [t.strip().upper() for t in str(row.get("button_type") or "").split("|") if t.strip()]
 
@@ -222,36 +250,54 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
 
     cards = []
     for i in range(max_cards):
-        c_title = titles[i] if i < len(titles) else (f"Card {i+1}" if titles else "")
+        c_title = titles[i] if i < len(titles) else (f"Card {i + 1}" if titles else "")
         c_desc = descriptions[i] if i < len(descriptions) else (descriptions[0] if descriptions else "")
-        c_url = media_urls[i] if i < len(media_urls) else (media_urls[0] if media_urls else "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png")
+        c_url = (
+            media_urls[i]
+            if i < len(media_urls)
+            else (
+                media_urls[0]
+                if media_urls
+                else "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png"
+            )
+        )
 
         card_suggs = []
         if i < len(button_texts):
             btext = button_texts[i]
             btype = button_types[i] if i < len(button_types) else (button_types[0] if button_types else "URL")
-            b_link = button_urls[i] if i < len(button_urls) else (button_urls[0] if button_urls else "https://www.tatacapital.com")
+            b_link = (
+                button_urls[i]
+                if i < len(button_urls)
+                else (button_urls[0] if button_urls else "https://www.tatacapital.com")
+            )
 
             if btype in ("URL", "URL_ACTION", "LINK") or b_link:
-                card_suggs.append({
-                    "suggestionType": "url_action",
-                    "text": btext,
-                    "postbackData": btext.lower().replace(" ", "_"),
-                    "url": b_link,
-                })
+                card_suggs.append(
+                    {
+                        "suggestionType": "url_action",
+                        "text": btext,
+                        "postbackData": btext.lower().replace(" ", "_"),
+                        "url": b_link,
+                    }
+                )
             else:
-                card_suggs.append({
-                    "suggestionType": "reply",
-                    "text": btext,
-                    "postbackData": btext.lower().replace(" ", "_"),
-                })
+                card_suggs.append(
+                    {
+                        "suggestionType": "reply",
+                        "text": btext,
+                        "postbackData": btext.lower().replace(" ", "_"),
+                    }
+                )
 
-        cards.append({
-            "cardTitle": c_title,
-            "cardDescription": c_desc,
-            "mediaUrl": c_url,
-            "suggestions": card_suggs,
-        })
+        cards.append(
+            {
+                "cardTitle": c_title,
+                "cardDescription": c_desc,
+                "mediaUrl": c_url,
+                "suggestions": card_suggs,
+            }
+        )
 
     return cards
 
@@ -285,7 +331,11 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         or ("|" in str(row.get("card_title") or "") and raw_type in ("carousel", "carousal"))
     )
 
-    public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
+    public_base = (
+        os.environ.get("RENDER_EXTERNAL_URL")
+        or os.environ.get("PUBLIC_APP_URL")
+        or "https://whitelisting-agent.onrender.com"
+    )
 
     # Resolve default media fallback per official spec ratio
     orientation_key = str(row.get("orientation") or "VERTICAL").strip().upper()
@@ -300,7 +350,12 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     if is_carousel:
         template_type = "carousel"
         carousel_cards = _build_carousel_cards_from_row(row)
-    elif raw_type in ("richcard", "card", "image") or header_type in ("image", "media", "richcard") or media_url or card_title:
+    elif (
+        raw_type in ("richcard", "card", "image")
+        or header_type in ("image", "media", "richcard")
+        or media_url
+        or card_title
+    ):
         template_type = "richcard"
         carousel_cards = []
         if not media_url:
@@ -352,6 +407,7 @@ def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmis
             rows.append(_row_to_rcs_submission(raw_row, client=client, fallback_idx=idx))
     return rows
 
+
 # ---------------------------------------------------------------------------
 # Official Karix RCS media specifications (RCS specifications docx)
 #   Rich Card: VERTICAL SHORT=3:1(1440x480)  VERTICAL MEDIUM=2:1(1440x720)  HORIZONTAL=3:4(768x1024)  max 2MB
@@ -359,21 +415,54 @@ def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmis
 # ---------------------------------------------------------------------------
 
 RICH_CARD_IMAGE_SPECS: dict[tuple, dict] = {
-    ("VERTICAL", "SHORT"): {"ratio": (3, 1), "optimal": (1440, 480), "max_bytes": 2 * 1024 * 1024},
-    ("VERTICAL", "MEDIUM"): {"ratio": (2, 1), "optimal": (1440, 720), "max_bytes": 2 * 1024 * 1024},
-    ("HORIZONTAL", "SHORT"): {"ratio": (3, 4), "optimal": (768, 1024), "max_bytes": 2 * 1024 * 1024},
-    ("HORIZONTAL", "MEDIUM"): {"ratio": (3, 4), "optimal": (768, 1024), "max_bytes": 2 * 1024 * 1024},
+    ("VERTICAL", "SHORT"): {
+        "ratio": (3, 1),
+        "optimal": (1440, 480),
+        "max_bytes": 2 * 1024 * 1024,
+    },
+    ("VERTICAL", "MEDIUM"): {
+        "ratio": (2, 1),
+        "optimal": (1440, 720),
+        "max_bytes": 2 * 1024 * 1024,
+    },
+    ("HORIZONTAL", "SHORT"): {
+        "ratio": (3, 4),
+        "optimal": (768, 1024),
+        "max_bytes": 2 * 1024 * 1024,
+    },
+    ("HORIZONTAL", "MEDIUM"): {
+        "ratio": (3, 4),
+        "optimal": (768, 1024),
+        "max_bytes": 2 * 1024 * 1024,
+    },
 }
 
 CAROUSEL_IMAGE_SPECS: dict[tuple, dict] = {
-    ("SHORT", "SMALL"): {"ratio": (8, 5), "optimal": (1160, 720), "max_bytes": 1 * 1024 * 1024},
-    ("SHORT", "MEDIUM"): {"ratio": (5, 2), "optimal": (1800, 720), "max_bytes": 1 * 1024 * 1024},
-    ("MEDIUM", "SMALL"): {"ratio": (1, 1), "optimal": (770, 720), "max_bytes": 1 * 1024 * 1024},
-    ("MEDIUM", "MEDIUM"): {"ratio": (16, 9), "optimal": (1280, 720), "max_bytes": 1 * 1024 * 1024},
+    ("SHORT", "SMALL"): {
+        "ratio": (8, 5),
+        "optimal": (1160, 720),
+        "max_bytes": 1 * 1024 * 1024,
+    },
+    ("SHORT", "MEDIUM"): {
+        "ratio": (5, 2),
+        "optimal": (1800, 720),
+        "max_bytes": 1 * 1024 * 1024,
+    },
+    ("MEDIUM", "SMALL"): {
+        "ratio": (1, 1),
+        "optimal": (770, 720),
+        "max_bytes": 1 * 1024 * 1024,
+    },
+    ("MEDIUM", "MEDIUM"): {
+        "ratio": (16, 9),
+        "optimal": (1280, 720),
+        "max_bytes": 1 * 1024 * 1024,
+    },
 }
 
 ACCEPTED_IMAGE_FORMATS = (".jpg", ".jpeg", ".png", ".gif")
 ACCEPTED_VIDEO_FORMATS = (".mp4", ".m4v", ".mpeg", ".webm", ".h263", ".m4p")
+
 
 def _spec_for_richcard(sub: RcsTemplateSubmission) -> dict:
     orientation = (getattr(sub, "orientation", "VERTICAL") or "VERTICAL").upper()
@@ -383,6 +472,7 @@ def _spec_for_richcard(sub: RcsTemplateSubmission) -> dict:
         RICH_CARD_IMAGE_SPECS[("VERTICAL", "MEDIUM")],
     )
 
+
 def _spec_for_carousel(sub: RcsTemplateSubmission) -> dict:
     height = (getattr(sub, "height", "MEDIUM") or "MEDIUM").upper()
     width = (getattr(sub, "width", "MEDIUM") or "MEDIUM").upper()
@@ -391,14 +481,17 @@ def _spec_for_carousel(sub: RcsTemplateSubmission) -> dict:
         CAROUSEL_IMAGE_SPECS[("MEDIUM", "MEDIUM")],
     )
 
+
 def _fit_rcs_image(img_bytes: bytes, spec: dict) -> bytes:
     """
     Fit image to the official spec ratio, resize to optimal resolution, and compress
     below the max file size using progressive JPEG quality reduction.
     """
     try:
-        from PIL import Image
         import io
+
+        from PIL import Image
+
         img = Image.open(io.BytesIO(img_bytes))
         if img.mode in ("RGBA", "LA", "P"):
             bg = Image.new("RGB", img.size, (255, 255, 255))
@@ -444,14 +537,17 @@ def _fit_rcs_image(img_bytes: bytes, spec: dict) -> bytes:
     except Exception:
         return img_bytes
 
+
 def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> bytes:
     """
     Auto-fit image bytes to the REQUESTED target ratio (e.g. 2:1 for standalone rich cards,
     3:4 for carousel cards). Preserves the image only if it already matches the target.
     """
     try:
-        from PIL import Image
         import io
+
+        from PIL import Image
+
         img = Image.open(io.BytesIO(img_bytes))
         current_w, current_h = img.size
         current_aspect = current_w / current_h
@@ -486,10 +582,13 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
     media = []
     try:
         import zipfile
+
         with zipfile.ZipFile(path, "r") as z:
             media_names = [f for f in z.namelist() if f.startswith("xl/media/")]
+
             def natural_key(name):
-                return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name)]
+                return [int(c) if c.isdigit() else c for c in re.split(r"(\d+)", name)]
+
             media_names.sort(key=natural_key)
             for name in media_names:
                 filename = name.split("/")[-1]
@@ -498,7 +597,10 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
         logger.warning("Could not extract embedded media from xlsx: %s", e)
     return media
 
-def _upload_and_bind_rcs_images(raw_media: list[tuple[str, bytes]], subs: list[RcsTemplateSubmission], client: str) -> None:
+
+def _upload_and_bind_rcs_images(
+    raw_media: list[tuple[str, bytes]], subs: list[RcsTemplateSubmission], client: str
+) -> None:
     """
     Fit each extracted image to the official RCS spec ratio for the template's
     orientation/height/width, compress to the max file size, upload, and bind the
@@ -523,8 +625,13 @@ def _upload_and_bind_rcs_images(raw_media: list[tuple[str, bytes]], subs: list[R
                     fitted = _fit_rcs_image(media_data, spec)
                     ratio_label = str(spec["ratio"])
                 k_name = upload_rcs_media(fitted, filename=fname, client=client)
-                setattr(sub, "file_name", k_name)
-                logger.info("Bound rich card media %s -> %s (ratio %s)", fname, k_name, ratio_label)
+                sub.file_name = k_name
+                logger.info(
+                    "Bound rich card media %s -> %s (ratio %s)",
+                    fname,
+                    k_name,
+                    ratio_label,
+                )
             except Exception as ex:
                 logger.warning("Failed to bind rich card media: %s", ex)
         elif sub.template_type == "carousel" and sub.carousel_cards:
@@ -544,6 +651,7 @@ def _upload_and_bind_rcs_images(raw_media: list[tuple[str, bytes]], subs: list[R
                 except Exception as ex:
                     logger.warning("Failed to bind carousel card media %s: %s", fname, ex)
 
+
 def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
@@ -557,7 +665,24 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
     wb.close()
 
     first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
-    has_standard_headers = any(h in ("template_name", "templatename", "name", "body", "body_text", "components", "category", "language", "card_title", "card_description", "media_url", "header_type") for h in first_row)
+    has_standard_headers = any(
+        h
+        in (
+            "template_name",
+            "templatename",
+            "name",
+            "body",
+            "body_text",
+            "components",
+            "category",
+            "language",
+            "card_title",
+            "card_description",
+            "media_url",
+            "header_type",
+        )
+        for h in first_row
+    )
 
     # Check if there is a row that contains multiple rich single-cell card blocks (only when no standard column headers exist)
     block_row_cards = None
@@ -569,7 +694,7 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
                 break
         if block_row_cards:
             c_cards = []
-            for c_idx, block in enumerate(block_row_cards):
+            for _c_idx, block in enumerate(block_row_cards):
                 card_dict = parse_single_cell_card_block(block)
 
                 b_text = card_dict.get("button_text") or "Apply Now"
@@ -585,8 +710,8 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
                 c_cards.append(card_dict)
 
             base_name = Path(path).stem
-            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_')
-            t_name = f"tata_{clean_name}_carousel"[:25].rstrip('_')
+            clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name).strip("_")
+            t_name = f"tata_{clean_name}_carousel"[:25].rstrip("_")
 
             sub = RcsTemplateSubmission(
                 template_name=t_name,
@@ -608,7 +733,7 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
             continue
 
         raw_row = {}
-        for h, val in zip(headers, row):
+        for h, val in zip(headers, row, strict=False):
             if h:
                 raw_row[h] = str(val).strip() if val is not None else ""
 

@@ -7,7 +7,6 @@ marketing briefs (like Book 4) with automatic image extraction.
 """
 
 import csv
-import io
 import json
 import logging
 import re
@@ -31,17 +30,41 @@ def infer_whatsapp_cta(text: str, client: str = "bajaj") -> tuple[str, str, str]
     if is_tata:
         base_domain = "https://www.tatacapital.com"
         if any(w in t_lower for w in ("home loan", "housing", "property")):
-            return "Check Rates", f"{base_domain}/home-loan.html/{{{{1}}}}", f"{base_domain}/home-loan.html"
+            return (
+                "Check Rates",
+                f"{base_domain}/home-loan.html/{{{{1}}}}",
+                f"{base_domain}/home-loan.html",
+            )
         elif any(w in t_lower for w in ("business loan", "enterprise", "msme")):
-            return "Apply Business", f"{base_domain}/business-loan.html/{{{{1}}}}", f"{base_domain}/business-loan.html"
+            return (
+                "Apply Business",
+                f"{base_domain}/business-loan.html/{{{{1}}}}",
+                f"{base_domain}/business-loan.html",
+            )
         elif any(w in t_lower for w in ("vehicle", "car", "2-wheeler", "bike")):
-            return "Explore Vehicle", f"{base_domain}/vehicle-loan.html/{{{{1}}}}", f"{base_domain}/vehicle-loan.html"
+            return (
+                "Explore Vehicle",
+                f"{base_domain}/vehicle-loan.html/{{{{1}}}}",
+                f"{base_domain}/vehicle-loan.html",
+            )
         elif any(w in t_lower for w in ("eligibility", "eligible", "check offer")):
-            return "Check Eligibility", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
+            return (
+                "Check Eligibility",
+                f"{base_domain}/personal-loan.html/{{{{1}}}}",
+                f"{base_domain}/personal-loan.html",
+            )
         elif any(w in t_lower for w in ("claim", "pre-approved", "pre approved", "exclusive")):
-            return "Claim Your Offer", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
+            return (
+                "Claim Your Offer",
+                f"{base_domain}/personal-loan.html/{{{{1}}}}",
+                f"{base_domain}/personal-loan.html",
+            )
         else:
-            return "Apply Now", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
+            return (
+                "Apply Now",
+                f"{base_domain}/personal-loan.html/{{{{1}}}}",
+                f"{base_domain}/personal-loan.html",
+            )
     else:
         # Bajaj
         base_domain = "https://www.bajajfinservmarkets.in"
@@ -57,7 +80,13 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
     - Action button with dynamic link
     """
     if not cell_text:
-        return {"header": None, "body": "", "button_text": "Apply Now", "button_url": "https://1kx.in/{{1}}", "button_example": "https://www.tatacapital.com"}
+        return {
+            "header": None,
+            "body": "",
+            "button_text": "Apply Now",
+            "button_url": "https://1kx.in/{{1}}",
+            "button_example": "https://www.tatacapital.com",
+        }
 
     lines = [line.strip() for line in cell_text.splitlines() if line.strip()]
 
@@ -70,7 +99,11 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
     for line in lines:
         is_cta = False
         # 1. Match CTA Button <Text> or CTA button<Text> or CTA<Text>
-        m_cta = re.search(r'CTA\s*(?:Button|button)?\s*[:<\[]\s*([^>\]<]+)\s*[>\]]', line, re.IGNORECASE)
+        m_cta = re.search(
+            r"CTA\s*(?:Button|button)?\s*[:<\[]\s*([^>\]<]+)\s*[>\]]",
+            line,
+            re.IGNORECASE,
+        )
         if m_cta:
             cand = m_cta.group(1).strip()
             if cand.lower() not in ("link", "url"):
@@ -78,7 +111,7 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
             is_cta = True
 
         # 2. Match [Button Text] <link> or <Button Text> <link>
-        m_link = re.search(r'[\[<]([^>\]<]+)[\]>]\s*(?:<link>|\[link\])', line, re.IGNORECASE)
+        m_link = re.search(r"[\[<]([^>\]<]+)[\]>]\s*(?:<link>|\[link\])", line, re.IGNORECASE)
         if m_link and not is_cta:
             cand = m_link.group(1).strip()
             if cand.lower() not in ("link", "url"):
@@ -86,7 +119,11 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
             is_cta = True
 
         # 3. Match prompt lines like "Tap to proceed ⬇️" or "Tap below to check eligibility⬇️"
-        if re.search(r'^(?:Tap|Click|Press)\s+(?:below|here|to\s+proceed|to\s+check|to\s+apply).*?(?:⬇️|->|:|here)?$', line, re.IGNORECASE):
+        if re.search(
+            r"^(?:Tap|Click|Press)\s+(?:below|here|to\s+proceed|to\s+check|to\s+apply).*?(?:⬇️|->|:|here)?$",
+            line,
+            re.IGNORECASE,
+        ):
             is_cta = True
 
         if not is_cta:
@@ -95,24 +132,25 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
     full_desc = "\n\n".join(clean_lines)
 
     # Normalize body variables: <Name>, <amt>, [var] -> {{1}}, {{2}}
-    spaced_body = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', full_desc)
-    spaced_body = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', spaced_body)
-    spaced_body = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', spaced_body)
+    spaced_body = re.sub(r"([A-Za-z0-9])(<[^>]+>)", r"\1 \2", full_desc)
+    spaced_body = re.sub(r"(<[^>]+>)([A-Za-z0-9])", r"\1 \2", spaced_body)
+    spaced_body = re.sub(r"([A-Za-z0-9])(\{#[^#]+#\})", r"\1 \2", spaced_body)
 
     placeholders = []
+
     def _repl(m):
         idx = len(placeholders) + 1
         placeholders.append(m.group(0))
         return f"{{{{{idx}}}}}"
 
-    pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
+    pattern = r"(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})"
     normalized_body = re.sub(pattern, _repl, spaced_body)
 
     # Extract clean header title
     first_line = clean_lines[0] if clean_lines else "Special Offer"
-    clean_title = re.sub(r'<[^>]+>|\[[^\]]+\]|\{[^}]+\}', '', first_line).strip()
-    clean_title = re.sub(r'^[,\s:–—\-]+|[,\s:–—\-]+$', '', clean_title)
-    if re.match(r'^(?:Dear|Hi|Hello)\b', clean_title, re.IGNORECASE) or len(clean_title) < 4:
+    clean_title = re.sub(r"<[^>]+>|\[[^\]]+\]|\{[^}]+\}", "", first_line).strip()
+    clean_title = re.sub(r"^[,\s:–—\-]+|[,\s:–—\-]+$", "", clean_title)
+    if re.match(r"^(?:Dear|Hi|Hello)\b", clean_title, re.IGNORECASE) or len(clean_title) < 4:
         clean_title = "Pre-Approved Personal Loan ✨"
 
     return {
@@ -167,23 +205,24 @@ def _extract_media_from_xlsx(path: str) -> list[dict]:
     media_items = []
     try:
         with zipfile.ZipFile(path, "r") as z:
-            media_names = [
-                f for f in z.namelist()
-                if f.startswith("xl/media/") or f.startswith("xl/embeddings/")
-            ]
+            media_names = [f for f in z.namelist() if f.startswith(("xl/media/", "xl/embeddings/"))]
+
             def natural_key(name):
-                return [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', name)]
+                return [int(c) if c.isdigit() else c for c in re.split(r"(\d+)", name)]
+
             media_names.sort(key=natural_key)
             for name in media_names:
                 filename = name.split("/")[-1]
                 raw_data = z.read(name)
                 kind, mime_type = _detect_media_kind(filename, raw_data)
-                media_items.append({
-                    "filename": filename,
-                    "bytes": raw_data,
-                    "kind": kind,
-                    "mime_type": mime_type,
-                })
+                media_items.append(
+                    {
+                        "filename": filename,
+                        "bytes": raw_data,
+                        "kind": kind,
+                        "mime_type": mime_type,
+                    }
+                )
     except Exception as e:
         logger.warning("Could not extract embedded media from xlsx: %s", e)
     return media_items
@@ -195,7 +234,18 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
 
 
 def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
-    _TC_FIELDS = {"type", "text", "format", "variables", "buttons", "example", "media_url", "media_file", "image_bytes", "file_type"}
+    _TC_FIELDS = {
+        "type",
+        "text",
+        "format",
+        "variables",
+        "buttons",
+        "example",
+        "media_url",
+        "media_file",
+        "image_bytes",
+        "file_type",
+    }
 
     components = []
     for c in row.get("components", []):
@@ -235,29 +285,35 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
         components.append(comp)
     elif htype == "LOCATION":
         components.append({"type": "HEADER", "format": "LOCATION"})
-    elif (htype in ("TEXT", "HEADER") or (not htype and (raw_row.get("header_text") or raw_row.get("header")))) and (raw_row.get("header_text") or raw_row.get("header")):
-        components.append({
-            "type": "HEADER",
-            "format": "TEXT",
-            "text": (raw_row.get("header_text") or raw_row.get("header")).strip(),
-        })
+    elif (htype in ("TEXT", "HEADER") or (not htype and (raw_row.get("header_text") or raw_row.get("header")))) and (
+        raw_row.get("header_text") or raw_row.get("header")
+    ):
+        components.append(
+            {
+                "type": "HEADER",
+                "format": "TEXT",
+                "text": (raw_row.get("header_text") or raw_row.get("header")).strip(),
+            }
+        )
     # 2. BODY
     body_text = (raw_row.get("body") or raw_row.get("body_text") or "").strip()
     if body_text:
         # Normalize line endings and collapse 3+ consecutive newlines (Meta Rule: max 2)
-        body_text = body_text.replace('\r\n', '\n').replace('\r', '\n')
-        body_text = re.sub(r'[ \t]+\n', '\n', body_text)
-        body_text = re.sub(r'\n{3,}', '\n\n', body_text)
-        body_text = re.sub(r'[ \t]+([.,!?:;])', r'\1', body_text)
-        body_text = re.sub(r'([A-Za-z0-9])(<[^>]+>)', r'\1 \2', body_text)
-        body_text = re.sub(r'(<[^>]+>)([A-Za-z0-9])', r'\1 \2', body_text)
-        body_text = re.sub(r'([A-Za-z0-9])(\{#[^#]+#\})', r'\1 \2', body_text)
+        body_text = body_text.replace("\r\n", "\n").replace("\r", "\n")
+        body_text = re.sub(r"[ \t]+\n", "\n", body_text)
+        body_text = re.sub(r"\n{3,}", "\n\n", body_text)
+        body_text = re.sub(r"[ \t]+([.,!?:;])", r"\1", body_text)
+        body_text = re.sub(r"([A-Za-z0-9])(<[^>]+>)", r"\1 \2", body_text)
+        body_text = re.sub(r"(<[^>]+>)([A-Za-z0-9])", r"\1 \2", body_text)
+        body_text = re.sub(r"([A-Za-z0-9])(\{#[^#]+#\})", r"\1 \2", body_text)
         placeholders = []
+
         def _repl(m):
             idx = len(placeholders) + 1
             placeholders.append(m.group(0))
             return f"{{{{{idx}}}}}"
-        pattern = r'(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})'
+
+        pattern = r"(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})"
         body_text = re.sub(pattern, _repl, body_text)
         components.append({"type": "BODY", "text": body_text.strip()})
     # 3. FOOTER
@@ -280,20 +336,21 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
         # Meta Rule: 'example' is ONLY valid if URL contains dynamic variables (e.g. {{1}})
         if "{{1}}" in burl or "{{0}}" in burl or "<" in burl:
             btn_data["example"] = [bexample]
-        components.append({
-            "type": "BUTTONS",
-            "buttons": [btn_data],
-        })
-    elif btype in ("QUICK_REPLY", "QUICKREPLY") and btext:
-        btn_items = [
-            {"type": "QUICK_REPLY", "text": item.strip()}
-            for item in btext.split("|") if item.strip()
-        ]
-        if btn_items:
-            components.append({
+        components.append(
+            {
                 "type": "BUTTONS",
-                "buttons": btn_items,
-            })
+                "buttons": [btn_data],
+            }
+        )
+    elif btype in ("QUICK_REPLY", "QUICKREPLY") and btext:
+        btn_items = [{"type": "QUICK_REPLY", "text": item.strip()} for item in btext.split("|") if item.strip()]
+        if btn_items:
+            components.append(
+                {
+                    "type": "BUTTONS",
+                    "buttons": btn_items,
+                }
+            )
 
     return components
 
@@ -343,7 +400,11 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     submissions = [_row_to_submission(row, client=client) for row in rows]
     kept = [s for s in submissions if s.components]
     for dropped in (s for s in submissions if not s.components):
-        logger.warning("Dropping row %r from %s: no template components parsed", dropped.template_name, path)
+        logger.warning(
+            "Dropping row %r from %s: no template components parsed",
+            dropped.template_name,
+            path,
+        )
     return kept
 
 
@@ -365,7 +426,19 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     all_raw_rows = list(sheet.iter_rows(values_only=True))
     wb.close()
     first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
-    has_standard_headers = any(h in ("template_name", "name", "body", "body_text", "components", "category", "language") for h in first_row)
+    has_standard_headers = any(
+        h
+        in (
+            "template_name",
+            "name",
+            "body",
+            "body_text",
+            "components",
+            "category",
+            "language",
+        )
+        for h in first_row
+    )
     # Check if this sheet is a multi-block single-cell layout (only when no standard column headers exist)
     block_row_cells = None
     if not has_standard_headers:
@@ -376,7 +449,7 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
                 break
         if block_row_cells:
             base_name = Path(path).stem
-            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', base_name).strip('_').lower()
+            clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name).strip("_").lower()
 
             submissions = []
             for idx, block in enumerate(block_row_cells, 1):
@@ -386,37 +459,49 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
                 components = []
                 if (idx - 1) < len(extracted_media):
                     m = extracted_media[idx - 1]
-                    components.append({
-                        "type": "HEADER",
-                        "format": m["kind"],
-                        "image_bytes": m["bytes"],
-                        "file_type": m["mime_type"],
-                    })
+                    components.append(
+                        {
+                            "type": "HEADER",
+                            "format": m["kind"],
+                            "image_bytes": m["bytes"],
+                            "file_type": m["mime_type"],
+                        }
+                    )
                 elif parsed.get("header"):
-                    components.append({
-                        "type": "HEADER",
-                        "format": "TEXT",
-                        "text": parsed["header"],
-                    })
-                components.append({
-                    "type": "BODY",
-                    "text": parsed["body"],
-                })
+                    components.append(
+                        {
+                            "type": "HEADER",
+                            "format": "TEXT",
+                            "text": parsed["header"],
+                        }
+                    )
+                components.append(
+                    {
+                        "type": "BODY",
+                        "text": parsed["body"],
+                    }
+                )
 
-                components.append({
-                    "type": "FOOTER",
-                    "text": "T&Cs apply",
-                })
+                components.append(
+                    {
+                        "type": "FOOTER",
+                        "text": "T&Cs apply",
+                    }
+                )
 
-                components.append({
-                    "type": "BUTTONS",
-                    "buttons": [{
-                        "type": "URL",
-                        "text": parsed["button_text"],
-                        "url": parsed["button_url"],
-                        "example": [parsed["button_example"]],
-                    }],
-                })
+                components.append(
+                    {
+                        "type": "BUTTONS",
+                        "buttons": [
+                            {
+                                "type": "URL",
+                                "text": parsed["button_text"],
+                                "url": parsed["button_url"],
+                                "example": [parsed["button_example"]],
+                            }
+                        ],
+                    }
+                )
 
                 sub = TemplateSubmission(
                     client=client.lower(),
@@ -443,7 +528,7 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
             continue
 
         raw_row = {}
-        for h, val in zip(headers, row):
+        for h, val in zip(headers, row, strict=False):
             if h:
                 raw_row[h] = str(val).strip() if val is not None else ""
 
@@ -503,9 +588,12 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     submissions = [_row_to_submission(row, client=client) for row in rows]
     kept = [s for s in submissions if s.components]
     for dropped in (s for s in submissions if not s.components):
-        logger.warning("Dropping row %r from %s: no template components parsed", dropped.template_name, path)
+        logger.warning(
+            "Dropping row %r from %s: no template components parsed",
+            dropped.template_name,
+            path,
+        )
     return kept
-
 
 
 def load_from_json(path: str) -> list[TemplateSubmission]:

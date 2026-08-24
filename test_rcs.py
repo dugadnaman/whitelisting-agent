@@ -15,7 +15,6 @@ from rcs_loader import (
     _normalize_row_keys,
     _parse_sender_ids,
     load_rcs_from_csv,
-    load_rcs_from_list,
 )
 from rcs_models import (
     RcsSubmissionResult,
@@ -26,7 +25,6 @@ from rcs_tracker import load_rcs_log, log_rcs_result, update_rcs_result
 
 
 class TestRcsPipeline(unittest.TestCase):
-
     def test_normalize_row_keys(self):
         raw = {
             "Template Name": "A",

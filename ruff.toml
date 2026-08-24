@@ -1,0 +1,22 @@
+# Ruff configuration for Karix WhatsApp & RCS Whitelisting
+target-version = "py311"
+line-length = 120
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "PIE",  # flake8-pie
+]
+ignore = [
+    "E501",   # line-too-long (handled by ruff format)
+    "B008",   # do not perform function calls in argument defaults (FastAPI Depends/Query)
+]
+
+[lint.per-file-ignores]
+"test_*.py" = ["B011", "F401", "E402"]
+"api.py" = ["E402"]

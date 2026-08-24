@@ -4,6 +4,7 @@ Integration smoke test - verifies Karix API connection and status checks.
 
 Uses official WABA_AUTH_TOKEN static credentials with optional portal fallback.
 """
+
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ import sys
 # Optionally load .env file if python-dotenv is available
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass  # .env loading is optional; env vars can be set directly
@@ -58,7 +60,12 @@ def test_list_all_templates():
     so you can see what's on the account.
     """
     import requests
-    from config import BAJAJ_WABA_ID, OFFICIAL_TEMPLATE_BASE_URL, get_official_auth_headers
+
+    from config import (
+        BAJAJ_WABA_ID,
+        OFFICIAL_TEMPLATE_BASE_URL,
+        get_official_auth_headers,
+    )
 
     print("\n--- Listing all templates (summary via Official API) ---\n")
 
@@ -74,8 +81,10 @@ def test_list_all_templates():
 
     print(f"  Total templates: {len(templates)}\n")
     for t in templates[:20]:  # Show first 20
-        print(f"  sno={t.get('sno')}  fb_id={t.get('fb_template_id')}  name={t.get('template_name')!r:30s}  "
-              f"status={t.get('template_create_status')}")
+        print(
+            f"  sno={t.get('sno')}  fb_id={t.get('fb_template_id')}  name={t.get('template_name')!r:30s}  "
+            f"status={t.get('template_create_status')}"
+        )
 
     if len(templates) > 20:
         print(f"  ... and {len(templates) - 20} more")

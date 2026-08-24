@@ -46,7 +46,9 @@ def _load_env_file() -> None:
 
 def _account_prefix(client: str) -> str:
     import re
-    return re.sub(r'[^a-zA-Z0-9_]', '_', client).strip('_').upper()
+
+    return re.sub(r"[^a-zA-Z0-9_]", "_", client).strip("_").upper()
+
 
 def get_rcs_bot_id(client: str = "tata") -> str:
     """Return the active RCS Bot ID / Sender ID for the given client."""
@@ -57,7 +59,12 @@ def get_rcs_bot_id(client: str = "tata") -> str:
         return os.environ.get("TATA_RCS_BOT_ID") or os.environ.get("TATA_RCS_SENDER_ID") or TATA_RCS_BOT_ID
     elif c == "bajaj":
         return os.environ.get("BAJAJ_RCS_BOT_ID") or os.environ.get("BAJAJ_RCS_SENDER_ID") or BAJAJ_RCS_BOT_ID
-    return os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID") or os.environ.get("RCS_BOT_ID") or ""
+    return (
+        os.environ.get(f"{prefix}_RCS_BOT_ID")
+        or os.environ.get(f"{prefix}_RCS_SENDER_ID")
+        or os.environ.get("RCS_BOT_ID")
+        or ""
+    )
 
 
 def get_rcs_entity_id(client: str = "tata") -> str:

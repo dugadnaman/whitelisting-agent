@@ -23,10 +23,11 @@ import os
 # up without restarting the process.
 # ---------------------------------------------------------------------------
 
+
 def _load_env_file():
     """Load key-value pairs from credentials.json and .env file if present."""
-    from pathlib import Path
     import json
+    from pathlib import Path
 
     # 1. Load credentials.json (saved from Settings UI)
     cred_json_path = Path("credentials.json")
@@ -51,10 +52,14 @@ def _load_env_file():
             v = v.strip().strip("'\"")
             if k and v:
                 os.environ[k] = v
+
+
 def _account_prefix(client: str) -> str:
     """Sanitize client name into uppercase environment variable prefix."""
     import re
-    return re.sub(r'[^a-zA-Z0-9_]', '_', client).strip('_').upper()
+
+    return re.sub(r"[^a-zA-Z0-9_]", "_", client).strip("_").upper()
+
 
 def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
@@ -94,6 +99,7 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
         "Referer": KARIX_REFERER,
     }
 
+
 def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
     Build headers for the official WhatsApp Template API for the given client.
@@ -111,7 +117,11 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
         token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN") or os.environ.get(f"{prefix}_AUTH_TOKEN")
 
     if not token:
-        expected_key = f"{prefix}_WABA_AUTH_TOKEN" if c not in ("bajaj", "tata") else ("TATA_WABA_AUTH_TOKEN" if c == "tata" else "BAJAJ_WABA_AUTH_TOKEN")
+        expected_key = (
+            f"{prefix}_WABA_AUTH_TOKEN"
+            if c not in ("bajaj", "tata")
+            else ("TATA_WABA_AUTH_TOKEN" if c == "tata" else "BAJAJ_WABA_AUTH_TOKEN")
+        )
         raise OSError(
             f"Missing required WABA API Token for {client} ({expected_key}). "
             f"Please enter the API Token in Settings under {client} before submitting."
@@ -160,13 +170,18 @@ def get_esmeaddr(client: str = "bajaj") -> str:
             return val
         raise OSError(f"Missing required ESME address for {client} ({prefix}_ESMEADDR).")
 
+
 def get_template_namespace_id(client: str = "bajaj") -> str:
     """Return template namespace ID for the given client."""
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
     if c == "bajaj":
-        return os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID") or os.environ.get("TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
+        return (
+            os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID")
+            or os.environ.get("TEMPLATE_NAMESPACE_ID")
+            or BAJAJ_TEMPLATE_NAMESPACE_ID
+        )
     else:
         val = os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
         if val:
@@ -175,6 +190,8 @@ def get_template_namespace_id(client: str = "bajaj") -> str:
             f"Missing required Template Namespace ID for {client} ({prefix}_TEMPLATE_NAMESPACE_ID). "
             f"Please configure it in Settings under {client}."
         )
+
+
 # ---------------------------------------------------------------------------
 # Fixed constants — same for every request on this Bajaj WABA account.
 # ---------------------------------------------------------------------------

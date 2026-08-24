@@ -8,9 +8,6 @@ submissions to resume without human intervention.
 import json
 import logging
 import os
-import re
-import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,29 +36,37 @@ def update_persisted_credentials(
 
     mapping: dict[str, str] = {}
 
-    if "bearer_token" in tokens and tokens["bearer_token"]:
-        key = "TATA_KARIX_BEARER_TOKEN" if is_tata else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
+    if tokens.get("bearer_token"):
+        key = (
+            "TATA_KARIX_BEARER_TOKEN"
+            if is_tata
+            else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
+        )
         mapping[key] = tokens["bearer_token"].strip()
         os.environ[key] = tokens["bearer_token"].strip()
         if is_bajaj:
             os.environ["KARIX_BEARER_TOKEN"] = tokens["bearer_token"].strip()
 
-    if "session" in tokens and tokens["session"]:
+    if tokens.get("session"):
         key = "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")
         mapping[key] = tokens["session"].strip()
         os.environ[key] = tokens["session"].strip()
         if is_bajaj:
             os.environ["KARIX_SESSION"] = tokens["session"].strip()
 
-    if "user" in tokens and tokens["user"]:
+    if tokens.get("user"):
         key = "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")
         mapping[key] = tokens["user"].strip()
         os.environ[key] = tokens["user"].strip()
         if is_bajaj:
             os.environ["KARIX_USER"] = tokens["user"].strip()
 
-    if "lounge_cookie" in tokens and tokens["lounge_cookie"]:
-        key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+    if tokens.get("lounge_cookie"):
+        key = (
+            "TATA_KARIX_LOUNGE_COOKIE"
+            if is_tata
+            else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+        )
         mapping[key] = tokens["lounge_cookie"].strip()
         os.environ[key] = tokens["lounge_cookie"].strip()
 
@@ -125,11 +130,21 @@ def refresh_karix_session(
     _load_env_file()
     acc = account.lower().strip()
     prefix = _account_prefix(acc)
-    is_tata = acc == "tata"
-    is_bajaj = acc == "bajaj"
 
-    u = username or os.environ.get(f"{prefix}_PORTAL_USER") or os.environ.get("KARIX_PORTAL_USER") or os.environ.get(f"{prefix}_USER") or os.environ.get("KARIX_USER")
-    p = password or os.environ.get(f"{prefix}_PORTAL_PASSWORD") or os.environ.get("KARIX_PORTAL_PASSWORD") or os.environ.get(f"{prefix}_PASSWORD") or os.environ.get("KARIX_PASSWORD")
+    u = (
+        username
+        or os.environ.get(f"{prefix}_PORTAL_USER")
+        or os.environ.get("KARIX_PORTAL_USER")
+        or os.environ.get(f"{prefix}_USER")
+        or os.environ.get("KARIX_USER")
+    )
+    p = (
+        password
+        or os.environ.get(f"{prefix}_PORTAL_PASSWORD")
+        or os.environ.get("KARIX_PORTAL_PASSWORD")
+        or os.environ.get(f"{prefix}_PASSWORD")
+        or os.environ.get("KARIX_PASSWORD")
+    )
     target_url = login_url or os.environ.get(f"{prefix}_PORTAL_URL") or KARIX_PORTAL_LOGIN_URLS[0]
 
     if not u or not p:
@@ -196,8 +211,15 @@ def refresh_karix_session(
                     if "json" in resp.headers.get("content-type", "").lower():
                         data = resp.json()
                         if isinstance(data, dict):
-                            token = data.get("token") or data.get("access_token") or data.get("jwt") or data.get("bearer")
-                            if token and isinstance(token, str) and len(token) > 20 and not harvested.get("bearer_token"):
+                            token = (
+                                data.get("token") or data.get("access_token") or data.get("jwt") or data.get("bearer")
+                            )
+                            if (
+                                token
+                                and isinstance(token, str)
+                                and len(token) > 20
+                                and not harvested.get("bearer_token")
+                            ):
                                 harvested["bearer_token"] = token.replace("Bearer ", "").strip()
                             sess = data.get("sessionId") or data.get("session") or data.get("sessionId")
                             if sess and isinstance(sess, str) and not harvested.get("session"):
@@ -221,9 +243,9 @@ def refresh_karix_session(
                 'input[name="user"]',
                 'input[name="email"]',
                 'input[type="email"]',
-                '#username',
-                '#user',
-                '#email',
+                "#username",
+                "#user",
+                "#email",
                 'input[placeholder*="user" i]',
                 'input[placeholder*="email" i]',
                 'input[type="text"]',
@@ -245,8 +267,8 @@ def refresh_karix_session(
                 'input[type="password"]',
                 'input[name="password"]',
                 'input[name="pass"]',
-                '#password',
-                '#pass',
+                "#password",
+                "#pass",
                 'input[placeholder*="pass" i]',
             ]
             pass_input = None
@@ -268,8 +290,8 @@ def refresh_karix_session(
                 'button:has-text("Login")',
                 'button:has-text("Sign in")',
                 'button:has-text("Submit")',
-                '.login-btn',
-                '#loginBtn',
+                ".login-btn",
+                "#loginBtn",
             ]
             for sel in submit_selectors:
                 if page.locator(sel).first.is_visible():
@@ -333,7 +355,7 @@ def refresh_karix_session(
         return {
             "success": False,
             "account": acc,
-            "error": f"Browser automation error: {str(exc)}",
+            "error": f"Browser automation error: {exc!s}",
         }
 
     # Verify if we got tokens

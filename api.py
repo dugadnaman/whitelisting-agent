@@ -22,21 +22,6 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-from config import (
-    BAJAJ_ESMEADDR,
-    BAJAJ_WABA_ID,
-    KARIX_BASE_URL,
-    OFFICIAL_TEMPLATE_BASE_URL,
-    _account_prefix,
-    _load_env_file,
-    get_official_auth_headers,
-    get_waba_id,
-)
-from loader import load_from_csv, load_from_excel
-from models import ApprovalStatus
-from runner import poll_pending, run, run_file
-from submission_client import _STATUS_MAP
-from tracker import load_log, pending_entries
 from activity_tracker import (
     get_activity_summary,
     get_all_users,
@@ -44,17 +29,30 @@ from activity_tracker import (
     log_activity,
     register_or_update_user,
 )
+from config import (
+    BAJAJ_WABA_ID,
+    OFFICIAL_TEMPLATE_BASE_URL,
+    _account_prefix,
+    _load_env_file,
+    get_official_auth_headers,
+    get_waba_id,
+)
 from grammar_checker import lint_and_fix_body
+from loader import load_from_csv, load_from_excel
+from models import ApprovalStatus
+from rcs_client import fetch_rcs_templates
+
 # RCS pipeline imports
 from rcs_config import (
-    KARIX_DLT_ACTION_URL,
     get_rcs_auth_headers,
     get_rcs_entity_id,
 )
-from rcs_client import fetch_rcs_templates
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
 from rcs_runner import run_rcs_file
 from rcs_tracker import load_rcs_log
+from runner import poll_pending, run
+from submission_client import _STATUS_MAP
+from tracker import load_log, pending_entries
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -75,18 +73,22 @@ app.add_middleware(
 LOG_PATH = "submission_log.jsonl"
 RCS_LOG_PATH = "rcs_submission_log.jsonl"
 
+
 @app.get("/api/health")
 @app.get("/healthz")
 def health_check():
     """Health check endpoint for Render zero-downtime deploys and external uptime monitors."""
     return {"status": "ok", "service": "karix-whitelisting-api", "version": "2.1.0"}
 
+
 MEDIA_CACHE_DIR = Path("media_cache")
 MEDIA_CACHE_DIR.mkdir(exist_ok=True)
+
 
 def _init_media_cache():
     try:
         from submission_client import _ensure_default_sample_image
+
         img_p = _ensure_default_sample_image()
         target = MEDIA_CACHE_DIR / "default_sample_header.png"
         if not target.exists() and Path(img_p).exists():
@@ -96,12 +98,18 @@ def _init_media_cache():
     # RCS ratio-specific fallbacks per official specs
     try:
         from PIL import Image
-        for fname, size in (("default_rcs_3x1.png", (1440, 480)), ("default_rcs_2x1.png", (1440, 720)), ("default_rcs_3x4.png", (768, 1024))):
+
+        for fname, size in (
+            ("default_rcs_3x1.png", (1440, 480)),
+            ("default_rcs_2x1.png", (1440, 720)),
+            ("default_rcs_3x4.png", (768, 1024)),
+        ):
             img_p = MEDIA_CACHE_DIR / fname
             if not img_p.exists():
                 Image.new("RGB", size, (0, 120, 242)).save(img_p, format="PNG")
     except Exception:
         pass
+
 
 @app.get("/api/media/{filename}")
 def get_public_media(filename: str):
@@ -124,6 +132,7 @@ def get_public_media(filename: str):
         media_type = "application/pdf"
     return FileResponse(str(file_p), media_type=media_type)
 
+
 # ---------------------------------------------------------------------------
 # Models & Account Store
 # ---------------------------------------------------------------------------
@@ -133,6 +142,7 @@ DEFAULT_ACCOUNTS = [
     {"id": "bajaj", "name": "Bajaj Finserv", "is_builtin": True},
     {"id": "tata", "name": "Tata Capital", "is_builtin": True},
 ]
+
 
 def load_accounts() -> list[dict]:
     """Load accounts from accounts.json, credentials.json, and environment."""
@@ -175,11 +185,14 @@ def load_accounts() -> list[dict]:
         pass
     return accounts
 
+
 def save_accounts(accounts: list[dict]) -> None:
     try:
         ACCOUNTS_FILE.write_text(json.dumps(accounts, indent=2) + "\n", encoding="utf-8")
     except Exception as exc:
         logger.error("Failed to write accounts.json: %s", exc)
+
+
 def get_account_name(account_id: str) -> str:
     accs = load_accounts()
     for a in accs:
@@ -187,12 +200,16 @@ def get_account_name(account_id: str) -> str:
             return a.get("name", account_id)
     return account_id.replace("_", " ").title()
 
+
 class AccountCreate(BaseModel):
     name: str
     id: str | None = None
+
+
 class UserRegister(BaseModel):
     name: str
     role: str | None = "Operator"
+
 
 class CredentialUpdate(BaseModel):
     account: str = "bajaj"  # e.g. "bajaj", "tata", or any custom account id
@@ -205,6 +222,8 @@ class CredentialUpdate(BaseModel):
     user_name: str | None = None  # Who is performing the update
     entity_id: str | None = None
     lounge_cookie: str | None = None
+
+
 # ---------------------------------------------------------------------------
 def _clean_error_message(err) -> str | None:
     """Flatten error strings or nested error dictionaries into a clean message."""
@@ -245,6 +264,7 @@ def _clean_error_message(err) -> str | None:
         return str(err)
     return str(err)
 
+
 def _json_safe(obj):
     """
     Recursively coerce arbitrary values to plain JSON-safe primitives so the
@@ -255,6 +275,7 @@ def _json_safe(obj):
         return obj
     if isinstance(obj, bytes):
         import base64
+
         return f"base64:{base64.b64encode(obj).decode()}"
     if isinstance(obj, dict):
         return {str(k): _json_safe(v) for k, v in obj.items()}
@@ -286,6 +307,7 @@ def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.get("/api/stats")
 def get_stats(
     account: str = Query("bajaj"),
@@ -306,11 +328,13 @@ def get_stats(
                 vi = lt.get("viTemplate", {})
                 name = vi.get("name") or str(lt.get("templateId", ""))
                 status_str = str(lt.get("status", "SUBMITTED")).upper()
-                merged.append({
-                    "template_name": name,
-                    "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-                    "approval_status": status_str.lower(),
-                })
+                merged.append(
+                    {
+                        "template_name": name,
+                        "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
+                        "approval_status": status_str.lower(),
+                    }
+                )
                 seen_names.add(name.lower())
 
             for le in local_entries:
@@ -343,12 +367,18 @@ def get_stats(
         for lt in live_templates:
             name = lt.get("template_name") or str(lt.get("fb_template_id", ""))
             status_str = str(lt.get("template_create_status", "PENDING")).upper()
-            approval_val = _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value if status_str in _STATUS_MAP else status_str.lower()
-            merged.append({
-                "template_name": name,
-                "status": "submitted",
-                "approval_status": approval_val,
-            })
+            approval_val = (
+                _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value
+                if status_str in _STATUS_MAP
+                else status_str.lower()
+            )
+            merged.append(
+                {
+                    "template_name": name,
+                    "status": "submitted",
+                    "approval_status": approval_val,
+                }
+            )
             seen_names.add(name.lower())
 
         for le in local_entries:
@@ -383,6 +413,7 @@ def get_stats(
             "duplicate": 0,
             "error": str(exc),
         }
+
 
 @app.get("/api/templates")
 def get_templates(
@@ -448,14 +479,16 @@ def get_templates(
             if status and isinstance(status, str):
                 s_val = status.lower()
                 merged_entries = [
-                    e for e in merged_entries
+                    e
+                    for e in merged_entries
                     if str(e.get("status", "")).lower() == s_val or str(e.get("approval_status", "")).lower() == s_val
                 ]
 
             if search and isinstance(search, str):
                 q = search.lower()
                 merged_entries = [
-                    e for e in merged_entries
+                    e
+                    for e in merged_entries
                     if q in str(e.get("template_name", "")).lower()
                     or q in str(e.get("template_id", "")).lower()
                     or q in str(e.get("source_ref", "")).lower()
@@ -475,7 +508,11 @@ def get_templates(
         for lt in live_templates:
             name = lt.get("template_name") or str(lt.get("fb_template_id", ""))
             status_str = str(lt.get("template_create_status", "PENDING")).upper()
-            approval_val = _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value if status_str in _STATUS_MAP else status_str.lower()
+            approval_val = (
+                _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value
+                if status_str in _STATUS_MAP
+                else status_str.lower()
+            )
 
             entry = {
                 "source_ref": name,
@@ -508,14 +545,16 @@ def get_templates(
         if status and isinstance(status, str):
             s_val = status.lower()
             merged_entries = [
-                e for e in merged_entries
+                e
+                for e in merged_entries
                 if str(e.get("approval_status", "")).lower() == s_val or str(e.get("status", "")).lower() == s_val
             ]
 
         if search and isinstance(search, str):
             q = search.lower()
             merged_entries = [
-                e for e in merged_entries
+                e
+                for e in merged_entries
                 if q in str(e.get("template_name", "")).lower()
                 or q in str(e.get("source_ref", "")).lower()
                 or q in str(e.get("provider_ref_id", "")).lower()
@@ -527,12 +566,14 @@ def get_templates(
         logger.exception("Error in get_templates for %s (%s): %s", acc, chan, exc)
         return []
 
+
 def _inspect_template_quality_and_warnings(submissions: list, channel: str = "whatsapp") -> list[dict]:
     """
     Inspect image dimensions and text grammar/spelling/Meta compliance across all template components.
     Attaches aspect ratio warnings, spelling typos, repeated words, and suggested fixes.
     """
     import base64
+
     results = []
     for s in submissions:
         item = asdict(s) if not isinstance(s, dict) else dict(s)
@@ -561,8 +602,10 @@ def _inspect_template_quality_and_warnings(submissions: list, channel: str = "wh
                 img_bytes = comp.get("image_bytes")
                 if img_bytes:
                     try:
-                        from PIL import Image
                         import io
+
+                        from PIL import Image
+
                         img = Image.open(io.BytesIO(img_bytes))
                         w, h = img.size
                         ratio = w / h
@@ -583,13 +626,15 @@ def _inspect_template_quality_and_warnings(submissions: list, channel: str = "wh
                             else:
                                 shape_name = f"Non-standard ({ratio:.2f}:1)"
 
-                            aspect_warnings.append({
-                                "component": "HEADER (IMAGE)",
-                                "original_size": f"{w}x{h}px",
-                                "current_ratio": shape_name,
-                                "recommended_ratio": "16:9 (1280x720) or 2:1 (1200x600)",
-                                "action": "Auto-pad onto standard canvas with matching background so no text/logo is cropped.",
-                            })
+                            aspect_warnings.append(
+                                {
+                                    "component": "HEADER (IMAGE)",
+                                    "original_size": f"{w}x{h}px",
+                                    "current_ratio": shape_name,
+                                    "recommended_ratio": "16:9 (1280x720) or 2:1 (1200x600)",
+                                    "action": "Auto-pad onto standard canvas with matching background so no text/logo is cropped.",
+                                }
+                            )
                         f_type = comp.get("file_type") or "image/png"
                         comp["thumbnail_url"] = f"data:{f_type};base64,{base64.b64encode(img_bytes).decode()}"
                     except Exception as exc:
@@ -601,7 +646,12 @@ def _inspect_template_quality_and_warnings(submissions: list, channel: str = "wh
 
         # RCS components check
         if channel == "rcs":
-            for text_field in ("text_message", "template_message", "card_title", "card_description"):
+            for text_field in (
+                "text_message",
+                "template_message",
+                "card_title",
+                "card_description",
+            ):
                 val = item.get(text_field)
                 if val and isinstance(val, str):
                     _, g_warns = lint_and_fix_body(val)
@@ -611,6 +661,7 @@ def _inspect_template_quality_and_warnings(submissions: list, channel: str = "wh
         item["grammar_warnings"] = grammar_warnings
         results.append(_json_safe(item))
     return results
+
 
 @app.post("/api/preview")
 async def preview_file(
@@ -633,7 +684,10 @@ async def preview_file(
                 submissions = await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=account)
             if not submissions:
                 log_activity(
-                    user=user, action="TEMPLATE_PREVIEW", account=account, channel="rcs",
+                    user=user,
+                    action="TEMPLATE_PREVIEW",
+                    account=account,
+                    channel="rcs",
                     details={"filename": file.filename or "upload.csv", "count": 0},
                     status="failed",
                 )
@@ -642,8 +696,14 @@ async def preview_file(
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}'. Please make sure the file contains RCS template definitions.",
                 )
             log_activity(
-                user=user, action="TEMPLATE_PREVIEW", account=account, channel="rcs",
-                details={"filename": file.filename or "upload.csv", "count": len(submissions)},
+                user=user,
+                action="TEMPLATE_PREVIEW",
+                account=account,
+                channel="rcs",
+                details={
+                    "filename": file.filename or "upload.csv",
+                    "count": len(submissions),
+                },
                 status="success",
             )
             return _inspect_template_quality_and_warnings(submissions, channel="rcs")
@@ -656,7 +716,10 @@ async def preview_file(
 
         if not submissions:
             log_activity(
-                user=user, action="TEMPLATE_PREVIEW", account=account, channel="whatsapp",
+                user=user,
+                action="TEMPLATE_PREVIEW",
+                account=account,
+                channel="whatsapp",
                 details={"filename": file.filename or "upload.csv", "count": 0},
                 status="failed",
             )
@@ -666,8 +729,14 @@ async def preview_file(
             )
 
         log_activity(
-            user=user, action="TEMPLATE_PREVIEW", account=account, channel="whatsapp",
-            details={"filename": file.filename or "upload.csv", "count": len(submissions)},
+            user=user,
+            action="TEMPLATE_PREVIEW",
+            account=account,
+            channel="whatsapp",
+            details={
+                "filename": file.filename or "upload.csv",
+                "count": len(submissions),
+            },
             status="success",
         )
         for s in submissions:
@@ -680,8 +749,8 @@ async def preview_file(
         logger.exception("Preview failed for %s (%s): %s", account, channel, exc)
         raise HTTPException(
             status_code=400,
-            detail=f"Preview failed for {channel}: {str(exc)}",
-        )
+            detail=f"Preview failed for {channel}: {exc!s}",
+        ) from exc
     finally:
         os.unlink(tmp_path)
 
@@ -738,7 +807,10 @@ async def submit_file(
                 },
                 status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
             )
-            return {"submitted": len(cleaned_entries), "results": [_json_safe(e) for e in cleaned_entries]}
+            return {
+                "submitted": len(cleaned_entries),
+                "results": [_json_safe(e) for e in cleaned_entries],
+            }
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
@@ -784,15 +856,18 @@ async def submit_file(
             },
             status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
         )
-        return {"submitted": len(cleaned_entries), "results": [_json_safe(e) for e in cleaned_entries]}
+        return {
+            "submitted": len(cleaned_entries),
+            "results": [_json_safe(e) for e in cleaned_entries],
+        }
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Submission failed for %s (%s): %s", acc, chan, exc)
         raise HTTPException(
             status_code=400,
-            detail=f"Submission failed for {acc} ({chan}): {str(exc)}",
-        )
+            detail=f"Submission failed for {acc} ({chan}): {exc!s}",
+        ) from exc
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -826,35 +901,37 @@ def poll(
         logger.exception("Error in poll for %s (%s): %s", acc, chan, exc)
         raise HTTPException(
             status_code=400,
-            detail=f"Poll failed for {acc}: {str(exc)}",
-        )
+            detail=f"Poll failed for {acc}: {exc!s}",
+        ) from exc
+
 
 @app.get("/api/accounts")
 def get_accounts():
     return load_accounts()
+
 
 @app.post("/api/accounts")
 def create_account(body: AccountCreate, user: str = Query("Anonymous Operator")):
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Account name is required.")
-    
+
     if body.id and body.id.strip():
-        acc_id = re.sub(r'[^a-z0-9_]', '_', body.id.strip().lower()).strip('_')
+        acc_id = re.sub(r"[^a-z0-9_]", "_", body.id.strip().lower()).strip("_")
     else:
-        acc_id = re.sub(r'[^a-z0-9_]', '_', name.lower().strip()).strip('_')
-    
+        acc_id = re.sub(r"[^a-z0-9_]", "_", name.lower().strip()).strip("_")
+
     if not acc_id:
         raise HTTPException(status_code=400, detail="Invalid account ID generated from name.")
-    
+
     accounts = load_accounts()
     if any(a.get("id") == acc_id for a in accounts):
         raise HTTPException(status_code=400, detail=f"Account with ID '{acc_id}' already exists.")
-    
+
     new_acc = {"id": acc_id, "name": name, "is_builtin": False}
     accounts.append(new_acc)
     save_accounts(accounts)
-    
+
     log_activity(
         user=user,
         action="ACCOUNT_CREATE",
@@ -865,18 +942,19 @@ def create_account(body: AccountCreate, user: str = Query("Anonymous Operator"))
     )
     return new_acc
 
+
 @app.delete("/api/accounts/{account_id}")
 def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
     acc_id = account_id.lower().strip()
     if acc_id in ("bajaj", "tata"):
         raise HTTPException(status_code=400, detail=f"Cannot delete built-in account '{acc_id}'.")
-    
+
     accounts = load_accounts()
     initial_count = len(accounts)
     accounts = [a for a in accounts if a.get("id") != acc_id]
     if len(accounts) == initial_count:
         raise HTTPException(status_code=404, detail=f"Account '{acc_id}' not found.")
-    
+
     save_accounts(accounts)
 
     # Scrub any credentials for this account from credentials.json and os.environ
@@ -920,6 +998,7 @@ def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
     )
     return {"ok": True}
 
+
 @app.get("/api/credentials")
 def get_credentials(
     account: str = Query("bajaj"),
@@ -936,13 +1015,23 @@ def get_credentials(
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
 
-    w_tok_key = "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+    w_tok_key = (
+        "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+    )
     w_id_key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
-    b_tok_key = "TATA_KARIX_BEARER_TOKEN" if is_tata else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
+    b_tok_key = (
+        "TATA_KARIX_BEARER_TOKEN"
+        if is_tata
+        else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
+    )
     s_key = "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")
     u_key = "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")
     e_id_key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
-    l_ck_key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+    l_ck_key = (
+        "TATA_KARIX_LOUNGE_COOKIE"
+        if is_tata
+        else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+    )
 
     waba_id = os.environ.get(w_id_key) or (BAJAJ_WABA_ID if is_bajaj else "")
     waba_auth_token = os.environ.get(w_tok_key) or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else "")
@@ -965,6 +1054,7 @@ def get_credentials(
         "is_configured": bool(waba_id and waba_auth_token) if chan == "whatsapp" else bool(entity_id),
     }
 
+
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate):
     env_path = Path(".env")
@@ -973,11 +1063,15 @@ def update_credentials(creds: CredentialUpdate):
     prefix = _account_prefix(acc)
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
-    
+
     mapping = {}
     if chan == "whatsapp":
         if creds.waba_auth_token is not None and creds.waba_auth_token.strip():
-            key = "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+            key = (
+                "TATA_WABA_AUTH_TOKEN"
+                if is_tata
+                else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+            )
             val = creds.waba_auth_token.strip()
             mapping[key] = val
             os.environ[key] = val
@@ -987,12 +1081,18 @@ def update_credentials(creds: CredentialUpdate):
             mapping[key] = val
             os.environ[key] = val
         if creds.bearer_token is not None and creds.bearer_token.strip():
-            key = "TATA_KARIX_BEARER_TOKEN" if is_tata else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
+            key = (
+                "TATA_KARIX_BEARER_TOKEN"
+                if is_tata
+                else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
+            )
             val = creds.bearer_token.strip()
             mapping[key] = val
             os.environ[key] = val
         if creds.session is not None and creds.session.strip():
-            key = "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")
+            key = (
+                "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")
+            )
             val = creds.session.strip()
             mapping[key] = val
             os.environ[key] = val
@@ -1008,7 +1108,11 @@ def update_credentials(creds: CredentialUpdate):
             mapping[key] = val
             os.environ[key] = val
         if creds.lounge_cookie is not None and creds.lounge_cookie.strip():
-            key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+            key = (
+                "TATA_KARIX_LOUNGE_COOKIE"
+                if is_tata
+                else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+            )
             val = creds.lounge_cookie.strip()
             mapping[key] = val
             os.environ[key] = val
@@ -1064,6 +1168,7 @@ def update_credentials(creds: CredentialUpdate):
     )
     return {"ok": True}
 
+
 @app.post("/api/test-credentials")
 def test_credentials(
     account: str = Query("bajaj"),
@@ -1080,9 +1185,15 @@ def test_credentials(
     _load_env_file()
 
     w_id_key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
-    w_tok_key = "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+    w_tok_key = (
+        "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+    )
     e_id_key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
-    l_ck_key = "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+    l_ck_key = (
+        "TATA_KARIX_LOUNGE_COOKIE"
+        if is_tata
+        else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+    )
 
     # Apply any supplied creds directly to environment in memory
     if creds:
@@ -1097,7 +1208,9 @@ def test_credentials(
 
     if chan == "rcs":
         try:
-            entity_id = (creds.entity_id.strip() if creds and creds.entity_id and creds.entity_id.strip() else None) or get_rcs_entity_id(acc)
+            entity_id = (
+                creds.entity_id.strip() if creds and creds.entity_id and creds.entity_id.strip() else None
+            ) or get_rcs_entity_id(acc)
             headers = get_rcs_auth_headers(acc)
             resp = http_client.get(
                 "https://karix.solutions/lounge/LoungePage/dltRegistration.php",
@@ -1132,7 +1245,11 @@ def test_credentials(
             }
 
         token = (
-            (creds.waba_auth_token.strip() if creds and creds.waba_auth_token and creds.waba_auth_token.strip() else None)
+            (
+                creds.waba_auth_token.strip()
+                if creds and creds.waba_auth_token and creds.waba_auth_token.strip()
+                else None
+            )
             or os.environ.get(w_tok_key)
             or os.environ.get("WABA_AUTH_TOKEN")
         )
@@ -1153,7 +1270,9 @@ def test_credentials(
             count = len(data.get("response", {}).get("templates", []))
             results.append(f"{acc_name} WhatsApp: Valid ({count} templates on WABA {waba_id})")
         elif resp.status_code == 401:
-            results.append(f"{acc_name} WhatsApp: 401 Unauthorized — The API token or WABA ID ({waba_id}) is incorrect.")
+            results.append(
+                f"{acc_name} WhatsApp: 401 Unauthorized — The API token or WABA ID ({waba_id}) is incorrect."
+            )
         else:
             results.append(f"{acc_name} WhatsApp: HTTP {resp.status_code} ({resp.text[:200]})")
     except Exception as exc:
@@ -1168,6 +1287,8 @@ def test_credentials(
         status="success" if is_ok else "failed",
     )
     return {"ok": is_ok, "message": " | ".join(results)}
+
+
 @app.get("/api/sample-csv")
 def get_sample_csv(channel: str = Query("whatsapp")):
     chan = channel.lower()
@@ -1185,6 +1306,7 @@ def get_sample_csv(channel: str = Query("whatsapp")):
             filename=filename,
         )
     return PlainTextResponse("template_name,body\nexample_1,Sample message text\n")
+
 
 @app.get("/api/activity")
 def get_activity_logs(
@@ -1205,10 +1327,12 @@ def get_activity_logs(
     )
     return [_json_safe(r) for r in records]
 
+
 @app.get("/api/users")
 def list_users():
     """Return all registered operator accounts."""
     return [_json_safe(u) for u in get_all_users()]
+
 
 @app.post("/api/users")
 def register_user_endpoint(body: UserRegister):
@@ -1252,11 +1376,13 @@ def record_custom_activity(
     )
     return _json_safe(rec)
 
+
 # ---------------------------------------------------------------------------
 # Autonomous Agent Endpoint
 # ---------------------------------------------------------------------------
 
 from agent import agent_instance
+
 
 class AgentChatRequest(BaseModel):
     message: str
@@ -1264,6 +1390,7 @@ class AgentChatRequest(BaseModel):
     channel: str = "whatsapp"
     user: str = "Operator"
     history: list[dict] = []
+
 
 @app.post("/api/agent/chat")
 def agent_chat_endpoint(req: AgentChatRequest):
@@ -1274,7 +1401,7 @@ def agent_chat_endpoint(req: AgentChatRequest):
     """
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
-    
+
     res = agent_instance.execute_instruction(
         instruction=req.message,
         account=req.account,
@@ -1283,7 +1410,9 @@ def agent_chat_endpoint(req: AgentChatRequest):
     )
     return _json_safe(res)
 
+
 from auth_refresher import refresh_karix_session
+
 
 class AuthRefreshRequest(BaseModel):
     account: str = "bajaj"
@@ -1291,6 +1420,7 @@ class AuthRefreshRequest(BaseModel):
     password: str | None = None
     login_url: str | None = None
     user: str = "Operator"
+
 
 @app.post("/api/auth/refresh")
 def auth_refresh_endpoint(req: AuthRefreshRequest):

@@ -7,22 +7,24 @@ whatever storage you end up using.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 
 
-class SubmissionStatus(str, Enum):
+class SubmissionStatus(StrEnum):
     """Outcome of the SUBMIT attempt itself (did the API call succeed)."""
+
     SUBMITTED = "submitted"
     FAILED = "failed"
 
 
-class ApprovalStatus(str, Enum):
+class ApprovalStatus(StrEnum):
     """
     Outcome of the actual template REVIEW (separate from submission).
     A template can be SUBMITTED successfully and still sit in PENDING for
     a while before Karix/Meta resolves it to APPROVED or REJECTED.
     """
+
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -32,6 +34,7 @@ class ApprovalStatus(str, Enum):
 @dataclass
 class TemplateComponent:
     """One block of a template: HEADER, BODY, FOOTER, or BUTTONS."""
+
     type: str  # "HEADER" | "BODY" | "FOOTER" | "BUTTONS"
     text: str | None = None
     format: str | None = None
@@ -42,9 +45,12 @@ class TemplateComponent:
     media_file: str | None = None
     image_bytes: bytes | None = None
     file_type: str | None = None
+
+
 @dataclass
 class TemplateSubmission:
     """One template to be submitted for whitelisting."""
+
     client: str  # "bajaj" (kept explicit for when Tata Capital Phase 2 exists)
     channel: str  # "whatsapp" for now
     template_name: str
@@ -61,6 +67,7 @@ class SubmissionResult:
     Outcome of attempting to submit one template, plus its latest known
     review outcome (updated later by check_status / the poller).
     """
+
     source_ref: str
     template_name: str
     status: SubmissionStatus
@@ -74,7 +81,5 @@ class SubmissionResult:
     channel: str = "whatsapp"
     submitted_by: str = "Anonymous Operator"
     source_file: str | None = None  # name of the uploaded spreadsheet, for dashboard attribution
-    submitted_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    submitted_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     updated_at: str | None = None  # set when check_status refreshes this

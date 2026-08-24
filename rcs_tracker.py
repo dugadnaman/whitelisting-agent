@@ -23,6 +23,7 @@ try:
     def _unlock(f):
         fcntl.flock(f, fcntl.LOCK_UN)
 except ImportError:  # pragma: no cover — Windows
+
     def _lock(f):
         pass
 

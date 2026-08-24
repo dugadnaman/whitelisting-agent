@@ -15,12 +15,11 @@ import api
 from agent import agent_instance
 from auth_refresher import refresh_karix_session, update_persisted_credentials
 from loader import _row_to_submission
-from models import ApprovalStatus, SubmissionStatus, TemplateSubmission
+from models import SubmissionStatus
 from submission_client import submit_template
 
 
 class TestSelfHealingAuth(unittest.TestCase):
-
     def test_update_persisted_credentials(self):
         """Verify update_persisted_credentials safely writes to credentials.json and os.environ."""
         fake_tokens = {
@@ -68,7 +67,10 @@ class TestSelfHealingAuth(unittest.TestCase):
     @patch("auth_refresher.refresh_karix_session")
     def test_401_triggers_self_healing_retry(self, mock_refresh, mock_get_session):
         """Verify that when Karix returns 401, submission_client calls refresh_karix_session and retries."""
-        mock_refresh.return_value = {"success": True, "message": "Harvested fresh session"}
+        mock_refresh.return_value = {
+            "success": True,
+            "message": "Harvested fresh session",
+        }
 
         # Mock first response as 401, second response as 200
         resp_401 = MagicMock()
@@ -85,22 +87,30 @@ class TestSelfHealingAuth(unittest.TestCase):
         mock_session_obj.post.side_effect = [resp_401, resp_201]
         mock_get_session.return_value = mock_session_obj
 
+        sub = _row_to_submission(
+            {
+                "source_ref": "test_401_heal",
+                "template_name": "test_auto_heal",
+                "category": "UTILITY",
+                "language": "en",
+                "header_type": "IMAGE",
+                "header_media_url": "https://example.com/banner.png",
+                "body": "Hello {{1}}",
+                "client": "bajaj",
+            },
+            client="bajaj",
+        )
 
-        sub = _row_to_submission({
-            "source_ref": "test_401_heal",
-            "template_name": "test_auto_heal",
-            "category": "UTILITY",
-            "language": "en",
-            "header_type": "IMAGE",
-            "header_media_url": "https://example.com/banner.png",
-            "body": "Hello {{1}}",
-            "client": "bajaj",
-        }, client="bajaj")
-
-        with patch("submission_client.get_portal_auth_headers") as mock_headers, \
-             patch("submission_client._resolve_header_media", return_value=[]), \
-             patch("submission_client._resolve_body_variables", return_value=[]):
-            mock_headers.return_value = {"Authorization": "Bearer fresh_token", "Session": "fresh_sess", "User": "Op"}
+        with (
+            patch("submission_client.get_portal_auth_headers") as mock_headers,
+            patch("submission_client._resolve_header_media", return_value=[]),
+            patch("submission_client._resolve_body_variables", return_value=[]),
+        ):
+            mock_headers.return_value = {
+                "Authorization": "Bearer fresh_token",
+                "Session": "fresh_sess",
+                "User": "Op",
+            }
             res = submit_template(sub, client="bajaj")
 
         # Verify refresh was triggered
