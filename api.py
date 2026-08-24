@@ -29,6 +29,7 @@ from activity_tracker import (
     register_or_update_user,
 )
 from auth import (
+    TATA_SUB_ACCOUNTS,
     authenticate_user,
     get_current_user,
     list_tenant_team,
@@ -1030,6 +1031,14 @@ def get_accounts(current_user: dict = Depends(get_current_user)):
     accs = load_accounts()
     tenant = current_user.get("tenant_id", "all")
     if tenant != "all" and current_user.get("role") != "superadmin":
+        if tenant == "tata":
+            return [
+                a
+                for a in accs
+                if a.get("group") == "Tata Capital" or a.get("id") in TATA_SUB_ACCOUNTS or a.get("id") == "tata"
+            ]
+        elif tenant == "bajaj":
+            return [a for a in accs if a.get("group") == "Bajaj" or a.get("id") == "bajaj"]
         return [a for a in accs if a.get("id") == tenant]
     return accs
 

@@ -85,17 +85,17 @@ export default function Nav() {
 
       {/* Account & Channel Selectors */}
       <div className="p-4 bg-gray-50/70 border-b border-gray-200/80 space-y-2.5">
-        {/* Account Selector (Locked for Tenant Operators) */}
+        {/* Account / Sub-Product Selector */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1 flex items-center justify-between">
-            <span>Organization</span>
+            <span>Account / Sub-Product</span>
             {isTenantLocked && (
-              <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded border border-amber-200">
-                🔒 Locked
+              <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
+                {currentUser?.tenant_id.toUpperCase()}
               </span>
             )}
           </label>
-          {isTenantLocked ? (
+          {accounts.length <= 1 ? (
             <div className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-900 shadow-2xs flex items-center justify-between">
               <span className="truncate">{getAccountLabel(account)}</span>
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
@@ -121,7 +121,6 @@ export default function Nav() {
             </div>
           )}
         </div>
-
         {/* Channel Selector */}
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">

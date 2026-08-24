@@ -4,30 +4,57 @@
     "name": "Bajaj Finserv",
     "is_builtin": true,
     "group": "Bajaj",
-    "headers": ["BAJAJ"]
+    "headers": [
+      "BAJAJ"
+    ]
+  },
+  {
+    "id": "tata",
+    "name": "Tata Capital (All Sub-Products)",
+    "is_builtin": true,
+    "group": "Tata Capital",
+    "headers": [
+      "PLTATA",
+      "TATABL",
+      "ALTATA",
+      "TCLLAP",
+      "HLTATA",
+      "TATAWL"
+    ]
   },
   {
     "id": "tcl_promo",
-    "name": "TCL — Promotional (PL, BL, UCL, NCL, LAP)",
+    "name": "TCL \u2014 Promotional (PL, BL, UCL, NCL, LAP)",
     "is_builtin": true,
     "group": "Tata Capital",
-    "headers": ["PLTATA", "TATABL", "ALTATA", "TCLLAP", "Tatacl"],
+    "headers": [
+      "PLTATA",
+      "TATABL",
+      "ALTATA",
+      "TCLLAP",
+      "Tatacl"
+    ],
     "sub_products": "Personal Loans (PL), Business Loans (BL), Used Car Loans (UCL), New Car Loans (NCL), LAP"
   },
   {
     "id": "tcl_trans",
-    "name": "TCL — Transactional (LAP, Services & Collections)",
+    "name": "TCL \u2014 Transactional (LAP, Services & Collections)",
     "is_builtin": true,
     "group": "Tata Capital",
-    "headers": ["TCLLAP", "Tatacl"],
+    "headers": [
+      "TCLLAP",
+      "Tatacl"
+    ],
     "sub_products": "LAP, Services & Collections"
   },
   {
     "id": "tchfl",
-    "name": "TCHFL — Housing Finance (HLTATA)",
+    "name": "TCHFL \u2014 Housing Finance (HLTATA)",
     "is_builtin": true,
     "group": "Tata Capital",
-    "headers": ["HLTATA"],
+    "headers": [
+      "HLTATA"
+    ],
     "sub_products": "Marketing SMS, Services & collections"
   },
   {
@@ -35,7 +62,9 @@
     "name": "Tata Wealth & Securities (TATAWL)",
     "is_builtin": true,
     "group": "Tata Capital",
-    "headers": ["TATAWL"],
+    "headers": [
+      "TATAWL"
+    ],
     "sub_products": "Wealth & Securities Marketing & Transactional"
   },
   {
@@ -43,14 +72,9 @@
     "name": "Tata Moneyfy",
     "is_builtin": true,
     "group": "Tata Capital",
-    "headers": ["MONEYFY"],
+    "headers": [
+      "MONEYFY"
+    ],
     "sub_products": "Moneyfy Mutual Funds & Investments"
-  },
-  {
-    "id": "tata",
-    "name": "Tata Capital (All Sub-Products)",
-    "is_builtin": true,
-    "group": "Tata Capital",
-    "headers": ["PLTATA", "TATABL", "ALTATA", "TCLLAP", "HLTATA", "TATAWL"]
   }
 ]

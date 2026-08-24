@@ -147,9 +147,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [pathname, router, refreshAccounts]);
 
   const setAccount = (newAccount: Account) => {
-    // If tenant locked, prevent switching to forbidden organization
-    if (isTenantLocked && currentUser?.tenant_id && newAccount !== currentUser.tenant_id) {
-      alert(`Access Denied: Your account is restricted to ${currentUser.tenant_id.toUpperCase()}.`);
+    if (accounts.length > 0 && !accounts.some((a) => a.id.toLowerCase() === newAccount.toLowerCase())) {
+      alert(`Access Denied: You do not have permission to access ${newAccount.toUpperCase()}.`);
       return;
     }
     setAccountState(newAccount);
