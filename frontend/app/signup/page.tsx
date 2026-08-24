@@ -113,15 +113,16 @@ export default function SignupPage() {
 
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              Organization (Strict Tenant Boundary)
+              Select Your Organization / Sub-Product
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-1 border border-gray-200 rounded-xl bg-gray-50/40">
+              {/* Bajaj Finserv */}
               <label
                 onClick={() => setTenantId('bajaj')}
-                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
                   tenantId === 'bajaj'
-                    ? 'bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20'
-                    : 'bg-gray-50/50 border-gray-200 hover:bg-gray-100'
+                    ? 'bg-blue-50/80 border-blue-600 ring-1 ring-blue-500/30'
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
                 }`}
               >
                 <div className="flex items-center gap-2">
@@ -134,17 +135,138 @@ export default function SignupPage() {
                   />
                   <span className="text-xs font-bold text-gray-900">Bajaj Finserv</span>
                 </div>
-                <p className="text-[10px] text-gray-500 mt-1 pl-5">
+                <p className="text-[10px] text-gray-500 mt-0.5 pl-5">
                   WABA: 286109054585247
                 </p>
               </label>
 
+              {/* TCL Promotional */}
+              <label
+                onClick={() => setTenantId('tcl_promo')}
+                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                  tenantId === 'tcl_promo'
+                    ? 'bg-blue-50/80 border-blue-600 ring-1 ring-blue-500/30'
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="tenant"
+                    checked={tenantId === 'tcl_promo'}
+                    onChange={() => setTenantId('tcl_promo')}
+                    className="text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-bold text-gray-900">TCL — Promo (PL, BL, UCL)</span>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-0.5 pl-5">
+                  Headers: PLTATA, TATABL, ALTATA
+                </p>
+              </label>
+
+              {/* TCL Transactional */}
+              <label
+                onClick={() => setTenantId('tcl_trans')}
+                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                  tenantId === 'tcl_trans'
+                    ? 'bg-blue-50/80 border-blue-600 ring-1 ring-blue-500/30'
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="tenant"
+                    checked={tenantId === 'tcl_trans'}
+                    onChange={() => setTenantId('tcl_trans')}
+                    className="text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-bold text-gray-900">TCL — Trans (LAP, Services)</span>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-0.5 pl-5">
+                  Headers: TCLLAP, Tatacl
+                </p>
+              </label>
+
+              {/* TCHFL Housing Finance */}
+              <label
+                onClick={() => setTenantId('tchfl')}
+                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                  tenantId === 'tchfl'
+                    ? 'bg-blue-50/80 border-blue-600 ring-1 ring-blue-500/30'
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="tenant"
+                    checked={tenantId === 'tchfl'}
+                    onChange={() => setTenantId('tchfl')}
+                    className="text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-bold text-gray-900">TCHFL — Housing Finance</span>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-0.5 pl-5">
+                  Header: HLTATA
+                </p>
+              </label>
+
+              {/* Wealth */}
+              <label
+                onClick={() => setTenantId('wealth')}
+                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                  tenantId === 'wealth'
+                    ? 'bg-blue-50/80 border-blue-600 ring-1 ring-blue-500/30'
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="tenant"
+                    checked={tenantId === 'wealth'}
+                    onChange={() => setTenantId('wealth')}
+                    className="text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-bold text-gray-900">Tata Wealth & Securities</span>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-0.5 pl-5">
+                  Header: TATAWL
+                </p>
+              </label>
+
+              {/* Moneyfy */}
+              <label
+                onClick={() => setTenantId('moneyfy')}
+                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                  tenantId === 'moneyfy'
+                    ? 'bg-blue-50/80 border-blue-600 ring-1 ring-blue-500/30'
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="tenant"
+                    checked={tenantId === 'moneyfy'}
+                    onChange={() => setTenantId('moneyfy')}
+                    className="text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-bold text-gray-900">Tata Moneyfy</span>
+                </div>
+                <p className="text-[10px] text-gray-500 mt-0.5 pl-5">
+                  Mutual Funds & Investments
+                </p>
+              </label>
+
+              {/* Tata Capital All */}
               <label
                 onClick={() => setTenantId('tata')}
-                className={`p-3 rounded-xl border text-left cursor-pointer transition-all ${
+                className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all sm:col-span-2 ${
                   tenantId === 'tata'
-                    ? 'bg-blue-50/80 border-blue-600 ring-2 ring-blue-500/20'
-                    : 'bg-gray-50/50 border-gray-200 hover:bg-gray-100'
+                    ? 'bg-blue-50/80 border-blue-600 ring-1 ring-blue-500/30'
+                    : 'bg-white border-gray-200 hover:bg-gray-50'
                 }`}
               >
                 <div className="flex items-center gap-2">
@@ -155,10 +277,10 @@ export default function SignupPage() {
                     onChange={() => setTenantId('tata')}
                     className="text-blue-600 focus:ring-blue-500"
                   />
-                  <span className="text-xs font-bold text-gray-900">Tata Capital</span>
+                  <span className="text-xs font-bold text-gray-900">Tata Capital (All Sub-Products Master)</span>
                 </div>
-                <p className="text-[10px] text-gray-500 mt-1 pl-5">
-                  RCS Entity: 100149023...
+                <p className="text-[10px] text-gray-500 mt-0.5 pl-5">
+                  Full access across all TCL, TCHFL, Wealth & Moneyfy sub-entities
                 </p>
               </label>
             </div>

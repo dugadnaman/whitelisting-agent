@@ -330,6 +330,9 @@ async def get_current_user(
     }
 
 
+TATA_SUB_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
+
+
 def require_tenant_access(account: str, user: dict[str, Any]) -> None:
     """
     Enforce strict tenant isolation.
@@ -343,12 +346,19 @@ def require_tenant_access(account: str, user: dict[str, Any]) -> None:
     if user_tenant == "all" or user_role == "superadmin":
         return
 
-    if user_tenant != target:
-        user_name = user.get("name") or user.get("email") or "Operator"
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"Access Denied: User '{user_name}' belongs to organization '{user_tenant.upper()}' "
-                f"and is strictly forbidden from accessing '{target.upper()}' templates or credentials."
-            ),
-        )
+    # Direct match
+    if user_tenant == target:
+        return
+
+    # If user belongs to Tata Master account ("tata"), they can access all Tata sub-accounts
+    if user_tenant == "tata" and target in TATA_SUB_ACCOUNTS:
+        return
+
+    user_name = user.get("name") or user.get("email") or "Operator"
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            f"Access Denied: User '{user_name}' belongs to organization '{user_tenant.upper()}' "
+            f"and is strictly forbidden from accessing '{target.upper()}' templates or credentials."
+        ),
+    )
