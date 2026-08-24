@@ -41,8 +41,8 @@ def _get_db() -> sqlite3.Connection:
 
 
 def hash_password(password: str) -> str:
-    """Hash plaintext password with bcrypt salt."""
-    salt = bcrypt.gensalt(rounds=12)
+    """Hash plaintext password with bcrypt salt (10 rounds for responsive container performance)."""
+    salt = bcrypt.gensalt(rounds=10)
     return bcrypt.hashpw(password.strip().encode("utf-8"), salt).decode("utf-8")
 
 
@@ -221,13 +221,26 @@ def register_user(
             )
         except sqlite3.IntegrityError as err:
             raise ValueError(f"An account with email '{clean_email}' already exists.") from err
-    return {
+    user_data = {
         "id": u_id,
         "email": clean_email,
         "name": clean_name,
         "tenant_id": clean_tenant,
         "role": clean_role,
         "created_at": now,
+    }
+
+    token = create_access_token(
+        user_id=u_id,
+        email=clean_email,
+        tenant_id=clean_tenant,
+        role=clean_role,
+        name=clean_name,
+    )
+
+    return {
+        "user": user_data,
+        "token": token,
     }
 
 

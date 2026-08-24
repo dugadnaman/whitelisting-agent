@@ -32,10 +32,9 @@ export default function LoginPage() {
       const res = await loginUser(finalEmail, finalPass);
       setCurrentUser(res.user);
       setUser(res.user.name || res.user.email);
-      router.push('/');
+      window.location.href = '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
       setLoading(false);
     }
   };
@@ -69,15 +68,16 @@ export default function LoginPage() {
         {/* Sign In Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
-              Work Email
+            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+              <span>Work Email</span>
+              <span className="text-[10px] text-blue-600 font-normal">e.g. @attributics.com</span>
             </label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="e.g. operator@bajajfinserv.in"
+              placeholder="e.g. namandugad@attributics.com"
               className="w-full border border-gray-300 rounded-lg px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-sans"
             />
           </div>

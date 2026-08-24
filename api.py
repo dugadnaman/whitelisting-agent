@@ -340,14 +340,13 @@ class TeamInviteRequest(BaseModel):
 def signup_endpoint(body: SignupRequest):
     """Register a new user account bound to a specific tenant organization."""
     try:
-        register_user(
+        auth_res = register_user(
             email=body.email,
             password=body.password,
             name=body.name,
             tenant_id=body.tenant_id,
             role=body.role,
         )
-        auth_res = authenticate_user(body.email, body.password)
         log_activity(
             user=body.name,
             action="USER_SIGNUP",
