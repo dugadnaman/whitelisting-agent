@@ -16,12 +16,12 @@ type ChatMessage = {
 };
 
 const DEFAULT_SUGGESTED_PROMPTS = [
+  'How do I submit templates?',
+  'Create a marketing template named festive_offer with body: Hello {{1}}, get 20% off at bajajfinserv.in',
   'Check why template emic_check_wa_07aug was rejected and fix it',
   'List all rejected templates for this account',
   'Poll live approval status from Meta',
-  'Fix copy: Dear {{1}}{{2}}, your disbursment has occured succesfully at {{3}}',
 ];
-
 function formatMessageContent(content: string) {
   // Simple markdown renderer for headers, bold, codeblocks, lists, and linebreaks
   const lines = content.split('\n');
@@ -132,8 +132,13 @@ export default function ChatWidget() {
       role: 'assistant',
       content:
         `### 👋 Karix AI Whitelisting Copilot\n\n` +
-        `I am your autonomous template agent for **${getAccountLabel(account)} (${channel.toUpperCase()})**.\n\n` +
-        `Ask me to diagnose rejections, auto-fix grammar & compliance, resubmit templates, or sync approval statuses.`,
+        `I am your autonomous template assistant for **${getAccountLabel(account)} (${channel.toUpperCase()})**.\n\n` +
+        `**What I can do for you:**\n` +
+        `• 🚀 **Submit Templates**: Type *"Create a template named X with body Y"* or ask *"How do I submit templates?"*\n` +
+        `• 🔧 **Fix Rejections**: Type *"Check why template X was rejected, fix it, and resubmit"*\n` +
+        `• 📋 **Inspect Catalogs**: Ask *"List rejected templates"* or *"Show pending approvals"*\n` +
+        `• 🔄 **Sync Statuses**: Ask *"Poll live approval status from Meta"*\n` +
+        `• ✍️ **Lint Copy**: Paste any copy with variables/URLs to fix typos and compliance.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       suggested_actions: DEFAULT_SUGGESTED_PROMPTS,
     },
@@ -392,6 +397,13 @@ export default function ChatWidget() {
 
           {/* Quick Prompt Bar */}
           <div className="px-4 py-2 bg-gray-50 border-t border-gray-200/80 flex gap-1.5 overflow-x-auto text-nowrap scrollbar-none">
+            <button
+              onClick={() => handleSend('How do I submit templates?')}
+              disabled={loading}
+              className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[11px] border border-blue-200 font-medium transition shrink-0"
+            >
+              🚀 How to Submit
+            </button>
             <button
               onClick={() => handleSend('List rejected templates')}
               disabled={loading}

@@ -8,6 +8,7 @@ resubmission, and catalog status management.
 import logging
 import os
 import re
+import time
 from typing import Any
 
 from activity_tracker import log_activity
@@ -232,14 +233,7 @@ def tool_diagnose_and_fix(
                     "status": res.status.value,
                     "issues_fixed": len(warnings),
                 },
-                status="success"
-                if res.status
-                in (
-                    SubmissionStatus.SUBMITTED,
-                    SubmissionStatus.PENDING,
-                    SubmissionStatus.DUPLICATE,
-                )
-                else "failed",
+                status="success" if res.status == SubmissionStatus.SUBMITTED else "failed",
             )
         else:
             sub = RcsTemplateSubmission(
@@ -379,12 +373,7 @@ def tool_create_template(
         )
         res = submit_template(sub, client=account)
         return {
-            "success": res.status
-            in (
-                SubmissionStatus.SUBMITTED,
-                SubmissionStatus.PENDING,
-                SubmissionStatus.DUPLICATE,
-            ),
+            "success": res.status == SubmissionStatus.SUBMITTED,
             "template_name": clean_name,
             "status": res.status.value,
             "provider_ref_id": res.provider_ref_id,
@@ -443,7 +432,105 @@ class WhitelistingAgent:
         actions_taken = []
         suggested_actions = []
 
-        # 1. Re-login / session refresh: "refresh session", "relogin", "auto-login", "refresh token"
+        # 1. How to submit / Upload instructions / General Help
+        if any(
+            w in text.lower()
+            for w in [
+                "how to submit",
+                "how do i submit",
+                "how can i submit",
+                "how to upload",
+                "how do i upload",
+                "how to create",
+                "how does this work",
+                "how do i use",
+                "ways to submit",
+                "help",
+                "instructions",
+                "what can you do",
+            ]
+        ):
+            reply = (
+                f"### 🚀 How to Submit Templates for **{account.title()} ({channel.upper()})**\n\n"
+                "You have **3 ways** to submit templates:\n\n"
+                "#### 1. 📂 Bulk Upload via Dashboard (Recommended for marketing sheets)\n"
+                "• Go to **[Submit Templates](/submit)** in the left sidebar.\n"
+                "• Drag & drop your `.xlsx` or `.csv` spreadsheet (or click *Download Sample CSV* for the format).\n"
+                "• Review the instant pre-submission preview with grammar and 16:9 image checks.\n"
+                "• Click **Submit Templates** to submit in parallel with real-time logs.\n\n"
+                "#### 2. 💬 Conversational Submission (Directly in this Copilot)\n"
+                "• Tell me to create and submit a template directly:\n"
+                '  > *"Create a marketing template named diwali_offer with body: Hello {{1}}, your pre-approved loan of {{2}} is ready at bajajfinserv.in"*\n\n'
+                "#### 3. 🔧 Auto-Fix & Resubmit Rejections\n"
+                "• Tell me to diagnose and repair a rejected template:\n"
+                '  > *"Check why template loan_oct_01 was rejected, fix it, and resubmit"*\n\n'
+                "#### 4. ⚡ Terminal CLI Runner\n"
+                "• Run: `python3 runner.py samples/templates.xlsx --client bajaj`"
+            )
+            suggested_actions = [
+                "List rejected templates",
+                "Poll approval status",
+                "Create a template named test_promo",
+            ]
+            return {
+                "reply": reply,
+                "actions_taken": [],
+                "suggested_actions": suggested_actions,
+            }
+
+        # 2. Template creation command: e.g. "create a marketing template named X with body Y"
+        has_create_keyword = bool(
+            re.search(
+                r"(?:create|submit|register|new|add)\s+(?:a\s+)?(?:[a-zA-Z]+\s+)?template",
+                text,
+                re.IGNORECASE,
+            )
+        )
+        if has_create_keyword and any(k in text.lower() for k in ["body", ":", "with text", "message"]):
+            name_m = re.search(r"(?:named|name|id)\s+([a-zA-Z0-9_\-]+)", text, re.IGNORECASE)
+            cat_m = re.search(r"\b(marketing|utility|authentication|transactional)\b", text, re.IGNORECASE)
+            body_m = re.search(r"(?:body|message|text|content)[:\s]+(.+)", text, re.IGNORECASE | re.DOTALL)
+
+            t_name = name_m.group(1).strip() if name_m else f"template_{int(time.time())}"
+            t_cat = cat_m.group(1).strip().upper() if cat_m else "MARKETING"
+            t_body = body_m.group(1).strip() if body_m else ""
+
+            if not t_body and ":" in text:
+                t_body = text.split(":", 1)[1].strip()
+            if t_body:
+                create_res = tool_create_template(
+                    name=t_name,
+                    body=t_body,
+                    category=t_cat,
+                    account=account,
+                    channel=channel,
+                )
+                actions_taken.append({"tool": "create_template", "result": create_res})
+                if create_res.get("success"):
+                    reply = (
+                        f"### ✅ Template `{t_name}` Created & Submitted\n\n"
+                        f"**Category:** `{t_cat}`\n"
+                        f"**Channel:** `{channel.upper()}` ({account.title()})\n"
+                        f"**Status:** `{create_res.get('status', 'submitted').upper()}`\n\n"
+                        f"**Submitted Body:**\n```\n{t_body}\n```\n"
+                    )
+                    suggested_actions = [
+                        "Poll approval status",
+                        "List pending templates",
+                        f"Inspect {t_name}",
+                    ]
+                else:
+                    reply = f"### ❌ Submission Failed for `{t_name}`\n\n**Error:** {create_res.get('error')}\n"
+                    suggested_actions = ["Check credentials", "Lint copy"]
+
+                return {
+                    "reply": reply,
+                    "actions_taken": actions_taken,
+                    "suggested_actions": suggested_actions,
+                    "data": create_res,
+                }
+
+        # 3. Re-login / session refresh: "refresh session", "relogin", "auto-login", "refresh token"
         if any(
             w in text.lower()
             for w in [
@@ -712,17 +799,18 @@ class WhitelistingAgent:
         return {
             "reply": (
                 f"I am your **Karix Whitelisting Assistant** for **{account.title()} ({channel.upper()})**.\n\n"
-                "Here are actions I can perform autonomously:\n"
-                '1. 🔧 **Fix Rejections:** *"Check why template loan_oct_01 was rejected, fix it, and resubmit"*\n'
-                '2. 📋 **Inspect Catalog:** *"List all rejected templates for bajaj"* or *"Show pending templates"*\n'
-                '3. 🔄 **Sync Approvals:** *"Poll approval status from Meta"*\n'
-                '4. ✍️ **Lint Copy:** *"Check grammar and Meta compliance in: Dear {{1}}, your acount balance is {{2}}"*'
+                "Here are actions I can perform for you:\n\n"
+                '1. 🚀 **Submit Templates:** *"How do I submit templates?"* or *"Create a marketing template named promo_01 with body: Hello {{1}}..."*\n'
+                '2. 🔧 **Fix Rejections:** *"Check why template loan_oct_01 was rejected, fix it, and resubmit"*\n'
+                '3. 📋 **Inspect Catalog:** *"List all rejected templates for bajaj"* or *"Show pending templates"*\n'
+                '4. 🔄 **Sync Approvals:** *"Poll approval status from Meta"*\n'
+                '5. ✍️ **Lint Copy:** *"Check grammar in: Dear {{1}}, your disbursment of {{2}} is ready"*'
             ),
             "actions_taken": [],
             "suggested_actions": [
+                "How do I submit templates?",
                 "List rejected templates",
                 "Poll approval status",
-                "Show active catalog",
             ],
         }
 
