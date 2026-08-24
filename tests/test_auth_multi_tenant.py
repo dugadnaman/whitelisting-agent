@@ -73,18 +73,21 @@ class TestMultiTenantAuth(unittest.TestCase):
         Bajaj operator CANNOT access Tata templates, stats, or credentials.
         Tata operator CANNOT access Bajaj templates, stats, or credentials.
         """
-        # 1. Login as Bajaj Operator
-        r_bajaj_login = self.client.post("/api/auth/login", json={"email": "bajaj@karix.com", "password": "Bajaj@123"})
+        # 1. Login as Bajaj Operator (Naman - Bajaj)
+        r_bajaj_login = self.client.post(
+            "/api/auth/login", json={"email": "namandugad46@gmail.com", "password": "Naman@123"}
+        )
         self.assertEqual(r_bajaj_login.status_code, 200)
         bajaj_token = r_bajaj_login.json()["token"]
         bajaj_headers = {"Authorization": f"Bearer {bajaj_token}"}
 
-        # 2. Login as Tata Operator
-        r_tata_login = self.client.post("/api/auth/login", json={"email": "tata@karix.com", "password": "Tata@123"})
+        # 2. Login as Tata Operator (Naman - Tata)
+        r_tata_login = self.client.post(
+            "/api/auth/login", json={"email": "dugadnaman@gmail.com", "password": "Naman@123"}
+        )
         self.assertEqual(r_tata_login.status_code, 200)
         tata_token = r_tata_login.json()["token"]
         tata_headers = {"Authorization": f"Bearer {tata_token}"}
-
         # --- Bajaj user allowed on Bajaj ---
         self.assertEqual(self.client.get("/api/stats?account=bajaj", headers=bajaj_headers).status_code, 200)
         self.assertEqual(self.client.get("/api/credentials?account=bajaj", headers=bajaj_headers).status_code, 200)
@@ -113,12 +116,13 @@ class TestMultiTenantAuth(unittest.TestCase):
         self.assertEqual(r_blocked_5.status_code, 403)
 
     def test_superadmin_accesses_all_tenants(self):
-        """Platform Superadmin (admin@karix.com) can access any tenant organization."""
-        r_admin_login = self.client.post("/api/auth/login", json={"email": "admin@karix.com", "password": "Admin@123"})
+        # Superadmin (Naman - Superadmin)
+        r_admin_login = self.client.post(
+            "/api/auth/login", json={"email": "namandugad@attributics.com", "password": "Naman@123"}
+        )
         self.assertEqual(r_admin_login.status_code, 200)
         admin_token = r_admin_login.json()["token"]
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
-
         # Superadmin can query Bajaj and Tata
         self.assertEqual(self.client.get("/api/stats?account=bajaj", headers=admin_headers).status_code, 200)
         self.assertEqual(self.client.get("/api/stats?account=tata&channel=rcs", headers=admin_headers).status_code, 200)

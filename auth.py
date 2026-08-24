@@ -90,11 +90,48 @@ def init_auth_db() -> None:
         # Seed default accounts if needed
         now = datetime.now(UTC).isoformat()
         seed_users = [
+            # Naman - Tata Capital Admin
+            (
+                "usr_naman_tata",
+                "dugadnaman@gmail.com",
+                hash_password("Naman@123"),
+                "Naman Dugad",
+                "tata",
+                "admin",
+                now,
+                now,
+                1,
+            ),
+            # Naman - Bajaj Finserv Admin
+            (
+                "usr_naman_bajaj",
+                "namandugad46@gmail.com",
+                hash_password("Naman@123"),
+                "Naman Dugad",
+                "bajaj",
+                "admin",
+                now,
+                now,
+                1,
+            ),
+            # Naman - Platform SuperAdmin
+            (
+                "usr_naman_superadmin",
+                "namandugad@attributics.com",
+                hash_password("Naman@123"),
+                "Naman Dugad",
+                "all",
+                "superadmin",
+                now,
+                now,
+                1,
+            ),
+            # Legacy aliases
             (
                 "usr_bajaj_admin",
                 "bajaj@karix.com",
                 hash_password("Bajaj@123"),
-                "Bajaj Lead Operator",
+                "Bajaj Admin",
                 "bajaj",
                 "admin",
                 now,
@@ -105,7 +142,7 @@ def init_auth_db() -> None:
                 "usr_tata_admin",
                 "tata@karix.com",
                 hash_password("Tata@123"),
-                "Tata Capital Admin",
+                "Tata Admin",
                 "tata",
                 "admin",
                 now,
@@ -129,7 +166,7 @@ def init_auth_db() -> None:
                 """
                 INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, last_login, is_active)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash, tenant_id = excluded.tenant_id, role = excluded.role
+                ON CONFLICT(email) DO UPDATE SET password_hash = excluded.password_hash, name = excluded.name, tenant_id = excluded.tenant_id, role = excluded.role
             """,
                 u,
             )

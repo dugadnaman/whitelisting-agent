@@ -120,28 +120,32 @@ export default function LoginPage() {
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              onClick={() => handleQuickLogin('bajaj@karix.com', 'Bajaj@123')}
-              className="p-2 bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-lg text-[11px] font-semibold text-left transition"
+              onClick={() => handleQuickLogin('namandugad46@gmail.com', 'Naman@123')}
+              className="p-2.5 bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-[11px] font-semibold text-left transition"
             >
-              <div className="font-bold">Bajaj Finserv</div>
-              <div className="text-[10px] text-emerald-600 font-mono">bajaj@karix.com</div>
+              <div className="font-bold flex items-center gap-1.5">
+                <span>🏢 Bajaj Finserv</span>
+              </div>
+              <div className="text-[10px] text-emerald-700 font-mono mt-0.5">namandugad46@gmail.com</div>
             </button>
 
             <button
               type="button"
-              onClick={() => handleQuickLogin('tata@karix.com', 'Tata@123')}
-              className="p-2 bg-blue-50/70 hover:bg-blue-100 border border-blue-200 text-blue-800 rounded-lg text-[11px] font-semibold text-left transition"
+              onClick={() => handleQuickLogin('dugadnaman@gmail.com', 'Naman@123')}
+              className="p-2.5 bg-blue-50/70 hover:bg-blue-100 border border-blue-200 text-blue-800 rounded-xl text-[11px] font-semibold text-left transition"
             >
-              <div className="font-bold">Tata Capital</div>
-              <div className="text-[10px] text-blue-600 font-mono">tata@karix.com</div>
+              <div className="font-bold flex items-center gap-1.5">
+                <span>🏢 Tata Capital</span>
+              </div>
+              <div className="text-[10px] text-blue-700 font-mono mt-0.5">dugadnaman@gmail.com</div>
             </button>
           </div>
           <button
             type="button"
-            onClick={() => handleQuickLogin('admin@karix.com', 'Admin@123')}
-            className="w-full p-2 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-800 rounded-lg text-[11px] font-semibold text-center transition"
+            onClick={() => handleQuickLogin('namandugad@attributics.com', 'Naman@123')}
+            className="w-full p-2.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-800 rounded-xl text-[11px] font-semibold text-center transition"
           >
-            🔑 Login as Platform SuperAdmin (admin@karix.com)
+            🔑 Login as Platform SuperAdmin (namandugad@attributics.com)
           </button>
         </div>
 
