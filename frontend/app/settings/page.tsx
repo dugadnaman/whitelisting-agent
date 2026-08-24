@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials, refreshSession } from '@/lib/api';
-import type { Account, Channel, AccountItem } from '@/lib/api';
+import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials, refreshSession, fetchTeam, inviteColleague } from '@/lib/api';
+import type { Account, Channel, AccountItem, AuthUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
@@ -50,7 +50,15 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
 
-  // Load server-configured credentials (synced across all devices & team members)
+  // Team Directory state
+  const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
+  const [loadingTeam, setLoadingTeam] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteName, setInviteName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
+  const [inviteRole, setInviteRole] = useState('operator');
+  const [inviting, setInviting] = useState(false);
   useEffect(() => {
     let ignore = false;
     async function loadServerCreds() {
@@ -88,26 +96,31 @@ export default function SettingsPage() {
         } catch {}
       }
     }
+
+    async function loadTeam() {
+      setLoadingTeam(true);
+      try {
+        const team = await fetchTeam();
+        setTeamMembers(team || []);
+      } catch {
+        setTeamMembers([]);
+      } finally {
+        setLoadingTeam(false);
+      }
+    }
+
     loadServerCreds();
+    loadTeam();
     return () => {
       ignore = true;
     };
   }, [selectedAccount, selectedChannel]);
   const isWhatsApp = selectedChannel === 'whatsapp';
-  const isTata = selectedAccount === 'tata';
-  const isBajaj = selectedAccount === 'bajaj';
-  const envPrefix = isTata
-    ? 'TATA'
-    : isBajaj
-    ? 'BAJAJ'
-    : selectedAccount.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
-
   const accountTitle = getAccountLabel(selectedAccount);
   const channelTitle = isWhatsApp ? 'WhatsApp' : 'RCS (DLT)';
-
+  const envPrefix = selectedAccount.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
   const selectedAccountItem = accounts.find((a) => a.id === selectedAccount);
   const isCustomAccount = selectedAccountItem && !selectedAccountItem.is_builtin;
-
   async function handleCreateAccount(e: React.FormEvent) {
     e.preventDefault();
     if (!newAccountName.trim()) return;
@@ -288,6 +301,180 @@ export default function SettingsPage() {
           <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-100 text-blue-900 uppercase">
             {currentUser?.role || 'Operator'}
           </span>
+        </div>
+      )}
+
+      {/* Organization Team Directory */}
+      <div className="bg-white rounded-2xl border border-gray-200/80 shadow-xs p-6 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+              <span>👥 Organization Team Directory</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                {teamMembers.length} Members
+              </span>
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Team accounts registered for <strong>{getAccountLabel(selectedAccount)}</strong> workspace.
+            </p>
+          </div>
+          {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
+            <button
+              type="button"
+              onClick={() => setShowInviteModal(true)}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition flex items-center gap-1.5"
+            >
+              <span>➕ Add Colleague</span>
+            </button>
+          )}
+        </div>
+
+        {loadingTeam ? (
+          <div className="py-6 text-center text-xs text-gray-400">Loading team members...</div>
+        ) : teamMembers.length === 0 ? (
+          <div className="py-6 text-center text-xs text-gray-400">No team members registered yet for this organization.</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {teamMembers.map((member) => (
+              <div
+                key={member.id || member.email}
+                className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/50 flex items-start gap-3 hover:bg-white hover:border-blue-300 transition"
+              >
+                <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                  {(member.name || member.email || 'U').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <h4 className="text-xs font-bold text-gray-900 truncate">{member.name}</h4>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase font-mono ${
+                        member.role === 'superadmin'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : member.role === 'admin'
+                          ? 'bg-purple-100 text-purple-800'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}
+                    >
+                      {member.role || 'Operator'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 font-mono truncate">{member.email}</p>
+                  <div className="mt-1 flex items-center justify-between text-[10px] text-gray-400">
+                    <span className="uppercase font-semibold text-gray-600">{member.tenant_id}</span>
+                    <span>Active 🟢</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Invite Modal */}
+      {showInviteModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900">Add Team Colleague</h3>
+              <button onClick={() => setShowInviteModal(false)} className="text-gray-400 hover:text-gray-600 font-bold">
+                &times;
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Create a new user account for {getAccountLabel(selectedAccount)} with @attributics.com or corporate email.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setInviting(true);
+                try {
+                  await inviteColleague(inviteEmail.trim(), invitePassword.trim(), inviteName.trim(), inviteRole);
+                  setShowInviteModal(false);
+                  const nameSaved = inviteName.trim();
+                  setInviteName('');
+                  setInviteEmail('');
+                  setInvitePassword('');
+                  const team = await fetchTeam();
+                  setTeamMembers(team || []);
+                  setBanner({ type: 'success', message: `Added ${nameSaved} to ${getAccountLabel(selectedAccount)}!` });
+                } catch (err) {
+                  setBanner({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+                } finally {
+                  setInviting(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Rahul Sharma"
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Work Email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. rahul@attributics.com"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Initial Password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="At least 6 characters"
+                  value={invitePassword}
+                  onChange={(e) => setInvitePassword(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Role
+                </label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="operator">Operator (Preview, Submit, Poll)</option>
+                  <option value="admin">Admin (Manage Team & Credentials)</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="px-3.5 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={inviting}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold"
+                >
+                  {inviting ? 'Creating...' : 'Create Account'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

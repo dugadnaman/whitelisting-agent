@@ -406,6 +406,14 @@ def tool_refresh_session(account: str = "bajaj", user: str = "AI Agent") -> dict
     return refresh_karix_session(account=account, user_attribution=user)
 
 
+def tool_list_team(tenant_id: str = "bajaj") -> dict[str, Any]:
+    """List team members and user details within an organization."""
+    from auth import list_tenant_team
+
+    members = list_tenant_team(tenant_id)
+    return {"tenant_id": tenant_id, "members": members, "count": len(members)}
+
+
 # ---------------------------------------------------------------------------
 # Agent Reasoning Engine & Intent Dispatcher
 # ---------------------------------------------------------------------------
@@ -457,7 +465,47 @@ class WhitelistingAgent:
                         }
                 # Lock account parameter to user's assigned organization
                 account = user_tenant
-        # 1. How to submit / Upload instructions / General Help
+
+        # 1. Team / User Accounts inquiry: "show users", "who is on the team", "list team", "show user details"
+        if any(
+            w in text.lower()
+            for w in [
+                "show user",
+                "show users",
+                "list user",
+                "list users",
+                "team member",
+                "who is on the team",
+                "user details",
+                "all users",
+                "my team",
+                "user accounts",
+            ]
+        ):
+            team_res = tool_list_team(tenant_id=account)
+            actions_taken.append({"tool": "list_tenant_team", "result": team_res})
+            members = team_res.get("members", [])
+            if not members:
+                reply = f"No registered team members found for **{account.title()}**."
+            else:
+                lines = [
+                    f"• **{m.get('name')}** (`{m.get('email')}`) — Role: `{m.get('role', 'operator').upper()}` | Org: `{m.get('tenant_id', account).upper()}`"
+                    for m in members
+                ]
+                reply = (
+                    f"### 👥 Registered Users for {account.title()} ({len(members)} operators):\n\n"
+                    + "\n".join(lines)
+                    + "\n\n*Tip: You can also inspect team accounts in **[Settings](/settings)** under Organization Team Directory.*"
+                )
+            suggested_actions = ["Poll approval status", "List rejected templates", "How do I submit templates?"]
+            return {
+                "reply": reply,
+                "actions_taken": actions_taken,
+                "suggested_actions": suggested_actions,
+                "data": team_res,
+            }
+
+        # 2. How to submit / Upload instructions / General Help
         if any(
             w in text.lower()
             for w in [

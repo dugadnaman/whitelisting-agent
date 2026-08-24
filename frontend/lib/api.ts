@@ -575,3 +575,18 @@ export async function fetchTeam(): Promise<AuthUser[]> {
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export async function inviteColleague(
+  email: string,
+  password: string,
+  name: string,
+  role: string = "operator"
+): Promise<AuthUser> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/team/invite"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, name, role }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
