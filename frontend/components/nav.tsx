@@ -52,7 +52,23 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
-  const { account, setAccount, channel, setChannel, user, accounts, getAccountLabel, openUserModal } = useApp();
+  const {
+    account,
+    setAccount,
+    channel,
+    setChannel,
+    user,
+    currentUser,
+    accounts,
+    getAccountLabel,
+    isTenantLocked,
+    logout,
+  } = useApp();
+
+  if (pathname === '/login' || pathname === '/signup') {
+    return null;
+  }
+
   return (
     <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-gray-200 flex flex-col z-30">
       <div className="p-5 border-b border-gray-100">
@@ -69,29 +85,41 @@ export default function Nav() {
 
       {/* Account & Channel Selectors */}
       <div className="p-4 bg-gray-50/70 border-b border-gray-200/80 space-y-2.5">
-        {/* Account Selector */}
+        {/* Account Selector (Locked for Tenant Operators) */}
         <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
-            Account
+          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1 flex items-center justify-between">
+            <span>Organization</span>
+            {isTenantLocked && (
+              <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded border border-amber-200">
+                🔒 Locked
+              </span>
+            )}
           </label>
-          <div className="relative">
-            <select
-              value={account}
-              onChange={(e) => setAccount(e.target.value as Account)}
-              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors"
-            >
-              {accounts.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.name}
-                </option>
-              ))}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
-              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
+          {isTenantLocked ? (
+            <div className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-900 shadow-2xs flex items-center justify-between">
+              <span className="truncate">{getAccountLabel(account)}</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
             </div>
-          </div>
+          ) : (
+            <div className="relative">
+              <select
+                value={account}
+                onChange={(e) => setAccount(e.target.value as Account)}
+                className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors"
+              >
+                {accounts.map((acc) => (
+                  <option key={acc.id} value={acc.id}>
+                    {acc.name}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Channel Selector */}
@@ -181,29 +209,31 @@ export default function Nav() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs">
-              {(user || 'U').charAt(0).toUpperCase()}
+              {(currentUser?.name || user || 'U').charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0">
               <p className="text-[11px] font-semibold text-gray-900 truncate">
-                {user || 'Anonymous'}
+                {currentUser?.name || user || 'Operator'}
               </p>
-              <p className="text-[10px] text-gray-400 truncate">Active Operator</p>
+              <p className="text-[10px] text-gray-400 truncate">
+                {currentUser?.email || (currentUser?.role ? `${currentUser.role.toUpperCase()}` : 'Operator')}
+              </p>
             </div>
           </div>
           <button
             type="button"
-            onClick={openUserModal}
-            className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 transition-colors p-1"
-            title="Switch or create operator profile"
+            onClick={logout}
+            className="text-[10px] font-bold text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 px-2 py-1 rounded border border-red-200 transition-colors shrink-0"
+            title="Sign out of account"
           >
-            Switch
+            Log Out
           </button>
         </div>
 
         <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1 border-t border-gray-200/60">
-          <span>Target</span>
-          <span className="font-mono font-semibold text-gray-700 uppercase">
-            {account} / {channel}
+          <span>Tenant Scope</span>
+          <span className="font-mono font-bold text-gray-800 uppercase text-[10px]">
+            {currentUser?.tenant_id || account}
           </span>
         </div>
       </div>

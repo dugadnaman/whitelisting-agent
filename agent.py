@@ -423,6 +423,7 @@ class WhitelistingAgent:
         account: str = "bajaj",
         channel: str = "whatsapp",
         user: str = "Operator",
+        user_profile: dict | None = None,
     ) -> dict[str, Any]:
         """
         Parse operator instruction, decide required tools, execute reasoning chain,
@@ -432,6 +433,30 @@ class WhitelistingAgent:
         actions_taken = []
         suggested_actions = []
 
+        # Strict Tenant Isolation Check inside Agent
+        if user_profile and isinstance(user_profile, dict):
+            user_tenant = str(user_profile.get("tenant_id", "all")).lower().strip()
+            user_role = str(user_profile.get("role", "operator")).lower().strip()
+
+            if user_tenant != "all" and user_role != "superadmin":
+                # Block cross-tenant prompt injection
+                forbidden_tenants = [t for t in ["bajaj", "tata"] if t != user_tenant]
+                for forbidden in forbidden_tenants:
+                    if (
+                        f"for {forbidden}" in text.lower()
+                        or f"{forbidden} templates" in text.lower()
+                        or f"on {forbidden}" in text.lower()
+                    ):
+                        return {
+                            "reply": (
+                                f"🚫 **Access Denied**: Your account is assigned to **{user_tenant.upper()}** "
+                                f"and is strictly forbidden from querying or modifying **{forbidden.upper()}** data."
+                            ),
+                            "actions_taken": [],
+                            "suggested_actions": [f"List {user_tenant} templates", "Poll approval status"],
+                        }
+                # Lock account parameter to user's assigned organization
+                account = user_tenant
         # 1. How to submit / Upload instructions / General Help
         if any(
             w in text.lower()

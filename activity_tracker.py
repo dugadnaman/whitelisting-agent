@@ -47,25 +47,12 @@ def init_store() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_act_user ON activities(user)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_act_account ON activities(account)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_act_action ON activities(action)")
+    try:
+        from auth import init_auth_db
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                name TEXT UNIQUE NOT NULL,
-                role TEXT DEFAULT 'Operator',
-                created_at TEXT NOT NULL,
-                last_active TEXT NOT NULL,
-                actions_count INTEGER DEFAULT 0
-            )
-        """)
-
-        # Auto-seed default operators if empty
-        conn.execute("""
-            INSERT OR IGNORE INTO users (id, name, role, created_at, last_active, actions_count)
-            VALUES
-                ('u_namann', 'Namann', 'Lead Operator', '2026-08-15T00:00:00+00:00', '2026-08-19T00:00:00+00:00', 10)
-        """)
-
+        init_auth_db()
+    except Exception as e:
+        logger.debug("Auth DB init check: %s", e)
     # Migrate any historical JSONL logs into SQLite
     _migrate_jsonl_to_sqlite()
 
@@ -111,24 +98,27 @@ def _migrate_jsonl_to_sqlite() -> None:
                     records_to_insert,
                 )
 
-                for u_name, count in users_map.items():
+                for u_name in users_map:
                     if u_name and u_name != "Anonymous Operator":
                         conn.execute(
                             """
-                            INSERT INTO users (id, name, role, created_at, last_active, actions_count)
-                            VALUES (?, ?, 'Operator', ?, ?, ?)
-                            ON CONFLICT(name) DO UPDATE SET
-                                actions_count = actions_count + excluded.actions_count,
-                                last_active = excluded.last_active
+                            INSERT OR IGNORE INTO users (id, email, password_hash, name, tenant_id, role, created_at, last_login, is_active)
+                            VALUES (?, ?, '', ?, 'all', 'Operator', ?, ?, 1)
                         """,
-                            (f"u_{uuid.uuid4().hex[:6]}", u_name, now, now, count),
+                            (
+                                f"u_{uuid.uuid4().hex[:6]}",
+                                f"{u_name.lower().replace(' ', '_')}@karix.com",
+                                u_name,
+                                now,
+                                now,
+                            ),
                         )
     except Exception as exc:
         logger.warning("Error migrating activity_log.jsonl to SQLite: %s", exc)
 
 
 def register_or_update_user(name: str, role: str = "Operator") -> dict:
-    """Register a new operator profile or update last active timestamp."""
+    """Register a new operator profile or update timestamp."""
     clean_name = name.strip()
     if not clean_name:
         raise ValueError("User name cannot be empty")
@@ -139,25 +129,27 @@ def register_or_update_user(name: str, role: str = "Operator") -> dict:
     with _get_db() as conn:
         conn.execute(
             """
-            INSERT INTO users (id, name, role, created_at, last_active, actions_count)
-            VALUES (?, ?, ?, ?, ?, 0)
+            INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, last_login, is_active)
+            VALUES (?, ?, '', ?, 'all', ?, ?, ?, 1)
             ON CONFLICT(name) DO UPDATE SET
-                last_active = excluded.last_active,
-                role = CASE WHEN users.role = 'Admin' THEN 'Admin' ELSE excluded.role END
+                last_login = excluded.last_login
         """,
-            (uid, clean_name, role, now, now),
+            (uid, f"{clean_name.lower().replace(' ', '_')}@karix.com", clean_name, role, now, now),
         )
 
-        cur = conn.execute("SELECT * FROM users WHERE name = ?", (clean_name,))
+        cur = conn.execute(
+            "SELECT id, email, name, tenant_id, role, created_at, last_login FROM users WHERE name = ?", (clean_name,)
+        )
         row = cur.fetchone()
         return dict(row) if row else {"id": uid, "name": clean_name, "role": role}
 
 
 def get_all_users() -> list[dict]:
     """Return all registered operator accounts sorted by last active."""
-    init_store()
     with _get_db() as conn:
-        cur = conn.execute("SELECT * FROM users ORDER BY last_active DESC")
+        cur = conn.execute(
+            "SELECT id, email, name, tenant_id, role, created_at, last_login FROM users ORDER BY created_at DESC"
+        )
         return [dict(r) for r in cur.fetchall()]
 
 
@@ -207,16 +199,13 @@ def log_activity(
             )
 
             if clean_user != "Anonymous Operator":
-                conn.execute(
-                    """
-                    INSERT INTO users (id, name, role, created_at, last_active, actions_count)
-                    VALUES (?, ?, 'Operator', ?, ?, 1)
-                    ON CONFLICT(name) DO UPDATE SET
-                        last_active = excluded.last_active,
-                        actions_count = actions_count + 1
-                """,
-                    (f"u_{uuid.uuid4().hex[:6]}", clean_user, ts, ts),
-                )
+                try:
+                    conn.execute(
+                        "UPDATE users SET last_login = ? WHERE email = ? OR name = ?",
+                        (ts, clean_user.lower(), clean_user),
+                    )
+                except Exception:
+                    pass
     except Exception as exc:
         logger.error("Failed to insert activity into SQLite: %s", exc)
 

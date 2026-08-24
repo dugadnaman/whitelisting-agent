@@ -1,8 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
-import Nav from '@/components/nav';
-import ChatWidget from '@/components/chat-widget';
+import AppShell from '@/components/app-shell';
 import { AppProvider } from '@/lib/context';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -21,9 +20,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AppProvider>
-          <Nav />
-          <main className="ml-64 p-8">{children}</main>
-          <ChatWidget />
+          <AppShell>{children}</AppShell>
         </AppProvider>
       </body>
     </html>

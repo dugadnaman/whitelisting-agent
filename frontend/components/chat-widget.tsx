@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { usePathname } from 'next/navigation';
 import { useApp } from '@/lib/context';
 import { sendAgentMessage } from '@/lib/api';
-import type { AgentChatResponse, AgentChatAction } from '@/lib/api';
-
+import type { AgentChatAction, AgentChatResponse } from '@/lib/api';
 type ChatMessage = {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -122,10 +122,15 @@ function renderInlineStyles(text: string): React.ReactNode {
 }
 
 export default function ChatWidget() {
+  const pathname = usePathname();
   const { account, channel, user, getAccountLabel } = useApp();
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+
+  if (pathname === '/login' || pathname === '/signup') {
+    return null;
+  }
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: 'init-1',

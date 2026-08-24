@@ -7,9 +7,26 @@ export type AccountItem = {
   is_builtin?: boolean;
 };
 
+export type AuthUser = {
+  id: string;
+  email: string;
+  name: string;
+  tenant_id: string;
+  role: string;
+  created_at?: string;
+  last_login?: string;
+};
+
+export type AuthResponse = {
+  user: AuthUser;
+  token: string;
+};
+
 export type UserItem = {
   id: string;
   name: string;
+  email?: string;
+  tenant_id?: string;
   role?: string;
   created_at?: string;
   last_active?: string;
@@ -145,6 +162,24 @@ function delay(ms: number): Promise<void> {
   return promise;
 }
 
+export function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("karix_jwt_token");
+}
+
+export function setAuthToken(token: string): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem("karix_jwt_token", token);
+  }
+}
+
+export function clearAuthToken(): void {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("karix_jwt_token");
+    localStorage.removeItem("karix_user_profile");
+  }
+}
+
 async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -160,14 +195,20 @@ async function fetchWithRetry(
     }, timeoutMs);
 
     try {
+      const headers = new Headers(init?.headers || {});
+      const token = getAuthToken();
+      if (token && !headers.has("Authorization")) {
+        headers.set("Authorization", `Bearer ${token}`);
+      }
+
       const customInit: RequestInit = {
         ...init,
+        headers,
         signal: init?.signal || controller.signal,
       };
 
       const res = await fetch(input, customInit);
       clearTimeout(timeoutId);
-
       // If server returned 500/502/503/504 (cold start, proxy blip, or temporary container swap), retry
       if ((res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) && i < retries) {
         await delay(delayMs * Math.pow(1.5, i));
@@ -486,6 +527,51 @@ export async function refreshSession(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ account, username, password, user }),
   });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function loginUser(email: string, password: string): Promise<AuthResponse> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/login"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data: AuthResponse = await res.json();
+  if (data.token) {
+    setAuthToken(data.token);
+  }
+  return data;
+}
+
+export async function signupUser(
+  email: string,
+  password: string,
+  name: string,
+  tenant_id: string = "bajaj"
+): Promise<AuthResponse> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/signup"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, name, tenant_id }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data: AuthResponse = await res.json();
+  if (data.token) {
+    setAuthToken(data.token);
+  }
+  return data;
+}
+
+export async function fetchMe(): Promise<AuthUser> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/me"));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchTeam(): Promise<AuthUser[]> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/team"));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

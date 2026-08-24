@@ -15,19 +15,25 @@ from dataclasses import asdict
 from pathlib import Path
 
 import requests as http_client
-from fastapi import Body, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
-
 from activity_tracker import (
     get_activity_summary,
     get_all_users,
     load_activities,
     log_activity,
     register_or_update_user,
+)
+from auth import (
+    authenticate_user,
+    get_current_user,
+    list_tenant_team,
+    register_user,
+    require_tenant_access,
 )
 from config import (
     BAJAJ_WABA_ID,
@@ -306,20 +312,129 @@ def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+# Multi-Tenant Authentication Endpoints
+# ---------------------------------------------------------------------------
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+    tenant_id: str = "bajaj"
+    role: str = "operator"
+
+
+class TeamInviteRequest(BaseModel):
+    email: str
+    name: str
+    password: str
+    role: str = "operator"
+
+
+@app.post("/api/auth/signup")
+def signup_endpoint(body: SignupRequest):
+    """Register a new user account bound to a specific tenant organization."""
+    try:
+        register_user(
+            email=body.email,
+            password=body.password,
+            name=body.name,
+            tenant_id=body.tenant_id,
+            role=body.role,
+        )
+        auth_res = authenticate_user(body.email, body.password)
+        log_activity(
+            user=body.name,
+            action="USER_SIGNUP",
+            account=body.tenant_id,
+            channel="all",
+            details={"email": body.email, "tenant": body.tenant_id, "role": body.role},
+            status="success",
+        )
+        return _json_safe(auth_res)
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err)) from val_err
+    except Exception as exc:
+        logger.exception("Signup error: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error during registration.") from exc
+
+
+@app.post("/api/auth/login")
+def login_endpoint(body: LoginRequest):
+    """Authenticate user with email & password, returning signed JWT with tenant claim."""
+    auth_res = authenticate_user(body.email, body.password)
+    if not auth_res:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    user_info = auth_res["user"]
+    log_activity(
+        user=user_info.get("name") or body.email,
+        action="USER_LOGIN",
+        account=user_info.get("tenant_id", "all"),
+        channel="all",
+        details={"email": body.email, "tenant": user_info.get("tenant_id")},
+        status="success",
+    )
+    return _json_safe(auth_res)
+
+
+@app.get("/api/auth/me")
+def get_me_endpoint(current_user: dict = Depends(get_current_user)):
+    """Return active user profile and tenant permissions."""
+    return _json_safe(current_user)
+
+
+@app.get("/api/auth/team")
+def get_team_endpoint(current_user: dict = Depends(get_current_user)):
+    """List team members within user's assigned organization."""
+    tenant = current_user.get("tenant_id", "bajaj")
+    members = list_tenant_team(tenant)
+    return _json_safe(members)
+
+
+@app.post("/api/auth/team/invite")
+def invite_team_member(body: TeamInviteRequest, current_user: dict = Depends(get_current_user)):
+    """Organization admins can onboard colleagues to their organization."""
+    tenant = current_user.get("tenant_id", "bajaj")
+    if current_user.get("role") not in ("admin", "superadmin"):
+        raise HTTPException(status_code=403, detail="Only organization admins can invite team members.")
+
+    try:
+        new_user = register_user(
+            email=body.email,
+            password=body.password,
+            name=body.name,
+            tenant_id=tenant,
+            role=body.role,
+        )
+        return _json_safe(new_user)
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=str(val_err)) from val_err
+
+
+# ---------------------------------------------------------------------------
+# Core Tenant Endpoints
+# ---------------------------------------------------------------------------
 
 
 @app.get("/api/stats")
 def get_stats(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
+    current_user: dict = Depends(get_current_user),
 ):
+    require_tenant_access(account, current_user)
     acc = account.lower()
     chan = channel.lower()
     try:
         if chan == "rcs":
             local_entries = load_rcs_log(RCS_LOG_PATH)
             local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-
             live_templates = fetch_rcs_templates(client=acc)
             seen_names = set()
             merged = []
@@ -421,7 +536,9 @@ def get_templates(
     channel: str = Query("whatsapp"),
     status: str | None = Query(None),
     search: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
 ):
+    require_tenant_access(account, current_user)
     acc = account.lower()
     chan = channel.lower()
     try:
@@ -669,13 +786,14 @@ async def preview_file(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
     user: str = Query("Anonymous Operator"),
+    current_user: dict = Depends(get_current_user),
 ):
+    require_tenant_access(account, current_user)
+    chan = channel.lower()
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
-
-    chan = channel.lower()
     try:
         if chan == "rcs":
             if suffix in (".xlsx", ".xls"):
@@ -763,12 +881,13 @@ async def submit_file(
     user: str = Query("Anonymous Operator"),
     fix_aspect_ratio: bool = Query(True),
     fix_grammar: bool = Query(True),
+    current_user: dict = Depends(get_current_user),
 ):
+    require_tenant_access(account, current_user)
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
-
     acc = account.lower()
     chan = channel.lower()
     try:
@@ -878,7 +997,9 @@ def poll(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
     user: str = Query("Anonymous Operator"),
+    current_user: dict = Depends(get_current_user),
 ):
+    require_tenant_access(account, current_user)
     acc = account.lower()
     chan = channel.lower()
     try:
@@ -906,8 +1027,12 @@ def poll(
 
 
 @app.get("/api/accounts")
-def get_accounts():
-    return load_accounts()
+def get_accounts(current_user: dict = Depends(get_current_user)):
+    accs = load_accounts()
+    tenant = current_user.get("tenant_id", "all")
+    if tenant != "all" and current_user.get("role") != "superadmin":
+        return [a for a in accs if a.get("id") == tenant]
+    return accs
 
 
 @app.post("/api/accounts")
@@ -1003,7 +1128,9 @@ def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
 def get_credentials(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
+    current_user: dict = Depends(get_current_user),
 ):
+    require_tenant_access(account, current_user)
     """
     Return saved credentials from the server so any device/operator on the team
     instantly shares the single source of truth without re-entering keys.
@@ -1056,7 +1183,8 @@ def get_credentials(
 
 
 @app.put("/api/credentials")
-def update_credentials(creds: CredentialUpdate):
+def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get_current_user)):
+    require_tenant_access(creds.account, current_user)
     env_path = Path(".env")
     acc = creds.account.lower().strip()
     chan = creds.channel.lower().strip()
@@ -1174,9 +1302,11 @@ def test_credentials(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
     creds: CredentialUpdate | None = None,
+    current_user: dict = Depends(get_current_user),
 ):
     body_fields = creds.model_fields_set if creds else set()
     acc = (creds.account if creds and "account" in body_fields else account).lower().strip()
+    require_tenant_access(acc, current_user)
     chan = (creds.channel if creds and "channel" in body_fields else channel).lower().strip()
     acc_name = get_account_name(acc)
     prefix = _account_prefix(acc)
@@ -1316,7 +1446,11 @@ def get_activity_logs(
     channel: str = Query("all"),
     search: str = Query(""),
     limit: int = Query(200),
+    current_user: dict = Depends(get_current_user),
 ):
+    tenant = current_user.get("tenant_id", "all")
+    if tenant != "all" and current_user.get("role") != "superadmin":
+        account = tenant
     records = load_activities(
         user=user if user != "all" else None,
         action=action if action != "all" else None,
@@ -1393,7 +1527,7 @@ class AgentChatRequest(BaseModel):
 
 
 @app.post("/api/agent/chat")
-def agent_chat_endpoint(req: AgentChatRequest):
+def agent_chat_endpoint(req: AgentChatRequest, current_user: dict = Depends(get_current_user)):
     """
     Autonomous Whitelisting Agent endpoint.
     Accepts natural-language commands to diagnose rejections, auto-remediate copy,
@@ -1402,11 +1536,14 @@ def agent_chat_endpoint(req: AgentChatRequest):
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
+    require_tenant_access(req.account, current_user)
+
     res = agent_instance.execute_instruction(
         instruction=req.message,
         account=req.account,
         channel=req.channel,
-        user=req.user,
+        user=req.user or current_user.get("name", "Operator"),
+        user_profile=current_user,
     )
     return _json_safe(res)
 
@@ -1423,11 +1560,12 @@ class AuthRefreshRequest(BaseModel):
 
 
 @app.post("/api/auth/refresh")
-def auth_refresh_endpoint(req: AuthRefreshRequest):
+def auth_refresh_endpoint(req: AuthRefreshRequest, current_user: dict = Depends(get_current_user)):
     """
     Self-Healing Auth: Execute headless Playwright browser login to Karix portal,
     harvest fresh Bearer, Session, and User tokens, and persist them.
     """
+    require_tenant_access(req.account, current_user)
     res = refresh_karix_session(
         account=req.account,
         username=req.username,

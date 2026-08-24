@@ -14,11 +14,12 @@ export default function SettingsPage() {
     setAccount: setActiveAccount,
     setChannel: setActiveChannel,
     user: currentOperator,
+    currentUser,
     accounts,
     refreshAccounts,
     getAccountLabel,
+    isTenantLocked,
   } = useApp();
-
   // Selected config tab
   const [selectedAccount, setSelectedAccount] = useState<Account>(activeAccount);
   const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
@@ -258,20 +259,37 @@ export default function SettingsPage() {
             Manage WABA IDs, API keys, and custom client accounts for WhatsApp &amp; RCS.
           </p>
         </div>
-
-        <button
-          onClick={() => {
-            setShowAddModal(true);
-            setCreateError(null);
-          }}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add New Account
-        </button>
+        {!isTenantLocked && (
+          <button
+            onClick={() => {
+              setShowAddModal(true);
+              setCreateError(null);
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add New Account
+          </button>
+        )}
       </div>
+
+      {/* Tenant Security Notice */}
+      {isTenantLocked && (
+        <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-800 flex items-center justify-between shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <span className="text-base">🔒</span>
+            <div>
+              <span className="font-bold">Multi-Tenant Boundary Active: </span>
+              <span>Logged in as <strong>{currentUser?.name}</strong> ({currentUser?.email}). Scoped exclusively to <strong>{getAccountLabel(currentUser?.tenant_id)}</strong>.</span>
+            </div>
+          </div>
+          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-100 text-blue-900 uppercase">
+            {currentUser?.role || 'Operator'}
+          </span>
+        </div>
+      )}
 
       {/* Account Cards & Selector */}
       <div className="space-y-3">
