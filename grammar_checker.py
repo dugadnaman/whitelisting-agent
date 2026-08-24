@@ -7,6 +7,17 @@ Provides automatic, compliant suggested corrections before submission.
 
 import re
 
+URL_PATTERN = re.compile(
+    r'https?://[^\s]+'
+    r'|www\.[^\s]+'
+    r'|\b[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*\.(?:com|in|org|net|co|io|biz|info|ai|app|gov|edu)(?:/[^\s]*)?',
+    re.IGNORECASE,
+)
+EMAIL_PATTERN = re.compile(
+    r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b',
+    re.IGNORECASE,
+)
+
 COMMON_FINANCIAL_TYPOS = {
     "recieved": "received",
     "recieve": "receive",
@@ -59,6 +70,29 @@ def lint_and_fix_body(text: str) -> tuple[str, list[dict]]:
 
     warnings = []
     cleaned = text
+
+    # Protect URLs and Emails before punctuation and grammar linting
+    tokens: dict[str, str] = {}
+
+    def repl_email(m: re.Match) -> str:
+        raw = m.group(0)
+        key = f"__PRT_EML_{len(tokens)}__"
+        tokens[key] = raw
+        return key
+
+    cleaned = EMAIL_PATTERN.sub(repl_email, cleaned)
+
+    def repl_url(m: re.Match) -> str:
+        raw = m.group(0)
+        trailing = ""
+        while raw and raw[-1] in ".,!?;:)":
+            trailing = raw[-1] + trailing
+            raw = raw[:-1]
+        key = f"__PRT_URL_{len(tokens)}__"
+        tokens[key] = raw
+        return key + trailing
+
+    cleaned = URL_PATTERN.sub(repl_url, cleaned)
 
     # 1. Repeated adjacent words (e.g. 'the the', 'to to', 'you you')
     def fix_repeated_words(m):
@@ -161,5 +195,9 @@ def lint_and_fix_body(text: str) -> tuple[str, list[dict]]:
             "replacement": "{{1}} {{2}}",
         })
         cleaned = re.sub(r'(\{\{\d+\}\})\s*(\{\{\d+\}\})', r'\1 \2', cleaned)
+    # Restore protected URLs and Emails
+    for k, v in tokens.items():
+        cleaned = cleaned.replace(k, v)
+
 
     return cleaned, warnings

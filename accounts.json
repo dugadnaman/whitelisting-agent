@@ -1,0 +1,12 @@
+[
+  {
+    "id": "bajaj",
+    "name": "Bajaj Finserv",
+    "is_builtin": true
+  },
+  {
+    "id": "tata",
+    "name": "Tata Capital",
+    "is_builtin": true
+  }
+]

@@ -59,30 +59,27 @@ def _account_prefix(client: str) -> str:
 def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
     """
     Build HTTP headers for the legacy portal media-upload endpoint.
+    Strictly isolated per account. Never cross-contaminates another account.
     """
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
-    if c == "tata":
-        bearer = os.environ.get("TATA_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
-        session = os.environ.get("TATA_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
-        user = os.environ.get("TATA_KARIX_USER") or os.environ.get("KARIX_USER")
-    elif c == "bajaj":
+    if c == "bajaj":
         bearer = os.environ.get("BAJAJ_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
         session = os.environ.get("BAJAJ_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
         user = os.environ.get("BAJAJ_KARIX_USER") or os.environ.get("KARIX_USER")
     else:
-        bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
-        session = os.environ.get(f"{prefix}_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
-        user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get("KARIX_USER")
+        bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+        session = os.environ.get(f"{prefix}_KARIX_SESSION")
+        user = os.environ.get(f"{prefix}_KARIX_USER")
 
     missing = []
     if not bearer:
-        missing.append(f"{prefix}_KARIX_BEARER_TOKEN" if c not in ("bajaj", "tata") else ("TATA_KARIX_BEARER_TOKEN" if c == "tata" else "KARIX_BEARER_TOKEN"))
+        missing.append(f"{prefix}_KARIX_BEARER_TOKEN" if c != "bajaj" else "BAJAJ_KARIX_BEARER_TOKEN")
     if not session:
-        missing.append(f"{prefix}_KARIX_SESSION" if c not in ("bajaj", "tata") else ("TATA_KARIX_SESSION" if c == "tata" else "KARIX_SESSION"))
+        missing.append(f"{prefix}_KARIX_SESSION" if c != "bajaj" else "BAJAJ_KARIX_SESSION")
     if not user:
-        missing.append(f"{prefix}_KARIX_USER" if c not in ("bajaj", "tata") else ("TATA_KARIX_USER" if c == "tata" else "KARIX_USER"))
+        missing.append(f"{prefix}_KARIX_USER" if c != "bajaj" else "BAJAJ_KARIX_USER")
     if missing:
         raise OSError(
             f"Missing required Karix portal credentials for {client}: {', '.join(missing)}. "
@@ -154,31 +151,30 @@ def get_esmeaddr(client: str = "bajaj") -> str:
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
     if c == "tata":
-        val = os.environ.get("TATA_ESMEADDR")
-        if not val:
-            import re
-            token = os.environ.get("TATA_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN") or ""
-            m = re.search(r"(\d{10,16})", token)
-            if m:
-                return m.group(1)
-            return "72516600000000"
-        return val
+        return os.environ.get("TATA_ESMEADDR") or "72516600000000"
     elif c == "bajaj":
-        return os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
+        return os.environ.get("BAJAJ_ESMEADDR") or os.environ.get("ESMEADDR") or BAJAJ_ESMEADDR
     else:
-        return os.environ.get(f"{prefix}_ESMEADDR") or os.environ.get("BAJAJ_ESMEADDR") or BAJAJ_ESMEADDR
+        val = os.environ.get(f"{prefix}_ESMEADDR")
+        if val:
+            return val
+        raise OSError(f"Missing required ESME address for {client} ({prefix}_ESMEADDR).")
 
 def get_template_namespace_id(client: str = "bajaj") -> str:
     """Return template namespace ID for the given client."""
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
-    if c == "tata":
-        return os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") or os.environ.get("TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
-    elif c == "bajaj":
-        return os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
+    if c == "bajaj":
+        return os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID") or os.environ.get("TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
     else:
-        return os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID") or os.environ.get("TEMPLATE_NAMESPACE_ID") or BAJAJ_TEMPLATE_NAMESPACE_ID
+        val = os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
+        if val:
+            return val
+        raise OSError(
+            f"Missing required Template Namespace ID for {client} ({prefix}_TEMPLATE_NAMESPACE_ID). "
+            f"Please configure it in Settings under {client}."
+        )
 # ---------------------------------------------------------------------------
 # Fixed constants — same for every request on this Bajaj WABA account.
 # ---------------------------------------------------------------------------

@@ -40,20 +40,16 @@ def test_check_status():
     print()
 
     # Assertions
-    if approval_status == ApprovalStatus.UNKNOWN:
-        print("✗ FAIL: Got UNKNOWN — likely an auth/transport error.")
-        print(f"  Raw response: {json.dumps(raw, indent=2, default=str)[:1000]}")
-        return False
-
-    if raw.get("template_name") != KNOWN_TEMPLATE_NAME:
-        print(f"✗ FAIL: Expected template_name={KNOWN_TEMPLATE_NAME!r}, "
-              f"got {raw.get('template_name')!r}")
-        return False
+    assert approval_status != ApprovalStatus.UNKNOWN, (
+        f"Got UNKNOWN — likely an auth/transport error. Raw: {json.dumps(raw, indent=2, default=str)[:1000]}"
+    )
+    assert raw.get("template_name") == KNOWN_TEMPLATE_NAME, (
+        f"Expected template_name={KNOWN_TEMPLATE_NAME!r}, got {raw.get('template_name')!r}"
+    )
 
     print(f"✓ check_status returned: {approval_status.value}")
     print(f"✓ Template name: {raw.get('template_name')}")
     print(f"✓ Status reason: {reason}")
-    return True
 
 
 def test_list_all_templates():
@@ -66,19 +62,14 @@ def test_list_all_templates():
 
     print("\n--- Listing all templates (summary via Official API) ---\n")
 
-    try:
-        headers = get_official_auth_headers()
-        resp = requests.get(
-            f"{OFFICIAL_TEMPLATE_BASE_URL}/{BAJAJ_WABA_ID}",
-            headers=headers,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except (requests.RequestException, ValueError) as e:
-        print(f"✗ Failed to list templates: {e}")
-        return False
-
+    headers = get_official_auth_headers()
+    resp = requests.get(
+        f"{OFFICIAL_TEMPLATE_BASE_URL}/{BAJAJ_WABA_ID}",
+        headers=headers,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
     templates = data.get("response", {}).get("templates", [])
 
     print(f"  Total templates: {len(templates)}\n")
@@ -90,7 +81,7 @@ def test_list_all_templates():
         print(f"  ... and {len(templates) - 20} more")
 
     print()
-    return True
+    assert len(templates) > 0, "Expected at least one template returned from WABA"
 
 
 if __name__ == "__main__":
@@ -100,13 +91,12 @@ if __name__ == "__main__":
         print("  Set it in .env or your environment with your official Karix API token.")
         sys.exit(1)
 
-    ok = True
-    ok = test_check_status() and ok
-    ok = test_list_all_templates() and ok
-
-    print()
-    if ok:
+    try:
+        test_check_status()
+        test_list_all_templates()
+        print()
         print("=== ALL TESTS PASSED ===")
-    else:
+    except AssertionError as e:
+        print(f"✗ FAIL: {e}")
         print("=== SOME TESTS FAILED ===")
         sys.exit(1)

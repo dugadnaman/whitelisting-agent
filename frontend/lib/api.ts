@@ -444,3 +444,33 @@ export async function registerUser(name: string, role: string = "Operator"): Pro
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export type AgentChatAction = {
+  tool: string;
+  target?: string;
+  result?: unknown;
+  [key: string]: unknown;
+};
+
+export type AgentChatResponse = {
+  reply: string;
+  actions_taken: AgentChatAction[];
+  suggested_actions: string[];
+  data?: unknown;
+};
+
+export async function sendAgentMessage(
+  message: string,
+  account: Account = "bajaj",
+  channel: Channel = "whatsapp",
+  user: string = "Operator",
+  history: Array<{ role: string; content: string }> = []
+): Promise<AgentChatResponse> {
+  const res = await fetchWithRetry(getApiUrl("/api/agent/chat"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, account, channel, user, history }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}

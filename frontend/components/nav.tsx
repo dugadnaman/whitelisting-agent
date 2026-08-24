@@ -158,6 +158,21 @@ export default function Nav() {
             </Link>
           );
         })}
+
+        {/* AI Copilot Trigger */}
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('toggle-copilot'))}
+          className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors group text-left mt-2"
+        >
+          <div className="flex items-center gap-3">
+            <span className="w-4 h-4 text-emerald-600">✨</span>
+            <span>AI Copilot</span>
+          </div>
+          <kbd className="px-1.5 py-0.5 bg-gray-100 text-[10px] text-gray-500 rounded font-mono border border-gray-200 group-hover:bg-white transition">
+            ⌘K
+          </kbd>
+        </button>
       </nav>
 
       {/* Footer Info */}

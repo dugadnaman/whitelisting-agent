@@ -24,6 +24,7 @@ submission_log.jsonl
 rcs_submission_log.jsonl
 activity_log.jsonl
 
+karix_store.db*
 # Scratch/Local configs
 scratch/
 .DS_Store

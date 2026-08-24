@@ -75,27 +75,36 @@ def get_rcs_entity_id(client: str = "tata") -> str:
 def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
     """
     Build the HTTP headers required for official Karix RCS Bot Builder requests.
-    Uses Bearer authorization with session fallback.
+    Strictly isolated per client account. Never leaks credentials across accounts.
     """
     _load_env_file()
     c = (client or "tata").lower().strip()
     prefix = _account_prefix(c)
 
-    bearer = (
-        os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
-        or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
-        or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
-        or os.environ.get(f"{prefix}_AUTH_TOKEN")
-        or (os.environ.get("TATA_WABA_AUTH_TOKEN") if c == "tata" else None)
-        or (os.environ.get("BAJAJ_WABA_AUTH_TOKEN") if c == "bajaj" else None)
-        or os.environ.get("KARIX_BEARER_TOKEN")
-        or os.environ.get("WABA_AUTH_TOKEN")
-    )
+    if c == "bajaj":
+        bearer = (
+            os.environ.get("BAJAJ_RCS_AUTH_TOKEN")
+            or os.environ.get("BAJAJ_KARIX_BEARER_TOKEN")
+            or os.environ.get("BAJAJ_WABA_AUTH_TOKEN")
+            or os.environ.get("KARIX_BEARER_TOKEN")
+            or os.environ.get("WABA_AUTH_TOKEN")
+        )
+        session = os.environ.get("BAJAJ_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
+        user = os.environ.get("BAJAJ_KARIX_USER") or os.environ.get("KARIX_USER")
+    else:
+        bearer = (
+            os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
+            or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+            or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
+            or os.environ.get(f"{prefix}_AUTH_TOKEN")
+        )
+        session = os.environ.get(f"{prefix}_KARIX_SESSION")
+        user = os.environ.get(f"{prefix}_KARIX_USER")
 
     if not bearer:
         raise OSError(
-            f"Missing required RCS Bearer token for {client}. "
-            "Please enter Bearer Token in Settings."
+            f"Missing required RCS Bearer token for {client} ({prefix}_KARIX_BEARER_TOKEN or {prefix}_RCS_AUTH_TOKEN). "
+            f"Please enter Bearer Token in Settings under {client}."
         )
     headers = {
         "Authorization": f"Bearer {bearer.strip()}",
@@ -105,9 +114,6 @@ def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
         "Referer": "https://rcmui.instaalerts.zone/",
     }
 
-    # If session header is available, include it
-    session = os.environ.get(f"{prefix}KARIX_SESSION") or os.environ.get("KARIX_SESSION")
-    user = os.environ.get(f"{prefix}KARIX_USER") or os.environ.get("KARIX_USER")
     if session:
         headers["Session"] = session.strip()
     if user:

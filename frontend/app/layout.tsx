@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import Nav from '@/components/nav';
+import ChatWidget from '@/components/chat-widget';
 import { AppProvider } from '@/lib/context';
 
 const inter = Inter({ subsets: ['latin'] });
@@ -22,6 +23,7 @@ export default function RootLayout({
         <AppProvider>
           <Nav />
           <main className="ml-64 p-8">{children}</main>
+          <ChatWidget />
         </AppProvider>
       </body>
     </html>

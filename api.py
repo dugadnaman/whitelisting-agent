@@ -1251,3 +1251,34 @@ def record_custom_activity(
         status="success",
     )
     return _json_safe(rec)
+
+# ---------------------------------------------------------------------------
+# Autonomous Agent Endpoint
+# ---------------------------------------------------------------------------
+
+from agent import agent_instance
+
+class AgentChatRequest(BaseModel):
+    message: str
+    account: str = "bajaj"
+    channel: str = "whatsapp"
+    user: str = "Operator"
+    history: list[dict] = []
+
+@app.post("/api/agent/chat")
+def agent_chat_endpoint(req: AgentChatRequest):
+    """
+    Autonomous Whitelisting Agent endpoint.
+    Accepts natural-language commands to diagnose rejections, auto-remediate copy,
+    resubmit compliant templates, inspect catalogs, and sync approvals.
+    """
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    
+    res = agent_instance.execute_instruction(
+        instruction=req.message,
+        account=req.account,
+        channel=req.channel,
+        user=req.user,
+    )
+    return _json_safe(res)
