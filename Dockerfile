@@ -30,7 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python backend dependencies
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-
+RUN playwright install --with-deps chromium
 # Copy Python backend code, data, initial logs, and credentials
 COPY *.py ./
 COPY *.csv ./

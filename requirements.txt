@@ -5,3 +5,4 @@ requests
 openpyxl
 python-dotenv
 Pillow
+playwright

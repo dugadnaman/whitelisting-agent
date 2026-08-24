@@ -14,6 +14,7 @@ from typing import Any
 
 from activity_tracker import log_activity
 from grammar_checker import lint_and_fix_body
+from loader import _row_to_submission
 from models import TemplateSubmission
 from rcs_models import RcsTemplateSubmission
 from rcs_client import submit_rcs_template, fetch_rcs_templates
@@ -146,19 +147,22 @@ def tool_diagnose_and_fix(
 
     if auto_resubmit:
         if channel == "whatsapp":
-            sub = TemplateSubmission(
-                source_ref=f"agent_fix_{new_name}",
-                template_name=new_name,
-                template_category=tmpl.get("category") or "UTILITY",
-                language=tmpl.get("language") or "en_US",
-                header_type=tmpl.get("header_type"),
-                header_text=tmpl.get("header_text"),
-                header_media_url=tmpl.get("header_media_url"),
-                body=fixed_body,
-                footer=tmpl.get("footer"),
-                buttons=tmpl.get("buttons") or [],
-                client=account,
-            )
+            comp_list = []
+            if tmpl.get("header_type"):
+                comp_list.append({"type": "HEADER", "format": tmpl.get("header_type"), "text": tmpl.get("header_text"), "media_url": tmpl.get("header_media_url")})
+            comp_list.append({"type": "BODY", "text": fixed_body})
+            if tmpl.get("footer"):
+                comp_list.append({"type": "FOOTER", "text": tmpl.get("footer")})
+            if tmpl.get("buttons"):
+                comp_list.append({"type": "BUTTONS", "buttons": tmpl.get("buttons")})
+
+            sub = _row_to_submission({
+                "template_name": new_name,
+                "category": tmpl.get("category") or "UTILITY",
+                "language": tmpl.get("language") or "en_US",
+                "components": comp_list,
+                "source_ref": f"agent_fix_{new_name}",
+            }, client=account)
             res = submit_template(sub, client=account)
             diagnosis["resubmitted"] = True
             diagnosis["submission_result"] = {
@@ -279,17 +283,20 @@ def tool_create_template(
     fixed_body, warnings = lint_and_fix_body(body)
 
     if channel == "whatsapp":
-        sub = TemplateSubmission(
-            source_ref=f"agent_create_{clean_name}",
-            template_name=clean_name,
-            template_category=category.upper(),
-            language="en_US",
-            header_type="TEXT" if header_text else None,
-            header_text=header_text,
-            body=fixed_body,
-            buttons=buttons or [],
-            client=account,
-        )
+        comp_list = []
+        if header_text:
+            comp_list.append({"type": "HEADER", "format": "TEXT", "text": header_text})
+        comp_list.append({"type": "BODY", "text": fixed_body})
+        if buttons:
+            comp_list.append({"type": "BUTTONS", "buttons": buttons})
+
+        sub = _row_to_submission({
+            "template_name": clean_name,
+            "category": category.upper(),
+            "language": "en_US",
+            "components": comp_list,
+            "source_ref": f"agent_create_{clean_name}",
+        }, client=account)
         res = submit_template(sub, client=account)
         return {
             "success": res.status in (SubmissionStatus.SUBMITTED, SubmissionStatus.PENDING, SubmissionStatus.DUPLICATE),
@@ -318,6 +325,11 @@ def tool_create_template(
         }
 
 
+def tool_refresh_session(account: str = "bajaj", user: str = "AI Agent") -> dict[str, Any]:
+    """Trigger browser automation to log into Karix portal and harvest fresh session credentials."""
+    from auth_refresher import refresh_karix_session
+    return refresh_karix_session(account=account, user_attribution=user)
+
 # ---------------------------------------------------------------------------
 # Agent Reasoning Engine & Intent Dispatcher
 # ---------------------------------------------------------------------------
@@ -343,7 +355,35 @@ class WhitelistingAgent:
         actions_taken = []
         suggested_actions = []
 
-        # 1. Text linting / copy checking: "fix grammar in: ...", "lint this copy: ...", "fix message:"
+        # 1. Re-login / session refresh: "refresh session", "relogin", "auto-login", "refresh token"
+        if any(w in text.lower() for w in ["refresh session", "relogin", "re-login", "refresh token", "refresh auth", "auto-login", "auto login", "login to karix", "portal login"]):
+            refresh_res = tool_refresh_session(account=account, user=user)
+            actions_taken.append({"tool": "refresh_karix_session", "result": refresh_res})
+            if refresh_res.get("success"):
+                reply = (
+                    f"### ⚡ Session Auto-Refreshed\n\n"
+                    f"Successfully logged into Karix portal via headless browser for **{account.title()}**.\n"
+                    f"• **Tokens Updated:** `{', '.join(refresh_res.get('tokens_updated', []))}`\n"
+                    f"• **Active Operator:** `{refresh_res.get('user', 'Portal User')}`\n\n"
+                    f"All subsequent template submissions will use these fresh credentials automatically."
+                )
+                suggested_actions = ["Poll approval status", "List rejected templates", "Check active catalog"]
+            else:
+                reply = (
+                    f"### ⚠️ Session Auto-Refresh Failed\n\n"
+                    f"{refresh_res.get('error')}\n\n"
+                    f"*Tip: Configure your Karix portal username and password under Settings to enable zero-touch session healing.*"
+                )
+                suggested_actions = ["List templates", "Poll approval status"]
+
+            return {
+                "reply": reply,
+                "actions_taken": actions_taken,
+                "suggested_actions": suggested_actions,
+                "data": refresh_res,
+            }
+
+        # 2. Text linting / copy checking: "fix grammar in: ...", "lint this copy: ...", "fix message:"
         if any(w in text.lower() for w in ["lint", "check grammar", "fix copy", "clean text", "fix message", "fix text", "check copy", "grammar in:"]) or (("fix" in text.lower() or "check" in text.lower()) and any(k in text.lower() for k in ["{{", "body:", "message:", "copy:"])):
             # Extract text payload
             raw_copy = text.split(":", 1)[1].strip() if ":" in text else text

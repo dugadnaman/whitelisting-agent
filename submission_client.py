@@ -732,6 +732,19 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 time.sleep(BACKOFF_SECONDS * (2 ** attempt))
             continue
 
+        # Self-healing check on 401 Unauthorized / Expired Session
+        if resp.status_code == 401 and not getattr(payload, "_auto_refreshed_auth", False):
+            logger.warning("Received 401 Unauthorized for %s (%s). Attempting self-healing auth refresh...", payload.template_name, c)
+            try:
+                from auth_refresher import refresh_karix_session
+                refresh_res = refresh_karix_session(account=c)
+                if refresh_res.get("success"):
+                    logger.info("Self-healing auth refresh succeeded! Retrying template submission for %s...", payload.template_name)
+                    setattr(payload, "_auto_refreshed_auth", True)
+                    return _submit_portal_template(payload, client=c)
+            except Exception as ref_exc:
+                logger.error("Self-healing auth attempt failed: %s", ref_exc)
+
         # Non-retryable error (400, 401, 403, etc.)
         if not resp.ok:
             return SubmissionResult(
@@ -745,7 +758,6 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 channel="whatsapp",
                 retry_count=attempt,
             )
-
         # 200 but Karix may still signal a logical failure
         # Check for {"Failed": "..."} or {"status": "failure"/"error"}
         if "Failed" in data:
@@ -880,6 +892,18 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
             if attempt < MAX_RETRIES - 1:
                 time.sleep(BACKOFF_SECONDS * (2 ** attempt))
             continue
+        # Self-healing check on 401 Unauthorized
+        if response.status_code == 401 and not getattr(payload, "_auto_refreshed_auth", False):
+            logger.warning("Received 401 on official API for %s (%s). Attempting self-healing auth refresh...", payload.template_name, c)
+            try:
+                from auth_refresher import refresh_karix_session
+                refresh_res = refresh_karix_session(account=c)
+                if refresh_res.get("success"):
+                    logger.info("Self-healing auth refresh succeeded! Retrying official template submission for %s...", payload.template_name)
+                    setattr(payload, "_auto_refreshed_auth", True)
+                    return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+            except Exception as ref_exc:
+                logger.error("Self-healing auth attempt failed: %s", ref_exc)
 
         if response.status_code != 201:
             return SubmissionResult(
@@ -893,7 +917,6 @@ def _submit_official_template(payload: TemplateSubmission, client: str = "bajaj"
                 channel="whatsapp",
                 retry_count=attempt,
             )
-
         template_id = str(data.get("templateId", "")).strip()
         if not template_id:
             return SubmissionResult(

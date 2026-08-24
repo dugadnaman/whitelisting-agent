@@ -1282,3 +1282,32 @@ def agent_chat_endpoint(req: AgentChatRequest):
         user=req.user,
     )
     return _json_safe(res)
+
+from auth_refresher import refresh_karix_session
+
+class AuthRefreshRequest(BaseModel):
+    account: str = "bajaj"
+    username: str | None = None
+    password: str | None = None
+    login_url: str | None = None
+    user: str = "Operator"
+
+@app.post("/api/auth/refresh")
+def auth_refresh_endpoint(req: AuthRefreshRequest):
+    """
+    Self-Healing Auth: Execute headless Playwright browser login to Karix portal,
+    harvest fresh Bearer, Session, and User tokens, and persist them.
+    """
+    res = refresh_karix_session(
+        account=req.account,
+        username=req.username,
+        password=req.password,
+        login_url=req.login_url,
+        user_attribution=req.user,
+    )
+    if not res.get("success"):
+        raise HTTPException(
+            status_code=400 if res.get("requires_credentials") else 500,
+            detail=res.get("error", "Auto-refresh failed"),
+        )
+    return _json_safe(res)
