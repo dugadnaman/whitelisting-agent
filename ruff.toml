@@ -18,5 +18,6 @@ ignore = [
 ]
 
 [lint.per-file-ignores]
+"tests/*.py" = ["B011", "F401", "E402"]
 "test_*.py" = ["B011", "F401", "E402"]
 "api.py" = ["E402"]

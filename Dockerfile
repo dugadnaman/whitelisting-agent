@@ -37,6 +37,10 @@ COPY *.csv ./
 COPY *.png ./
 COPY *.jsonl ./
 COPY *.json ./
+COPY default_sample_header.* ./
+COPY media_cache/ ./media_cache/
+COPY samples/ ./samples/
+COPY tests/ ./tests/
 COPY --from=frontend-builder /app/frontend /app/frontend
 
 # Setup supervisord configuration to run both FastAPI (8000) and Next.js (3000)
