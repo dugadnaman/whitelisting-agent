@@ -498,6 +498,7 @@ export default function SettingsPage() {
                 key={acc.id}
                 onClick={() => {
                   setSelectedAccount(acc.id);
+                  setActiveAccount(acc.id);
                   setBanner(null);
                 }}
                 className={`group relative p-3 rounded-xl border text-left cursor-pointer transition-all ${

@@ -83,11 +83,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   // Authenticate user on mount
+  // Authenticate user on initial mount
   useEffect(() => {
     let ignore = false;
 
     async function checkAuth() {
-      const isAuthPage = pathname === '/login' || pathname === '/signup';
+      const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/signup';
       const token = getAuthToken();
 
       if (!token) {
@@ -106,16 +107,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCurrentUser(userProfile);
         setUserState(userProfile.name || userProfile.email);
 
-        // Lock tenant to user's assigned organization
-        if (userProfile.tenant_id && userProfile.tenant_id !== 'all') {
-          setAccountState(userProfile.tenant_id);
-          try {
-            localStorage.setItem('karix_account', userProfile.tenant_id);
-          } catch {}
+        // Load saved account preference if valid for tenant
+        const savedAccount = localStorage.getItem('karix_account');
+        if (savedAccount && savedAccount.trim()) {
+          if (userProfile.tenant_id === 'tata') {
+            const isTataSub = ['tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(
+              savedAccount.toLowerCase()
+            );
+            if (isTataSub) {
+              setAccountState(savedAccount);
+            } else {
+              setAccountState('tchfl');
+            }
+          } else if (userProfile.tenant_id === 'bajaj') {
+            setAccountState('bajaj');
+          } else {
+            setAccountState(savedAccount);
+          }
         } else {
-          // Superadmin can use saved preference
-          const savedAccount = localStorage.getItem('karix_account');
-          if (savedAccount) setAccountState(savedAccount);
+          setAccountState(userProfile.tenant_id === 'tata' ? 'tchfl' : userProfile.tenant_id || 'bajaj');
         }
 
         const savedChannel = localStorage.getItem('karix_channel') as Channel;
@@ -144,7 +154,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       ignore = true;
     };
-  }, [pathname, router, refreshAccounts]);
+  }, [router, refreshAccounts]);
 
   const setAccount = (newAccount: Account) => {
     if (accounts.length > 0 && !accounts.some((a) => a.id.toLowerCase() === newAccount.toLowerCase())) {
