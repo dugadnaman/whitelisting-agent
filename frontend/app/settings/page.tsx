@@ -41,8 +41,8 @@ export default function SettingsPage() {
   const [showPortalCreds, setShowPortalCreds] = useState(false);
   const [portalUsername, setPortalUsername] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
+  const [templateNamespaceId, setTemplateNamespaceId] = useState('');
   const [refreshingSession, setRefreshingSession] = useState(false);
-  // RCS form fields
   const [entityId, setEntityId] = useState('');
   const [loungeCookie, setLoungeCookie] = useState('');
 
@@ -71,9 +71,14 @@ export default function SettingsPage() {
           setBearerToken(creds.bearer_token || '');
           setSession(creds.session || '');
           setUser(creds.user || '');
+          setPortalUsername(creds.portal_username || '');
+          setPortalPassword(creds.portal_password || '');
+          setTemplateNamespaceId(creds.template_namespace_id || '');
         } else {
           setEntityId(creds.entity_id || '');
           setLoungeCookie(creds.lounge_cookie || '');
+          setPortalUsername(creds.portal_username || '');
+          setPortalPassword(creds.portal_password || '');
         }
       } catch {
         if (ignore) return;
@@ -222,12 +227,14 @@ export default function SettingsPage() {
         bearer_token: bearerToken.trim() || undefined,
         session: session.trim() || undefined,
         user: user.trim() || undefined,
+        portal_username: portalUsername.trim() || undefined,
+        portal_password: portalPassword.trim() || undefined,
+        template_namespace_id: templateNamespaceId.trim() || undefined,
         entity_id: entityId.trim() || undefined,
         lounge_cookie: loungeCookie.trim() || undefined,
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
-
       // Save to localStorage cache so it never vanishes on page refresh
       try {
         const cacheKey = `karix_creds_${selectedAccount}_${selectedChannel}`;

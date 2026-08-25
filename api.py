@@ -219,7 +219,7 @@ class UserRegister(BaseModel):
 
 
 class CredentialUpdate(BaseModel):
-    account: str = "bajaj"  # e.g. "bajaj", "tata", or any custom account id
+    account: str = "bajaj"  # e.g. "bajaj", "tata", "tchfl", etc.
     channel: str = "whatsapp"  # "whatsapp" | "rcs"
     waba_auth_token: str | None = None
     waba_id: str | None = None
@@ -227,6 +227,9 @@ class CredentialUpdate(BaseModel):
     session: str | None = None
     user: str | None = None
     user_name: str | None = None  # Who is performing the update
+    portal_username: str | None = None
+    portal_password: str | None = None
+    template_namespace_id: str | None = None
     entity_id: str | None = None
     lounge_cookie: str | None = None
 
@@ -1168,13 +1171,42 @@ def get_credentials(
         else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
     )
 
-    waba_id = os.environ.get(w_id_key) or (BAJAJ_WABA_ID if is_bajaj else "")
-    waba_auth_token = os.environ.get(w_tok_key) or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else "")
-    bearer_token = os.environ.get(b_tok_key) or (os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else "")
-    session = os.environ.get(s_key) or (os.environ.get("KARIX_SESSION") if is_bajaj else "")
-    user = os.environ.get(u_key) or (os.environ.get("KARIX_USER") if is_bajaj else "")
-    entity_id = os.environ.get(e_id_key) or ("110100001654" if is_bajaj else ("1001490234791338781" if is_tata else ""))
+    waba_id = os.environ.get(w_id_key) or (
+        BAJAJ_WABA_ID if is_bajaj else ("286109054585247" if acc in TATA_SUB_ACCOUNTS else "")
+    )
+    waba_auth_token = os.environ.get(w_tok_key) or (
+        os.environ.get("WABA_AUTH_TOKEN")
+        if is_bajaj
+        else (os.environ.get("TATA_WABA_AUTH_TOKEN") if acc in TATA_SUB_ACCOUNTS else "")
+    )
+    bearer_token = os.environ.get(b_tok_key) or (
+        os.environ.get("KARIX_BEARER_TOKEN")
+        if is_bajaj
+        else (os.environ.get("TATA_KARIX_BEARER_TOKEN") if acc in TATA_SUB_ACCOUNTS else "")
+    )
+    session = os.environ.get(s_key) or (
+        os.environ.get("KARIX_SESSION")
+        if is_bajaj
+        else (os.environ.get("TATA_KARIX_SESSION") if acc in TATA_SUB_ACCOUNTS else "")
+    )
+    user = os.environ.get(u_key) or (
+        os.environ.get("KARIX_USER")
+        if is_bajaj
+        else (os.environ.get("TATA_KARIX_USER") if acc in TATA_SUB_ACCOUNTS else "")
+    )
+    entity_id = os.environ.get(e_id_key) or ("110100001654" if is_bajaj else "1001490234791338781")
     lounge_cookie = os.environ.get(l_ck_key) or (os.environ.get("KARIX_LOUNGE_COOKIE") if is_bajaj else "")
+    portal_username = os.environ.get(f"{prefix}_PORTAL_USER") or (
+        os.environ.get("TATA_PORTAL_USER") if acc in TATA_SUB_ACCOUNTS else ""
+    )
+    portal_password = os.environ.get(f"{prefix}_PORTAL_PASSWORD") or (
+        os.environ.get("TATA_PORTAL_PASSWORD") if acc in TATA_SUB_ACCOUNTS else ""
+    )
+    template_namespace_id = (
+        os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
+        or (os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") if acc in TATA_SUB_ACCOUNTS else "")
+        or "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
+    )
 
     return {
         "account": acc,
@@ -1184,6 +1216,9 @@ def get_credentials(
         "bearer_token": bearer_token or "",
         "session": session or "",
         "user": user or "",
+        "portal_username": portal_username or "",
+        "portal_password": portal_password or "",
+        "template_namespace_id": template_namespace_id or "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5",
         "entity_id": entity_id or "",
         "lounge_cookie": lounge_cookie or "",
         "is_configured": bool(waba_id and waba_auth_token) if chan == "whatsapp" else bool(entity_id),
@@ -1237,7 +1272,21 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
             val = creds.user.strip()
             mapping[key] = val
             os.environ[key] = val
-    elif chan == "rcs":
+        if creds.portal_username is not None and creds.portal_username.strip():
+            key = f"{prefix}_PORTAL_USER"
+            val = creds.portal_username.strip()
+            mapping[key] = val
+            os.environ[key] = val
+        if creds.portal_password is not None and creds.portal_password.strip():
+            key = f"{prefix}_PORTAL_PASSWORD"
+            val = creds.portal_password.strip()
+            mapping[key] = val
+            os.environ[key] = val
+        if creds.template_namespace_id is not None and creds.template_namespace_id.strip():
+            key = f"{prefix}_TEMPLATE_NAMESPACE_ID"
+            val = creds.template_namespace_id.strip()
+            mapping[key] = val
+            os.environ[key] = val
         if creds.entity_id is not None and creds.entity_id.strip():
             key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
             val = creds.entity_id.strip()

@@ -349,6 +349,9 @@ export async function fetchCredentials(
   bearer_token: string;
   session: string;
   user: string;
+  portal_username?: string;
+  portal_password?: string;
+  template_namespace_id?: string;
   entity_id: string;
   lounge_cookie: string;
   is_configured: boolean;
@@ -368,6 +371,9 @@ export async function updateCredentials(creds: {
   session?: string;
   user?: string;
   user_name?: string;
+  portal_username?: string;
+  portal_password?: string;
+  template_namespace_id?: string;
   entity_id?: string;
   lounge_cookie?: string;
 }): Promise<{ ok: boolean }> {
