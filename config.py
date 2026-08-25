@@ -133,13 +133,7 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     if c == "bajaj":
         token = os.environ.get("BAJAJ_WABA_AUTH_TOKEN") or os.environ.get("WABA_AUTH_TOKEN")
     else:
-        token = (
-            os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
-            or os.environ.get(f"{prefix}_AUTH_TOKEN")
-            or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
-            or os.environ.get("TATA_WABA_AUTH_TOKEN")
-            or os.environ.get("TATA_KARIX_BEARER_TOKEN")
-        )
+        token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN") or os.environ.get("TATA_WABA_AUTH_TOKEN")
 
     if not token:
         expected_key = f"{prefix}_WABA_AUTH_TOKEN" if c != "bajaj" else "BAJAJ_WABA_AUTH_TOKEN"

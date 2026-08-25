@@ -1085,30 +1085,50 @@ def submit_template(
 ) -> SubmissionResult:
     """
     Submit one template to Karix and return the result.
-    Primary: Uses Official WABA Template API (with direct WABA media handle upload).
-    Fallback: Uses Portal API if official credentials are missing and portal session exists.
+    If portal session credentials exist, uses Portal API.
+    If official WABA static token exists, uses Official API.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
 
-    # 1. Primary: Official WABA API (supported for all template types including media headers)
-    try:
-        get_official_auth_headers(c)
-        res = _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
-        if res.status == SubmissionStatus.SUBMITTED or (
-            res.error and "Unauthorised" not in str(res.error) and "Missing required" not in str(res.error)
-        ):
-            return res
-    except OSError:
-        pass
-
-    # 2. Fallback: Portal API if official token is missing
+    # 1. Primary for accounts with Portal Session: Portal API
     try:
         get_portal_auth_headers(c)
-        return _submit_portal_template(payload, client=c)
+        portal_res = _submit_portal_template(payload, client=c)
+        if portal_res.status == SubmissionStatus.SUBMITTED:
+            return portal_res
+        if (
+            portal_res.error
+            and "Unauthorised" not in str(portal_res.error)
+            and "Missing required" not in str(portal_res.error)
+        ):
+            return portal_res
     except OSError:
         pass
 
-    return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+    # 2. Try Official WABA API if official token is configured
+    try:
+        get_official_auth_headers(c)
+        official_res = _submit_official_template(
+            payload,
+            client=c,
+            fix_aspect_ratio=fix_aspect_ratio,
+            fix_grammar=fix_grammar,
+        )
+        if official_res.status == SubmissionStatus.SUBMITTED:
+            return official_res
+    except OSError:
+        pass
+
+    # 3. Final fallback
+    try:
+        return _submit_portal_template(payload, client=c)
+    except Exception:
+        return _submit_official_template(
+            payload,
+            client=c,
+            fix_aspect_ratio=fix_aspect_ratio,
+            fix_grammar=fix_grammar,
+        )
 
 
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
