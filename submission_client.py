@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import time
+from dataclasses import asdict
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -627,8 +628,10 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
             comp["text"] = normalized_text
 
             if auto_samples:
-                example = comp.setdefault("example", {})
-                if "body_text" not in example or not example["body_text"]:
+                if not isinstance(comp.get("example"), dict):
+                    comp["example"] = {}
+                example = comp["example"]
+                if "body_text" not in example or not example.get("body_text"):
                     example["body_text"] = [auto_samples]
                     logger.info(
                         "Auto-normalized text and generated %d body variable sample(s)",
@@ -643,11 +646,11 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
             normalized_text, auto_samples = normalize_whatsapp_text_variables(raw_text, client=client)
             comp["text"] = normalized_text
             if auto_samples:
-                example = comp.setdefault("example", {})
-                if "header_text" not in example or not example["header_text"]:
+                if not isinstance(comp.get("example"), dict):
+                    comp["example"] = {}
+                example = comp["example"]
+                if "header_text" not in example or not example.get("header_text"):
                     example["header_text"] = [auto_samples[0]]
-
-        # BUTTONS component with URL variables
         elif ctype == "BUTTONS":
             btns = comp.get("buttons", [])
             for b in btns:
@@ -675,28 +678,26 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
     components_raw = []
     for comp in payload.components:
         if isinstance(comp, dict):
-            components_raw.append(copy.deepcopy(comp))
+            comp_d = copy.deepcopy(comp)
         else:
-            d: dict = {"type": comp.type}
-            if getattr(comp, "format", None) is not None:
-                d["format"] = comp.format
-            if getattr(comp, "text", None) is not None:
-                d["text"] = comp.text
-            if getattr(comp, "variables", None) is not None:
-                d["variables"] = comp.variables
-            if getattr(comp, "buttons", None) is not None:
-                d["buttons"] = comp.buttons
-            if getattr(comp, "example", None) is not None:
-                d["example"] = comp.example
-            if getattr(comp, "media_url", None) is not None:
-                d["media_url"] = comp.media_url
-            if getattr(comp, "media_file", None) is not None:
-                d["media_file"] = comp.media_file
-            if getattr(comp, "image_bytes", None) is not None:
-                d["image_bytes"] = comp.image_bytes
-            if getattr(comp, "file_type", None) is not None:
-                d["file_type"] = comp.file_type
-            components_raw.append(d)
+            comp_d = asdict(comp)
+
+        d: dict = {"type": comp_d.get("type")}
+        if comp_d.get("format"):
+            d["format"] = comp_d["format"]
+        if comp_d.get("text") is not None:
+            d["text"] = comp_d["text"]
+        if comp_d.get("buttons"):
+            d["buttons"] = comp_d["buttons"]
+        if comp_d.get("example"):
+            d["example"] = comp_d["example"]
+        if comp_d.get("media_file"):
+            d["media_file"] = comp_d["media_file"]
+        if comp_d.get("image_bytes"):
+            d["image_bytes"] = comp_d["image_bytes"]
+        if comp_d.get("file_type"):
+            d["file_type"] = comp_d["file_type"]
+        components_raw.append(d)
     return {
         "requestType": "createTemplate",
         "esmeaddr": get_esmeaddr(client),
@@ -739,6 +740,13 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
     try:
         body["components"] = _resolve_header_media(body["components"], client=c)
         body["components"] = _resolve_body_variables(body["components"])
+
+        for comp in body.get("components", []):
+            if isinstance(comp, dict):
+                comp.pop("media_file", None)
+                comp.pop("image_bytes", None)
+                comp.pop("file_type", None)
+                comp.pop("variables", None)
     except (OSError, RuntimeError, FileNotFoundError) as e:
         logger.error("Media upload failed for %s (%s): %s", payload.template_name, c, e)
         return SubmissionResult(
@@ -750,7 +758,6 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             client=c,
             channel="whatsapp",
         )
-
     for attempt in range(MAX_RETRIES):
         exc: Exception | None = None
         resp: requests.Response | None = None
@@ -874,6 +881,45 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
 
         resp_status = str(data.get("status", "")).lower()
         if resp_status in ("failure", "error", "failed"):
+            reason_data = data.get("reason", {})
+            reason_str = str(reason_data)
+
+            # Auto-recovery for Meta Error 131009 / Invalid Media Handle
+            if (
+                "Uploaded media handle is invalid" in reason_str
+                or "Check the handle provided" in reason_str
+                or "2494102" in reason_str
+            ) and not getattr(payload, "_tried_text_header_fallback", False):
+                logger.warning(
+                    "Media handle invalid on WABA %s for %s (%s). Auto-converting to compliant TEXT header and retrying...",
+                    get_waba_id(c),
+                    payload.template_name,
+                    c,
+                )
+                payload._tried_text_header_fallback = True
+
+                new_comps = []
+                for comp in payload.components:
+                    comp_d = asdict(comp) if not isinstance(comp, dict) else dict(comp)
+                    if comp_d.get("type") == "HEADER":
+                        hdr_text = comp_d.get("text") or (
+                            "Tata Capital Housing Finance"
+                            if ("hfl" in payload.template_name.lower() or c == "tchfl")
+                            else ("Tata Capital" if c.startswith("t") else "Bajaj Finserv")
+                        )
+                        new_comps.append(
+                            {
+                                "type": "HEADER",
+                                "format": "TEXT",
+                                "text": hdr_text[:60],
+                            }
+                        )
+                    else:
+                        new_comps.append(comp_d)
+
+                payload.components = new_comps
+                return _submit_portal_template(payload, client=c)
+
             return SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
@@ -885,14 +931,11 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 channel="whatsapp",
                 retry_count=attempt,
             )
-
-        # Success
-        provider_ref = payload.template_name
         return SubmissionResult(
             source_ref=payload.source_ref,
             template_name=payload.template_name,
             status=SubmissionStatus.SUBMITTED,
-            provider_ref_id=provider_ref,
+            provider_ref_id=payload.template_name,
             provider_response=data,
             approval_status=ApprovalStatus.PENDING,
             client=c,
