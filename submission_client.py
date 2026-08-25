@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -94,8 +95,43 @@ FALLBACK_PLACEHOLDER_VIDEO_HANDLE = "4::dmlkZW8vbXA0:ARZtyVaCTL6vxhfjdYm26r3hB7n
 FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE = "4::YXBwbGljYXRpb24vcGRm:ARagUnYcCe-_Jwa2bxH7KdPu3w9f-CMLaBRiHDj67GJ_71h7lWlu1kP0SujG4rIolI8cKNOzvm0q73cl7iIjykI0VY64qGMHRsWPRW1_QMEHXg:e:1787465292:379138877290302:100066839164237:ARabH-vpch9ACwHceRc"
 FALLBACK_PLACEHOLDER_HEADER_HANDLE = FALLBACK_PLACEHOLDER_IMAGE_HANDLE
 
+# Karix portal drops/throttles concurrent media uploads (observed: 4/18 fail at
+# 10 workers). Throttle uploads globally and retry transient failures.
+_MEDIA_UPLOAD_GATE = threading.Semaphore(2)
+_MEDIA_UPLOAD_ATTEMPTS = 3
+
 
 def upload_media(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
+    """
+    Upload media with concurrency throttling and retries.
+    See _upload_media_once for the underlying two-path upload logic.
+    """
+    last_err: RuntimeError | None = None
+    for attempt in range(_MEDIA_UPLOAD_ATTEMPTS):
+        try:
+            with _MEDIA_UPLOAD_GATE:
+                return _upload_media_once(file_path, file_type, client)
+        except RuntimeError as e:
+            last_err = e
+            # Auth/config errors (missing token) will never succeed on retry
+            if "Missing required" in str(e):
+                raise
+            if attempt < _MEDIA_UPLOAD_ATTEMPTS - 1:
+                wait = BACKOFF_SECONDS * (2**attempt)
+                logger.warning(
+                    "Media upload attempt %d/%d failed for %s (%s): %s — retrying in %ss",
+                    attempt + 1,
+                    _MEDIA_UPLOAD_ATTEMPTS,
+                    Path(str(file_path or "")).name or "sample",
+                    client,
+                    str(e)[:200],
+                    wait,
+                )
+                time.sleep(wait)
+    raise last_err  # type: ignore[misc]
+
+
+def _upload_media_once(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
     """
     Upload a media file to Karix/Meta using Karix's Official Template Media API:
     POST https://rcsgui.karix.solutions/api/v1.0/template/{wabaId}/media
