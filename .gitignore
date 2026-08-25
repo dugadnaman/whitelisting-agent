@@ -28,3 +28,4 @@ karix_store.db*
 # Scratch/Local configs
 scratch/
 .DS_Store
+omp-session-*.html
