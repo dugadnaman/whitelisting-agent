@@ -1085,16 +1085,29 @@ def submit_template(
 ) -> SubmissionResult:
     """
     Submit one template to Karix and return the result.
-    When submitting media headers (IMAGE, VIDEO, DOCUMENT), uses Portal API if session
-    headers exist so Karix stores and displays the full-color creative thumbnail in the GUI.
+    Primary: Uses Official WABA Template API (with direct WABA media handle upload).
+    Fallback: Uses Portal API if official credentials are missing and portal session exists.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
-    if _requires_portal_media(payload):
-        try:
-            get_portal_auth_headers(c)
-            return _submit_portal_template(payload, client=c)
-        except OSError:
-            pass
+
+    # 1. Primary: Official WABA API (supported for all template types including media headers)
+    try:
+        get_official_auth_headers(c)
+        res = _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        if res.status == SubmissionStatus.SUBMITTED or (
+            res.error and "Unauthorised" not in str(res.error) and "Missing required" not in str(res.error)
+        ):
+            return res
+    except OSError:
+        pass
+
+    # 2. Fallback: Portal API if official token is missing
+    try:
+        get_portal_auth_headers(c)
+        return _submit_portal_template(payload, client=c)
+    except OSError:
+        pass
+
     return _submit_official_template(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
 
 
