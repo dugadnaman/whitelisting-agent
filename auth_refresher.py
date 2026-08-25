@@ -131,20 +131,13 @@ def refresh_karix_session(
     acc = account.lower().strip()
     prefix = _account_prefix(acc)
 
-    u = (
-        username
-        or os.environ.get(f"{prefix}_PORTAL_USER")
-        or os.environ.get("KARIX_PORTAL_USER")
-        or os.environ.get(f"{prefix}_USER")
-        or os.environ.get("KARIX_USER")
-    )
-    p = (
-        password
-        or os.environ.get(f"{prefix}_PORTAL_PASSWORD")
-        or os.environ.get("KARIX_PORTAL_PASSWORD")
-        or os.environ.get(f"{prefix}_PASSWORD")
-        or os.environ.get("KARIX_PASSWORD")
-    )
+    if acc == "bajaj":
+        u = username or os.environ.get("BAJAJ_PORTAL_USER") or os.environ.get("KARIX_PORTAL_USER")
+        p = password or os.environ.get("BAJAJ_PORTAL_PASSWORD") or os.environ.get("KARIX_PORTAL_PASSWORD")
+    else:
+        # Strict tenant separation: only this account's own portal login.
+        u = username or os.environ.get(f"{prefix}_PORTAL_USER")
+        p = password or os.environ.get(f"{prefix}_PORTAL_PASSWORD")
     target_url = login_url or os.environ.get(f"{prefix}_PORTAL_URL") or KARIX_PORTAL_LOGIN_URLS[0]
 
     if not u or not p:

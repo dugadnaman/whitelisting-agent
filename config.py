@@ -27,8 +27,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+_PREEXISTING_ENV = frozenset(os.environ.keys())
+
+
 def _load_env_file():
-    """Load key-value pairs from credentials.json and .env file if present."""
+    """Load key-value pairs from credentials.json and .env file if present.
+
+    Precedence: real environment variables (e.g. Render dashboard env vars)
+    always win over file values — files are defaults only. This prevents the
+    git-tracked credentials.json from overriding tokens set in the dashboard,
+    which survive deploys unlike Render's ephemeral filesystem.
+    """
+
     import json
     from pathlib import Path
 
@@ -38,7 +48,7 @@ def _load_env_file():
         try:
             creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
             for k, v in creds.items():
-                if k and v:
+                if k and v and (k not in _PREEXISTING_ENV or k not in os.environ):
                     os.environ[k] = str(v).strip()
         except Exception:
             pass
@@ -53,7 +63,7 @@ def _load_env_file():
             k, v = line.split("=", 1)
             k = k.strip()
             v = v.strip().strip("'\"")
-            if k and v:
+            if k and v and (k not in _PREEXISTING_ENV or k not in os.environ):
                 os.environ[k] = v
 
 
@@ -77,18 +87,17 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
         session = os.environ.get("BAJAJ_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
         user = os.environ.get("BAJAJ_KARIX_USER") or os.environ.get("KARIX_USER")
     else:
-        bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN") or os.environ.get("TATA_KARIX_BEARER_TOKEN")
-        session = os.environ.get(f"{prefix}_KARIX_SESSION") or os.environ.get("TATA_KARIX_SESSION")
-        user = (
-            os.environ.get(f"{prefix}_KARIX_USER")
-            or os.environ.get("TATA_KARIX_USER")
-            or os.environ.get(f"{prefix}_PORTAL_USER")
-        )
-
+        # Strict tenant separation: each sub-account has its own portal login
+        # (e.g. TCHFL=TATACAPWABA, TCL_PROMO=TATACAPPROMO). Never inherit the
+        # parent TATA_* session — submitting under another login's session is
+        # what caused Meta's "invalid media handle" cross-WABA rejections.
+        bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+        session = os.environ.get(f"{prefix}_KARIX_SESSION")
+        user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
     # If token is still missing, trigger headless auto-login using portal user & pass
     if not bearer or not session:
-        portal_u = os.environ.get(f"{prefix}_PORTAL_USER") or os.environ.get("TATA_PORTAL_USER")
-        portal_p = os.environ.get(f"{prefix}_PORTAL_PASSWORD") or os.environ.get("TATA_PORTAL_PASSWORD")
+        portal_u = os.environ.get(f"{prefix}_PORTAL_USER")
+        portal_p = os.environ.get(f"{prefix}_PORTAL_PASSWORD")
         if portal_u and portal_p:
             try:
                 from auth_refresher import refresh_karix_session
@@ -96,9 +105,9 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
                 ref_res = refresh_karix_session(account=c)
                 if ref_res.get("success"):
                     _load_env_file()
-                    bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN") or os.environ.get("TATA_KARIX_BEARER_TOKEN")
-                    session = os.environ.get(f"{prefix}_KARIX_SESSION") or os.environ.get("TATA_KARIX_SESSION")
-                    user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get("TATA_KARIX_USER")
+                    bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+                    session = os.environ.get(f"{prefix}_KARIX_SESSION")
+                    user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
             except Exception as e:
                 logger.warning("Auto-refresh on get_portal_auth_headers notice: %s", e)
 
@@ -136,7 +145,8 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     if c == "bajaj":
         token = os.environ.get("BAJAJ_WABA_AUTH_TOKEN") or os.environ.get("WABA_AUTH_TOKEN")
     else:
-        token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN") or os.environ.get("TATA_WABA_AUTH_TOKEN")
+        # Strict tenant separation: no silent inheritance of the parent token.
+        token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
 
     if not token:
         expected_key = f"{prefix}_WABA_AUTH_TOKEN" if c != "bajaj" else "BAJAJ_WABA_AUTH_TOKEN"
@@ -159,7 +169,13 @@ def get_waba_id(client: str = "bajaj") -> str:
     if c == "bajaj":
         return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
     else:
-        return os.environ.get(f"{prefix}_WABA_ID") or os.environ.get("TATA_WABA_ID") or "286109054585247"
+        waba = os.environ.get(f"{prefix}_WABA_ID") or os.environ.get("TATA_WABA_ID")
+        if not waba:
+            raise OSError(
+                f"Missing WABA ID for {client} ({prefix}_WABA_ID or TATA_WABA_ID). "
+                "Configure it in Settings — never fall back to another tenant's WABA."
+            )
+        return waba
 
 
 def get_esmeaddr(client: str = "bajaj") -> str:

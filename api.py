@@ -1174,34 +1174,18 @@ def get_credentials(
     waba_id = os.environ.get(w_id_key) or (
         BAJAJ_WABA_ID if is_bajaj else ("734197179371393" if acc in TATA_SUB_ACCOUNTS else "")
     )
-    waba_auth_token = os.environ.get(w_tok_key) or (
-        os.environ.get("WABA_AUTH_TOKEN")
-        if is_bajaj
-        else (os.environ.get("TATA_WABA_AUTH_TOKEN") if acc in TATA_SUB_ACCOUNTS else "")
-    )
-    bearer_token = os.environ.get(b_tok_key) or (
-        os.environ.get("KARIX_BEARER_TOKEN")
-        if is_bajaj
-        else (os.environ.get("TATA_KARIX_BEARER_TOKEN") if acc in TATA_SUB_ACCOUNTS else "")
-    )
-    session = os.environ.get(s_key) or (
-        os.environ.get("KARIX_SESSION")
-        if is_bajaj
-        else (os.environ.get("TATA_KARIX_SESSION") if acc in TATA_SUB_ACCOUNTS else "")
-    )
-    user = os.environ.get(u_key) or (
-        os.environ.get("KARIX_USER")
-        if is_bajaj
-        else (os.environ.get("TATA_KARIX_USER") if acc in TATA_SUB_ACCOUNTS else "")
-    )
+    # Strict tenant separation: display ONLY this account's own tokens.
+    # Never surface the parent TATA_* session here — it belongs to a different
+    # portal login (e.g. TATACAPPROMO) and showing it under TCHFL made it look
+    # like TCHFL was configured when it wasn't.
+    waba_auth_token = os.environ.get(w_tok_key) or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else "")
+    bearer_token = os.environ.get(b_tok_key) or (os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else "")
+    session = os.environ.get(s_key) or (os.environ.get("KARIX_SESSION") if is_bajaj else "")
+    user = os.environ.get(u_key) or (os.environ.get("KARIX_USER") if is_bajaj else "")
     entity_id = os.environ.get(e_id_key) or ("110100001654" if is_bajaj else "1001490234791338781")
     lounge_cookie = os.environ.get(l_ck_key) or (os.environ.get("KARIX_LOUNGE_COOKIE") if is_bajaj else "")
-    portal_username = os.environ.get(f"{prefix}_PORTAL_USER") or (
-        os.environ.get("TATA_PORTAL_USER") if acc in TATA_SUB_ACCOUNTS else ""
-    )
-    portal_password = os.environ.get(f"{prefix}_PORTAL_PASSWORD") or (
-        os.environ.get("TATA_PORTAL_PASSWORD") if acc in TATA_SUB_ACCOUNTS else ""
-    )
+    portal_username = os.environ.get(f"{prefix}_PORTAL_USER") or ""
+    portal_password = os.environ.get(f"{prefix}_PORTAL_PASSWORD") or ""
     template_namespace_id = (
         os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
         or (os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") if acc in TATA_SUB_ACCOUNTS else "")
