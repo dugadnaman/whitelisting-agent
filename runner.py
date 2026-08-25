@@ -18,6 +18,7 @@ Efficiency notes (post-audit):
 from datetime import UTC, datetime
 from pathlib import Path
 
+from config import get_waba_id
 from loader import load_from_list
 from models import ApprovalStatus
 from submission_client import (
@@ -45,11 +46,12 @@ def run(
     """Phase 2, step 1: submit each template, log the attempt."""
     import concurrent.futures
 
-    submissions = load_from_list(templates_raw)
+    submissions = load_from_list(templates_raw, client=client)
     print(f"Submitting {len(submissions)} template(s) for {client} (by {user})...")
 
     def _submit_single(submission):
         submission.client = client
+        submission.waba_id = get_waba_id(client)
         result = submit_template(
             submission,
             client=client,

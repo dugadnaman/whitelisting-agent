@@ -601,5 +601,5 @@ def load_from_json(path: str) -> list[TemplateSubmission]:
     return [_row_to_submission(row) for row in data]
 
 
-def load_from_list(rows: list[dict]) -> list[TemplateSubmission]:
-    return [_row_to_submission(row) for row in rows]
+def load_from_list(rows: list[dict], client: str = "bajaj") -> list[TemplateSubmission]:
+    return [_row_to_submission(row, client=client) for row in rows]
