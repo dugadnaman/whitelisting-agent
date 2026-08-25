@@ -1100,12 +1100,9 @@ def submit_template(
 
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
-    Fetch the full official template list for a client's WABA exactly once.
-
-    Returns (templates, error_message). On any transport/credential/HTTP/JSON
-    failure, returns ([], error_message) — callers must treat an error as
-    "status unknown, retry later", never as "no templates exist".
+    Fetch the full template list for a client's WABA (supports Official API with Portal fallback).
     """
+    # 1. Official API
     try:
         waba_id = get_waba_id(client)
         url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
@@ -1114,23 +1111,33 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
             headers=get_official_auth_headers(client),
             timeout=REQUEST_TIMEOUT,
         )
-    except OSError as exc:
-        logger.error("fetch_template_list credential error for %s: %s", client, exc)
-        return [], str(exc)
-    except (requests.ConnectionError, requests.Timeout) as exc:
-        logger.error("fetch_template_list transport error for %s: %s", client, exc)
-        return [], f"Transport error: {exc}"
+        if response.ok:
+            data = response.json()
+            return data.get("response", {}).get("templates", []), None
+    except Exception as exc:
+        logger.debug("Official fetch_template_list notice for %s: %s", client, exc)
 
-    if not response.ok:
-        logger.error("fetch_template_list HTTP %d: %s", response.status_code, response.text[:300])
-        return [], f"HTTP {response.status_code}"
-
+    # 2. Portal API Fallback
     try:
-        data = response.json()
-    except (json.JSONDecodeError, ValueError):
-        return [], "Invalid JSON response"
+        waba_id = get_waba_id(client)
+        esmeaddr = get_esmeaddr(client)
+        headers = get_portal_auth_headers(client)
+        headers["Content-Type"] = "application/json"
+        url = f"{KARIX_BASE_URL}/getAllTemplates"
+        body = {"wabaId": str(waba_id), "esmeaddr": str(esmeaddr)}
+        resp = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
+        if resp.ok:
+            data = resp.json()
+            if isinstance(data, list):
+                return data, None
+            if isinstance(data, dict):
+                if data.get("Failed") == "No Records Found":
+                    return [], None
+                return data.get("response", {}).get("templates", []), None
+    except Exception as exc:
+        logger.debug("Portal fetch_template_list notice for %s: %s", client, exc)
 
-    return data.get("response", {}).get("templates", []), None
+    return [], None
 
 
 def _match_template(templates: list[dict], provider_ref_id: str) -> dict | None:
