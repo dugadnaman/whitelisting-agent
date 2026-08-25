@@ -1172,7 +1172,7 @@ def get_credentials(
     )
 
     waba_id = os.environ.get(w_id_key) or (
-        BAJAJ_WABA_ID if is_bajaj else ("286109054585247" if acc in TATA_SUB_ACCOUNTS else "")
+        BAJAJ_WABA_ID if is_bajaj else ("734197179371393" if acc in TATA_SUB_ACCOUNTS else "")
     )
     waba_auth_token = os.environ.get(w_tok_key) or (
         os.environ.get("WABA_AUTH_TOKEN")
