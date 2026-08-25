@@ -186,11 +186,7 @@ def get_template_namespace_id(client: str = "bajaj") -> str:
             or os.environ.get("TEMPLATE_NAMESPACE_ID")
             or BAJAJ_TEMPLATE_NAMESPACE_ID
         )
-    return (
-        os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
-        or os.environ.get("TATA_TEMPLATE_NAMESPACE_ID")
-        or "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
-    )
+    return os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID") or os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") or ""
 
 
 # ---------------------------------------------------------------------------
