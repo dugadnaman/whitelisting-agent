@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 BACKOFF_SECONDS = 1  # 1 s → 2 s → 4 s
 REQUEST_TIMEOUT = 15  # seconds
-MEDIA_UPLOAD_TIMEOUT = 8  # seconds — fast fail/fallback
+MEDIA_UPLOAD_TIMEOUT = 30  # seconds — generous for Render free-tier cold starts
 
 # HTTP status codes worth retrying (transport-level, not validation errors)
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
@@ -107,17 +107,19 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     if not path.exists():
         path = Path(_ensure_default_sample_image())
 
+    errors: list[str] = []
+    mime = (
+        "image/jpeg"
+        if ("jpeg" in file_type or "jpg" in file_type)
+        else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
+    )
+
     # 1. Primary: Karix Official Template Media Upload API (POST /api/v1.0/template/{wabaId}/media)
     try:
         waba_id = get_waba_id(client)
         headers = get_official_auth_headers(client)
         url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}/media"
 
-        mime = (
-            "image/jpeg"
-            if ("jpeg" in file_type or "jpg" in file_type)
-            else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
-        )
         with open(path, "rb") as f:
             resp = get_http_session().post(
                 url,
@@ -149,18 +151,19 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
                     str(h)[:60],
                 )
                 return str(h)
+            errors.append(f"Official API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}")
+        else:
+            errors.append(f"Official API: HTTP {resp.status_code}: {resp.text[:300]}")
+    except OSError as e:
+        # Missing token — expected for accounts without official API access
+        errors.append(f"Official API: {e}")
     except Exception as e:
-        logger.debug("Karix Official Media Upload notice (%s): %s", client, e)
+        errors.append(f"Official API: {type(e).__name__}: {e}")
 
     # 2. Secondary: Karix Portal mediaUpload if portal headers exist
     try:
         headers = get_portal_auth_headers(client)
         url = f"{KARIX_BASE_URL}/mediaUpload"
-        mime = (
-            "image/jpeg"
-            if ("jpeg" in file_type or "jpg" in file_type)
-            else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
-        )
         with open(path, "rb") as f:
             resp = get_http_session().post(
                 url,
@@ -185,14 +188,21 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
                         first_handle[:60],
                     )
                     return first_handle
+            errors.append(f"Portal API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}")
+        else:
+            errors.append(f"Portal API: HTTP {resp.status_code}: {resp.text[:300]}")
+    except OSError as e:
+        errors.append(f"Portal API: {e}")
     except Exception as e:
-        logger.warning("Karix portal media upload error for %s: %s", client, e)
+        errors.append(f"Portal API: {type(e).__name__}: {e}")
 
-    # 3. If upload could not generate a handle, raise an explicit error
+    # 3. If upload could not generate a handle, raise with diagnostic details
     w_id = get_waba_id(client)
+    detail = "; ".join(errors) if errors else "No diagnostic info"
+    logger.error("Media upload failed for %s (WABA %s): %s", client, w_id, detail)
     raise RuntimeError(
         f"Could not upload media creative to Karix/Meta for {client} (WABA {w_id}). "
-        "Please ensure your Portal Session or WABA API Token is configured in Settings."
+        f"Details: {detail}"
     )
 
 
