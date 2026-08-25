@@ -155,33 +155,37 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     try:
         headers = get_portal_auth_headers(client)
         url = f"{KARIX_BASE_URL}/mediaUpload"
+        mime = (
+            "image/jpeg"
+            if ("jpeg" in file_type or "jpg" in file_type)
+            else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
+        )
         with open(path, "rb") as f:
             resp = get_http_session().post(
                 url,
                 headers=headers,
-                files={"file": (path.name, f, file_type)},
+                files={"file": (path.name, f, mime)},
                 data={
-                    "esmeaddr": get_esmeaddr(client),
-                    "waba_id": get_waba_id(client),
-                    "template_namespace_id": get_template_namespace_id(client),
-                    "file_type": file_type,
+                    "esmeaddr": str(get_esmeaddr(client)),
+                    "waba_id": str(get_waba_id(client)),
+                    "file_type": mime,
                 },
                 timeout=MEDIA_UPLOAD_TIMEOUT,
             )
         if resp.ok:
             data = resp.json()
-            handle_str = data.get("Success")
+            handle_str = data.get("Success") or data.get("handle") or data.get("header_handle")
             if handle_str:
                 first_handle = handle_str.strip().split("\n")[0].strip()
-                logger.info(
-                    "Media uploaded via Karix portal for %s: handle=%s...",
-                    client,
-                    first_handle[:60],
-                )
-                return first_handle
-    except Exception:
-        pass
-
+                if first_handle.startswith("4::"):
+                    logger.info(
+                        "Media uploaded via Karix portal for %s: handle=%s...",
+                        client,
+                        first_handle[:60],
+                    )
+                    return first_handle
+    except Exception as e:
+        logger.warning("Karix portal media upload error for %s: %s", client, e)
     # 3. Fallback to format-specific verified placeholder header handle
     ft = (file_type or "").lower()
     if "video" in ft or str(path).endswith(".mp4"):
