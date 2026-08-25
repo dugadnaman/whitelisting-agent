@@ -522,20 +522,6 @@ export async function sendAgentMessage(
   return res.json();
 }
 
-export async function refreshSession(
-  account: Account = "bajaj",
-  username?: string,
-  password?: string,
-  user: string = "Operator"
-): Promise<{ success: boolean; message: string; tokens_updated?: string[] }> {
-  const res = await fetchWithRetry(getApiUrl("/api/auth/refresh"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ account, username, password, user }),
-  });
-  if (!res.ok) throw new Error(await getErrorMessage(res));
-  return res.json();
-}
 
 export async function loginUser(email: string, password: string): Promise<AuthResponse> {
   const res = await fetchWithRetry(getApiUrl("/api/auth/login"), {

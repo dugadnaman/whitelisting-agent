@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials, refreshSession, fetchTeam, inviteColleague } from '@/lib/api';
+import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague } from '@/lib/api';
 import type { Account, Channel, AccountItem, AuthUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
@@ -42,7 +42,6 @@ export default function SettingsPage() {
   const [portalUsername, setPortalUsername] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
   const [templateNamespaceId, setTemplateNamespaceId] = useState('');
-  const [refreshingSession, setRefreshingSession] = useState(false);
   const [entityId, setEntityId] = useState('');
   const [loungeCookie, setLoungeCookie] = useState('');
 
@@ -650,102 +649,19 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            {/* Optional Portal Credentials */}
+            {/* Optional Portal Session Credentials */}
             <div className="pt-2 border-t border-gray-100">
               <button
                 type="button"
                 onClick={() => setShowPortalCreds((prev) => !prev)}
                 className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 font-medium"
               >
-                <span>{showPortalCreds ? 'Hide' : 'Show'} Portal Session & Self-Healing Browser Auth</span>
-                <span className="text-[10px] text-gray-400">(Auto-harvests Bearer & Session on 401)</span>
+                <span>{showPortalCreds ? 'Hide' : 'Show'} Portal Session Tokens</span>
+                <span className="text-[10px] text-gray-400">(Required for media-header templates; update when expired)</span>
               </button>
 
               {showPortalCreds && (
                 <div className="mt-4 space-y-5 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                  {/* Self-Healing Auto-Login Box */}
-                  <div className="p-3.5 bg-white rounded-lg border border-blue-100 shadow-2xs space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">⚡</span>
-                        <div>
-                          <h4 className="text-xs font-bold text-gray-900">Self-Healing Browser Login (Playwright)</h4>
-                          <p className="text-[11px] text-gray-500">
-                            Launches a headless browser, logs into Karix portal, and automatically extracts fresh tokens.
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setRefreshingSession(true);
-                          setBanner(null);
-                          try {
-                            const res = await refreshSession(
-                              selectedAccount,
-                              portalUsername.trim() || undefined,
-                              portalPassword.trim() || undefined,
-                              currentOperator || 'Operator'
-                            );
-                            setBanner({ type: 'success', message: res.message || 'Session refreshed successfully!' });
-                            const creds = await fetchCredentials(selectedAccount, selectedChannel);
-                            setBearerToken(creds.bearer_token || '');
-                            setSession(creds.session || '');
-                            setUser(creds.user || '');
-                          } catch (err) {
-                            setBanner({
-                              type: 'error',
-                              message: err instanceof Error ? err.message : String(err),
-                            });
-                          } finally {
-                            setRefreshingSession(false);
-                          }
-                        }}
-                        disabled={refreshingSession}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shrink-0"
-                      >
-                        {refreshingSession ? (
-                          <>
-                            <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                            <span>Logging in...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span>⚡ Run Auto-Login</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-gray-100">
-                      <div>
-                        <label htmlFor="portal_user" className="block text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-1">
-                          Portal Username / Email ({envPrefix}_PORTAL_USER)
-                        </label>
-                        <input
-                          id="portal_user"
-                          type="text"
-                          value={portalUsername}
-                          onChange={(e) => setPortalUsername(e.target.value)}
-                          placeholder="e.g. operator@company.com"
-                          className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-gray-50/50"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="portal_pass" className="block text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-1">
-                          Portal Password ({envPrefix}_PORTAL_PASSWORD)
-                        </label>
-                        <input
-                          id="portal_pass"
-                          type="password"
-                          value={portalPassword}
-                          onChange={(e) => setPortalPassword(e.target.value)}
-                          placeholder="••••••••••••"
-                          className="w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-gray-50/50"
-                        />
-                      </div>
-                    </div>
-                  </div>
 
                   <div>
                     <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">

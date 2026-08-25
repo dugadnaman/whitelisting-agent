@@ -1327,15 +1327,54 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     except Exception as ex:
         logger.warning("Could not write credentials.json: %s", ex)
 
+    # 3. Persist to the GitHub repo so tokens survive Render's ephemeral
+    # filesystem and every deploy/restart — "write once, works on all
+    # devices" until the session itself expires. Requires GITHUB_TOKEN and
+    # GITHUB_REPO env vars; silently skipped when not configured.
+    gh_status = _commit_credentials_to_github()
+
     log_activity(
         user=creds.user_name or "Anonymous Operator",
         action="CREDENTIALS_UPDATE",
         account=acc,
         channel=chan,
-        details={"keys_updated": list(mapping.keys())},
+        details={"keys_updated": list(mapping.keys()), "github_persisted": gh_status},
         status="success",
     )
-    return {"ok": True}
+    return {"ok": True, "github_persisted": gh_status}
+
+
+def _commit_credentials_to_github() -> str | None:
+    """Commit credentials.json to the configured GitHub repo. Returns status string or None."""
+    import base64
+
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPO")  # e.g. "dugadnaman/whitelisting-agent"
+    if not token or not repo:
+        return None
+    try:
+        import requests as _rq
+
+        api = f"https://api.github.com/repos/{repo}/contents/credentials.json"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+        r = _rq.get(api, headers=headers, timeout=10)
+        sha = r.json().get("sha") if r.ok else None
+        content = base64.b64encode(Path("credentials.json").read_bytes()).decode()
+        payload = {
+            "message": "chore: update saved credentials from Settings",
+            "content": content,
+        }
+        if sha:
+            payload["sha"] = sha
+        r = _rq.put(api, headers=headers, json=payload, timeout=15)
+        if r.status_code in (200, 201):
+            logger.info("credentials.json committed to GitHub (%s)", repo)
+            return "committed"
+        logger.warning("GitHub credentials commit failed: HTTP %s: %s", r.status_code, r.text[:200])
+        return f"failed_http_{r.status_code}"
+    except Exception as exc:
+        logger.warning("GitHub credentials commit error: %s", exc)
+        return "error"
 
 
 @app.post("/api/test-credentials")
@@ -1590,34 +1629,3 @@ def agent_chat_endpoint(req: AgentChatRequest, current_user: dict = Depends(get_
     return _json_safe(res)
 
 
-from auth_refresher import refresh_karix_session
-
-
-class AuthRefreshRequest(BaseModel):
-    account: str = "bajaj"
-    username: str | None = None
-    password: str | None = None
-    login_url: str | None = None
-    user: str = "Operator"
-
-
-@app.post("/api/auth/refresh")
-def auth_refresh_endpoint(req: AuthRefreshRequest, current_user: dict = Depends(get_current_user)):
-    """
-    Self-Healing Auth: Execute headless Playwright browser login to Karix portal,
-    harvest fresh Bearer, Session, and User tokens, and persist them.
-    """
-    require_tenant_access(req.account, current_user)
-    res = refresh_karix_session(
-        account=req.account,
-        username=req.username,
-        password=req.password,
-        login_url=req.login_url,
-        user_attribution=req.user,
-    )
-    if not res.get("success"):
-        raise HTTPException(
-            status_code=400 if res.get("requires_credentials") else 500,
-            detail=res.get("error", "Auto-refresh failed"),
-        )
-    return _json_safe(res)

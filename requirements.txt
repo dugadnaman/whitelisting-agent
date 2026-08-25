@@ -5,6 +5,5 @@ requests
 openpyxl
 python-dotenv
 Pillow
-playwright
 pyjwt
 bcrypt

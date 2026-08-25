@@ -400,10 +400,19 @@ def tool_create_template(
 
 
 def tool_refresh_session(account: str = "bajaj", user: str = "AI Agent") -> dict[str, Any]:
-    """Trigger browser automation to log into Karix portal and harvest fresh session credentials."""
-    from auth_refresher import refresh_karix_session
-
-    return refresh_karix_session(account=account, user_attribution=user)
+    """Report that browser auto-login is unavailable (Karix portal requires OTP)."""
+    return {
+        "success": False,
+        "account": account,
+        "error": (
+            "Browser auto-login is no longer available — the Karix portal requires "
+            "an OTP only a human can receive. Ask an operator to open Settings → "
+            f"{account} and paste fresh Portal Bearer Token / Session ID from the "
+            "Karix portal (DevTools → Network headers). Saved tokens then work on "
+            "all devices until they expire."
+        ),
+        "requires_manual_credentials": True,
+    }
 
 
 def tool_list_team(tenant_id: str = "bajaj") -> dict[str, Any]:
@@ -635,9 +644,8 @@ class WhitelistingAgent:
                 ]
             else:
                 reply = (
-                    f"### ⚠️ Session Auto-Refresh Failed\n\n"
-                    f"{refresh_res.get('error')}\n\n"
-                    f"*Tip: Configure your Karix portal username and password under Settings to enable zero-touch session healing.*"
+                    f"### ⚠️ Manual Token Update Required\n\n"
+                    f"{refresh_res.get('error')}"
                 )
                 suggested_actions = ["List templates", "Poll approval status"]
 

@@ -95,11 +95,10 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
         session = os.environ.get(f"{prefix}_KARIX_SESSION")
         user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
 
-    # NOTE: no browser auto-login here. Launching Playwright from submission
-    # worker threads OOMs small containers and stalls batches. Missing tokens
-    # fail fast with the error below; the 401 self-healing path in
-    # submission_client (single-shot, flag-guarded) is the only automatic
-    # refresh trigger, and "Run Auto-Login" in Settings is the manual one.
+    # NOTE: no browser auto-login — the Karix portal requires an OTP only a
+    # human can receive. Tokens are entered manually in Settings and persist
+    # via credentials.json (committed back to the repo on save) until they
+    # naturally expire.
 
     missing = []
     if not bearer:
@@ -111,7 +110,8 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
     if missing:
         raise OSError(
             f"Missing required Karix portal credentials for {client}: {', '.join(missing)}. "
-            "Please enter the Portal Bearer Token, Session ID, and User in Settings or click ⚡ Run Auto-Login."
+            "Open Settings → " + client + " and paste the Portal Bearer Token, Session ID, and User "
+            "from the Karix portal (logged-in browser → DevTools → Network → request headers)."
         )
 
     return {

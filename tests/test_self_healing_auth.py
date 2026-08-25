@@ -1,6 +1,11 @@
 """
-Tests for Self-Healing Auth and Browser Automation Tooling.
-Verifies token persistence, agent tool dispatch, 401 recovery flow, and API endpoints.
+Tests for credential handling after Playwright removal.
+
+The Karix portal requires an OTP, so browser auto-login is gone. These tests
+verify the replacement contract:
+- 401 responses produce an actionable "session expired" failure (no retry loop)
+- missing credentials fail fast with the exact missing key named
+- saving credentials via the API persists to disk and reports GitHub status
 """
 
 import json
@@ -9,113 +14,116 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
-
 import api
-from agent import agent_instance
-from auth_refresher import refresh_karix_session, update_persisted_credentials
 from loader import _row_to_submission
-from models import SubmissionStatus
+from models import ApprovalStatus, SubmissionStatus, TemplateSubmission
 from submission_client import submit_template
 
 
-class TestSelfHealingAuth(unittest.TestCase):
-    def test_update_persisted_credentials(self):
-        """Verify update_persisted_credentials safely writes to credentials.json and os.environ."""
-        fake_tokens = {
-            "bearer_token": "test_bearer_token_1234567890",
-            "session": "test_session_abc",
-            "user": "TestOperator",
-        }
+class TestCredentialContract(unittest.TestCase):
+    def setUp(self):
+        # Ensure a clean slate for the account under test
+        for k in list(os.environ):
+            if k.startswith("TCHFL_"):
+                del os.environ[k]
 
-        update_persisted_credentials(account="bajaj", tokens=fake_tokens)
-
-        # Check os.environ
-        self.assertEqual(os.environ.get("BAJAJ_KARIX_BEARER_TOKEN"), "test_bearer_token_1234567890")
-        self.assertEqual(os.environ.get("BAJAJ_KARIX_SESSION"), "test_session_abc")
-        self.assertEqual(os.environ.get("BAJAJ_KARIX_USER"), "TestOperator")
-
-        # Check credentials.json
-        cred_path = Path("credentials.json")
-        if cred_path.exists():
-            data = json.loads(cred_path.read_text(encoding="utf-8"))
-            self.assertEqual(data.get("BAJAJ_KARIX_BEARER_TOKEN"), "test_bearer_token_1234567890")
-            self.assertEqual(data.get("BAJAJ_KARIX_SESSION"), "test_session_abc")
-
-    def test_refresh_missing_credentials_returns_clean_error(self):
-        """When no portal credentials are set for an account, returns clean requires_credentials diagnostic."""
-        res = refresh_karix_session(account="custom_tenant", username=None, password=None)
-        self.assertFalse(res["success"])
-        self.assertTrue(res.get("requires_credentials"))
-        self.assertIn("No portal username/password found", res.get("error", ""))
-
-    def test_agent_session_refresh_intent(self):
-        """Verify that natural language commands to the agent trigger the session refresh tool."""
-        res = agent_instance.execute_instruction("Refresh session for bajaj", account="bajaj", channel="whatsapp")
-        self.assertIn("reply", res)
-        self.assertTrue(any(a.get("tool") == "refresh_karix_session" for a in res.get("actions_taken", [])))
-
-    def test_api_auth_refresh_endpoint(self):
-        """Verify POST /api/auth/refresh endpoint behavior."""
-        client = TestClient(api.app)
-        # Testing with missing credentials returns 400 with helpful message
-        r = client.post("/api/auth/refresh", json={"account": "unknown_acc"})
-        self.assertEqual(r.status_code, 400)
-        self.assertIn("No portal username/password found", r.json().get("detail", ""))
-
-    @patch("submission_client.get_http_session")
-    @patch("auth_refresher.refresh_karix_session")
-    def test_401_triggers_self_healing_retry(self, mock_refresh, mock_get_session):
-        """Verify that when Karix returns 401, submission_client calls refresh_karix_session and retries."""
-        mock_refresh.return_value = {
-            "success": True,
-            "message": "Harvested fresh session",
-        }
-
-        # Mock first response as 401, second response as 200
-        resp_401 = MagicMock()
-        resp_401.status_code = 401
-        resp_401.ok = False
-        resp_401.text = "Unauthorized"
-        resp_401.json.return_value = {"error": "Token expired"}
-        resp_201 = MagicMock()
-        resp_201.status_code = 201
-        resp_201.ok = True
-        resp_201.json.return_value = {"templateId": "999999"}
-
-        mock_session_obj = MagicMock()
-        mock_session_obj.post.side_effect = [resp_401, resp_201]
-        mock_get_session.return_value = mock_session_obj
-
-        sub = _row_to_submission(
-            {
-                "source_ref": "test_401_heal",
-                "template_name": "test_auto_heal",
-                "category": "UTILITY",
-                "language": "en",
-                "header_type": "IMAGE",
-                "header_media_url": "https://example.com/banner.png",
-                "body": "Hello {{1}}",
-                "client": "bajaj",
-            },
-            client="bajaj",
+    def test_401_returns_actionable_error_without_retry(self):
+        """A 401 from the portal API fails the template with a clear message — no browser, no retry."""
+        submission = TemplateSubmission(
+            client="tchfl",
+            channel="whatsapp",
+            template_name="t_401_test",
+            language="en",
+            category="MARKETING",
+            waba_id="734197179371393",
+            components=[],
+            source_ref="test",
         )
 
-        with (
-            patch("submission_client.get_portal_auth_headers") as mock_headers,
-            patch("submission_client._resolve_header_media", return_value=[]),
-            patch("submission_client._resolve_body_variables", return_value=[]),
-        ):
-            mock_headers.return_value = {
-                "Authorization": "Bearer fresh_token",
-                "Session": "fresh_sess",
-                "User": "Op",
-            }
-            res = submit_template(sub, client="bajaj")
+        class FakeResponse:
+            status_code = 401
+            ok = False
+            text = '{"detail":"unauthorized"}'
 
-        # Verify refresh was triggered
-        mock_refresh.assert_called_once()
-        self.assertEqual(res.status, SubmissionStatus.SUBMITTED)
+            def json(self):
+                return {"detail": "unauthorized"}
+
+        fake_session = MagicMock()
+        fake_session.post.return_value = FakeResponse()
+        with patch("submission_client.get_portal_auth_headers") as mock_headers, patch(
+            "submission_client.get_http_session", return_value=fake_session
+        ):
+            mock_headers.return_value = {"Authorization": "Bearer x", "Session": "s", "User": "u"}
+            res = submit_template(submission, client="tchfl")
+
+        self.assertEqual(res.status, SubmissionStatus.FAILED)
+        self.assertIn("Session expired (401)", res.error)
+        self.assertIn("Settings", res.error)
+        # Exactly ONE HTTP call — no retry loop on 401
+        self.assertEqual(fake_session.post.call_count, 1)
+
+    def test_missing_credentials_fail_fast(self):
+        """Missing portal credentials raise OSError naming the exact env keys."""
+        from config import get_portal_auth_headers
+
+        with patch("config._load_env_file"), patch.dict(os.environ, {}, clear=False):
+            for k in list(os.environ):
+                if k.startswith("TCHFL_"):
+                    del os.environ[k]
+            with self.assertRaises(OSError) as ctx:
+                get_portal_auth_headers("tchfl")
+        self.assertIn("TCHFL_KARIX_BEARER_TOKEN", str(ctx.exception))
+        self.assertIn("Settings", str(ctx.exception))
+
+    def test_update_credentials_persists_and_reports_github_status(self):
+        """PUT /api/credentials writes credentials.json and returns github_persisted status."""
+        os.environ.setdefault("ALLOWED_ORIGINS", "")
+        from fastapi.testclient import TestClient
+
+        client = TestClient(api.app)
+        email = "cred_contract@attributics.com"
+        client.post(
+            "/api/auth/signup",
+            json={"email": email, "password": "Test@123", "full_name": "CC", "tenant": "tata"},
+        )
+        r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
+        token = r.json().get("token") or r.json().get("access_token")
+        H = {"Authorization": f"Bearer {token}"}
+
+        r = client.put(
+            "/api/credentials",
+            json={
+                "account": "tchfl",
+                "channel": "whatsapp",
+                "bearer_token": "cc_bearer_123",
+                "session": "cc_session_456",
+                "user": "CCUser",
+            },
+            headers=H,
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["ok"])
+        # GITHUB_TOKEN not set in tests → skipped, not failed
+        self.assertIn(body.get("github_persisted"), (None, "committed"))
+
+        # Persisted to disk under the account's own prefix
+        creds = json.loads(Path("credentials.json").read_text(encoding="utf-8"))
+        self.assertEqual(creds.get("TCHFL_KARIX_BEARER_TOKEN"), "cc_bearer_123")
+        self.assertEqual(creds.get("TCHFL_KARIX_SESSION"), "cc_session_456")
+
+        # And readable back through the config layer (strict isolation)
+        from config import get_portal_auth_headers
+
+        h = get_portal_auth_headers("tchfl")
+        self.assertEqual(h["Authorization"], "Bearer cc_bearer_123")
+        self.assertEqual(h["Session"], "cc_session_456")
+
+        # cleanup
+        for k in ("TCHFL_KARIX_BEARER_TOKEN", "TCHFL_KARIX_SESSION", "TCHFL_KARIX_USER"):
+            os.environ.pop(k, None)
+            creds.pop(k, None)
+        Path("credentials.json").write_text(json.dumps(creds, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
