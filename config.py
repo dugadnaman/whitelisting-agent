@@ -59,6 +59,9 @@ def _load_env_file():
 
 def _account_prefix(client: str) -> str:
     """Sanitize client name into uppercase environment variable prefix."""
+    import re
+
+    return re.sub(r"[^a-zA-Z0-9_]", "_", client).strip("_").upper()
 
 
 def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:

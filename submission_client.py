@@ -187,13 +187,13 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
                     return first_handle
     except Exception as e:
         logger.warning("Karix portal media upload error for %s: %s", client, e)
-    # 3. Fallback to format-specific verified placeholder header handle
-    ft = (file_type or "").lower()
-    if "video" in ft or str(path).endswith(".mp4"):
-        return FALLBACK_PLACEHOLDER_VIDEO_HANDLE
-    if "pdf" in ft or str(path).endswith(".pdf"):
-        return FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE
-    return FALLBACK_PLACEHOLDER_IMAGE_HANDLE
+
+    # 3. If upload could not generate a handle, raise an explicit error
+    w_id = get_waba_id(client)
+    raise RuntimeError(
+        f"Could not upload media creative to Karix/Meta for {client} (WABA {w_id}). "
+        "Please ensure your Portal Session or WABA API Token is configured in Settings."
+    )
 
 
 def _ensure_default_sample_image() -> str:
@@ -885,37 +885,38 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             reason_str = str(reason_data)
 
             # Auto-recovery for Meta Error 131009 / Invalid Media Handle
+            # Re-upload media with correct credentials and retry — never downgrade IMAGE to TEXT
             if (
                 "Uploaded media handle is invalid" in reason_str
                 or "Check the handle provided" in reason_str
                 or "2494102" in reason_str
-            ) and not getattr(payload, "_tried_text_header_fallback", False):
+            ) and not getattr(payload, "_tried_media_reupload", False):
                 logger.warning(
-                    "Media handle invalid on WABA %s for %s (%s). Auto-converting to compliant TEXT header and retrying...",
+                    "Media handle invalid on WABA %s for %s (%s). Re-uploading media with fresh credentials...",
                     get_waba_id(c),
                     payload.template_name,
                     c,
                 )
-                payload._tried_text_header_fallback = True
+                payload._tried_media_reupload = True
 
+                # Force re-upload: clear stale handles from HEADER components
+                # and let _resolve_header_media generate fresh ones for this client
                 new_comps = []
                 for comp in payload.components:
                     comp_d = asdict(comp) if not isinstance(comp, dict) else dict(comp)
-                    if comp_d.get("type") == "HEADER":
-                        hdr_text = comp_d.get("text") or (
-                            "Tata Capital Housing Finance"
-                            if ("hfl" in payload.template_name.lower() or c == "tchfl")
-                            else ("Tata Capital" if c.startswith("t") else "Bajaj Finserv")
-                        )
-                        new_comps.append(
-                            {
-                                "type": "HEADER",
-                                "format": "TEXT",
-                                "text": hdr_text[:60],
-                            }
-                        )
-                    else:
-                        new_comps.append(comp_d)
+                    if comp_d.get("type") == "HEADER" and comp_d.get("format", "").upper() in ("IMAGE", "VIDEO", "DOCUMENT"):
+                        # Strip the stale handle so _resolve_header_media will re-upload
+                        comp_d.pop("example", None)
+                        # Ensure a media file is available for re-upload
+                        if not comp_d.get("media_file") and not comp_d.get("media_url") and not comp_d.get("image_bytes"):
+                            fmt = comp_d.get("format", "IMAGE").upper()
+                            if fmt == "VIDEO":
+                                comp_d["media_file"] = _ensure_default_sample_video()
+                            elif fmt == "DOCUMENT":
+                                comp_d["media_file"] = _ensure_default_sample_pdf()
+                            else:
+                                comp_d["media_file"] = _ensure_default_sample_image()
+                    new_comps.append(comp_d)
 
                 payload.components = new_comps
                 return _submit_portal_template(payload, client=c)
