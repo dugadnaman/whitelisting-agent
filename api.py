@@ -1422,8 +1422,9 @@ def test_credentials(
     try:
         waba_id = (
             (creds.waba_id.strip() if creds and creds.waba_id and creds.waba_id.strip() else None)
-            or os.environ.get(w_id_key)
-            or (BAJAJ_WABA_ID if is_bajaj else None)
+            or os.environ.get(f"{prefix}_WABA_ID")
+            or os.environ.get("TATA_WABA_ID" if acc in TATA_SUB_ACCOUNTS else "BAJAJ_WABA_ID")
+            or (BAJAJ_WABA_ID if is_bajaj else "734197179371393")
         )
         if not waba_id:
             return {
@@ -1437,15 +1438,15 @@ def test_credentials(
                 if creds and creds.waba_auth_token and creds.waba_auth_token.strip()
                 else None
             )
-            or os.environ.get(w_tok_key)
-            or os.environ.get("WABA_AUTH_TOKEN")
+            or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
+            or os.environ.get("TATA_WABA_AUTH_TOKEN" if acc in TATA_SUB_ACCOUNTS else "BAJAJ_WABA_AUTH_TOKEN")
+            or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else os.environ.get("TATA_KARIX_BEARER_TOKEN"))
         )
         if not token:
             return {
                 "ok": False,
                 "message": f"{acc_name} WhatsApp: Please enter the WABA API Token in the field above or set {w_tok_key} in Settings.",
             }
-
         headers = {"Authentication": f"Bearer {token}"}
         resp = http_client.get(
             f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}",
