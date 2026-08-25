@@ -94,22 +94,12 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
         bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
         session = os.environ.get(f"{prefix}_KARIX_SESSION")
         user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
-    # If token is still missing, trigger headless auto-login using portal user & pass
-    if not bearer or not session:
-        portal_u = os.environ.get(f"{prefix}_PORTAL_USER")
-        portal_p = os.environ.get(f"{prefix}_PORTAL_PASSWORD")
-        if portal_u and portal_p:
-            try:
-                from auth_refresher import refresh_karix_session
 
-                ref_res = refresh_karix_session(account=c)
-                if ref_res.get("success"):
-                    _load_env_file()
-                    bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
-                    session = os.environ.get(f"{prefix}_KARIX_SESSION")
-                    user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
-            except Exception as e:
-                logger.warning("Auto-refresh on get_portal_auth_headers notice: %s", e)
+    # NOTE: no browser auto-login here. Launching Playwright from submission
+    # worker threads OOMs small containers and stalls batches. Missing tokens
+    # fail fast with the error below; the 401 self-healing path in
+    # submission_client (single-shot, flag-guarded) is the only automatic
+    # refresh trigger, and "Run Auto-Login" in Settings is the manual one.
 
     missing = []
     if not bearer:

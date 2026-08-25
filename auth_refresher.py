@@ -8,6 +8,8 @@ submissions to resume without human intervention.
 import json
 import logging
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -114,7 +116,43 @@ def update_persisted_credentials(
         logger.warning("Could not update .env during auto-refresh: %s", exc)
 
 
+# Only ONE browser login per account at a time, with a result cooldown.
+# Concurrent Playwright Chromium launches OOM small containers (Render free
+# tier) and hammer the portal login page.
+_refresh_lock = threading.Lock()
+_refresh_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_REFRESH_COOLDOWN_SEC = 120
+
+
 def refresh_karix_session(
+    account: str = "bajaj",
+    username: str | None = None,
+    password: str | None = None,
+    login_url: str | None = None,
+    timeout_sec: int = 35,
+    user_attribution: str = "Self-Healing Auth Agent",
+) -> dict[str, Any]:
+    """Serialize browser logins per account; reuse a recent result within the cooldown."""
+    acc = (account or "bajaj").lower().strip()
+    with _refresh_lock:
+        last = _refresh_cache.get(acc)
+        if last is not None and (time.time() - last[0]) < _REFRESH_COOLDOWN_SEC:
+            cached = dict(last[1])
+            cached["cached"] = True
+            return cached
+        result = _refresh_karix_session_uncached(
+            account=acc,
+            username=username,
+            password=password,
+            login_url=login_url,
+            timeout_sec=timeout_sec,
+            user_attribution=user_attribution,
+        )
+        _refresh_cache[acc] = (time.time(), result)
+        return result
+
+
+def _refresh_karix_session_uncached(
     account: str = "bajaj",
     username: str | None = None,
     password: str | None = None,
