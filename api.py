@@ -1358,6 +1358,10 @@ def _commit_credentials_to_github() -> str | None:
         api = f"https://api.github.com/repos/{repo}/contents/credentials.json"
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
         r = _rq.get(api, headers=headers, timeout=10)
+        if not r.ok and r.status_code in (401, 403):
+            reason = r.json().get("message", r.text[:120]) if "json" in r.headers.get("content-type", "") else r.text[:120]
+            logger.warning("GitHub credentials access denied: HTTP %s: %s", r.status_code, reason)
+            return f"failed_http_{r.status_code}: {reason}"
         sha = r.json().get("sha") if r.ok else None
         content = base64.b64encode(Path("credentials.json").read_bytes()).decode()
         payload = {
@@ -1371,7 +1375,11 @@ def _commit_credentials_to_github() -> str | None:
             logger.info("credentials.json committed to GitHub (%s)", repo)
             return "committed"
         logger.warning("GitHub credentials commit failed: HTTP %s: %s", r.status_code, r.text[:200])
-        return f"failed_http_{r.status_code}"
+        try:
+            gh_reason = r.json().get("message", r.text[:120])
+        except Exception:
+            gh_reason = r.text[:120]
+        return f"failed_http_{r.status_code}: {gh_reason}"
     except Exception as exc:
         logger.warning("GitHub credentials commit error: %s", exc)
         return "error"
