@@ -1685,3 +1685,29 @@ def agent_chat_endpoint(req: AgentChatRequest, current_user: dict = Depends(get_
     return _json_safe(res)
 
 
+@app.get("/api/debug/logs")
+def debug_logs(current_user: dict = Depends(get_current_user)):
+    """Temporary debug endpoint to read supervisor logs on Render."""
+    if current_user.get("role") != "admin" and current_user.get("email") != "dugadnaman@gmail.com":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    import os
+    paths = [
+        "/var/log/supervisor/fastapi.err.log",
+        "/var/log/supervisor/fastapi.out.log",
+        "/var/log/supervisor/supervisord.log",
+    ]
+    res = {}
+    for p in paths:
+        if os.path.exists(p):
+            try:
+                # Read last 100 lines
+                with open(p, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                res[p] = "".join(lines[-100:])
+            except Exception as e:
+                res[p] = f"Error reading: {e}"
+        else:
+            res[p] = "Not found"
+    return res
+
+
