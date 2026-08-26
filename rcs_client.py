@@ -15,6 +15,7 @@ import requests
 from config import get_esmeaddr
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
+    _account_prefix,
     get_rcs_auth_headers,
     get_rcs_bot_id,
 )
@@ -447,6 +448,16 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
 
         try:
             headers = get_rcs_auth_headers(c)
+            bot_id_res = get_rcs_bot_id(c)
+            esme_res = get_esmeaddr(c)
+            logger.info(
+                "🔒 CONFIRMATION CHECKPOINT [RCS Create]: client=%s, bot_id=%s, esmeaddr=%s, template=%s, credential_source=%s_RCS_AUTH_TOKEN",
+                c,
+                bot_id_res,
+                esme_res,
+                payload.template_name,
+                _account_prefix(c),
+            )
             resp = requests.post(
                 KARIX_RCS_SAVE_URL,
                 headers=headers,
@@ -569,6 +580,13 @@ def fetch_rcs_templates(bot_id: str | None = None, client: str = "tata") -> list
     esme_addr = get_esmeaddr(c)
     try:
         headers = get_rcs_auth_headers(c)
+        logger.info(
+            "🔒 CHECKPOINT [RCS Fetch]: client=%s, bot_id=%s, esmeaddr=%s, credential_source=%s_RCS_AUTH_TOKEN",
+            c,
+            b_id,
+            esme_addr,
+            _account_prefix(c),
+        )
         resp = requests.post(
             "https://rcsgui.karix.solutions/api/rcstemplate/fetchTemplates",
             headers=headers,

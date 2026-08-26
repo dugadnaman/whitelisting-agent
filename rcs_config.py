@@ -27,10 +27,23 @@ BAJAJ_RCS_BOT_ID = "af2vdbyFh3RX8eee"
 # Legacy Lounge URLs
 KARIX_LOUNGE_BASE_URL = "https://karix.solutions/lounge/LoungePage"
 KARIX_DLT_ACTION_URL = f"{KARIX_LOUNGE_BASE_URL}/dltRegistrationAction.php"
+_PREEXISTING_ENV = frozenset(os.environ.keys())
 
 
 def _load_env_file() -> None:
-    """Load key-value pairs from a local .env file if present."""
+    """Load key-value pairs from credentials.json and local .env file if present."""
+    import json
+
+    cred_path = Path("credentials.json")
+    if cred_path.exists():
+        try:
+            creds = json.loads(cred_path.read_text(encoding="utf-8"))
+            for k, v in creds.items():
+                if k and v and (k not in _PREEXISTING_ENV or k not in os.environ):
+                    os.environ[k] = str(v).strip()
+        except Exception:
+            pass
+
     env_path = Path(".env")
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -40,7 +53,7 @@ def _load_env_file() -> None:
             k, v = line.split("=", 1)
             k = k.strip()
             v = v.strip().strip("'\"")
-            if k and v:
+            if k and v and (k not in _PREEXISTING_ENV or k not in os.environ):
                 os.environ[k] = v
 
 
@@ -59,13 +72,13 @@ def get_rcs_bot_id(client: str = "tata") -> str:
         return os.environ.get("TATA_RCS_BOT_ID") or os.environ.get("TATA_RCS_SENDER_ID") or TATA_RCS_BOT_ID
     elif c == "bajaj":
         return os.environ.get("BAJAJ_RCS_BOT_ID") or os.environ.get("BAJAJ_RCS_SENDER_ID") or BAJAJ_RCS_BOT_ID
-    return (
-        os.environ.get(f"{prefix}_RCS_BOT_ID")
-        or os.environ.get(f"{prefix}_RCS_SENDER_ID")
-        or os.environ.get("RCS_BOT_ID")
-        or ""
-    )
-
+    bot = os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID")
+    if not bot:
+        raise OSError(
+            f"Missing RCS Bot ID for {client} ({prefix}_RCS_BOT_ID). "
+            f"Configure it in Settings under {client} — never fall back to another account's Bot ID."
+        )
+    return bot
 
 def get_rcs_entity_id(client: str = "tata") -> str:
     """Return the Entity ID for RCS DLT templates."""
