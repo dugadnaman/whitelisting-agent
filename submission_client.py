@@ -204,7 +204,7 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
                 timeout=MEDIA_UPLOAD_TIMEOUT,
             )
         if resp.ok:
-            data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
+            data = _parse_karix_json(resp)
             h = None
             if isinstance(data, dict):
                 if data.get("header_handle"):

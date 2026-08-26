@@ -1527,7 +1527,13 @@ def test_credentials(
             timeout=15,
         )
         if resp.status_code == 200:
-            data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
+            try:
+                data = resp.json()
+            except Exception:
+                try:
+                    data = json.loads(resp.text)
+                except Exception:
+                    data = {}
             count = len(data.get("response", {}).get("templates", []))
             results.append(f"{acc_name} WhatsApp: Valid ({count} templates on WABA {waba_id})")
         elif resp.status_code == 401:
