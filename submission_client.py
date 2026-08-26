@@ -807,6 +807,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             client=c,
             channel="whatsapp",
         )
+    last_result: SubmissionResult | None = None
     for attempt in range(MAX_RETRIES):
         exc: Exception | None = None
         resp: requests.Response | None = None
@@ -835,11 +836,11 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             )
         # ---- Handle transport errors (retry) ----
         if exc is not None:
-            SubmissionResult(
+            last_result = SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
-                error=str(exc),
+                error=f"Transport error: {exc}",
                 approval_status=ApprovalStatus.UNKNOWN,
                 client=c,
                 channel="whatsapp",
@@ -864,7 +865,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 resp.status_code,
                 resp.text[:500],
             )
-            SubmissionResult(
+            last_result = SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
@@ -990,6 +991,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             channel="whatsapp",
             retry_count=attempt,
         )
+    return last_result
 
 
 def _requires_portal_media(payload: TemplateSubmission) -> bool:
