@@ -274,6 +274,40 @@ def test_adaptive_rate_limiting_and_governor():
 
     print("✓ test_adaptive_rate_limiting_and_governor passed!")
 
+
+def test_predictive_category_approval_polling():
+    """
+    Verify classify_template_category_sla and get_pending_templates_sla_insights
+    correctly estimate review SLAs by template category (Procedural Memory).
+    """
+    from runner import classify_template_category_sla, get_pending_templates_sla_insights
+
+    # 1. UTILITY template classification
+    util_tier, util_sla = classify_template_category_sla({
+        "category": "UTILITY",
+        "components": [{"type": "BODY", "text": "Your account statement is ready."}],
+    })
+    assert util_tier == "UTILITY"
+    assert util_sla["avg_approval_sec"] <= 300
+
+    # 2. MARKETING Media template classification
+    media_tier, media_sla = classify_template_category_sla({
+        "category": "MARKETING",
+        "components": [
+            {"type": "HEADER", "format": "IMAGE"},
+            {"type": "BODY", "text": "Check out our special offer."},
+        ],
+    })
+    assert media_tier == "MARKETING_MEDIA"
+    assert media_sla["avg_approval_sec"] >= 1800
+
+    # 3. Insights calculation on empty/mock pending
+    insights = get_pending_templates_sla_insights(client="bajaj")
+    assert "next_recommended_poll_sec" in insights
+    assert isinstance(insights["categories"], dict)
+
+    print("✓ test_predictive_category_approval_polling passed!")
+
 if __name__ == "__main__":
     # Check credentials are set
     if not os.environ.get("WABA_AUTH_TOKEN"):

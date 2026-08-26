@@ -66,6 +66,22 @@ export type KarixHealth = {
   pacing_delay_sec: number;
   sample_count: number;
 };
+export type SlaInsight = {
+  template_name?: string;
+  category_tier?: string;
+  category_label?: string;
+  age_sec?: number;
+  estimated_remaining_sec?: number;
+  is_due_for_poll?: boolean;
+};
+
+export type SlaInsights = {
+  pending_count: number;
+  due_for_poll_count: number;
+  categories: Record<string, number>;
+  next_recommended_poll_sec: number;
+  templates_status?: SlaInsight[];
+};
 
 export type Stats = {
   total: number;
@@ -77,6 +93,7 @@ export type Stats = {
   duplicate: number;
   error?: string | null;
   karix_health?: KarixHealth;
+  sla_insights?: SlaInsights;
 };
 export type AspectRatioWarning = {
   component: string;

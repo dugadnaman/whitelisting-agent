@@ -15,6 +15,7 @@ Efficiency notes (post-audit):
     stay "pending" so a later poll retries them.
 """
 
+import collections
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -33,6 +34,102 @@ from tracker import log_result, pending_entries, update_results
 # not-yet-listed templates, unknown provider states) keeps the entry pending.
 _TERMINAL_STATUSES = {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}
 
+CATEGORY_APPROVAL_SLAS = {
+    "AUTHENTICATION": {"initial_delay_sec": 60, "poll_interval_sec": 60, "avg_approval_sec": 120, "label": "Authentication (Auto)"},
+    "UTILITY": {"initial_delay_sec": 120, "poll_interval_sec": 120, "avg_approval_sec": 240, "label": "Utility (Fast ~3m)"},
+    "MARKETING_TEXT": {"initial_delay_sec": 600, "poll_interval_sec": 300, "avg_approval_sec": 1200, "label": "Marketing Text (~15m)"},
+    "MARKETING_MEDIA": {"initial_delay_sec": 1200, "poll_interval_sec": 600, "avg_approval_sec": 2400, "label": "Marketing Media (~35m)"},
+    "DEFAULT": {"initial_delay_sec": 300, "poll_interval_sec": 300, "avg_approval_sec": 900, "label": "Standard (~10m)"},
+}
+
+
+def classify_template_category_sla(entry: dict) -> tuple[str, dict]:
+    """Classify a pending template into its SLA tier based on category and media header."""
+    pr = entry.get("provider_response") if isinstance(entry.get("provider_response"), dict) else {}
+    cat = str(entry.get("category") or pr.get("category", "MARKETING")).upper()
+    has_media = False
+
+    comps = entry.get("components") or pr.get("components", []) or []
+    for c in comps:
+        comp_d = c if isinstance(c, dict) else getattr(c, "__dict__", {})
+        if comp_d.get("type") == "HEADER" and str(comp_d.get("format", "")).upper() in ("IMAGE", "VIDEO", "DOCUMENT"):
+            has_media = True
+            break
+
+    if "AUTH" in cat:
+        tier = "AUTHENTICATION"
+    elif "UTIL" in cat:
+        tier = "UTILITY"
+    elif has_media or "MEDIA" in cat:
+        tier = "MARKETING_MEDIA"
+    elif "MARKET" in cat:
+        tier = "MARKETING_TEXT"
+    else:
+        tier = "DEFAULT"
+
+    return tier, CATEGORY_APPROVAL_SLAS[tier]
+
+
+def get_pending_templates_sla_insights(log_path: str = "submission_log.jsonl", client: str = "bajaj") -> dict:
+    """
+    Procedural Memory: Evaluate pending templates against their SLA windows.
+    Returns SLA countdowns, due-for-poll items, and recommended next poll time.
+    """
+    c = client.lower()
+    pending = [e for e in pending_entries(log_path) if (e.get("client", "bajaj") or "bajaj").lower() == c]
+    if not pending:
+        return {
+            "pending_count": 0,
+            "due_for_poll_count": 0,
+            "categories": {},
+            "next_recommended_poll_sec": 120,
+            "templates_status": [],
+        }
+
+    now = datetime.now(UTC)
+    due_items = []
+    category_counts: dict[str, int] = collections.defaultdict(int)
+    details = []
+
+    for entry in pending:
+        tier, sla = classify_template_category_sla(entry)
+        category_counts[sla["label"]] += 1
+
+        submitted_at_str = entry.get("submitted_at")
+        age_sec = 0.0
+        if submitted_at_str:
+            try:
+                sub_time = datetime.fromisoformat(submitted_at_str.replace("Z", "+00:00"))
+                age_sec = (now - sub_time).total_seconds()
+            except Exception:
+                age_sec = 0.0
+
+        est_remaining_sec = max(0, int(sla["avg_approval_sec"] - age_sec))
+        is_due = age_sec >= sla["initial_delay_sec"]
+
+        if is_due:
+            due_items.append(entry)
+
+        details.append({
+            "template_name": entry.get("template_name"),
+            "category_tier": tier,
+            "category_label": sla["label"],
+            "age_sec": int(age_sec),
+            "estimated_remaining_sec": est_remaining_sec,
+            "is_due_for_poll": is_due,
+        })
+
+    remaining_times = [d["estimated_remaining_sec"] for d in details if d["estimated_remaining_sec"] > 0]
+    next_poll = min(remaining_times) if remaining_times else 60
+    next_poll = max(15, min(300, next_poll))
+
+    return {
+        "pending_count": len(pending),
+        "due_for_poll_count": len(due_items),
+        "categories": dict(category_counts),
+        "next_recommended_poll_sec": next_poll,
+        "templates_status": details[:10],
+    }
 
 def run(
     templates_raw: list[dict],
@@ -85,18 +182,23 @@ def run(
     print(f"Done. Results appended to {log_path}")
 
 
-def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") -> None:
+def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") -> dict:
     """
     Phase 2, step 2: check approval status for everything still pending.
 
     ONE remote fetch + ONE batch write, regardless of how many entries are
-    pending. Transient failures leave entries pollable for the next run.
+    pending. Returns a summary dictionary including procedural SLA insights.
     """
     c = client.lower()
     to_check = [e for e in pending_entries(log_path) if (e.get("client", "bajaj") or "bajaj").lower() == c]
     if not to_check:
         print(f"Nothing pending for {client}.")
-        return
+        return {
+            "checked": 0,
+            "updated": 0,
+            "pending": 0,
+            "insights": get_pending_templates_sla_insights(log_path, client=c),
+        }
 
     print(f"Checking {len(to_check)} pending template(s) for {client}...")
 
@@ -104,7 +206,13 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
     if err is not None:
         # Do NOT write anything: a later poll will retry every entry.
         print(f"  Poll deferred for {client}: {err}")
-        return
+        return {
+            "checked": len(to_check),
+            "updated": 0,
+            "pending": len(to_check),
+            "error": str(err),
+            "insights": get_pending_templates_sla_insights(log_path, client=c),
+        }
 
     now = datetime.now(UTC).isoformat()
     updates: dict[str, dict] = {}
@@ -130,10 +238,17 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
             # PENDING or unknown provider state — keep pollable.
             print(f"  {entry['template_name']}: {status.value} (kept pending)")
 
+    updated = 0
     if updates:
         updated = update_results(updates, log_path)
         print(f"Applied {updated} status update(s).")
 
+    return {
+        "checked": len(to_check),
+        "updated": updated,
+        "pending": len(to_check) - updated,
+        "insights": get_pending_templates_sla_insights(log_path, client=c),
+    }
 
 def run_file(
     file_path: str,

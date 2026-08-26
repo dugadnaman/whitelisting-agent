@@ -167,16 +167,18 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (autoRefresh && mounted) {
+      const intervalSec = stats?.sla_insights?.next_recommended_poll_sec || 30;
+      const intervalMs = Math.max(15, Math.min(120, intervalSec)) * 1000;
       intervalRef.current = setInterval(() => {
         loadStats();
         loadTemplates();
         loadActivity();
-      }, 30000);
+      }, intervalMs);
     }
     return () => {
       clearInterval(intervalRef.current as NodeJS.Timeout);
     };
-  }, [autoRefresh, loadStats, loadTemplates, loadActivity, mounted]);
+  }, [autoRefresh, loadStats, loadTemplates, loadActivity, mounted, stats?.sla_insights?.next_recommended_poll_sec]);
 
   const handlePoll = async () => {
     try {
@@ -380,6 +382,31 @@ export default function DashboardPage() {
           );
         })}
       </div>
+      {/* Predictive Meta Approval SLA Countdown Banner */}
+      {!statsLoading && stats?.sla_insights && stats.pending > 0 && Object.keys(stats.sla_insights.categories).length > 0 && (
+        <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <span className="text-sm">⏱️</span>
+            <span className="text-xs font-bold text-amber-950">
+              Estimated Meta Review Turnaround ({stats.pending} pending):
+            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {Object.entries(stats.sla_insights.categories).map(([cat, count]) => (
+                <span
+                  key={cat}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-white text-amber-900 border border-amber-300 shadow-3xs"
+                >
+                  <span className="font-bold text-amber-700">{count}</span> {cat}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="text-[11px] text-amber-800/80 font-mono shrink-0">
+            Next smart poll in ~{stats.sla_insights.next_recommended_poll_sec}s
+          </div>
+        </div>
+      )}
+
 
       {/* Status distribution bar */}
       {!statsLoading && distTotal > 0 && (

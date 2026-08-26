@@ -58,7 +58,7 @@ from rcs_config import (
     get_rcs_entity_id,
 )
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
-from runner import poll_pending, run
+from runner import get_pending_templates_sla_insights, poll_pending, run
 from submission_client import _GOVERNOR, _STATUS_MAP
 from tracker import load_log, log_result, pending_entries
 
@@ -468,6 +468,7 @@ def get_stats(
                 "rejected": sum(1 for e in merged if e.get("approval_status") == "rejected"),
                 "error": None,
                 "karix_health": _GOVERNOR.get_health_stats(),
+                "sla_insights": {"pending_count": 0, "due_for_poll_count": 0, "categories": {}, "next_recommended_poll_sec": 120},
             }
 
         # WhatsApp
@@ -515,6 +516,7 @@ def get_stats(
             "duplicate": 0,
             "error": None,
             "karix_health": _GOVERNOR.get_health_stats(),
+            "sla_insights": get_pending_templates_sla_insights(LOG_PATH, client=acc),
         }
     except Exception as exc:
         logger.exception("Error in get_stats for %s (%s): %s", acc, chan, exc)
@@ -528,6 +530,7 @@ def get_stats(
             "duplicate": 0,
             "error": str(exc),
             "karix_health": _GOVERNOR.get_health_stats(),
+            "sla_insights": {"pending_count": 0, "due_for_poll_count": 0, "categories": {}, "next_recommended_poll_sec": 120},
         }
 
 
@@ -1205,16 +1208,19 @@ def poll(
             return {"checked": 0}
         all_pending = pending_entries(LOG_PATH)
         matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-        poll_pending(LOG_PATH, client=acc)
+        poll_res = poll_pending(LOG_PATH, client=acc)
         log_activity(
             user=user,
             action="STATUS_POLL",
             account=acc,
             channel=chan,
-            details={"checked_count": len(matching)},
+            details={
+                "checked_count": poll_res.get("checked", len(matching)),
+                "updated_count": poll_res.get("updated", 0),
+            },
             status="success",
         )
-        return {"checked": len(matching)}
+        return _json_safe(poll_res)
     except Exception as exc:
         # Never leak a 500 on Poll — surface a clean, actionable error (e.g. missing credentials).
         logger.exception("Error in poll for %s (%s): %s", acc, chan, exc)
