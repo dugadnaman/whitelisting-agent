@@ -39,11 +39,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleQuickLogin = (demoEmail: string, demoPass: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    handleSubmit(undefined, demoEmail, demoPass);
-  };
 
   return (
     <div className="min-h-screen -ml-64 -m-8 flex items-center justify-center bg-gray-50/70 p-6">
@@ -112,42 +107,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Quick Demo Credentials */}
-        <div className="pt-4 border-t border-gray-100 space-y-2.5">
-          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider text-center">
-            Quick One-Click Demo Access
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('namandugad46@gmail.com', 'Naman@123')}
-              className="p-2.5 bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-[11px] font-semibold text-left transition"
-            >
-              <div className="font-bold flex items-center gap-1.5">
-                <span>🏢 Bajaj Finserv</span>
-              </div>
-              <div className="text-[10px] text-emerald-700 font-mono mt-0.5">namandugad46@gmail.com</div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('dugadnaman@gmail.com', 'Naman@123')}
-              className="p-2.5 bg-blue-50/70 hover:bg-blue-100 border border-blue-200 text-blue-800 rounded-xl text-[11px] font-semibold text-left transition"
-            >
-              <div className="font-bold flex items-center gap-1.5">
-                <span>🏢 Tata Capital</span>
-              </div>
-              <div className="text-[10px] text-blue-700 font-mono mt-0.5">dugadnaman@gmail.com</div>
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={() => handleQuickLogin('namandugad@attributics.com', 'Naman@123')}
-            className="w-full p-2.5 bg-gray-100 hover:bg-gray-200 border border-gray-300 text-gray-800 rounded-xl text-[11px] font-semibold text-center transition"
-          >
-            🔑 Login as Platform SuperAdmin (namandugad@attributics.com)
-          </button>
-        </div>
 
         {/* Sign up link */}
         <div className="text-center text-xs text-gray-500 pt-2">
