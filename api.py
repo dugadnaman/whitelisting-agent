@@ -1691,23 +1691,18 @@ def debug_logs(current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "admin" and current_user.get("email") != "dugadnaman@gmail.com":
         raise HTTPException(status_code=403, detail="Forbidden")
     import os
-    paths = [
-        "/var/log/supervisor/fastapi.err.log",
-        "/var/log/supervisor/fastapi.out.log",
-        "/var/log/supervisor/supervisord.log",
-    ]
     res = {}
-    for p in paths:
-        if os.path.exists(p):
-            try:
-                # Read last 100 lines
-                with open(p, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                res[p] = "".join(lines[-100:])
-            except Exception as e:
-                res[p] = f"Error reading: {e}"
-        else:
-            res[p] = "Not found"
+    log_dir = "/var/log/supervisor"
+    if os.path.exists(log_dir):
+        for f_name in os.listdir(log_dir):
+            p = os.path.join(log_dir, f_name)
+            if os.path.isfile(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                    res[f_name] = "".join(lines[-150:])
+                except Exception as e:
+                    res[f_name] = f"Error reading: {e}"
     return res
 
 
