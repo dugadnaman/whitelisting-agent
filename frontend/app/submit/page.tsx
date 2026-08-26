@@ -52,6 +52,7 @@ export default function SubmitPage() {
   const [dragging, setDragging] = useState(false);
   const [autoFixAspectRatio, setAutoFixAspectRatio] = useState(true);
   const [autoFixGrammar, setAutoFixGrammar] = useState(true);
+  const [autoSkipDuplicates, setAutoSkipDuplicates] = useState(true);
   const [showAspectRatioModal, setShowAspectRatioModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -123,7 +124,7 @@ export default function SubmitPage() {
     setShowAspectRatioModal(false);
     setState({ step: 'submitting' });
     try {
-      const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar);
+      const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates);
       setState({ step: 'submitted', submitted: res.submitted, results: res.results });
     } catch (err) {
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
@@ -133,7 +134,7 @@ export default function SubmitPage() {
         previews: currentPreviews,
       });
     }
-  }, [file, account, channel, user, currentPreviews]);
+  }, [file, account, channel, user, currentPreviews, autoSkipDuplicates]);
 
   const handleInitiateSubmit = useCallback(() => {
     if (!file || !currentPreviews) return;
@@ -304,21 +305,51 @@ export default function SubmitPage() {
           {(() => {
             const dupes = state.previews.filter(p => p.already_exists_on_waba || p.exists_on_waba || p.duplicate_warning);
             if (!dupes.length) return null;
+            const netNewCount = state.previews.length - dupes.length;
             return (
-              <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2 shadow-xs">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-rose-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
-                    🚫
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-3 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-rose-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
+                      🚫
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-rose-950">
+                        {dupes.length} of {state.previews.length} template{dupes.length === 1 ? '' : 's'} already exist on {accountLabel}&apos;s WABA
+                      </h4>
+                      <p className="text-[11px] text-rose-800/90 mt-0.5 leading-relaxed">
+                        Meta will reject new submissions with <em>&quot;There is already English content for this template&quot;</em>.
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-rose-950">
-                      Duplicate Template Names Detected ({dupes.length} of {state.previews.length} template{dupes.length === 1 ? '' : 's'} already exist on {accountLabel}&apos;s WABA)
-                    </h4>
-                    <p className="text-[11px] text-rose-800/90 mt-0.5 leading-relaxed">
-                      Meta will reject new submissions with <em>&quot;There is already English content for this template&quot;</em>. Consider renaming these templates (e.g. appending <code>_v2</code>) before submitting, or edit them in Meta Business Manager.
-                    </p>
-                  </div>
+
+                  {/* Auto-Skip Toggle */}
+                  <label className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-rose-300 text-xs font-semibold text-rose-900 shadow-xs cursor-pointer shrink-0 hover:bg-rose-50/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={autoSkipDuplicates}
+                      onChange={(e) => setAutoSkipDuplicates(e.target.checked)}
+                      className="rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+                    />
+                    <span>Auto-Skip Existing Templates (Recommended)</span>
+                  </label>
                 </div>
+
+                {autoSkipDuplicates ? (
+                  <div className="text-[11px] text-rose-900 bg-rose-100/70 p-2.5 rounded-lg border border-rose-200/80 flex items-center gap-2">
+                    <span className="text-xs">⚡</span>
+                    <span>
+                      <strong>Smart Duplicate Filter Active:</strong> Only the <strong>{netNewCount} net-new template{netNewCount === 1 ? '' : 's'}</strong> will be submitted to Meta. The {dupes.length} existing template{dupes.length === 1 ? '' : 's'} will be safely skipped to prevent Meta rejections.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-rose-900 bg-white/80 p-2.5 rounded-lg border border-rose-200 flex items-center gap-2">
+                    <span className="text-xs">⚠️</span>
+                    <span>
+                      <strong>Submit All Active:</strong> All {state.previews.length} templates will be sent to Meta. Templates that already exist will likely receive a duplicate rejection.
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -451,7 +482,19 @@ export default function SubmitPage() {
                   onClick={handleInitiateSubmit}
                   className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
                 >
-                  <span>Submit All ({state.previews.length})</span>
+                  {(() => {
+                    const dupes = state.previews.filter(p => p.already_exists_on_waba || p.exists_on_waba || p.duplicate_warning);
+                    const netNew = state.previews.length - dupes.length;
+                    if (dupes.length > 0 && autoSkipDuplicates) {
+                      return (
+                        <span>
+                          Submit {netNew} Net-New {netNew === 1 ? 'Template' : 'Templates'}
+                          {dupes.length > 0 && ` (${dupes.length} Skipped)`}
+                        </span>
+                      );
+                    }
+                    return <span>Submit All ({state.previews.length})</span>;
+                  })()}
                   <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
                   </svg>
@@ -689,7 +732,9 @@ export default function SubmitPage() {
                             <StatusBadge status={r.approval_status || 'unknown'} />
                           </td>
                           <td className="px-5 py-3 text-gray-500">
-                            {r.error ? (
+                            {r.status === 'duplicate' ? (
+                              <span className="text-blue-700 font-medium">{r.error || 'Already active on WABA — skipped duplicate submission.'}</span>
+                            ) : r.error ? (
                               <span className="text-red-600 font-medium">{formatError(r.error)}</span>
                             ) : (
                               'Submitted successfully'

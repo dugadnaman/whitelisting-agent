@@ -309,10 +309,11 @@ export async function submitFile(
   file: File,
   account: Account = "bajaj",
   channel: Channel = "whatsapp",
-  user: string = "Namann",
+  user: string = "Operator",
   fixAspectRatio: boolean = true,
-  fixGrammar: boolean = true
-): Promise<{ submitted: number; results: Template[] }> {
+  fixGrammar: boolean = true,
+  skipDuplicates: boolean = true
+): Promise<{ submitted: number; skipped_duplicates?: number; results: Template[] }> {
   const form = new FormData();
   form.append("file", file);
   const qs = new URLSearchParams({
@@ -321,6 +322,7 @@ export async function submitFile(
     user,
     fix_aspect_ratio: String(fixAspectRatio),
     fix_grammar: String(fixGrammar),
+    skip_duplicates: String(skipDuplicates),
   }).toString();
   const res = await fetchWithRetry(getApiUrl(`/api/submit?${qs}`), {
     method: "POST",

@@ -73,6 +73,75 @@ def test_list_all_templates():
     if templates:
         assert len(templates) > 0
 
+
+def test_duplicate_submission_skipping():
+    """
+    Verify that when skip_duplicates is enabled, templates already active on WABA
+    are filtered into DUPLICATE status without hitting Karix/Meta create endpoints.
+    """
+    import io
+    import tempfile
+    from unittest.mock import patch
+    from fastapi.testclient import TestClient
+    import api
+    from models import SubmissionStatus
+
+    client = TestClient(api.app)
+    # Sign up/in as tata user
+    email = "dupe_test@attributics.com"
+    client.post("/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Dupe Tester", "tenant_id": "tata"})
+    r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
+    token = r.json().get("token") or r.json().get("access_token")
+    H = {"Authorization": f"Bearer {token}"}
+
+    # Mock live templates to contain 'existing_template_1'
+    mock_live = [
+        {"template_name": "existing_template_1", "template_create_status": "APPROVED", "fb_template_id": "999888"}
+    ]
+
+    csv_content = (
+        "template_name,template_category,header_type,header_text,body_text\n"
+        "existing_template_1,MARKETING,TEXT,Header,Hello {{1}}\n"
+        "brand_new_template_2,MARKETING,TEXT,Header,Hello {{1}}\n"
+    )
+
+    def fake_run(raw_list, log_path, **kwargs):
+        from tracker import log_result
+        from models import SubmissionResult, SubmissionStatus
+        for item in raw_list:
+            res = SubmissionResult(
+                source_ref=item.get("source_ref", item.get("template_name", "")),
+                template_name=item.get("template_name", ""),
+                status=SubmissionStatus.SUBMITTED,
+                provider_ref_id="fake_123",
+            )
+            log_result(res, log_path)
+
+    with patch("api.fetch_whatsapp_templates", return_value=mock_live), patch("api.run", side_effect=fake_run) as mock_run:
+        r = client.post(
+            "/api/submit?account=tchfl&channel=whatsapp&skip_duplicates=true",
+            files={"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=H,
+        )
+    assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+    data = r.json()
+    results = data.get("results", [])
+    assert len(results) == 2, f"Expected 2 results, got {len(results)}"
+
+    # Check duplicate entry was safely skipped
+    dupe_row = next((x for x in results if x.get("template_name") == "existing_template_1"), None)
+    assert dupe_row is not None
+    assert dupe_row.get("status") == SubmissionStatus.DUPLICATE.value
+    assert "already active on waba" in dupe_row.get("error", "").lower()
+
+    # Verify run was only invoked with the net-new template
+    if mock_run.called:
+        submitted_raw = mock_run.call_args[0][0]
+        assert len(submitted_raw) == 1
+        assert submitted_raw[0]["template_name"] == "brand_new_template_2"
+
+    print("✓ test_duplicate_submission_skipping passed!")
+
 if __name__ == "__main__":
     # Check credentials are set
     if not os.environ.get("WABA_AUTH_TOKEN"):

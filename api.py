@@ -46,8 +46,11 @@ from config import (
 )
 from grammar_checker import lint_and_fix_body
 from loader import load_from_csv, load_from_excel
-from models import ApprovalStatus
+from models import ApprovalStatus, SubmissionResult, SubmissionStatus
 from rcs_client import fetch_rcs_templates
+from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
+from rcs_runner import run_rcs, run_rcs_file
+from rcs_tracker import load_rcs_log, log_rcs_result
 
 # RCS pipeline imports
 from rcs_config import (
@@ -55,11 +58,9 @@ from rcs_config import (
     get_rcs_entity_id,
 )
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
-from rcs_runner import run_rcs_file
-from rcs_tracker import load_rcs_log
 from runner import poll_pending, run
 from submission_client import _STATUS_MAP
-from tracker import load_log, pending_entries
+from tracker import load_log, log_result, pending_entries
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -926,6 +927,7 @@ async def submit_file(
     user: str = Query("Anonymous Operator"),
     fix_aspect_ratio: bool = Query(True),
     fix_grammar: bool = Query(True),
+    skip_duplicates: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
@@ -946,12 +948,58 @@ async def submit_file(
                     status_code=400,
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}' to submit.",
                 )
-            before_count = len(load_rcs_log(RCS_LOG_PATH))
-            await asyncio.to_thread(run_rcs_file, tmp_path, RCS_LOG_PATH, client=acc, user=user)
-            all_entries = load_rcs_log(RCS_LOG_PATH)
-            new_entries = all_entries[before_count:]
+
+            to_submit = []
+            duplicate_entries = []
+            if skip_duplicates:
+                live_templates = fetch_rcs_templates(client=acc)
+                live_map = {
+                    (lt.get("viTemplate", {}).get("name") or str(lt.get("templateId", ""))).strip().lower(): lt
+                    for lt in live_templates
+                    if (lt.get("viTemplate", {}).get("name") or lt.get("templateId"))
+                }
+                for s in subs:
+                    name_key = s.template_name.strip().lower()
+                    if name_key in live_map:
+                        live_obj = live_map[name_key]
+                        status_str = str(live_obj.get("status", "APPROVED")).upper()
+                        dupe_res = RcsSubmissionResult(
+                            source_ref=s.source_ref,
+                            template_name=s.template_name,
+                            status=RcsSubmissionStatus.DUPLICATE,
+                            provider_ref_id=str(live_obj.get("templateId", "")),
+                            error="RCS template already active on DLT Bot — skipped duplicate submission.",
+                            provider_response=live_obj,
+                            approval_status=status_str.lower(),
+                            client=acc,
+                            channel="rcs",
+                            submitted_by=user,
+                            source_file=file.filename or "upload.csv",
+                        )
+                        log_rcs_result(dupe_res, RCS_LOG_PATH)
+                        duplicate_entries.append(asdict(dupe_res))
+                    else:
+                        to_submit.append(s)
+            else:
+                to_submit = subs
+
+            new_entries = []
+            if to_submit:
+                before_count = len(load_rcs_log(RCS_LOG_PATH))
+                await asyncio.to_thread(
+                    run_rcs,
+                    [asdict(s) for s in to_submit],
+                    RCS_LOG_PATH,
+                    client=acc,
+                    user=user,
+                    source_file=file.filename or "upload.csv",
+                )
+                all_entries = load_rcs_log(RCS_LOG_PATH)
+                new_entries = all_entries[before_count:]
+
+            all_combined = duplicate_entries + new_entries
             cleaned_entries = []
-            for e in new_entries:
+            for e in all_combined:
                 entry = dict(e)
                 if "error" in entry:
                     entry["error"] = _clean_error_message(entry["error"])
@@ -965,14 +1013,17 @@ async def submit_file(
                 details={
                     "filename": file.filename or "upload.csv",
                     "count": len(cleaned_entries),
+                    "net_new_submitted": len(to_submit),
+                    "duplicates_skipped": len(duplicate_entries),
                     "templates": [e.get("template_name") for e in cleaned_entries],
-                    "successful": len([e for e in cleaned_entries if e.get("status") == "submitted"]),
+                    "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
                     "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
                 },
-                status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
+                status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
             )
             return {
-                "submitted": len(cleaned_entries),
+                "submitted": len(to_submit),
+                "skipped_duplicates": len(duplicate_entries),
                 "results": [_json_safe(e) for e in cleaned_entries],
             }
 
@@ -986,21 +1037,66 @@ async def submit_file(
                 status_code=400,
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
             )
-        before_count = len(load_log(LOG_PATH))
-        await asyncio.to_thread(
-            run,
-            [asdict(s) for s in subs],
-            LOG_PATH,
-            client=acc,
-            user=user,
-            source_file=file.filename or "upload.csv",
-            fix_aspect_ratio=fix_aspect_ratio,
-            fix_grammar=fix_grammar,
-        )
-        all_entries = load_log(LOG_PATH)
-        new_entries = all_entries[before_count:]
+
+        to_submit = []
+        duplicate_entries = []
+        if skip_duplicates:
+            live_templates = fetch_whatsapp_templates(client=acc)
+            live_map = {
+                (lt.get("template_name") or "").strip().lower(): lt
+                for lt in live_templates
+                if lt.get("template_name")
+            }
+            for s in subs:
+                name_key = s.template_name.strip().lower()
+                if name_key in live_map:
+                    live_obj = live_map[name_key]
+                    status_str = str(live_obj.get("template_create_status") or live_obj.get("status", "APPROVED")).upper()
+                    approval_val = (
+                        _STATUS_MAP.get(status_str, ApprovalStatus.APPROVED).value
+                        if status_str in _STATUS_MAP
+                        else status_str.lower()
+                    )
+                    ref_id = str(live_obj.get("fb_template_id", "") or live_obj.get("sno", "") or "")
+                    dupe_res = SubmissionResult(
+                        source_ref=s.source_ref,
+                        template_name=s.template_name,
+                        status=SubmissionStatus.DUPLICATE,
+                        provider_ref_id=ref_id,
+                        error="Template already active on WABA — automatically skipped duplicate submission.",
+                        provider_response=live_obj,
+                        approval_status=ApprovalStatus(approval_val) if approval_val in ("approved", "pending", "rejected") else ApprovalStatus.APPROVED,
+                        client=acc,
+                        channel="whatsapp",
+                        submitted_by=user,
+                        source_file=file.filename or "upload.csv",
+                    )
+                    log_result(dupe_res, LOG_PATH)
+                    duplicate_entries.append(asdict(dupe_res))
+                else:
+                    to_submit.append(s)
+        else:
+            to_submit = subs
+
+        new_entries = []
+        if to_submit:
+            before_count = len(load_log(LOG_PATH))
+            await asyncio.to_thread(
+                run,
+                [asdict(s) for s in to_submit],
+                LOG_PATH,
+                client=acc,
+                user=user,
+                source_file=file.filename or "upload.csv",
+                fix_aspect_ratio=fix_aspect_ratio,
+                fix_grammar=fix_grammar,
+            )
+            all_entries = load_log(LOG_PATH)
+            new_entries = all_entries[before_count:]
+
+        all_combined = duplicate_entries + new_entries
         cleaned_entries = []
-        for e in new_entries:
+        for e in all_combined:
             entry = dict(e)
             if "error" in entry:
                 entry["error"] = _clean_error_message(entry["error"])
@@ -1014,14 +1110,17 @@ async def submit_file(
             details={
                 "filename": file.filename or "upload.csv",
                 "count": len(cleaned_entries),
+                "net_new_submitted": len(to_submit),
+                "duplicates_skipped": len(duplicate_entries),
                 "templates": [e.get("template_name") for e in cleaned_entries],
-                "successful": len([e for e in cleaned_entries if e.get("status") == "submitted"]),
+                "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
                 "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
             },
-            status="success" if any(e.get("status") == "submitted" for e in cleaned_entries) else "failed",
+            status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
         )
         return {
-            "submitted": len(cleaned_entries),
+            "submitted": len(to_submit),
+            "skipped_duplicates": len(duplicate_entries),
             "results": [_json_safe(e) for e in cleaned_entries],
         }
     except HTTPException:

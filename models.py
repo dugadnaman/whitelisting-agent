@@ -16,6 +16,7 @@ class SubmissionStatus(StrEnum):
 
     SUBMITTED = "submitted"
     FAILED = "failed"
+    DUPLICATE = "duplicate"
 
 
 class ApprovalStatus(StrEnum):
