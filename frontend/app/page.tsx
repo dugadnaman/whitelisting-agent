@@ -30,13 +30,24 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function LiveBadge({ live }: { live?: boolean }) {
-  return live ? (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200" title="Synced live from the Karix WABA">
-      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-      Karix Live
-    </span>
-  ) : (
+function LiveBadge({ live, existsOnWaba }: { live?: boolean; existsOnWaba?: boolean }) {
+  if (live) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200" title="Synced live from the Karix WABA">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+        Live on WABA
+      </span>
+    );
+  }
+  if (existsOnWaba) {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200" title="Found on Karix WABA">
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+        On WABA
+      </span>
+    );
+  }
+  return (
     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-50 text-gray-500 border border-gray-200" title="Recorded locally at submission time">
       Local Log
     </span>
@@ -528,7 +539,7 @@ export default function DashboardPage() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold text-gray-900 font-mono text-[11px]">{t.template_name}</span>
-                                <LiveBadge live={t.live} />
+                                <LiveBadge live={t.live} existsOnWaba={t.exists_on_waba} />
                               </div>
                               <div className="text-[10px] text-gray-400 font-mono mt-0.5">
                                 {channel === 'whatsapp' ? (t.provider_ref_id ? `ID ${t.provider_ref_id}` : 'Not submitted yet') : (t.template_id ? `DLT ${t.template_id}` : '')}

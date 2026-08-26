@@ -45,6 +45,7 @@ export type Template = {
   submitted_by?: string | null;
   source_file?: string | null;
   live?: boolean;
+  exists_on_waba?: boolean;
   updated_at?: string | null;
   provider_response?: Record<string, unknown> | null;
   client?: string;
@@ -93,6 +94,12 @@ export type TemplatePreview = {
   source_ref?: string;
   aspect_ratio_warnings?: AspectRatioWarning[];
   grammar_warnings?: GrammarWarning[];
+  already_exists_on_waba?: boolean;
+  exists_on_waba?: boolean;
+  duplicate_warning?: {
+    template_name: string;
+    message: string;
+  };
   components?: Array<{
     type: string;
     text?: string;

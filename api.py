@@ -295,22 +295,16 @@ def _json_safe(obj):
 
 
 def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
-    """Fetch live templates directly from Karix WhatsApp API."""
-    acc = client.lower()
+    """Fetch live templates directly from Karix WhatsApp API (Portal & Official)."""
+    acc = client.lower().strip()
     try:
-        waba_id = get_waba_id(acc)
-        headers = get_official_auth_headers(acc)
-        resp = http_client.get(
-            f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}",
-            headers=headers,
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
-            return data.get("response", {}).get("templates", [])
+        from submission_client import fetch_template_list
+
+        templates, _ = fetch_template_list(client=acc)
+        return templates or []
     except Exception as e:
         logger.warning("Could not fetch live WhatsApp templates for %s: %s", acc, e)
-    return []
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +544,7 @@ def get_templates(
             local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
 
             live_templates = fetch_rcs_templates(client=acc)
+            live_map = {(lt.get("viTemplate", {}).get("name") or str(lt.get("templateId", ""))).strip().lower(): lt for lt in live_templates if (lt.get("viTemplate", {}).get("name") or lt.get("templateId"))}
             seen_names = set()
             merged_entries = []
 
@@ -588,14 +583,27 @@ def get_templates(
                     "submitted_by": None,
                     "source_file": None,
                     "live": True,
+                    "exists_on_waba": True,
                 }
                 merged_entries.append(entry)
                 seen_names.add(name.lower())
 
             for le in local_entries:
-                if le.get("template_name", "").lower() not in seen_names:
-                    merged_entries.append(le)
-
+                le_name = (le.get("template_name") or "").strip().lower()
+                le_clean = dict(le)
+                le_clean["error"] = _clean_error_message(le.get("error"))
+                if le_name in seen_names:
+                    # Enrich the live entry with local metadata if available
+                    for me in merged_entries:
+                        if me.get("template_name", "").strip().lower() == le_name:
+                            me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
+                            me["source_file"] = me.get("source_file") or le.get("source_file")
+                            me["exists_on_waba"] = True
+                else:
+                    le_clean["live"] = False
+                    le_clean["exists_on_waba"] = False
+                    merged_entries.append(le_clean)
+                    seen_names.add(le_name)
             if status and isinstance(status, str):
                 s_val = status.lower()
                 merged_entries = [
@@ -622,12 +630,13 @@ def get_templates(
         local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
 
         live_templates = fetch_whatsapp_templates(client=acc)
+        live_map = {(lt.get("template_name") or "").strip().lower(): lt for lt in live_templates if lt.get("template_name")}
         seen_names = set()
         merged_entries = []
 
         for lt in live_templates:
-            name = lt.get("template_name") or str(lt.get("fb_template_id", ""))
-            status_str = str(lt.get("template_create_status", "PENDING")).upper()
+            name = lt.get("template_name") or str(lt.get("fb_template_id", "") or lt.get("sno", ""))
+            status_str = str(lt.get("template_create_status") or lt.get("status", "PENDING")).upper()
             approval_val = (
                 _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value
                 if status_str in _STATUS_MAP
@@ -637,7 +646,7 @@ def get_templates(
             entry = {
                 "source_ref": name,
                 "template_name": name,
-                "status": "submitted",
+                "status": "submitted" if approval_val in ("approved", "pending", "submitted") else "failed",
                 "provider_ref_id": str(lt.get("fb_template_id", "") or lt.get("sno", "")),
                 "approval_status": approval_val,
                 "approval_reason": lt.get("template_status_reason"),
@@ -651,17 +660,27 @@ def get_templates(
                 "submitted_by": None,
                 "source_file": None,
                 "live": True,
+                "exists_on_waba": True,
             }
             merged_entries.append(entry)
             seen_names.add(name.lower())
 
         for le in local_entries:
-            if le.get("template_name", "").lower() not in seen_names:
-                le_clean = dict(le)
-                le_clean["error"] = _clean_error_message(le.get("error"))
+            le_name = (le.get("template_name") or "").strip().lower()
+            le_clean = dict(le)
+            le_clean["error"] = _clean_error_message(le.get("error"))
+            if le_name in seen_names:
+                # Template exists on WABA! Enrich the live entry with local metadata
+                for me in merged_entries:
+                    if me.get("template_name", "").strip().lower() == le_name:
+                        me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
+                        me["source_file"] = me.get("source_file") or le.get("source_file")
+                        me["exists_on_waba"] = True
+            else:
                 le_clean["live"] = False
+                le_clean["exists_on_waba"] = False
                 merged_entries.append(le_clean)
-
+                seen_names.add(le_name)
         if status and isinstance(status, str):
             s_val = status.lower()
             merged_entries = [
@@ -687,19 +706,42 @@ def get_templates(
         return []
 
 
-def _inspect_template_quality_and_warnings(submissions: list, channel: str = "whatsapp") -> list[dict]:
+def _inspect_template_quality_and_warnings(
+    submissions: list, channel: str = "whatsapp", account: str = "bajaj"
+) -> list[dict]:
     """
-    Inspect image dimensions and text grammar/spelling/Meta compliance across all template components.
-    Attaches aspect ratio warnings, spelling typos, repeated words, and suggested fixes.
+    Inspect image dimensions, text grammar/spelling, and cross-reference with live WABA list.
+    Attaches aspect ratio warnings, spelling typos, duplicate warnings, and suggested fixes.
     """
     import base64
+
+    acc = account.lower().strip()
+    live_templates = fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else fetch_rcs_templates(client=acc)
+    live_names = {
+        (lt.get("template_name") or lt.get("viTemplate", {}).get("name") or "").strip().lower()
+        for lt in live_templates
+        if lt.get("template_name") or lt.get("viTemplate", {}).get("name")
+    }
 
     results = []
     for s in submissions:
         item = asdict(s) if not isinstance(s, dict) else dict(s)
+        tname = (item.get("template_name") or "").strip()
+        already_exists = tname.lower() in live_names if tname else False
+        item["already_exists_on_waba"] = already_exists
+        item["exists_on_waba"] = already_exists
+        if already_exists:
+            item["duplicate_warning"] = {
+                "template_name": tname,
+                "message": (
+                    f"Template '{tname}' already exists on WABA for {account.title()}. "
+                    "Meta will reject resubmission with duplicate content. "
+                    "Please use a new name (e.g. appending '_v2') or edit the existing template."
+                ),
+            }
+
         aspect_warnings = []
         grammar_warnings = []
-
         # WhatsApp components
         components = item.get("components") or []
         for comp in components:
@@ -827,7 +869,7 @@ async def preview_file(
                 },
                 status="success",
             )
-            return _inspect_template_quality_and_warnings(submissions, channel="rcs")
+            return _inspect_template_quality_and_warnings(submissions, channel="rcs", account=account)
 
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
@@ -862,7 +904,7 @@ async def preview_file(
         )
         for s in submissions:
             s.client = account
-        return _inspect_template_quality_and_warnings(submissions, channel="whatsapp")
+        return _inspect_template_quality_and_warnings(submissions, channel="whatsapp", account=account)
     except HTTPException:
         raise
     except Exception as exc:

@@ -300,6 +300,29 @@ export default function SubmitPage() {
       {/* STEP 2: Preview Table */}
       {state.step === 'previewed' && (
         <div className="space-y-4">
+          {/* Live WABA Duplicate Conflict Alert Banner if templates already exist on WABA */}
+          {(() => {
+            const dupes = state.previews.filter(p => p.already_exists_on_waba || p.exists_on_waba || p.duplicate_warning);
+            if (!dupes.length) return null;
+            return (
+              <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-rose-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
+                    🚫
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-rose-950">
+                      Duplicate Template Names Detected ({dupes.length} of {state.previews.length} template{dupes.length === 1 ? '' : 's'} already exist on {accountLabel}&apos;s WABA)
+                    </h4>
+                    <p className="text-[11px] text-rose-800/90 mt-0.5 leading-relaxed">
+                      Meta will reject new submissions with <em>&quot;There is already English content for this template&quot;</em>. Consider renaming these templates (e.g. appending <code>_v2</code>) before submitting, or edit them in Meta Business Manager.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Aspect Ratio Alert Banner if non-16:9 images are detected */}
           {(() => {
             const warned = state.previews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0);
@@ -462,7 +485,16 @@ export default function SubmitPage() {
                 {state.previews.map((p, idx) => (
                   <tr key={idx} className="hover:bg-gray-50/50">
                     <td className="px-5 py-3 text-gray-400 font-mono">{idx + 1}</td>
-                    <td className="px-5 py-3 font-semibold text-gray-900 font-mono">{p.template_name}</td>
+                    <td className="px-5 py-3 font-semibold text-gray-900 font-mono">
+                      <div className="flex items-center gap-2">
+                        <span>{p.template_name}</span>
+                        {(p.already_exists_on_waba || p.exists_on_waba) && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-200 shrink-0" title="Already exists on this WABA">
+                            Already on WABA
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     {channel === 'whatsapp' ? (
                       <>
                         <td className="px-5 py-3 text-gray-700">{p.category || 'MARKETING'}</td>

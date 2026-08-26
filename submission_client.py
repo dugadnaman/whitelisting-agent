@@ -1214,42 +1214,52 @@ def submit_template(
 
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
-    Fetch the full template list for a client's WABA (supports Official API with Portal fallback).
+    Fetch the full template list for a client's WABA (supports Portal API and Official API).
+    Returns (templates_list, error_str_if_any).
     """
-    # 1. Official API
-    try:
-        waba_id = get_waba_id(client)
-        url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
-        response = get_http_session().get(
-            url,
-            headers=get_official_auth_headers(client),
-            timeout=REQUEST_TIMEOUT,
-        )
-        if response.ok:
-            data = response.json()
-            return data.get("response", {}).get("templates", []), None
-    except Exception as exc:
-        logger.debug("Official fetch_template_list notice for %s: %s", client, exc)
+    c = (client or "bajaj").lower().strip()
 
-    # 2. Portal API Fallback
+    # 1. Primary: Portal API getAllTemplates with pagination
     try:
-        waba_id = get_waba_id(client)
-        esmeaddr = get_esmeaddr(client)
-        headers = get_portal_auth_headers(client)
+        waba_id = get_waba_id(c)
+        esmeaddr = get_esmeaddr(c)
+        headers = get_portal_auth_headers(c)
         headers["Content-Type"] = "application/json"
         url = f"{KARIX_BASE_URL}/getAllTemplates"
-        body = {"wabaId": str(waba_id), "esmeaddr": str(esmeaddr)}
+        body = {"wabaId": str(waba_id), "esmeaddr": str(esmeaddr), "start": 0, "limit": 2500}
         resp = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
         if resp.ok:
-            data = resp.json()
+            data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
             if isinstance(data, list):
                 return data, None
             if isinstance(data, dict):
                 if data.get("Failed") == "No Records Found":
                     return [], None
-                return data.get("response", {}).get("templates", []), None
+                templates = (
+                    data.get("Success", {}).get("templates")
+                    or data.get("response", {}).get("templates")
+                    or data.get("templates")
+                    or []
+                )
+                if templates or "Success" in data or "response" in data:
+                    return templates, None
     except Exception as exc:
-        logger.debug("Portal fetch_template_list notice for %s: %s", client, exc)
+        logger.debug("Portal fetch_template_list notice for %s: %s", c, exc)
+
+    # 2. Official API Fallback
+    try:
+        waba_id = get_waba_id(c)
+        url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
+        response = get_http_session().get(
+            url,
+            headers=get_official_auth_headers(c),
+            timeout=REQUEST_TIMEOUT,
+        )
+        if response.ok:
+            data = response.json() if "json" in response.headers.get("content-type", "").lower() else {}
+            return data.get("response", {}).get("templates", []), None
+    except Exception as exc:
+        logger.debug("Official fetch_template_list notice for %s: %s", c, exc)
 
     return [], None
 
