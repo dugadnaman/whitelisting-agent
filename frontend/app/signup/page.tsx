@@ -17,7 +17,6 @@ export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [tenantId, setTenantId] = useState<'bajaj' | 'tata'>('bajaj');
-  const [tataSubAccount, setTataSubAccount] = useState('tchfl');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +48,7 @@ export default function SignupPage() {
       setUser(res.user.name || res.user.email);
       
       // Pre-set the chosen sub-account
-      const chosenAccount = tenantId === 'bajaj' ? 'bajaj' : (tataSubAccount || 'tata');
+      const chosenAccount = tenantId === 'bajaj' ? 'bajaj' : 'tata';
       setAccount(chosenAccount);
       try {
         localStorage.setItem('active_account', chosenAccount);
@@ -215,28 +214,6 @@ export default function SignupPage() {
                 <p className="text-[11px] text-gray-600 mt-2.5 leading-relaxed">
                   Unified access to all Tata Capital sub-entities (TCHFL, TCL Promo, TCL Trans, Wealth, Moneyfy).
                 </p>
-
-                {/* Sub-account selector inside Tata */}
-                {tenantId === 'tata' && (
-                  <div className="mt-3 pt-3 border-t border-blue-200/60">
-                    <label className="block text-[10px] font-bold text-blue-900 uppercase tracking-wider mb-1.5">
-                      Choose Primary Sub-Product / Division:
-                    </label>
-                    <select
-                      value={tataSubAccount}
-                      onChange={(e) => setTataSubAccount(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-full bg-white border border-blue-300 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-800 outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="tchfl">TCHFL — Housing Finance (HLTATA)</option>
-                      <option value="tcl_promo">TCL — Promotional (PL, BL, UCL, LAP)</option>
-                      <option value="tcl_trans">TCL — Transactional (Services & Collections)</option>
-                      <option value="wealth">Tata Wealth & Securities (TATAWL)</option>
-                      <option value="moneyfy">Tata Moneyfy</option>
-                      <option value="tata">Tata Capital (All Sub-Products)</option>
-                    </select>
-                  </div>
-                )}
               </div>
             </div>
 
