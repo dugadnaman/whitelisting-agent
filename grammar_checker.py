@@ -216,3 +216,124 @@ def lint_and_fix_body(text: str) -> tuple[str, list[dict]]:
         cleaned = cleaned.replace(k, v)
 
     return cleaned, warnings
+
+
+def validate_meta_technical_compliance(
+    body_text: str = "",
+    header_text: str | None = None,
+    footer_text: str | None = None,
+    buttons: list | None = None,
+    header_format: str | None = None,
+) -> list[dict]:
+    """
+    Validate technical Meta WhatsApp and RCS compliance rules (Semantic Memory).
+    Checks:
+    1. Word-to-variable ratio limit (Meta Error 2388293)
+    2. Variable formatting (sequential index {{1}}, {{2}})
+    3. Consecutive line breaks (max 2)
+    4. Header text length (max 60)
+    5. Footer text length (max 60)
+    6. Button text length (max 25) and URL validation
+    """
+    compliance_warnings = []
+
+    # 1. Word-to-Variable Ratio Check (Meta Error 2388293)
+    if body_text and body_text.strip():
+        var_matches = re.findall(r"\{\{\d+\}\}", body_text)
+        var_count = len(var_matches)
+        if var_count > 0:
+            # Strip variable tags to count fixed words
+            text_without_vars = re.sub(r"\{\{\d+\}\}", " ", body_text)
+            words = [w for w in re.findall(r"\b\w+\b", text_without_vars) if len(w) > 0]
+            word_count = len(words)
+            ratio = word_count / var_count if var_count > 0 else 0
+
+            if word_count < 3 or ratio < 2.5:
+                compliance_warnings.append(
+                    {
+                        "type": "META_WORD_RATIO",
+                        "severity": "error",
+                        "issue": (
+                            f"Parameters words ratio too low ({word_count} fixed words for {var_count} variable{'s' if var_count > 1 else ''}, ratio {ratio:.1f}:1). "
+                            "Meta rejects templates with error 2388293 when text is too sparse relative to variables."
+                        ),
+                        "recommendation": f"Add at least {max(3, int(var_count * 3) - word_count)} more fixed explanatory words around the variables.",
+                    }
+                )
+
+        # 2. Sequential Indexing Check
+        indexes = [int(m.strip("{}")) for m in var_matches]
+        if indexes:
+            expected = list(range(1, len(indexes) + 1))
+            if indexes != expected:
+                compliance_warnings.append(
+                    {
+                        "type": "NON_SEQUENTIAL_VARIABLES",
+                        "severity": "warning",
+                        "issue": f"Variables are non-sequential ({[f'{{{{{i}}}}}' for i in indexes]}). Expected: {[f'{{{{{i}}}}}' for i in expected]}.",
+                        "recommendation": "The system will auto-normalize variable indices sequentially during submission.",
+                    }
+                )
+
+        # 3. Consecutive Line Breaks (Meta Rule: max 2 newlines)
+        if "\n\n\n" in body_text or "\r\n\r\n\r\n" in body_text:
+            compliance_warnings.append(
+                {
+                    "type": "EXCESSIVE_LINEBREAKS",
+                    "severity": "warning",
+                    "issue": "Body contains 3 or more consecutive line breaks.",
+                    "recommendation": "Meta enforces a maximum of 2 consecutive line breaks (auto-compacted on submit).",
+                }
+            )
+
+    # 4. Header length limit (max 60 chars)
+    if header_text and header_format == "TEXT":
+        h_len = len(header_text.strip())
+        if h_len > 60:
+            compliance_warnings.append(
+                {
+                    "type": "HEADER_LENGTH_LIMIT",
+                    "severity": "error",
+                    "issue": f"Header text exceeds Meta limit of 60 characters ({h_len} chars).",
+                    "recommendation": f"Shorten header text by {h_len - 60} characters.",
+                }
+            )
+
+    # 5. Footer length limit (max 60 chars)
+    if footer_text:
+        f_len = len(footer_text.strip())
+        if f_len > 60:
+            compliance_warnings.append(
+                {
+                    "type": "FOOTER_LENGTH_LIMIT",
+                    "severity": "error",
+                    "issue": f"Footer text exceeds Meta limit of 60 characters ({f_len} chars).",
+                    "recommendation": f"Shorten footer text by {f_len - 60} characters.",
+                }
+            )
+
+    # 6. Button text length (max 25 chars) and URL validation
+    if buttons and isinstance(buttons, list):
+        for idx, btn in enumerate(buttons):
+            b_text = btn.get("text", "") if isinstance(btn, dict) else getattr(btn, "text", "")
+            if b_text and len(str(b_text).strip()) > 25:
+                compliance_warnings.append(
+                    {
+                        "type": "BUTTON_LENGTH_LIMIT",
+                        "severity": "error",
+                        "issue": f"Button #{idx + 1} text exceeds 25 characters ({len(str(b_text).strip())} chars: '{b_text}').",
+                        "recommendation": "Shorten button text to 25 characters or fewer.",
+                    }
+                )
+            b_url = btn.get("url", "") if isinstance(btn, dict) else getattr(btn, "url", "")
+            if b_url and " " in str(b_url).strip():
+                compliance_warnings.append(
+                    {
+                        "type": "BUTTON_URL_INVALID",
+                        "severity": "error",
+                        "issue": f"Button #{idx + 1} URL contains spaces ('{b_url}').",
+                        "recommendation": "Remove spaces or URL-encode the destination link.",
+                    }
+                )
+
+    return compliance_warnings

@@ -204,6 +204,43 @@ def test_smart_account_routing_detection():
 
     print("✓ test_smart_account_routing_detection passed!")
 
+
+def test_preflight_technical_compliance_validator():
+    """
+    Verify validate_meta_technical_compliance detects word ratio limits (Meta Error 2388293),
+    length violations, and formatting tags (Semantic Memory).
+    """
+    from grammar_checker import validate_meta_technical_compliance
+
+    # 1. Word-to-variable ratio too low (e.g. 'Hello {{1}}' -> 1 word, 1 var -> ratio 1:1 < 2.5)
+    warns = validate_meta_technical_compliance(body_text="Hello {{1}}")
+    assert any(w["type"] == "META_WORD_RATIO" for w in warns)
+    assert any("2388293" in w["issue"] for w in warns)
+
+    # 2. Compliant ratio (e.g. 'Dear customer, your personal loan account balance is {{1}}.')
+    good_warns = validate_meta_technical_compliance(
+        body_text="Dear valued customer, your requested loan application status is currently {{1}}."
+    )
+    assert not any(w["type"] == "META_WORD_RATIO" for w in good_warns)
+
+    # 3. Header text length limit (> 60 chars)
+    h_warns = validate_meta_technical_compliance(
+        header_text="This is an excessively long header text that exceeds sixty characters easily",
+        header_format="TEXT",
+    )
+    assert any(w["type"] == "HEADER_LENGTH_LIMIT" for w in h_warns)
+
+    # 4. Button length limit (> 25 chars) and space in URL
+    b_warns = validate_meta_technical_compliance(
+        buttons=[
+            {"type": "URL", "text": "This Button Text Is Far Too Long For Meta", "url": "https://example.com/ my path"}
+        ]
+    )
+    assert any(w["type"] == "BUTTON_LENGTH_LIMIT" for w in b_warns)
+    assert any(w["type"] == "BUTTON_URL_INVALID" for w in b_warns)
+
+    print("✓ test_preflight_technical_compliance_validator passed!")
+
 if __name__ == "__main__":
     # Check credentials are set
     if not os.environ.get("WABA_AUTH_TOKEN"):

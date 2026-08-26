@@ -83,6 +83,12 @@ export type GrammarWarning = {
   original: string;
   replacement: string;
 };
+export type ComplianceWarning = {
+  type: string;
+  severity: 'error' | 'warning';
+  issue: string;
+  recommendation: string;
+};
 export type AccountDetection = {
   detected_account_id: string;
   detected_account_name: string;
@@ -102,6 +108,7 @@ export type TemplatePreview = {
   source_ref?: string;
   aspect_ratio_warnings?: AspectRatioWarning[];
   grammar_warnings?: GrammarWarning[];
+  compliance_warnings?: ComplianceWarning[];
   already_exists_on_waba?: boolean;
   exists_on_waba?: boolean;
   duplicate_warning?: {

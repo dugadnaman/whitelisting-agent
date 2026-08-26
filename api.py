@@ -44,7 +44,7 @@ from config import (
     get_official_auth_headers,
     get_waba_id,
 )
-from grammar_checker import lint_and_fix_body
+from grammar_checker import lint_and_fix_body, validate_meta_technical_compliance
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus, SubmissionResult, SubmissionStatus
 from rcs_client import fetch_rcs_templates
@@ -825,6 +825,20 @@ def _inspect_template_quality_and_warnings(
 
         item["aspect_ratio_warnings"] = aspect_warnings
         item["grammar_warnings"] = grammar_warnings
+        # Technical compliance validation (Semantic Memory: word-to-variable ratio, length limits)
+        body_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "BODY"), "")
+        header_comp = next((c for c in components if isinstance(c, dict) and c.get("type") == "HEADER"), None)
+        footer_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "FOOTER"), "")
+        buttons_list = next((c.get("buttons", []) for c in components if isinstance(c, dict) and c.get("type") == "BUTTONS"), [])
+
+        compliance_warnings = validate_meta_technical_compliance(
+            body_text=body_text,
+            header_text=header_comp.get("text") if header_comp else None,
+            footer_text=footer_text,
+            buttons=buttons_list,
+            header_format=header_comp.get("format") if header_comp else None,
+        )
+        item["compliance_warnings"] = compliance_warnings
         results.append(_json_safe(item))
     return results
 

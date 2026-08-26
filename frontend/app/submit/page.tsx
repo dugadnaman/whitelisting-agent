@@ -396,6 +396,29 @@ export default function SubmitPage() {
               </div>
             );
           })()}
+          {/* Meta Technical Compliance Alert Banner if word-ratio or length violations are detected */}
+          {(() => {
+            const compWarned = state.previews.filter(p => p.compliance_warnings && p.compliance_warnings.length > 0);
+            if (!compWarned.length) return null;
+            return (
+              <div className="p-4 bg-amber-50/90 border border-amber-200 rounded-xl space-y-2 shadow-xs">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
+                    ⚙️
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-amber-950">
+                      Technical Compliance Flagged ({compWarned.length} of {state.previews.length} template{compWarned.length === 1 ? '' : 's'})
+                    </h4>
+                    <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
+                      Meta enforces strict technical parameters (e.g. minimum fixed words per variable placeholder, 60-char header limits, 25-char button limits). Review the flagged rows below to prevent rejection.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
 
           {/* Aspect Ratio Alert Banner if non-16:9 images are detected */}
           {(() => {
@@ -647,6 +670,24 @@ export default function SubmitPage() {
                                       +{p.grammar_warnings.length - 3} more
                                     </span>
                                   )}
+                                </div>
+                              )}
+
+                              {p.compliance_warnings && p.compliance_warnings.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {p.compliance_warnings.map((cw, cIdx) => (
+                                    <span
+                                      key={cIdx}
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                        cw.severity === 'error'
+                                          ? 'bg-rose-100 text-rose-800 border-rose-200'
+                                          : 'bg-amber-100 text-amber-800 border-amber-200'
+                                      }`}
+                                      title={cw.recommendation}
+                                    >
+                                      <span>⚙️ {cw.issue}</span>
+                                    </span>
+                                  ))}
                                 </div>
                               )}
                             </div>
