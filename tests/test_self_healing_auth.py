@@ -77,10 +77,22 @@ class TestCredentialContract(unittest.TestCase):
 
     def test_update_credentials_persists_and_reports_github_status(self):
         """PUT /api/credentials writes credentials.json and returns github_persisted status."""
+        import os
+
         os.environ.setdefault("ALLOWED_ORIGINS", "")
         from fastapi.testclient import TestClient
 
         client = TestClient(api.app)
+
+        # Snapshot pre-existing values so the test restores them exactly —
+        # never delete real operator credentials.
+        saved_env = {
+            k: os.environ.get(k)
+            for k in ("TCHFL_KARIX_BEARER_TOKEN", "TCHFL_KARIX_SESSION", "TCHFL_KARIX_USER")
+        }
+        creds_path = Path("credentials.json")
+        saved_file = creds_path.read_text(encoding="utf-8") if creds_path.exists() else None
+
         email = "cred_contract@attributics.com"
         client.post(
             "/api/auth/signup",
@@ -108,7 +120,7 @@ class TestCredentialContract(unittest.TestCase):
         self.assertIn(body.get("github_persisted"), (None, "committed"))
 
         # Persisted to disk under the account's own prefix
-        creds = json.loads(Path("credentials.json").read_text(encoding="utf-8"))
+        creds = json.loads(creds_path.read_text(encoding="utf-8"))
         self.assertEqual(creds.get("TCHFL_KARIX_BEARER_TOKEN"), "cc_bearer_123")
         self.assertEqual(creds.get("TCHFL_KARIX_SESSION"), "cc_session_456")
 
@@ -119,11 +131,16 @@ class TestCredentialContract(unittest.TestCase):
         self.assertEqual(h["Authorization"], "Bearer cc_bearer_123")
         self.assertEqual(h["Session"], "cc_session_456")
 
-        # cleanup
-        for k in ("TCHFL_KARIX_BEARER_TOKEN", "TCHFL_KARIX_SESSION", "TCHFL_KARIX_USER"):
-            os.environ.pop(k, None)
-            creds.pop(k, None)
-        Path("credentials.json").write_text(json.dumps(creds, indent=2) + "\n", encoding="utf-8")
+        # cleanup: restore prior state exactly (values OR absence)
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if saved_file is None:
+            creds_path.unlink(missing_ok=True)
+        else:
+            creds_path.write_text(saved_file, encoding="utf-8")
 
 
 if __name__ == "__main__":

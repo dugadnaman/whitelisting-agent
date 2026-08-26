@@ -150,7 +150,46 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
         else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
     )
 
-    # 1. Primary: Karix Official Template Media Upload API (POST /api/v1.0/template/{wabaId}/media)
+    # 1. Primary: Karix Portal mediaUpload — scoped to the session's own WABA.
+    # Portal-first avoids the cross-WABA trap: a sub-account's official WABA
+    # token may be bound to a different WABA than the one configured, producing
+    # handles Meta rejects with "Check the handle provided".
+    try:
+        headers = get_portal_auth_headers(client)
+        url = f"{KARIX_BASE_URL}/mediaUpload"
+        with open(path, "rb") as f:
+            resp = get_http_session().post(
+                url,
+                headers=headers,
+                files={"file": (path.name, f, mime)},
+                data={
+                    "esmeaddr": str(get_esmeaddr(client)),
+                    "waba_id": str(get_waba_id(client)),
+                    "file_type": mime,
+                },
+                timeout=MEDIA_UPLOAD_TIMEOUT,
+            )
+        if resp.ok:
+            data = resp.json()
+            handle_str = data.get("Success") or data.get("handle") or data.get("header_handle")
+            if handle_str:
+                first_handle = handle_str.strip().split("\n")[0].strip()
+                if first_handle.startswith("4::"):
+                    logger.info(
+                        "Media uploaded via Karix portal for %s: handle=%s...",
+                        client,
+                        first_handle[:60],
+                    )
+                    return first_handle
+            errors.append(f"Portal API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}")
+        else:
+            errors.append(f"Portal API: HTTP {resp.status_code}: {resp.text[:300]}")
+    except OSError as e:
+        errors.append(f"Portal API: {e}")
+    except Exception as e:
+        errors.append(f"Portal API: {type(e).__name__}: {e}")
+
+    # 2. Secondary: Karix Official Template Media Upload API (POST /api/v1.0/template/{wabaId}/media)
     try:
         waba_id = get_waba_id(client)
         headers = get_official_auth_headers(client)
@@ -195,42 +234,6 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
         errors.append(f"Official API: {e}")
     except Exception as e:
         errors.append(f"Official API: {type(e).__name__}: {e}")
-
-    # 2. Secondary: Karix Portal mediaUpload if portal headers exist
-    try:
-        headers = get_portal_auth_headers(client)
-        url = f"{KARIX_BASE_URL}/mediaUpload"
-        with open(path, "rb") as f:
-            resp = get_http_session().post(
-                url,
-                headers=headers,
-                files={"file": (path.name, f, mime)},
-                data={
-                    "esmeaddr": str(get_esmeaddr(client)),
-                    "waba_id": str(get_waba_id(client)),
-                    "file_type": mime,
-                },
-                timeout=MEDIA_UPLOAD_TIMEOUT,
-            )
-        if resp.ok:
-            data = resp.json()
-            handle_str = data.get("Success") or data.get("handle") or data.get("header_handle")
-            if handle_str:
-                first_handle = handle_str.strip().split("\n")[0].strip()
-                if first_handle.startswith("4::"):
-                    logger.info(
-                        "Media uploaded via Karix portal for %s: handle=%s...",
-                        client,
-                        first_handle[:60],
-                    )
-                    return first_handle
-            errors.append(f"Portal API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}")
-        else:
-            errors.append(f"Portal API: HTTP {resp.status_code}: {resp.text[:300]}")
-    except OSError as e:
-        errors.append(f"Portal API: {e}")
-    except Exception as e:
-        errors.append(f"Portal API: {type(e).__name__}: {e}")
 
     # 3. If upload could not generate a handle, raise with diagnostic details
     w_id = get_waba_id(client)
@@ -1212,6 +1215,20 @@ def submit_template(
         )
 
 
+def _parse_karix_json(resp) -> dict | list:
+    """Parse a Karix response body as JSON. Karix serves JSON with text/plain content-type."""
+    try:
+        return resp.json()
+    except Exception:
+        pass
+    try:
+        import json as _json
+
+        return _json.loads(resp.text)
+    except Exception:
+        return {}
+
+
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
     Fetch the full template list for a client's WABA (supports Portal API and Official API).
@@ -1229,7 +1246,7 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
         body = {"wabaId": str(waba_id), "esmeaddr": str(esmeaddr), "start": 0, "limit": 2500}
         resp = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
         if resp.ok:
-            data = resp.json() if "json" in resp.headers.get("content-type", "").lower() else {}
+            data = _parse_karix_json(resp)
             if isinstance(data, list):
                 return data, None
             if isinstance(data, dict):
@@ -1256,8 +1273,9 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
             timeout=REQUEST_TIMEOUT,
         )
         if response.ok:
-            data = response.json() if "json" in response.headers.get("content-type", "").lower() else {}
-            return data.get("response", {}).get("templates", []), None
+            data = _parse_karix_json(response)
+            if isinstance(data, dict):
+                return data.get("response", {}).get("templates", []), None
     except Exception as exc:
         logger.debug("Official fetch_template_list notice for %s: %s", c, exc)
 

@@ -168,14 +168,59 @@ def get_waba_id(client: str = "bajaj") -> str:
         return waba
 
 
+def _esmeaddr_from_session_token(token: str | None) -> str | None:
+    """
+    Decode the esmeaddr embedded in a Karix portal session token.
+
+    Token payload format: <random><esmeaddr><ACCOUNT_NAME>, e.g.
+      'msijafen72148300000000BFDL_WABA'      -> 72148300000000 (Bajaj)
+      'msx42ip072516600000000TATACAPPROMO'   -> 72516600000000
+      'mt89yco272389800000000TATACAPWABA'    -> 72389800000000 (TCHFL)
+
+    Every sub-account has its OWN esmeaddr — the authoritative source is the
+    session token itself, not shared config values.
+    """
+    if not token or "." not in token:
+        return None
+    try:
+        import base64
+
+        payload = base64.b64decode(token.split(".")[1] + "==").decode("utf-8", errors="replace")
+        m = re.search(r"(\d{14,15})([A-Z_]+)$", payload)
+        if not m:
+            return None
+        digits = m.group(1)
+        return digits[1:] if len(digits) == 15 else digits
+    except Exception:
+        return None
+
+
 def get_esmeaddr(client: str = "bajaj") -> str:
-    """Return ESME address for the given client."""
+    """
+    Return ESME address for the given client.
+
+    The esmeaddr embedded in the account's portal session token is
+    authoritative (each sub-account has its own); env/config values are
+    fallbacks for accounts without a session token yet.
+    """
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
     if c == "bajaj":
-        return os.environ.get("BAJAJ_ESMEADDR") or os.environ.get("ESMEADDR") or BAJAJ_ESMEADDR
-    return os.environ.get(f"{prefix}_ESMEADDR") or os.environ.get("TATA_ESMEADDR") or "72516600000000"
+        token = os.environ.get("BAJAJ_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
+        return (
+            _esmeaddr_from_session_token(token)
+            or os.environ.get("BAJAJ_ESMEADDR")
+            or os.environ.get("ESMEADDR")
+            or BAJAJ_ESMEADDR
+        )
+    token = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+    return (
+        _esmeaddr_from_session_token(token)
+        or os.environ.get(f"{prefix}_ESMEADDR")
+        or os.environ.get("TATA_ESMEADDR")
+        or "72516600000000"
+    )
 
 
 def get_template_namespace_id(client: str = "bajaj") -> str:
