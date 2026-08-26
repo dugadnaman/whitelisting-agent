@@ -59,7 +59,7 @@ from rcs_config import (
 )
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
 from runner import poll_pending, run
-from submission_client import _STATUS_MAP
+from submission_client import _GOVERNOR, _STATUS_MAP
 from tracker import load_log, log_result, pending_entries
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
@@ -467,6 +467,7 @@ def get_stats(
                 "approved": sum(1 for e in merged if e.get("approval_status") == "approved"),
                 "rejected": sum(1 for e in merged if e.get("approval_status") == "rejected"),
                 "error": None,
+                "karix_health": _GOVERNOR.get_health_stats(),
             }
 
         # WhatsApp
@@ -513,6 +514,7 @@ def get_stats(
             "rejected": rejected,
             "duplicate": 0,
             "error": None,
+            "karix_health": _GOVERNOR.get_health_stats(),
         }
     except Exception as exc:
         logger.exception("Error in get_stats for %s (%s): %s", acc, chan, exc)
@@ -525,6 +527,7 @@ def get_stats(
             "rejected": 0,
             "duplicate": 0,
             "error": str(exc),
+            "karix_health": _GOVERNOR.get_health_stats(),
         }
 
 

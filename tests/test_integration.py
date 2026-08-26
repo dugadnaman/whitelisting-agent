@@ -241,6 +241,39 @@ def test_preflight_technical_compliance_validator():
 
     print("✓ test_preflight_technical_compliance_validator passed!")
 
+
+def test_adaptive_rate_limiting_and_governor():
+    """
+    Verify KarixHealthGovernor tracks latency and throttles concurrency during high load / 429s (Working Memory).
+    """
+    from submission_client import KarixHealthGovernor
+
+    gov = KarixHealthGovernor(window_size=10)
+
+    # 1. Optimal state (low latency, zero errors)
+    for _ in range(5):
+        gov.record_request(duration_sec=0.4, status_code=200)
+    stats = gov.get_health_stats()
+    assert stats["status"] == "optimal"
+    assert stats["optimal_workers"] >= 6
+    assert stats["pacing_delay_sec"] == 0.0
+
+    # 2. Degraded state (high latency > 3.0s)
+    for _ in range(8):
+        gov.record_request(duration_sec=3.5, status_code=200)
+    degraded_stats = gov.get_health_stats()
+    assert degraded_stats["status"] in ("moderate", "degraded")
+    assert degraded_stats["optimal_workers"] <= 4
+
+    # 3. Throttled state on HTTP 429
+    gov.record_request(duration_sec=1.0, status_code=429)
+    throttled_stats = gov.get_health_stats()
+    assert throttled_stats["status"] == "throttled"
+    assert throttled_stats["optimal_workers"] <= 2
+    assert throttled_stats["pacing_delay_sec"] >= 1.0
+
+    print("✓ test_adaptive_rate_limiting_and_governor passed!")
+
 if __name__ == "__main__":
     # Check credentials are set
     if not os.environ.get("WABA_AUTH_TOKEN"):

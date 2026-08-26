@@ -273,6 +273,35 @@ export default function DashboardPage() {
                 Karix Synced{lastSynced ? ` · ${relativeTime(lastSynced)}` : ''}
               </span>
             )}
+            {stats?.karix_health && (
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border shadow-2xs ${
+                  stats.karix_health.status === 'optimal'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : stats.karix_health.status === 'moderate'
+                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                    : stats.karix_health.status === 'degraded'
+                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                    : 'bg-rose-50 text-rose-800 border-rose-200'
+                }`}
+                title={`Average Latency: ${stats.karix_health.avg_latency_sec}s, Optimal Concurrency: ${stats.karix_health.optimal_workers} parallel workers, Pacing: ${stats.karix_health.pacing_delay_sec}s`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    stats.karix_health.status === 'optimal'
+                      ? 'bg-emerald-500 animate-pulse'
+                      : stats.karix_health.status === 'moderate'
+                      ? 'bg-blue-500'
+                      : stats.karix_health.status === 'degraded'
+                      ? 'bg-amber-500'
+                      : 'bg-rose-500'
+                  }`}
+                />
+                <span>
+                  Karix API: {stats.karix_health.status.toUpperCase()} ({stats.karix_health.avg_latency_sec}s · {stats.karix_health.optimal_workers}w)
+                </span>
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-500 mt-1">
             Overview of template submission and whitelisting status for {accountLabel} on {channelLabel}.

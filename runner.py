@@ -45,13 +45,25 @@ def run(
 ) -> None:
     """Phase 2, step 1: submit each template, log the attempt."""
     import concurrent.futures
+    import time
+    from submission_client import _GOVERNOR
 
     submissions = load_from_list(templates_raw, client=client)
-    print(f"Submitting {len(submissions)} template(s) for {client} (by {user})...")
+    optimal_workers = _GOVERNOR.get_optimal_concurrency(base_workers=min(8, max(1, len(submissions))))
+    workers = min(optimal_workers, max(1, len(submissions)))
+    pacing = _GOVERNOR.get_pacing_delay()
+
+    health = _GOVERNOR.get_health_stats()
+    print(
+        f"Submitting {len(submissions)} template(s) for {client} (by {user}) "
+        f"[Concurrency: {workers} workers, Pacing: {pacing}s, Karix API: {health['status']} ({health['avg_latency_sec']}s)]..."
+    )
 
     def _submit_single(submission):
         submission.client = client
         submission.waba_id = get_waba_id(client)
+        if pacing > 0:
+            time.sleep(pacing)
         result = submit_template(
             submission,
             client=client,
@@ -67,7 +79,6 @@ def run(
         print(f"  {result.template_name}: {result.status.value}{note}")
         return result
 
-    workers = min(10, max(1, len(submissions)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         list(executor.map(_submit_single, submissions))
 
@@ -134,18 +145,28 @@ def run_file(
 ) -> None:
     """Phase 2, step 1 (from CSV or XLSX): load templates from file, submit in parallel pool, log results."""
     import concurrent.futures
-
+    import time
     from loader import load_from_csv, load_from_excel
+    from submission_client import _GOVERNOR
 
     if file_path.lower().endswith((".xlsx", ".xls")):
         submissions = load_from_excel(file_path, client=client)
     else:
         submissions = load_from_csv(file_path, client=client)
 
-    print(f"Loaded {len(submissions)} template(s) for {client} from {file_path} to submit (by {user}).")
+    optimal_workers = _GOVERNOR.get_optimal_concurrency(base_workers=min(8, max(1, len(submissions))))
+    workers = min(optimal_workers, max(1, len(submissions)))
+    pacing = _GOVERNOR.get_pacing_delay()
+
+    print(
+        f"Loaded {len(submissions)} template(s) for {client} from {file_path} to submit (by {user}) "
+        f"[Concurrency: {workers} workers, Pacing: {pacing}s]..."
+    )
 
     def _submit_single(submission):
         submission.client = client
+        if pacing > 0:
+            time.sleep(pacing)
         result = submit_template(
             submission,
             client=client,
@@ -161,12 +182,10 @@ def run_file(
         print(f"  {result.template_name}: {result.status.value}{note}")
         return result
 
-    workers = min(10, max(1, len(submissions)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         list(executor.map(_submit_single, submissions))
 
     print(f"Done. Results appended to {log_path}")
-
 
 if __name__ == "__main__":
     import os

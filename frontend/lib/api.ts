@@ -58,6 +58,15 @@ export type Template = {
   entity_id?: string;
 };
 
+export type KarixHealth = {
+  status: 'optimal' | 'moderate' | 'degraded' | 'throttled';
+  avg_latency_sec: number;
+  error_rate: number;
+  optimal_workers: number;
+  pacing_delay_sec: number;
+  sample_count: number;
+};
+
 export type Stats = {
   total: number;
   submitted: number;
@@ -67,6 +76,7 @@ export type Stats = {
   rejected: number;
   duplicate: number;
   error?: string | null;
+  karix_health?: KarixHealth;
 };
 export type AspectRatioWarning = {
   component: string;

@@ -14,6 +14,7 @@ Auth model:
     endpoint rejects the static official token.
 """
 
+import collections
 import copy
 import io
 import json
@@ -22,7 +23,6 @@ import os
 import re
 import threading
 import time
-from dataclasses import asdict
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -99,6 +99,90 @@ FALLBACK_PLACEHOLDER_HEADER_HANDLE = FALLBACK_PLACEHOLDER_IMAGE_HANDLE
 # 10 workers). Throttle uploads globally and retry transient failures.
 _MEDIA_UPLOAD_GATE = threading.Semaphore(2)
 _MEDIA_UPLOAD_ATTEMPTS = 3
+class KarixHealthGovernor:
+    """
+    Working Memory: Tracks real-time Karix API response latency and error rates
+    to adaptively throttle parallel workers and inject pacing delays.
+    """
+
+    def __init__(self, window_size: int = 30):
+        self._lock = threading.RLock()
+        self._latencies: collections.deque[float] = collections.deque(maxlen=window_size)
+        self._errors: collections.deque[int] = collections.deque(maxlen=window_size)
+        self._last_429_time: float = 0.0
+
+    def record_request(self, duration_sec: float, status_code: int = 200, is_error: bool = False) -> None:
+        with self._lock:
+            self._latencies.append(duration_sec)
+            self._errors.append(1 if (is_error or status_code in (429, 500, 502, 503, 504)) else 0)
+            if status_code == 429:
+                self._last_429_time = time.time()
+
+    def get_optimal_concurrency(self, base_workers: int = 8) -> int:
+        """
+        Dynamically calculate optimal worker pool size:
+        - Healthy (< 1.8s avg latency, < 10% errors) -> base_workers (e.g. 8)
+        - Degraded (1.8s - 4.5s avg latency or 10-25% errors) -> 4 workers
+        - High Latency / Errors (> 4.5s or > 25% errors) -> 2 workers
+        - Recent 429 (< 45s ago) -> 1-2 workers
+        """
+        with self._lock:
+            if time.time() - self._last_429_time < 45:
+                return max(1, min(2, base_workers))
+
+            if not self._latencies:
+                return base_workers
+
+            avg_latency = sum(self._latencies) / len(self._latencies)
+            error_rate = sum(self._errors) / len(self._errors) if self._errors else 0.0
+
+            if avg_latency > 5.0 or error_rate >= 0.30:
+                return max(1, min(2, base_workers))
+            elif avg_latency > 2.5 or error_rate >= 0.15:
+                return max(2, min(4, base_workers))
+            elif avg_latency > 1.5:
+                return max(3, min(6, base_workers))
+            return base_workers
+
+    def get_pacing_delay(self) -> float:
+        """Return an optional inter-request delay in seconds based on server load."""
+        with self._lock:
+            if time.time() - self._last_429_time < 45:
+                return 1.0  # 1s delay if recently 429 throttled
+            if not self._latencies:
+                return 0.0
+            avg_latency = sum(self._latencies) / len(self._latencies)
+            if avg_latency > 4.0:
+                return 0.5
+            elif avg_latency > 2.0:
+                return 0.2
+            return 0.0
+
+    def get_health_stats(self) -> dict:
+        """Return real-time working memory metrics."""
+        with self._lock:
+            avg_lat = (sum(self._latencies) / len(self._latencies)) if self._latencies else 0.8
+            err_rate = (sum(self._errors) / len(self._errors)) if self._errors else 0.0
+            is_throttled = (time.time() - self._last_429_time) < 45
+
+            if is_throttled or err_rate >= 0.25 or avg_lat > 4.5:
+                health_status = "throttled" if is_throttled else "degraded"
+            elif avg_lat > 2.0 or err_rate > 0.05:
+                health_status = "moderate"
+            else:
+                health_status = "optimal"
+
+            return {
+                "status": health_status,
+                "avg_latency_sec": round(avg_lat, 2),
+                "error_rate": round(err_rate, 2),
+                "optimal_workers": self.get_optimal_concurrency(),
+                "pacing_delay_sec": self.get_pacing_delay(),
+                "sample_count": len(self._latencies),
+            }
+
+
+_GOVERNOR = KarixHealthGovernor()
 
 
 def upload_media(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
@@ -811,19 +895,22 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
     for attempt in range(MAX_RETRIES):
         exc: Exception | None = None
         resp: requests.Response | None = None
-
         try:
             headers = get_portal_auth_headers(c)
+            t0 = time.time()
             resp = get_http_session().post(
                 url,
                 headers=headers,
                 files={"request": (None, json.dumps(body), "application/json")},
                 timeout=REQUEST_TIMEOUT,
             )
+            _GOVERNOR.record_request(time.time() - t0, status_code=resp.status_code if resp else 500)
         except (requests.ConnectionError, requests.Timeout) as e:
             exc = e
+            _GOVERNOR.record_request(REQUEST_TIMEOUT, status_code=500, is_error=True)
             logger.warning("Attempt %d/%d transport error: %s", attempt + 1, MAX_RETRIES, e)
         except OSError as e:
+            _GOVERNOR.record_request(0.1, status_code=500, is_error=True)
             return SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
@@ -1065,10 +1152,12 @@ def _submit_official_template(
         try:
             headers = get_official_auth_headers(c)
             headers["Content-Type"] = "application/json"
+            t0 = time.time()
             response = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
+            _GOVERNOR.record_request(time.time() - t0, status_code=response.status_code if response else 500)
         except (requests.ConnectionError, requests.Timeout) as exc:
+            _GOVERNOR.record_request(REQUEST_TIMEOUT, status_code=500, is_error=True)
             last_result = SubmissionResult(
-                source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
                 error=f"Transport error: {exc}",
