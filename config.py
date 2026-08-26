@@ -159,11 +159,11 @@ def get_waba_id(client: str = "bajaj") -> str:
     if c == "bajaj":
         return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
     else:
-        waba = os.environ.get(f"{prefix}_WABA_ID") or os.environ.get("TATA_WABA_ID")
+        waba = os.environ.get(f"{prefix}_WABA_ID")
         if not waba:
             raise OSError(
-                f"Missing WABA ID for {client} ({prefix}_WABA_ID or TATA_WABA_ID). "
-                "Configure it in Settings — never fall back to another tenant's WABA."
+                f"Missing WABA ID for {client} ({prefix}_WABA_ID). "
+                f"Configure it in Settings under {client} — never fall back to another account's WABA."
             )
         return waba
 
@@ -215,12 +215,13 @@ def get_esmeaddr(client: str = "bajaj") -> str:
             or BAJAJ_ESMEADDR
         )
     token = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
-    return (
-        _esmeaddr_from_session_token(token)
-        or os.environ.get(f"{prefix}_ESMEADDR")
-        or os.environ.get("TATA_ESMEADDR")
-        or "72516600000000"
-    )
+    esme = _esmeaddr_from_session_token(token) or os.environ.get(f"{prefix}_ESMEADDR")
+    if not esme:
+        raise OSError(
+            f"Missing ESMEADDR for {client} ({prefix}_ESMEADDR or portal session token). "
+            f"Configure credentials in Settings under {client}."
+        )
+    return esme
 
 
 def get_template_namespace_id(client: str = "bajaj") -> str:

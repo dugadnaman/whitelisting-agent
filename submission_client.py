@@ -32,6 +32,7 @@ from config import (
     BAJAJ_WABA_ID,
     KARIX_BASE_URL,
     OFFICIAL_TEMPLATE_BASE_URL,
+    _account_prefix,
     get_esmeaddr,
     get_official_auth_headers,
     get_portal_auth_headers,
@@ -157,7 +158,6 @@ class KarixHealthGovernor:
             elif avg_latency > 2.0:
                 return 0.2
             return 0.0
-
     def get_health_stats(self) -> dict:
         """Return real-time working memory metrics."""
         with self._lock:
@@ -241,6 +241,16 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
     try:
         headers = get_portal_auth_headers(client)
         url = f"{KARIX_BASE_URL}/mediaUpload"
+        waba_res = get_waba_id(client)
+        esme_res = get_esmeaddr(client)
+        logger.info(
+            "🔒 CONFIRMATION CHECKPOINT [Media Upload]: client=%s, waba_id=%s, esmeaddr=%s, file_type=%s, credential_source=%s_KARIX_BEARER_TOKEN",
+            client,
+            waba_res,
+            esme_res,
+            file_type,
+            _account_prefix(client),
+        )
         with open(path, "rb") as f:
             resp = get_http_session().post(
                 url,
@@ -897,6 +907,16 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
         resp: requests.Response | None = None
         try:
             headers = get_portal_auth_headers(c)
+            waba_resolved = get_waba_id(c)
+            esme_resolved = get_esmeaddr(c)
+            logger.info(
+                "🔒 CONFIRMATION CHECKPOINT [Portal Create]: client=%s, waba_id=%s, esmeaddr=%s, template=%s, credential_source=%s_KARIX_BEARER_TOKEN",
+                c,
+                waba_resolved,
+                esme_resolved,
+                payload.template_name,
+                _account_prefix(c),
+            )
             t0 = time.time()
             resp = get_http_session().post(
                 url,
@@ -1152,6 +1172,13 @@ def _submit_official_template(
         try:
             headers = get_official_auth_headers(c)
             headers["Content-Type"] = "application/json"
+            logger.info(
+                "🔒 CONFIRMATION CHECKPOINT [Official Create]: client=%s, waba_id=%s, template=%s, credential_source=%s_WABA_AUTH_TOKEN",
+                c,
+                waba_id,
+                payload.template_name,
+                _account_prefix(c),
+            )
             t0 = time.time()
             response = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
             _GOVERNOR.record_request(time.time() - t0, status_code=response.status_code if response else 500)
