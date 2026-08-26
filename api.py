@@ -715,15 +715,17 @@ def _inspect_template_quality_and_warnings(
     Attaches aspect ratio warnings, spelling typos, duplicate warnings, and suggested fixes.
     """
     import base64
+    from loader import detect_spreadsheet_account
 
     acc = account.lower().strip()
+    account_detection = detect_spreadsheet_account(submissions, current_account=acc)
+
     live_templates = fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else fetch_rcs_templates(client=acc)
     live_names = {
         (lt.get("template_name") or lt.get("viTemplate", {}).get("name") or "").strip().lower()
         for lt in live_templates
         if lt.get("template_name") or lt.get("viTemplate", {}).get("name")
     }
-
     results = []
     for s in submissions:
         item = asdict(s) if not isinstance(s, dict) else dict(s)
@@ -740,6 +742,7 @@ def _inspect_template_quality_and_warnings(
                     "Please use a new name (e.g. appending '_v2') or edit the existing template."
                 ),
             }
+        item["account_detection"] = account_detection
 
         aspect_warnings = []
         grammar_warnings = []
@@ -928,6 +931,7 @@ async def submit_file(
     fix_aspect_ratio: bool = Query(True),
     fix_grammar: bool = Query(True),
     skip_duplicates: bool = Query(True),
+    auto_route: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
@@ -948,7 +952,23 @@ async def submit_file(
                     status_code=400,
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}' to submit.",
                 )
+            if auto_route:
+                from loader import detect_spreadsheet_account
 
+                detection = detect_spreadsheet_account(subs, current_account=acc)
+                if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
+                    target_acc = detection["detected_account_id"]
+                    try:
+                        require_tenant_access(target_acc, current_user)
+                        logger.info(
+                            "Smart Routing: auto-routing RCS submission from %s to %s (confidence: %s)",
+                            acc,
+                            target_acc,
+                            detection.get("confidence"),
+                        )
+                        acc = target_acc
+                    except HTTPException:
+                        pass
             to_submit = []
             duplicate_entries = []
             if skip_duplicates:
@@ -1037,6 +1057,23 @@ async def submit_file(
                 status_code=400,
                 detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
             )
+        if auto_route:
+            from loader import detect_spreadsheet_account
+
+            detection = detect_spreadsheet_account(subs, current_account=acc)
+            if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
+                target_acc = detection["detected_account_id"]
+                try:
+                    require_tenant_access(target_acc, current_user)
+                    logger.info(
+                        "Smart Routing: auto-routing WhatsApp submission from %s to %s (confidence: %s)",
+                        acc,
+                        target_acc,
+                        detection.get("confidence"),
+                    )
+                    acc = target_acc
+                except HTTPException:
+                    pass
 
         to_submit = []
         duplicate_entries = []

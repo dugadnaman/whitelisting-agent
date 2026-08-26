@@ -83,6 +83,14 @@ export type GrammarWarning = {
   original: string;
   replacement: string;
 };
+export type AccountDetection = {
+  detected_account_id: string;
+  detected_account_name: string;
+  confidence: number;
+  matched_reasons: string[];
+  is_mismatch: boolean;
+  current_account: string;
+};
 
 export type TemplatePreview = {
   template_name: string;
@@ -100,6 +108,7 @@ export type TemplatePreview = {
     template_name: string;
     message: string;
   };
+  account_detection?: AccountDetection;
   components?: Array<{
     type: string;
     text?: string;
@@ -312,7 +321,8 @@ export async function submitFile(
   user: string = "Operator",
   fixAspectRatio: boolean = true,
   fixGrammar: boolean = true,
-  skipDuplicates: boolean = true
+  skipDuplicates: boolean = true,
+  autoRoute: boolean = true
 ): Promise<{ submitted: number; skipped_duplicates?: number; results: Template[] }> {
   const form = new FormData();
   form.append("file", file);
@@ -323,6 +333,7 @@ export async function submitFile(
     fix_aspect_ratio: String(fixAspectRatio),
     fix_grammar: String(fixGrammar),
     skip_duplicates: String(skipDuplicates),
+    auto_route: String(autoRoute),
   }).toString();
   const res = await fetchWithRetry(getApiUrl(`/api/submit?${qs}`), {
     method: "POST",

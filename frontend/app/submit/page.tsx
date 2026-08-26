@@ -46,7 +46,7 @@ function isAcceptedFile(file: File): boolean {
 }
 
 export default function SubmitPage() {
-  const { account, channel, user, getAccountLabel } = useApp();
+  const { account, channel, user, setAccount, getAccountLabel } = useApp();
   const [state, setState] = useState<State>({ step: 'idle' });
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -124,7 +124,7 @@ export default function SubmitPage() {
     setShowAspectRatioModal(false);
     setState({ step: 'submitting' });
     try {
-      const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates);
+      const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates, true);
       setState({ step: 'submitted', submitted: res.submitted, results: res.results });
     } catch (err) {
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
@@ -301,6 +301,49 @@ export default function SubmitPage() {
       {/* STEP 2: Preview Table */}
       {state.step === 'previewed' && (
         <div className="space-y-4">
+          {/* Smart Routing Account Auto-Detection Banner */}
+          {(() => {
+            const detection = state.previews[0]?.account_detection;
+            if (!detection || !detection.is_mismatch) return null;
+            return (
+              <div className="p-4 bg-indigo-50/90 border border-indigo-200 rounded-xl space-y-3 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
+                      🎯
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-indigo-950 flex items-center gap-2">
+                        <span>Smart Account Routing Detected</span>
+                        <span className="text-[10px] bg-indigo-200/80 text-indigo-800 px-1.5 py-0.2 rounded font-mono font-semibold">
+                          {(detection.confidence * 100).toFixed(0)}% Match
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-indigo-900/90 mt-0.5 leading-relaxed">
+                        This spreadsheet contains <strong>{detection.detected_account_name}</strong> templates ({detection.matched_reasons.join(', ')}), but your active context is <strong>{accountLabel}</strong>.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAccount(detection.detected_account_id);
+                        try {
+                          localStorage.setItem('active_account', detection.detected_account_id);
+                        } catch {}
+                      }}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-xs"
+                    >
+                      <span>Switch to {detection.detected_account_name} →</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Live WABA Duplicate Conflict Alert Banner if templates already exist on WABA */}
           {(() => {
             const dupes = state.previews.filter(p => p.already_exists_on_waba || p.exists_on_waba || p.duplicate_warning);

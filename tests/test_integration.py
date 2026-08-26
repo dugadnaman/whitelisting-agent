@@ -142,6 +142,68 @@ def test_duplicate_submission_skipping():
 
     print("✓ test_duplicate_submission_skipping passed!")
 
+
+def test_smart_account_routing_detection():
+    """
+    Verify that detect_spreadsheet_account correctly identifies target sub-accounts
+    from header tags, prefixes, and keywords (Meta Memory).
+    """
+    from loader import detect_spreadsheet_account, TemplateSubmission, TemplateComponent
+
+    # 1. HLTATA / hfl_ prefix -> TCHFL
+    tchfl_subs = [
+        TemplateSubmission(
+            client="tata",
+            channel="whatsapp",
+            template_name="hfl_loan_approved_2508",
+            language="en",
+            category="MARKETING",
+            waba_id="",
+            components=[TemplateComponent(type="HEADER", text="HLTATA")],
+            source_ref="row1",
+        )
+    ]
+    res = detect_spreadsheet_account(tchfl_subs, current_account="tcl_promo")
+    assert res["detected_account_id"] == "tchfl"
+    assert res["is_mismatch"] is True
+    assert "TCHFL" in res["detected_account_name"]
+
+    # 2. PLTATA / pl_ prefix -> TCL Promo
+    promo_subs = [
+        TemplateSubmission(
+            client="tata",
+            channel="whatsapp",
+            template_name="pl_instant_offer_01",
+            language="en",
+            category="MARKETING",
+            waba_id="",
+            components=[TemplateComponent(type="HEADER", text="PLTATA")],
+            source_ref="row1",
+        )
+    ]
+    res2 = detect_spreadsheet_account(promo_subs, current_account="tcl_promo")
+    assert res2["detected_account_id"] == "tcl_promo"
+    assert res2["is_mismatch"] is False
+
+    # 3. MONEYFY keywords -> Moneyfy
+    mf_subs = [
+        TemplateSubmission(
+            client="tata",
+            channel="whatsapp",
+            template_name="mf_sip_growth_scheme",
+            language="en",
+            category="MARKETING",
+            waba_id="",
+            components=[TemplateComponent(type="BODY", text="Start your Moneyfy Mutual Fund SIP today.")],
+            source_ref="row1",
+        )
+    ]
+    res3 = detect_spreadsheet_account(mf_subs, current_account="tchfl")
+    assert res3["detected_account_id"] == "moneyfy"
+    assert res3["is_mismatch"] is True
+
+    print("✓ test_smart_account_routing_detection passed!")
+
 if __name__ == "__main__":
     # Check credentials are set
     if not os.environ.get("WABA_AUTH_TOKEN"):

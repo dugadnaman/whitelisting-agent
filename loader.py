@@ -603,3 +603,151 @@ def load_from_json(path: str) -> list[TemplateSubmission]:
 
 def load_from_list(rows: list[dict], client: str = "bajaj") -> list[TemplateSubmission]:
     return [_row_to_submission(row, client=client) for row in rows]
+
+
+ACCOUNT_ROUTING_RULES = [
+    {
+        "id": "tchfl",
+        "name": "TCHFL — Housing Finance (HLTATA)",
+        "headers": ["HLTATA", "TCHFL", "HL_TATA", "HOUSING"],
+        "name_prefixes": ["hfl_", "tchfl_", "hl_"],
+        "keywords": ["housing finance", "home loan", "tchfl", "hltata", "housing"],
+    },
+    {
+        "id": "tcl_promo",
+        "name": "TCL — Promotional (PL, BL, UCL, NCL, LAP)",
+        "headers": ["PLTATA", "TATABL", "ALTATA", "TCLLAP", "Tatacl", "TCLPROMO"],
+        "name_prefixes": ["pl_", "bl_", "ucl_", "ncl_", "lap_", "promo_"],
+        "keywords": ["personal loan", "business loan", "used car loan", "two wheeler", "promotional", "pltata", "tatabl"],
+    },
+    {
+        "id": "tcl_trans",
+        "name": "TCL — Transactional (LAP, Services & Collections)",
+        "headers": ["TCLLAP", "Tatacl", "TCLTRANS"],
+        "name_prefixes": ["trans_", "srv_", "coll_", "serv_"],
+        "keywords": ["transactional", "emi reminder", "overdue", "collections", "statement"],
+    },
+    {
+        "id": "wealth",
+        "name": "Tata Wealth & Securities (TATAWL)",
+        "headers": ["TATAWL", "WEALTH", "TATA_WEALTH"],
+        "name_prefixes": ["wl_", "wealth_", "sec_"],
+        "keywords": ["wealth", "securities", "portfolio", "demat", "trading", "tatawl"],
+    },
+    {
+        "id": "moneyfy",
+        "name": "Tata Moneyfy",
+        "headers": ["MONEYFY", "TATA_MONEYFY"],
+        "name_prefixes": ["mf_", "moneyfy_"],
+        "keywords": ["moneyfy", "mutual fund", "sip", "investment"],
+    },
+    {
+        "id": "bajaj",
+        "name": "Bajaj Finserv",
+        "headers": ["BAJAJ", "BFDL", "BAJAJ_FINSERV"],
+        "name_prefixes": ["bajaj_", "bfdl_"],
+        "keywords": ["bajaj", "finserv", "bfdl", "emi card", "bfl"],
+    },
+]
+
+
+def detect_spreadsheet_account(
+    submissions_or_rows: list,
+    current_account: str = "bajaj",
+) -> dict:
+    """
+    Inspect spreadsheet rows, template names, header tags, and body text
+    to infer the target sub-account with a confidence score and explanation.
+    """
+    if not submissions_or_rows:
+        return {
+            "detected_account_id": current_account,
+            "detected_account_name": current_account.title(),
+            "confidence": 0.0,
+            "matched_reasons": ["No rows to inspect"],
+            "is_mismatch": False,
+            "current_account": current_account,
+        }
+
+    scores = {rule["id"]: 0 for rule in ACCOUNT_ROUTING_RULES}
+    reasons = {rule["id"]: [] for rule in ACCOUNT_ROUTING_RULES}
+
+    for item in submissions_or_rows:
+        row = item if isinstance(item, dict) else (getattr(item, "__dict__", None) or {})
+        tname = str(row.get("template_name") or getattr(item, "template_name", "") or "").lower()
+
+        # Check components text
+        comp_text = ""
+        comp_headers = []
+        components = row.get("components") or getattr(item, "components", []) or []
+        for comp in components:
+            c = comp if isinstance(comp, dict) else (getattr(comp, "__dict__", None) or {})
+            if c.get("text"):
+                comp_text += " " + str(c.get("text", "")).lower()
+            if c.get("type") == "HEADER":
+                h_text = str(c.get("text") or "").upper()
+                if h_text:
+                    comp_headers.append(h_text)
+
+        # Check raw header columns (e.g. sender_id, header, client, sub_product)
+        explicit_client = str(row.get("client") or row.get("account") or row.get("sub_product") or "").lower()
+        raw_header_val = str(row.get("header") or row.get("sender_id") or row.get("dlt_header") or "").upper()
+
+        for rule in ACCOUNT_ROUTING_RULES:
+            r_id = rule["id"]
+
+            # 1. Explicit account column
+            if explicit_client and r_id in explicit_client:
+                scores[r_id] += 20
+                if f"Explicit account column: '{explicit_client}'" not in reasons[r_id]:
+                    reasons[r_id].append(f"Explicit account column: '{explicit_client}'")
+
+            # 2. Header tag match
+            for tag in rule["headers"]:
+                if tag in raw_header_val or any(tag in ch for ch in comp_headers):
+                    scores[r_id] += 10
+                    if f"Header tag '{tag}'" not in reasons[r_id]:
+                        reasons[r_id].append(f"Header tag '{tag}'")
+
+            # 3. Template name prefix match
+            for prefix in rule["name_prefixes"]:
+                if tname.startswith(prefix):
+                    scores[r_id] += 5
+                    if f"Template prefix '{prefix}'" not in reasons[r_id]:
+                        reasons[r_id].append(f"Template prefix '{prefix}'")
+
+            # 4. Keyword match in body
+            for kw in rule["keywords"]:
+                if kw in comp_text or kw in tname:
+                    scores[r_id] += 2
+                    if f"Keyword '{kw}'" not in reasons[r_id]:
+                        reasons[r_id].append(f"Keyword '{kw}'")
+
+    # Pick highest score
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    best_id, best_score = sorted_scores[0]
+
+    # Calculate confidence (0.0 to 1.0)
+    total_score = sum(scores.values())
+    confidence = (best_score / total_score) if total_score > 0 else 0.0
+
+    if best_score == 0:
+        best_id = current_account
+        confidence = 0.0
+        reasons[best_id] = ["No distinct brand indicators found; retained current account."]
+
+    rule_meta = next((r for r in ACCOUNT_ROUTING_RULES if r["id"] == best_id), None)
+    best_name = rule_meta["name"] if rule_meta else best_id.title()
+
+    curr_norm = (current_account or "bajaj").lower().strip()
+    is_mismatch = (best_id != curr_norm) and (confidence >= 0.35)
+
+    return {
+        "detected_account_id": best_id,
+        "detected_account_name": best_name,
+        "confidence": round(confidence, 2),
+        "matched_reasons": reasons.get(best_id, [])[:3],
+        "is_mismatch": is_mismatch,
+        "current_account": current_account,
+        "all_scores": {k: v for k, v in scores.items() if v > 0},
+    }
