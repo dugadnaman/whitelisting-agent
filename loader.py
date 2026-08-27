@@ -408,6 +408,80 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     return kept
 
 
+def _build_single_cell_card_submission(
+    idx: int, block: str, client: str, clean_name: str, extracted_media: list, waba_cache: dict
+) -> TemplateSubmission:
+    parsed = parse_single_cell_whatsapp_block(block, client=client)
+    t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
+
+    components = []
+    if (idx - 1) < len(extracted_media):
+        m = extracted_media[idx - 1]
+        components.append(
+            {
+                "type": "HEADER",
+                "format": m["kind"],
+                "image_bytes": m["bytes"],
+                "file_type": m["mime_type"],
+            }
+        )
+    elif parsed.get("header"):
+        components.append(
+            {
+                "type": "HEADER",
+                "format": "TEXT",
+                "text": parsed["header"],
+            }
+        )
+    components.append({"type": "BODY", "text": parsed["body"]})
+    components.append({"type": "FOOTER", "text": "T&Cs apply"})
+    components.append(
+        {
+            "type": "BUTTONS",
+            "buttons": [
+                {
+                    "type": "URL",
+                    "text": parsed["button_text"],
+                    "url": parsed["button_url"],
+                    "example": [parsed["button_example"]],
+                }
+            ],
+        }
+    )
+
+    return TemplateSubmission(
+        client=client.lower(),
+        channel="whatsapp",
+        template_name=t_name,
+        language="en",
+        category="MARKETING",
+        waba_id=_resolve_row_waba(client, waba_cache),
+        components=components,
+        source_ref=t_name,
+    )
+
+
+def _parse_single_cell_excel_blocks(
+    all_raw_rows: list, path: str, client: str, extracted_media: list, waba_cache: dict
+) -> list[TemplateSubmission] | None:
+    block_row_cells = None
+    for r in all_raw_rows:
+        text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
+        if len(text_blocks) >= 2:
+            block_row_cells = text_blocks
+            break
+    if not block_row_cells:
+        return None
+
+    base_name = Path(path).stem
+    clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name).strip("_").lower()
+
+    return [
+        _build_single_cell_card_submission(idx, block, client, clean_name, extracted_media, waba_cache)
+        for idx, block in enumerate(block_row_cells, 1)
+    ]
+
+
 def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """
     Load templates from an Excel (.xlsx) file.
@@ -416,7 +490,6 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     import openpyxl
 
     waba_cache: dict[str, str] = {}
-    # Extract all embedded media (images, videos, documents)
     extracted_media = _extract_media_from_xlsx(path)
     videos = [m for m in extracted_media if m["kind"] == "VIDEO"]
     images = [m for m in extracted_media if m["kind"] == "IMAGE"]
@@ -439,84 +512,10 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
         )
         for h in first_row
     )
-    # Check if this sheet is a multi-block single-cell layout (only when no standard column headers exist)
-    block_row_cells = None
-    if not has_standard_headers:
-        for r in all_raw_rows:
-            text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
-            if len(text_blocks) >= 2:
-                block_row_cells = text_blocks
-                break
-        if block_row_cells:
-            base_name = Path(path).stem
-            clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name).strip("_").lower()
+    block_subs = _parse_single_cell_excel_blocks(all_raw_rows, path, client, extracted_media, waba_cache) if not has_standard_headers else None
+    if block_subs is not None:
+        return block_subs
 
-            submissions = []
-            for idx, block in enumerate(block_row_cells, 1):
-                parsed = parse_single_cell_whatsapp_block(block, client=client)
-                t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
-
-                components = []
-                if (idx - 1) < len(extracted_media):
-                    m = extracted_media[idx - 1]
-                    components.append(
-                        {
-                            "type": "HEADER",
-                            "format": m["kind"],
-                            "image_bytes": m["bytes"],
-                            "file_type": m["mime_type"],
-                        }
-                    )
-                elif parsed.get("header"):
-                    components.append(
-                        {
-                            "type": "HEADER",
-                            "format": "TEXT",
-                            "text": parsed["header"],
-                        }
-                    )
-                components.append(
-                    {
-                        "type": "BODY",
-                        "text": parsed["body"],
-                    }
-                )
-
-                components.append(
-                    {
-                        "type": "FOOTER",
-                        "text": "T&Cs apply",
-                    }
-                )
-
-                components.append(
-                    {
-                        "type": "BUTTONS",
-                        "buttons": [
-                            {
-                                "type": "URL",
-                                "text": parsed["button_text"],
-                                "url": parsed["button_url"],
-                                "example": [parsed["button_example"]],
-                            }
-                        ],
-                    }
-                )
-
-                sub = TemplateSubmission(
-                    client=client.lower(),
-                    channel="whatsapp",
-                    template_name=t_name,
-                    language="en",
-                    category="MARKETING",
-                    waba_id=_resolve_row_waba(client, waba_cache),
-                    components=components,
-                    source_ref=t_name,
-                )
-                submissions.append(sub)
-
-            return submissions
-    # Standard row-based spreadsheet
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
     v_idx = 0
@@ -543,38 +542,9 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
         else:
             raw_row["components"] = _flat_row_to_components(raw_row)
 
-        # Assign embedded video / image / document bytes if row has a media header without URL
-        for comp in raw_row["components"]:
-            if isinstance(comp, dict) and comp.get("type") == "HEADER":
-                cformat = str(comp.get("format", "")).upper()
-                if cformat == "VIDEO" and not comp.get("media_url") and not comp.get("media_file"):
-                    if v_idx < len(videos):
-                        comp["image_bytes"] = videos[v_idx]["bytes"]
-                        comp["file_type"] = videos[v_idx]["mime_type"]
-                        v_idx += 1
-                    elif v_idx < len(extracted_media):
-                        comp["image_bytes"] = extracted_media[v_idx]["bytes"]
-                        comp["file_type"] = "video/mp4"
-                        v_idx += 1
-                elif cformat == "IMAGE" and not comp.get("media_url") and not comp.get("media_file"):
-                    if img_idx < len(images):
-                        comp["image_bytes"] = images[img_idx]["bytes"]
-                        comp["file_type"] = images[img_idx]["mime_type"]
-                        img_idx += 1
-                    elif img_idx < len(extracted_media):
-                        comp["image_bytes"] = extracted_media[img_idx]["bytes"]
-                        comp["file_type"] = "image/png"
-                        img_idx += 1
-                elif cformat == "DOCUMENT" and not comp.get("media_url") and not comp.get("media_file"):
-                    if doc_idx < len(docs):
-                        comp["image_bytes"] = docs[doc_idx]["bytes"]
-                        comp["file_type"] = docs[doc_idx]["mime_type"]
-                        doc_idx += 1
-                    elif doc_idx < len(extracted_media):
-                        comp["image_bytes"] = extracted_media[doc_idx]["bytes"]
-                        comp["file_type"] = "application/pdf"
-                        doc_idx += 1
-
+        v_idx, img_idx, doc_idx = _bind_embedded_media_to_row(
+            raw_row, videos, images, docs, extracted_media, v_idx, img_idx, doc_idx
+        )
         raw_row["client"] = raw_row.get("client") or client
         if not raw_row.get("waba_id"):
             raw_row["waba_id"] = _resolve_row_waba(raw_row["client"], waba_cache)
@@ -603,6 +573,78 @@ def load_from_json(path: str) -> list[TemplateSubmission]:
 
 def load_from_list(rows: list[dict], client: str = "bajaj") -> list[TemplateSubmission]:
     return [_row_to_submission(row, client=client) for row in rows]
+def _bind_embedded_media_to_row(
+    raw_row: dict,
+    videos: list,
+    images: list,
+    docs: list,
+    extracted_media: list,
+    v_idx: int,
+    img_idx: int,
+    doc_idx: int,
+) -> tuple[int, int, int]:
+    for comp in raw_row.get("components", []):
+        if not isinstance(comp, dict) or comp.get("type") != "HEADER":
+            continue
+        cformat = str(comp.get("format", "")).upper()
+        if comp.get("media_url") or comp.get("media_file"):
+            continue
+        if cformat == "VIDEO":
+            if v_idx < len(videos):
+                comp["image_bytes"] = videos[v_idx]["bytes"]
+                comp["file_type"] = videos[v_idx]["mime_type"]
+                v_idx += 1
+            elif v_idx < len(extracted_media):
+                comp["image_bytes"] = extracted_media[v_idx]["bytes"]
+                comp["file_type"] = "video/mp4"
+                v_idx += 1
+        elif cformat == "IMAGE":
+            if img_idx < len(images):
+                comp["image_bytes"] = images[img_idx]["bytes"]
+                comp["file_type"] = images[img_idx]["mime_type"]
+                img_idx += 1
+            elif img_idx < len(extracted_media):
+                comp["image_bytes"] = extracted_media[img_idx]["bytes"]
+                comp["file_type"] = "image/png"
+                img_idx += 1
+        elif cformat == "DOCUMENT":
+            if doc_idx < len(docs):
+                comp["image_bytes"] = docs[doc_idx]["bytes"]
+                comp["file_type"] = docs[doc_idx]["mime_type"]
+                doc_idx += 1
+            elif doc_idx < len(extracted_media):
+                comp["image_bytes"] = extracted_media[doc_idx]["bytes"]
+                comp["file_type"] = "application/pdf"
+                doc_idx += 1
+    return v_idx, img_idx, doc_idx
+
+
+def _score_single_row_routing(
+    explicit_client: str, raw_header_val: str, comp_headers: list[str], comp_text: str, tname: str, scores: dict, reasons: dict
+) -> None:
+    for rule in ACCOUNT_ROUTING_RULES:
+        r_id = rule["id"]
+        if explicit_client and r_id in explicit_client:
+            scores[r_id] += 20
+            if f"Explicit account column: '{explicit_client}'" not in reasons[r_id]:
+                reasons[r_id].append(f"Explicit account column: '{explicit_client}'")
+        for tag in rule["headers"]:
+            if tag in raw_header_val or any(tag in ch for ch in comp_headers):
+                scores[r_id] += 10
+                if f"Header tag '{tag}'" not in reasons[r_id]:
+                    reasons[r_id].append(f"Header tag '{tag}'")
+        for prefix in rule["name_prefixes"]:
+            if tname.startswith(prefix):
+                scores[r_id] += 5
+                if f"Template prefix '{prefix}'" not in reasons[r_id]:
+                    reasons[r_id].append(f"Template prefix '{prefix}'")
+        for kw in rule["keywords"]:
+            if kw in comp_text or kw in tname:
+                scores[r_id] += 2
+                if f"Keyword '{kw}'" not in reasons[r_id]:
+                    reasons[r_id].append(f"Keyword '{kw}'")
+
+
 
 
 ACCOUNT_ROUTING_RULES = [
@@ -693,36 +735,7 @@ def detect_spreadsheet_account(
         explicit_client = str(row.get("client") or row.get("account") or row.get("sub_product") or "").lower()
         raw_header_val = str(row.get("header") or row.get("sender_id") or row.get("dlt_header") or "").upper()
 
-        for rule in ACCOUNT_ROUTING_RULES:
-            r_id = rule["id"]
-
-            # 1. Explicit account column
-            if explicit_client and r_id in explicit_client:
-                scores[r_id] += 20
-                if f"Explicit account column: '{explicit_client}'" not in reasons[r_id]:
-                    reasons[r_id].append(f"Explicit account column: '{explicit_client}'")
-
-            # 2. Header tag match
-            for tag in rule["headers"]:
-                if tag in raw_header_val or any(tag in ch for ch in comp_headers):
-                    scores[r_id] += 10
-                    if f"Header tag '{tag}'" not in reasons[r_id]:
-                        reasons[r_id].append(f"Header tag '{tag}'")
-
-            # 3. Template name prefix match
-            for prefix in rule["name_prefixes"]:
-                if tname.startswith(prefix):
-                    scores[r_id] += 5
-                    if f"Template prefix '{prefix}'" not in reasons[r_id]:
-                        reasons[r_id].append(f"Template prefix '{prefix}'")
-
-            # 4. Keyword match in body
-            for kw in rule["keywords"]:
-                if kw in comp_text or kw in tname:
-                    scores[r_id] += 2
-                    if f"Keyword '{kw}'" not in reasons[r_id]:
-                        reasons[r_id].append(f"Keyword '{kw}'")
-
+        _score_single_row_routing(explicit_client, raw_header_val, comp_headers, comp_text, tname, scores, reasons)
     # Pick highest score
     sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     best_id, best_score = sorted_scores[0]

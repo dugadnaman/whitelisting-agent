@@ -23,6 +23,7 @@ import os
 import re
 import threading
 import time
+from dataclasses import asdict
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -215,29 +216,7 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     raise last_err  # type: ignore[misc]
 
 
-def _upload_media_once(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
-    """
-    Upload a media file to Karix/Meta using Karix's Official Template Media API:
-    POST https://rcsgui.karix.solutions/api/v1.0/template/{wabaId}/media
-    Uses official WABA API Token (Authentication: Bearer {token}) with multipart form upload.
-    """
-    if not file_path or not str(file_path).strip():
-        file_path = _ensure_default_sample_image()
-    path = Path(file_path)
-    if not path.exists():
-        path = Path(_ensure_default_sample_image())
-
-    errors: list[str] = []
-    mime = (
-        "image/jpeg"
-        if ("jpeg" in file_type or "jpg" in file_type)
-        else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
-    )
-
-    # 1. Primary: Karix Portal mediaUpload — scoped to the session's own WABA.
-    # Portal-first avoids the cross-WABA trap: a sub-account's official WABA
-    # token may be bound to a different WABA than the one configured, producing
-    # handles Meta rejects with "Check the handle provided".
+def _try_portal_media_upload(path: Path, mime: str, client: str, errors: list[str]) -> str | None:
     try:
         headers = get_portal_auth_headers(client)
         url = f"{KARIX_BASE_URL}/mediaUpload"
@@ -248,7 +227,7 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
             client,
             waba_res,
             esme_res,
-            file_type,
+            mime,
             _account_prefix(client),
         )
         with open(path, "rb") as f:
@@ -282,8 +261,10 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
         errors.append(f"Portal API: {e}")
     except Exception as e:
         errors.append(f"Portal API: {type(e).__name__}: {e}")
+    return None
 
-    # 2. Secondary: Karix Official Template Media Upload API (POST /api/v1.0/template/{wabaId}/media)
+
+def _try_official_media_upload(path: Path, mime: str, client: str, errors: list[str]) -> str | None:
     try:
         waba_id = get_waba_id(client)
         headers = get_official_auth_headers(client)
@@ -324,12 +305,39 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
         else:
             errors.append(f"Official API: HTTP {resp.status_code}: {resp.text[:300]}")
     except OSError as e:
-        # Missing token — expected for accounts without official API access
         errors.append(f"Official API: {e}")
     except Exception as e:
         errors.append(f"Official API: {type(e).__name__}: {e}")
+    return None
 
-    # 3. If upload could not generate a handle, raise with diagnostic details
+
+def _upload_media_once(file_path: str | None = None, file_type: str = "image/png", client: str = "bajaj") -> str:
+    """
+    Upload a media file to Karix/Meta using Karix's Official Template Media API:
+    POST https://rcsgui.karix.solutions/api/v1.0/template/{wabaId}/media
+    Uses official WABA API Token (Authentication: Bearer {token}) with multipart form upload.
+    """
+    if not file_path or not str(file_path).strip():
+        file_path = _ensure_default_sample_image()
+    path = Path(file_path)
+    if not path.exists():
+        path = Path(_ensure_default_sample_image())
+
+    errors: list[str] = []
+    mime = (
+        "image/jpeg"
+        if ("jpeg" in file_type or "jpg" in file_type)
+        else ("video/mp4" if "video" in file_type else ("application/pdf" if "pdf" in file_type else "image/png"))
+    )
+
+    handle = _try_portal_media_upload(path, mime, client, errors)
+    if handle:
+        return handle
+
+    handle = _try_official_media_upload(path, mime, client, errors)
+    if handle:
+        return handle
+
     w_id = get_waba_id(client)
     detail = "; ".join(errors) if errors else "No diagnostic info"
     logger.error("Media upload failed for %s (WABA %s): %s", client, w_id, detail)
@@ -486,6 +494,72 @@ def normalize_image_16_9(
         return str(input_path_or_bytes), "image/png"
 
 
+def _prepare_local_media_bytes(
+    cformat: str, image_bytes: bytes | None, media_file: str | None, media_url: str | None, fix_aspect_ratio: bool
+) -> tuple[str | None, str]:
+    import tempfile
+
+    if cformat == "IMAGE":
+        if fix_aspect_ratio:
+            if image_bytes:
+                return normalize_image_16_9(image_bytes)
+            elif media_file:
+                return normalize_image_16_9(media_file)
+            elif not media_url:
+                return _ensure_default_sample_image(), "image/png"
+        else:
+            if image_bytes:
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    tmp.write(image_bytes)
+                    return tmp.name, "image/png"
+            elif not media_file and not media_url:
+                return _ensure_default_sample_image(), "image/png"
+        return media_file, "image/png"
+    elif cformat == "VIDEO":
+        if image_bytes:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                tmp.write(image_bytes)
+                return tmp.name, "video/mp4"
+        if not media_file and not media_url:
+            return _ensure_default_sample_video(), "video/mp4"
+        return media_file, "video/mp4"
+    elif cformat == "DOCUMENT":
+        if image_bytes:
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(image_bytes)
+                return tmp.name, "application/pdf"
+        if not media_file and not media_url:
+            return _ensure_default_sample_pdf(), "application/pdf"
+        return media_file, "application/pdf"
+    return media_file, "application/octet-stream"
+
+
+def _download_remote_media(cformat: str, media_url: str) -> tuple[str, str]:
+    import tempfile
+
+    suffix = Path(media_url.split("?")[0]).suffix if media_url else ""
+    if not suffix:
+        suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        media_file = tmp.name
+    file_type = "video/mp4" if cformat == "VIDEO" else ("application/pdf" if cformat == "DOCUMENT" else "image/png")
+
+    logger.info("Downloading header %s from %s", cformat.lower(), media_url)
+    try:
+        urlretrieve(media_url, media_file)
+        if cformat == "IMAGE":
+            media_file, file_type = normalize_image_16_9(media_file)
+    except Exception as e:
+        logger.warning("Could not download media_url %s: %s; using default sample", media_url, e)
+        if cformat == "VIDEO":
+            media_file = _ensure_default_sample_video()
+        elif cformat == "DOCUMENT":
+            media_file = _ensure_default_sample_pdf()
+        else:
+            media_file = _ensure_default_sample_image()
+    return media_file, file_type
+
+
 def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ratio: bool = True) -> list:
     """
     Pre-process components before submission: for any HEADER component with
@@ -499,7 +573,6 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
         if ctype != "HEADER" or cformat not in ("IMAGE", "VIDEO", "DOCUMENT"):
             continue
 
-        # Already has a handle — skip
         example = comp.get("example", {})
         if example.get("header_handle") and example["header_handle"] != []:
             continue
@@ -509,137 +582,44 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
         file_type = comp.pop("file_type", None)
         image_bytes = comp.pop("image_bytes", None)
 
-        if cformat == "IMAGE":
-            if fix_aspect_ratio:
-                if image_bytes:
-                    media_file, file_type = normalize_image_16_9(image_bytes)
-                elif media_file:
-                    media_file, file_type = normalize_image_16_9(media_file)
-                elif not media_url:
-                    media_file = _ensure_default_sample_image()
-                    file_type = "image/png"
-            else:
-                if image_bytes:
-                    import tempfile
+        media_file, file_type = _prepare_local_media_bytes(
+            cformat, image_bytes, media_file, media_url, fix_aspect_ratio
+        )
 
-                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                        tmp.write(image_bytes)
-                        media_file = tmp.name
-                    file_type = "image/png"
-                elif not media_file and not media_url:
-                    media_file = _ensure_default_sample_image()
-                    file_type = "image/png"
-        elif cformat == "VIDEO":
-            default_type = "video/mp4"
-            if image_bytes:
-                import tempfile
-
-                with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-                    tmp.write(image_bytes)
-                    media_file = tmp.name
-                file_type = "video/mp4"
-            if not media_file and not media_url:
-                media_file = _ensure_default_sample_video()
-                file_type = "video/mp4"
-            default_type = "application/pdf"
-            if image_bytes:
-                import tempfile
-
-                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                    tmp.write(image_bytes)
-                    media_file = tmp.name
-                file_type = "application/pdf"
-            if not media_file and not media_url:
-                media_file = _ensure_default_sample_pdf()
-                file_type = "application/pdf"
-        else:
-            default_type = "application/octet-stream"
-
-        file_type = file_type or default_type
-
-        # Download from URL if media_url is provided
         if media_url and not media_file:
-            import tempfile
+            media_file, file_type = _download_remote_media(cformat, media_url)
 
-            suffix = Path(media_url.split("?")[0]).suffix if media_url else ""
-            if not suffix:
-                suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                media_file = tmp.name
-
-            logger.info("Downloading header %s from %s", cformat.lower(), media_url)
-            try:
-                urlretrieve(media_url, media_file)
-                if cformat == "IMAGE":
-                    media_file, file_type = normalize_image_16_9(media_file)
-            except Exception as e:
-                logger.warning(
-                    "Could not download media_url %s: %s; using default sample",
-                    media_url,
-                    e,
-                )
-                if cformat == "VIDEO":
-                    media_file = _ensure_default_sample_video()
-                elif cformat == "DOCUMENT":
-                    media_file = _ensure_default_sample_pdf()
-                else:
-                    media_file = _ensure_default_sample_image()
-
-        # Guarantee media_file is non-null and exists
         if not media_file or not os.path.exists(str(media_file)):
             if cformat == "VIDEO":
-                media_file = _ensure_default_sample_video()
-                file_type = "video/mp4"
+                media_file, file_type = _ensure_default_sample_video(), "video/mp4"
             elif cformat == "DOCUMENT":
-                media_file = _ensure_default_sample_pdf()
-                file_type = "application/pdf"
+                media_file, file_type = _ensure_default_sample_pdf(), "application/pdf"
             else:
-                media_file = _ensure_default_sample_image()
-                file_type = "image/png"
+                media_file, file_type = _ensure_default_sample_image(), "image/png"
 
-        # Cache media to persistent public directory and generate public URL for Meta
+        # Cache media to persistent public directory and generate public URL
         import hashlib
 
         MEDIA_CACHE_DIR = Path("media_cache")
         MEDIA_CACHE_DIR.mkdir(exist_ok=True)
-
         public_url = None
-        if media_file and os.path.exists(str(media_file)):
-            try:
-                raw_bytes = Path(media_file).read_bytes()
-                media_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
-                ext = (
-                    ".jpg"
-                    if "jpeg" in file_type
-                    else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
-                )
-                cache_file = MEDIA_CACHE_DIR / f"{media_hash}{ext}"
-                cache_file.write_bytes(raw_bytes)
+        try:
+            raw_bytes = Path(media_file).read_bytes()
+            media_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
+            ext = ".jpg" if "jpeg" in file_type else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
+            cache_file = MEDIA_CACHE_DIR / f"{media_hash}{ext}"
+            cache_file.write_bytes(raw_bytes)
+            public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
+            public_url = f"{public_base}/api/media/{media_hash}{ext}"
+        except Exception as e:
+            logger.debug("Media caching notice: %s", e)
 
-                public_base = (
-                    os.environ.get("RENDER_EXTERNAL_URL")
-                    or os.environ.get("PUBLIC_APP_URL")
-                    or "https://whitelisting-agent.onrender.com"
-                )
-                public_url = f"{public_base}/api/media/{media_hash}{ext}"
-            except Exception as e:
-                logger.debug("Media caching notice: %s", e)
-
-        # Upload via Karix BSP / Resumable upload
         handle = upload_media(media_file, file_type, client=client)
-
-        # Meta Rule: example MUST contain EITHER header_handle OR header_url, NEVER BOTH!
         if handle:
             comp["example"] = {"header_handle": [handle]}
         elif public_url:
             comp["example"] = {"header_url": [public_url]}
 
-        logger.info(
-            "Header %s resolved for template (%s) with example keys: %s",
-            cformat,
-            client,
-            list(comp.get("example", {}).keys()),
-        )
     return components
 
 
@@ -795,23 +775,26 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
                 if "header_text" not in example or not example.get("header_text"):
                     example["header_text"] = [auto_samples[0]]
         elif ctype == "BUTTONS":
-            btns = comp.get("buttons", [])
-            for b in btns:
-                if isinstance(b, dict) and b.get("type") == "URL":
-                    url = b.get("url", "")
-                    if "{{1}}" in url or "{{0}}" in url or "<" in url:
-                        if not b.get("example") or not b["example"]:
-                            b["example"] = [
-                                "https://www.tatacapital.com/personal-loan.html"
-                                if client.lower() == "tata"
-                                else "https://www.bajajfinservmarkets.in/"
-                            ]
-                            logger.info("Auto-generated URL variable sample for button")
-                    else:
-                        # Meta Rule: static URL buttons MUST NOT have 'example' parameter
-                        b.pop("example", None)
+            _resolve_button_cta_variables(comp.get("buttons", []), client)
 
     return components
+
+
+def _resolve_button_cta_variables(btns: list, client: str) -> None:
+    for b in btns:
+        if isinstance(b, dict) and b.get("type") == "URL":
+            url = b.get("url", "")
+            if "{{1}}" in url or "{{0}}" in url or "<" in url:
+                if not b.get("example") or not b["example"]:
+                    b["example"] = [
+                        "https://www.tatacapital.com/personal-loan.html"
+                        if client.lower() == "tata"
+                        else "https://www.bajajfinservmarkets.in/"
+                    ]
+                    logger.info("Auto-generated URL variable sample for button")
+            else:
+                b.pop("example", None)
+
 
 
 def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj") -> dict:
@@ -854,6 +837,120 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         "category": payload.category,
         "components": components_raw,
     }
+def _evaluate_portal_create_response(
+    resp: requests.Response, data: dict, payload: TemplateSubmission, c: str, attempt: int
+) -> SubmissionResult:
+    if resp.status_code == 401:
+        return SubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=SubmissionStatus.FAILED,
+            error=(
+                "Session expired (401). Open Settings → "
+                f"{c} and paste fresh Portal Bearer Token / Session ID from "
+                "the Karix portal (DevTools → Network headers)."
+            ),
+            provider_response=data,
+            approval_status=ApprovalStatus.UNKNOWN,
+            client=c,
+            channel="whatsapp",
+            retry_count=attempt,
+        )
+
+    if not resp.ok:
+        return SubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=SubmissionStatus.FAILED,
+            error=f"HTTP {resp.status_code}: {resp.text[:2000]}",
+            provider_response=data,
+            approval_status=ApprovalStatus.UNKNOWN,
+            client=c,
+            channel="whatsapp",
+            retry_count=attempt,
+        )
+
+    if "Failed" in data:
+        return SubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=SubmissionStatus.FAILED,
+            error=data["Failed"],
+            provider_response=data,
+            approval_status=ApprovalStatus.UNKNOWN,
+            client=c,
+            channel="whatsapp",
+            retry_count=attempt,
+        )
+
+    resp_status = str(data.get("status", "")).lower()
+    if resp_status in ("failure", "error", "failed"):
+        reason_data = data.get("reason", {})
+        reason_str = str(reason_data)
+        recovered = _handle_portal_media_auto_recovery(payload, c, reason_str)
+        if recovered is not None:
+            return recovered
+        return SubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=SubmissionStatus.FAILED,
+            error=data.get("reason", str(data)),
+            provider_response=data,
+            approval_status=ApprovalStatus.UNKNOWN,
+            client=c,
+            channel="whatsapp",
+            retry_count=attempt,
+        )
+
+    return SubmissionResult(
+        source_ref=payload.source_ref,
+        template_name=payload.template_name,
+        status=SubmissionStatus.SUBMITTED,
+        provider_ref_id=payload.template_name,
+        provider_response=data,
+        approval_status=ApprovalStatus.PENDING,
+        client=c,
+        channel="whatsapp",
+        retry_count=attempt,
+    )
+
+
+def _handle_portal_media_auto_recovery(payload: TemplateSubmission, c: str, reason_str: str) -> SubmissionResult | None:
+    is_handle_err = (
+        "Uploaded media handle is invalid" in reason_str
+        or "Check the handle provided" in reason_str
+        or "2494102" in reason_str
+    )
+    if not is_handle_err or getattr(payload, "_tried_media_reupload", False):
+        return None
+
+    logger.warning(
+        "Media handle invalid on WABA %s for %s (%s). Re-uploading media with fresh credentials...",
+        get_waba_id(c),
+        payload.template_name,
+        c,
+    )
+    payload._tried_media_reupload = True
+
+    new_comps = []
+    for comp in payload.components:
+        comp_d = asdict(comp) if not isinstance(comp, dict) else dict(comp)
+        if comp_d.get("type") == "HEADER" and comp_d.get("format", "").upper() in ("IMAGE", "VIDEO", "DOCUMENT"):
+            comp_d.pop("example", None)
+            if not comp_d.get("media_file") and not comp_d.get("media_url") and not comp_d.get("image_bytes"):
+                fmt = comp_d.get("format", "IMAGE").upper()
+                if fmt == "VIDEO":
+                    comp_d["media_file"] = _ensure_default_sample_video()
+                elif fmt == "DOCUMENT":
+                    comp_d["media_file"] = _ensure_default_sample_pdf()
+                else:
+                    comp_d["media_file"] = _ensure_default_sample_image()
+        new_comps.append(comp_d)
+
+    payload.components = new_comps
+    return _submit_portal_template(payload, client=c)
+
+
 
 
 # Status mapping
@@ -987,117 +1084,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
                 time.sleep(BACKOFF_SECONDS * (2**attempt))
             continue
 
-        # 401 Unauthorized = expired portal session. Playwright auto-login was
-        # removed (Karix portal requires OTP) — surface an actionable error.
-        if resp.status_code == 401:
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=(
-                    "Session expired (401). Open Settings → "
-                    f"{c} and paste fresh Portal Bearer Token / Session ID from "
-                    "the Karix portal (DevTools → Network headers)."
-                ),
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-
-        # Non-retryable error (400, 401, 403, etc.)
-        if not resp.ok:
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=f"HTTP {resp.status_code}: {resp.text[:2000]}",
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-        # 200 but Karix may still signal a logical failure
-        # Check for {"Failed": "..."} or {"status": "failure"/"error"}
-        if "Failed" in data:
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=data["Failed"],
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-
-        resp_status = str(data.get("status", "")).lower()
-        if resp_status in ("failure", "error", "failed"):
-            reason_data = data.get("reason", {})
-            reason_str = str(reason_data)
-
-            # Auto-recovery for Meta Error 131009 / Invalid Media Handle
-            # Re-upload media with correct credentials and retry — never downgrade IMAGE to TEXT
-            if (
-                "Uploaded media handle is invalid" in reason_str
-                or "Check the handle provided" in reason_str
-                or "2494102" in reason_str
-            ) and not getattr(payload, "_tried_media_reupload", False):
-                logger.warning(
-                    "Media handle invalid on WABA %s for %s (%s). Re-uploading media with fresh credentials...",
-                    get_waba_id(c),
-                    payload.template_name,
-                    c,
-                )
-                payload._tried_media_reupload = True
-
-                # Force re-upload: clear stale handles from HEADER components
-                # and let _resolve_header_media generate fresh ones for this client
-                new_comps = []
-                for comp in payload.components:
-                    comp_d = asdict(comp) if not isinstance(comp, dict) else dict(comp)
-                    if comp_d.get("type") == "HEADER" and comp_d.get("format", "").upper() in ("IMAGE", "VIDEO", "DOCUMENT"):
-                        # Strip the stale handle so _resolve_header_media will re-upload
-                        comp_d.pop("example", None)
-                        # Ensure a media file is available for re-upload
-                        if not comp_d.get("media_file") and not comp_d.get("media_url") and not comp_d.get("image_bytes"):
-                            fmt = comp_d.get("format", "IMAGE").upper()
-                            if fmt == "VIDEO":
-                                comp_d["media_file"] = _ensure_default_sample_video()
-                            elif fmt == "DOCUMENT":
-                                comp_d["media_file"] = _ensure_default_sample_pdf()
-                            else:
-                                comp_d["media_file"] = _ensure_default_sample_image()
-                    new_comps.append(comp_d)
-
-                payload.components = new_comps
-                return _submit_portal_template(payload, client=c)
-
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=data.get("reason", str(data)),
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.SUBMITTED,
-            provider_ref_id=payload.template_name,
-            provider_response=data,
-            approval_status=ApprovalStatus.PENDING,
-            client=c,
-            channel="whatsapp",
-            retry_count=attempt,
-        )
+        return _evaluate_portal_create_response(resp, data, payload, c, attempt)
     return last_result
 
 

@@ -82,7 +82,9 @@ def test_duplicate_submission_skipping():
     import io
     import tempfile
     from unittest.mock import patch
+
     from fastapi.testclient import TestClient
+
     import api
     from models import SubmissionStatus
 
@@ -106,8 +108,8 @@ def test_duplicate_submission_skipping():
     )
 
     def fake_run(raw_list, log_path, **kwargs):
-        from tracker import log_result
         from models import SubmissionResult, SubmissionStatus
+        from tracker import log_result
         for item in raw_list:
             res = SubmissionResult(
                 source_ref=item.get("source_ref", item.get("template_name", "")),
@@ -148,7 +150,7 @@ def test_smart_account_routing_detection():
     Verify that detect_spreadsheet_account correctly identifies target sub-accounts
     from header tags, prefixes, and keywords (Meta Memory).
     """
-    from loader import detect_spreadsheet_account, TemplateSubmission, TemplateComponent
+    from loader import TemplateComponent, TemplateSubmission, detect_spreadsheet_account
 
     # 1. HLTATA / hfl_ prefix -> TCHFL
     tchfl_subs = [

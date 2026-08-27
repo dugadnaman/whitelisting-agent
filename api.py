@@ -41,16 +41,11 @@ from config import (
     OFFICIAL_TEMPLATE_BASE_URL,
     _account_prefix,
     _load_env_file,
-    get_official_auth_headers,
-    get_waba_id,
 )
 from grammar_checker import lint_and_fix_body, validate_meta_technical_compliance
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus, SubmissionResult, SubmissionStatus
 from rcs_client import fetch_rcs_templates
-from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
-from rcs_runner import run_rcs, run_rcs_file
-from rcs_tracker import load_rcs_log, log_rcs_result
 
 # RCS pipeline imports
 from rcs_config import (
@@ -58,6 +53,9 @@ from rcs_config import (
     get_rcs_entity_id,
 )
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
+from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
+from rcs_runner import run_rcs
+from rcs_tracker import load_rcs_log, log_rcs_result
 from runner import get_pending_templates_sla_insights, poll_pending, run
 from submission_client import _GOVERNOR, _STATUS_MAP
 from tracker import load_log, log_result, pending_entries
@@ -534,6 +532,150 @@ def get_stats(
         }
 
 
+def _filter_and_sort_templates(entries: list[dict], status: str | None, search: str | None) -> list[dict]:
+    res = entries
+    if status and isinstance(status, str):
+        s_val = status.lower()
+        res = [
+            e
+            for e in res
+            if str(e.get("status", "")).lower() == s_val or str(e.get("approval_status", "")).lower() == s_val
+        ]
+    if search and isinstance(search, str):
+        q = search.lower()
+        res = [
+            e
+            for e in res
+            if q in str(e.get("template_name", "")).lower()
+            or q in str(e.get("template_id", "")).lower()
+            or q in str(e.get("source_ref", "")).lower()
+            or q in str(e.get("provider_ref_id", "")).lower()
+        ]
+    res.sort(key=lambda e: e.get("submitted_at") or "", reverse=True)
+    return res
+
+
+def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
+    local_entries = [e for e in load_rcs_log(RCS_LOG_PATH) if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+    live_templates = fetch_rcs_templates(client=acc)
+    seen_names = set()
+    merged_entries = []
+
+    for lt in live_templates:
+        vi = lt.get("viTemplate", {})
+        name = vi.get("name") or str(lt.get("templateId", ""))
+        status_str = str(lt.get("status", "SUBMITTED")).upper()
+        t_type = vi.get("type", "text")
+
+        carousel_cards = vi.get("carouselCard", [])
+        card_title = ""
+        msg = vi.get("textMessage", "")
+        if carousel_cards:
+            t_type = f"carousel ({len(carousel_cards)} cards)"
+            card_title = " | ".join([c.get("cardTitle", "") for c in carousel_cards if c.get("cardTitle")])
+            msg = " | ".join([c.get("cardDescription", "") for c in carousel_cards if c.get("cardDescription")])
+        elif vi.get("standaloneCard"):
+            t_type = "richcard"
+            card_title = vi.get("standaloneCard", {}).get("cardTitle", "")
+            msg = vi.get("standaloneCard", {}).get("cardDescription", "")
+
+        entry = {
+            "source_ref": name,
+            "template_name": name,
+            "template_id": str(lt.get("templateId", "")),
+            "template_type": t_type,
+            "card_title": card_title,
+            "template_message": msg,
+            "sender_ids": [lt.get("botId", "")],
+            "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
+            "approval_status": status_str.lower(),
+            "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
+            "provider_response": lt,
+            "client": acc,
+            "channel": "rcs",
+            "submitted_by": None,
+            "source_file": None,
+            "live": True,
+            "exists_on_waba": True,
+        }
+        merged_entries.append(entry)
+        seen_names.add(name.lower())
+
+    for le in local_entries:
+        le_name = (le.get("template_name") or "").strip().lower()
+        le_clean = dict(le)
+        le_clean["error"] = _clean_error_message(le.get("error"))
+        if le_name in seen_names:
+            for me in merged_entries:
+                if me.get("template_name", "").strip().lower() == le_name:
+                    me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
+                    me["source_file"] = me.get("source_file") or le.get("source_file")
+                    me["exists_on_waba"] = True
+        else:
+            le_clean["live"] = False
+            le_clean["exists_on_waba"] = False
+            merged_entries.append(le_clean)
+            seen_names.add(le_name)
+
+    return _filter_and_sort_templates(merged_entries, status, search)
+
+
+def _merge_wa_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
+    local_entries = [e for e in load_log(LOG_PATH) if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+    live_templates = fetch_whatsapp_templates(client=acc)
+    seen_names = set()
+    merged_entries = []
+
+    for lt in live_templates:
+        name = lt.get("template_name") or str(lt.get("fb_template_id", "") or lt.get("sno", ""))
+        status_str = str(lt.get("template_create_status") or lt.get("status", "PENDING")).upper()
+        approval_val = (
+            _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value
+            if status_str in _STATUS_MAP
+            else status_str.lower()
+        )
+
+        entry = {
+            "source_ref": name,
+            "template_name": name,
+            "status": "submitted" if approval_val in ("approved", "pending", "submitted") else "failed",
+            "provider_ref_id": str(lt.get("fb_template_id", "") or lt.get("sno", "")),
+            "approval_status": approval_val,
+            "approval_reason": lt.get("template_status_reason"),
+            "error": None,
+            "retry_count": 0,
+            "submitted_at": lt.get("created_at") or lt.get("modified_at") or "",
+            "updated_at": lt.get("modified_at"),
+            "provider_response": lt,
+            "client": acc,
+            "channel": "whatsapp",
+            "submitted_by": None,
+            "source_file": None,
+            "live": True,
+            "exists_on_waba": True,
+        }
+        merged_entries.append(entry)
+        seen_names.add(name.lower())
+
+    for le in local_entries:
+        le_name = (le.get("template_name") or "").strip().lower()
+        le_clean = dict(le)
+        le_clean["error"] = _clean_error_message(le.get("error"))
+        if le_name in seen_names:
+            for me in merged_entries:
+                if me.get("template_name", "").strip().lower() == le_name:
+                    me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
+                    me["source_file"] = me.get("source_file") or le.get("source_file")
+                    me["exists_on_waba"] = True
+        else:
+            le_clean["live"] = False
+            le_clean["exists_on_waba"] = False
+            merged_entries.append(le_clean)
+            seen_names.add(le_name)
+
+    return _filter_and_sort_templates(merged_entries, status, search)
+
+
 @app.get("/api/templates")
 def get_templates(
     account: str = Query("bajaj"),
@@ -547,170 +689,120 @@ def get_templates(
     chan = channel.lower()
     try:
         if chan == "rcs":
-            local_entries = load_rcs_log(RCS_LOG_PATH)
-            local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-
-            live_templates = fetch_rcs_templates(client=acc)
-            live_map = {(lt.get("viTemplate", {}).get("name") or str(lt.get("templateId", ""))).strip().lower(): lt for lt in live_templates if (lt.get("viTemplate", {}).get("name") or lt.get("templateId"))}
-            seen_names = set()
-            merged_entries = []
-
-            for lt in live_templates:
-                vi = lt.get("viTemplate", {})
-                name = vi.get("name") or str(lt.get("templateId", ""))
-                status_str = str(lt.get("status", "SUBMITTED")).upper()
-                t_type = vi.get("type", "text")
-
-                carousel_cards = vi.get("carouselCard", [])
-                card_title = ""
-                msg = vi.get("textMessage", "")
-                if carousel_cards:
-                    t_type = f"carousel ({len(carousel_cards)} cards)"
-                    card_title = " | ".join([c.get("cardTitle", "") for c in carousel_cards if c.get("cardTitle")])
-                    msg = " | ".join([c.get("cardDescription", "") for c in carousel_cards if c.get("cardDescription")])
-                elif vi.get("standaloneCard"):
-                    t_type = "richcard"
-                    card_title = vi.get("standaloneCard", {}).get("cardTitle", "")
-                    msg = vi.get("standaloneCard", {}).get("cardDescription", "")
-
-                entry = {
-                    "source_ref": name,
-                    "template_name": name,
-                    "template_id": str(lt.get("templateId", "")),
-                    "template_type": t_type,
-                    "card_title": card_title,
-                    "template_message": msg,
-                    "sender_ids": [lt.get("botId", "")],
-                    "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-                    "approval_status": status_str.lower(),
-                    "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
-                    "provider_response": lt,
-                    "client": acc,
-                    "channel": "rcs",
-                    "submitted_by": None,
-                    "source_file": None,
-                    "live": True,
-                    "exists_on_waba": True,
-                }
-                merged_entries.append(entry)
-                seen_names.add(name.lower())
-
-            for le in local_entries:
-                le_name = (le.get("template_name") or "").strip().lower()
-                le_clean = dict(le)
-                le_clean["error"] = _clean_error_message(le.get("error"))
-                if le_name in seen_names:
-                    # Enrich the live entry with local metadata if available
-                    for me in merged_entries:
-                        if me.get("template_name", "").strip().lower() == le_name:
-                            me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
-                            me["source_file"] = me.get("source_file") or le.get("source_file")
-                            me["exists_on_waba"] = True
-                else:
-                    le_clean["live"] = False
-                    le_clean["exists_on_waba"] = False
-                    merged_entries.append(le_clean)
-                    seen_names.add(le_name)
-            if status and isinstance(status, str):
-                s_val = status.lower()
-                merged_entries = [
-                    e
-                    for e in merged_entries
-                    if str(e.get("status", "")).lower() == s_val or str(e.get("approval_status", "")).lower() == s_val
-                ]
-
-            if search and isinstance(search, str):
-                q = search.lower()
-                merged_entries = [
-                    e
-                    for e in merged_entries
-                    if q in str(e.get("template_name", "")).lower()
-                    or q in str(e.get("template_id", "")).lower()
-                    or q in str(e.get("source_ref", "")).lower()
-                ]
-
-            merged_entries.sort(key=lambda e: e.get("submitted_at") or "", reverse=True)
-            return [_json_safe(e) for e in merged_entries]
-
-        # WhatsApp
-        local_entries = load_log(LOG_PATH)
-        local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-
-        live_templates = fetch_whatsapp_templates(client=acc)
-        live_map = {(lt.get("template_name") or "").strip().lower(): lt for lt in live_templates if lt.get("template_name")}
-        seen_names = set()
-        merged_entries = []
-
-        for lt in live_templates:
-            name = lt.get("template_name") or str(lt.get("fb_template_id", "") or lt.get("sno", ""))
-            status_str = str(lt.get("template_create_status") or lt.get("status", "PENDING")).upper()
-            approval_val = (
-                _STATUS_MAP.get(status_str, ApprovalStatus.UNKNOWN).value
-                if status_str in _STATUS_MAP
-                else status_str.lower()
-            )
-
-            entry = {
-                "source_ref": name,
-                "template_name": name,
-                "status": "submitted" if approval_val in ("approved", "pending", "submitted") else "failed",
-                "provider_ref_id": str(lt.get("fb_template_id", "") or lt.get("sno", "")),
-                "approval_status": approval_val,
-                "approval_reason": lt.get("template_status_reason"),
-                "error": None,
-                "retry_count": 0,
-                "submitted_at": lt.get("created_at") or lt.get("modified_at") or "",
-                "updated_at": lt.get("modified_at"),
-                "provider_response": lt,
-                "client": acc,
-                "channel": "whatsapp",
-                "submitted_by": None,
-                "source_file": None,
-                "live": True,
-                "exists_on_waba": True,
-            }
-            merged_entries.append(entry)
-            seen_names.add(name.lower())
-
-        for le in local_entries:
-            le_name = (le.get("template_name") or "").strip().lower()
-            le_clean = dict(le)
-            le_clean["error"] = _clean_error_message(le.get("error"))
-            if le_name in seen_names:
-                # Template exists on WABA! Enrich the live entry with local metadata
-                for me in merged_entries:
-                    if me.get("template_name", "").strip().lower() == le_name:
-                        me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
-                        me["source_file"] = me.get("source_file") or le.get("source_file")
-                        me["exists_on_waba"] = True
-            else:
-                le_clean["live"] = False
-                le_clean["exists_on_waba"] = False
-                merged_entries.append(le_clean)
-                seen_names.add(le_name)
-        if status and isinstance(status, str):
-            s_val = status.lower()
-            merged_entries = [
-                e
-                for e in merged_entries
-                if str(e.get("approval_status", "")).lower() == s_val or str(e.get("status", "")).lower() == s_val
-            ]
-
-        if search and isinstance(search, str):
-            q = search.lower()
-            merged_entries = [
-                e
-                for e in merged_entries
-                if q in str(e.get("template_name", "")).lower()
-                or q in str(e.get("source_ref", "")).lower()
-                or q in str(e.get("provider_ref_id", "")).lower()
-            ]
-
-        merged_entries.sort(key=lambda e: e.get("submitted_at") or "", reverse=True)
-        return [_json_safe(e) for e in merged_entries]
+            entries = _merge_rcs_templates(acc, status, search)
+        else:
+            entries = _merge_wa_templates(acc, status, search)
+        return [_json_safe(e) for e in entries]
     except Exception as exc:
         logger.exception("Error in get_templates for %s (%s): %s", acc, chan, exc)
         return []
+
+
+def _inspect_image_aspect_ratio(comp: dict, aspect_warnings: list[dict]) -> None:
+    img_bytes = comp.get("image_bytes")
+    if not img_bytes:
+        return
+    try:
+        import base64
+        import io
+
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(img_bytes))
+        w, h = img.size
+        ratio = w / h
+
+        is_16_9 = abs(ratio - (16 / 9)) < 0.08
+        is_2_1 = abs(ratio - 2.0) < 0.08
+        is_3_4 = abs(ratio - 0.75) < 0.08
+
+        if not is_16_9 and not is_2_1 and not is_3_4:
+            shape_name = (
+                "1:1 (Square)"
+                if abs(ratio - 1.0) < 0.05
+                else ("Portrait / Vertical" if ratio < 1.0 else f"Non-standard ({ratio:.2f}:1)")
+            )
+            aspect_warnings.append(
+                {
+                    "component": "HEADER (IMAGE)",
+                    "original_size": f"{w}x{h}px",
+                    "current_ratio": shape_name,
+                    "recommended_ratio": "16:9 (1280x720) or 2:1 (1200x600)",
+                    "action": "Auto-pad onto standard canvas with matching background so no text/logo is cropped.",
+                }
+            )
+        f_type = comp.get("file_type") or "image/png"
+        comp["thumbnail_url"] = f"data:{f_type};base64,{base64.b64encode(img_bytes).decode()}"
+    except Exception as exc:
+        logger.debug("Aspect ratio inspection notice: %s", exc)
+    finally:
+        comp.pop("image_bytes", None)
+
+
+def _inspect_single_submission(
+    s, live_names: set[str], account_detection: dict, account: str, channel: str
+) -> dict:
+    item = asdict(s) if not isinstance(s, dict) else dict(s)
+    tname = (item.get("template_name") or "").strip()
+    already_exists = tname.lower() in live_names if tname else False
+    item["already_exists_on_waba"] = already_exists
+    item["exists_on_waba"] = already_exists
+    if already_exists:
+        item["duplicate_warning"] = {
+            "template_name": tname,
+            "message": (
+                f"Template '{tname}' already exists on WABA for {account.title()}. "
+                "Meta will reject resubmission with duplicate content. "
+                "Please use a new name (e.g. appending '_v2') or edit the existing template."
+            ),
+        }
+    item["account_detection"] = account_detection
+
+    aspect_warnings = []
+    grammar_warnings = []
+    components = item.get("components") or []
+    for comp in components:
+        if not isinstance(comp, dict):
+            continue
+        ctype = comp.get("type")
+        cformat = str(comp.get("format", "")).upper()
+
+        if ctype == "BODY" or (ctype == "HEADER" and cformat == "TEXT"):
+            raw_text = comp.get("text", "")
+            if raw_text:
+                cleaned, g_warns = lint_and_fix_body(raw_text)
+                if g_warns:
+                    grammar_warnings.extend(g_warns)
+                    comp["suggested_text"] = cleaned
+
+        if ctype == "HEADER" and cformat == "IMAGE":
+            _inspect_image_aspect_ratio(comp, aspect_warnings)
+        elif "image_bytes" in comp:
+            comp.pop("image_bytes", None)
+
+    if channel == "rcs":
+        for text_field in ("text_message", "template_message", "card_title", "card_description"):
+            val = item.get(text_field)
+            if val and isinstance(val, str):
+                _, g_warns = lint_and_fix_body(val)
+                grammar_warnings.extend(g_warns)
+
+    item["aspect_ratio_warnings"] = aspect_warnings
+    item["grammar_warnings"] = grammar_warnings
+
+    body_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "BODY"), "")
+    header_comp = next((c for c in components if isinstance(c, dict) and c.get("type") == "HEADER"), None)
+    footer_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "FOOTER"), "")
+    buttons_list = next((c.get("buttons", []) for c in components if isinstance(c, dict) and c.get("type") == "BUTTONS"), [])
+
+    item["compliance_warnings"] = validate_meta_technical_compliance(
+        body_text=body_text,
+        header_text=header_comp.get("text") if header_comp else None,
+        footer_text=footer_text,
+        buttons=buttons_list,
+        header_format=header_comp.get("format") if header_comp else None,
+    )
+    return item
 
 
 def _inspect_template_quality_and_warnings(
@@ -720,7 +812,6 @@ def _inspect_template_quality_and_warnings(
     Inspect image dimensions, text grammar/spelling, and cross-reference with live WABA list.
     Attaches aspect ratio warnings, spelling typos, duplicate warnings, and suggested fixes.
     """
-    import base64
     from loader import detect_spreadsheet_account
 
     acc = account.lower().strip()
@@ -732,121 +823,10 @@ def _inspect_template_quality_and_warnings(
         for lt in live_templates
         if lt.get("template_name") or lt.get("viTemplate", {}).get("name")
     }
-    results = []
-    for s in submissions:
-        item = asdict(s) if not isinstance(s, dict) else dict(s)
-        tname = (item.get("template_name") or "").strip()
-        already_exists = tname.lower() in live_names if tname else False
-        item["already_exists_on_waba"] = already_exists
-        item["exists_on_waba"] = already_exists
-        if already_exists:
-            item["duplicate_warning"] = {
-                "template_name": tname,
-                "message": (
-                    f"Template '{tname}' already exists on WABA for {account.title()}. "
-                    "Meta will reject resubmission with duplicate content. "
-                    "Please use a new name (e.g. appending '_v2') or edit the existing template."
-                ),
-            }
-        item["account_detection"] = account_detection
-
-        aspect_warnings = []
-        grammar_warnings = []
-        # WhatsApp components
-        components = item.get("components") or []
-        for comp in components:
-            if not isinstance(comp, dict):
-                continue
-            ctype = comp.get("type")
-            cformat = str(comp.get("format", "")).upper()
-
-            # Check text grammar & spelling on BODY and HEADER TEXT
-            if ctype == "BODY" or (ctype == "HEADER" and cformat == "TEXT"):
-                raw_text = comp.get("text", "")
-                if raw_text:
-                    cleaned, g_warns = lint_and_fix_body(raw_text)
-                    if g_warns:
-                        grammar_warnings.extend(g_warns)
-                        comp["suggested_text"] = cleaned
-
-            # Check Image Aspect Ratio on HEADER IMAGE
-            if ctype == "HEADER" and cformat == "IMAGE":
-                img_bytes = comp.get("image_bytes")
-                if img_bytes:
-                    try:
-                        import io
-
-                        from PIL import Image
-
-                        img = Image.open(io.BytesIO(img_bytes))
-                        w, h = img.size
-                        ratio = w / h
-
-                        # Standard compliant aspect ratios for WhatsApp and RCS:
-                        # 16:9 = 1.7778 (WhatsApp standard & RCS standard)
-                        # 2:1  = 2.0000 (RCS Standalone Card standard & WhatsApp Wide)
-                        # 3:4  = 0.7500 (RCS Carousel Card standard)
-                        is_16_9 = abs(ratio - (16 / 9)) < 0.08
-                        is_2_1 = abs(ratio - 2.0) < 0.08
-                        is_3_4 = abs(ratio - 0.75) < 0.08
-
-                        if not is_16_9 and not is_2_1 and not is_3_4:
-                            if abs(ratio - 1.0) < 0.05:
-                                shape_name = "1:1 (Square)"
-                            elif ratio < 1.0:
-                                shape_name = "Portrait / Vertical"
-                            else:
-                                shape_name = f"Non-standard ({ratio:.2f}:1)"
-
-                            aspect_warnings.append(
-                                {
-                                    "component": "HEADER (IMAGE)",
-                                    "original_size": f"{w}x{h}px",
-                                    "current_ratio": shape_name,
-                                    "recommended_ratio": "16:9 (1280x720) or 2:1 (1200x600)",
-                                    "action": "Auto-pad onto standard canvas with matching background so no text/logo is cropped.",
-                                }
-                            )
-                        f_type = comp.get("file_type") or "image/png"
-                        comp["thumbnail_url"] = f"data:{f_type};base64,{base64.b64encode(img_bytes).decode()}"
-                    except Exception as exc:
-                        logger.debug("Aspect ratio inspection notice: %s", exc)
-                    finally:
-                        comp.pop("image_bytes", None)
-            elif "image_bytes" in comp:
-                comp.pop("image_bytes", None)
-
-        # RCS components check
-        if channel == "rcs":
-            for text_field in (
-                "text_message",
-                "template_message",
-                "card_title",
-                "card_description",
-            ):
-                val = item.get(text_field)
-                if val and isinstance(val, str):
-                    _, g_warns = lint_and_fix_body(val)
-                    grammar_warnings.extend(g_warns)
-
-        item["aspect_ratio_warnings"] = aspect_warnings
-        item["grammar_warnings"] = grammar_warnings
-        # Technical compliance validation (Semantic Memory: word-to-variable ratio, length limits)
-        body_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "BODY"), "")
-        header_comp = next((c for c in components if isinstance(c, dict) and c.get("type") == "HEADER"), None)
-        footer_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "FOOTER"), "")
-        buttons_list = next((c.get("buttons", []) for c in components if isinstance(c, dict) and c.get("type") == "BUTTONS"), [])
-
-        compliance_warnings = validate_meta_technical_compliance(
-            body_text=body_text,
-            header_text=header_comp.get("text") if header_comp else None,
-            footer_text=footer_text,
-            buttons=buttons_list,
-            header_format=header_comp.get("format") if header_comp else None,
-        )
-        item["compliance_warnings"] = compliance_warnings
-        results.append(_json_safe(item))
-    return results
+    return [
+        _json_safe(_inspect_single_submission(s, live_names, account_detection, account, channel))
+        for s in submissions
+    ]
 
 
 @app.post("/api/preview")
@@ -942,6 +922,192 @@ async def preview_file(
         os.unlink(tmp_path)
 
 
+async def _submit_rcs_batch(
+    tmp_path: str, suffix: str, acc: str, user: str, skip_duplicates: bool, auto_route: bool, filename: str, current_user: dict
+) -> dict:
+    subs = load_rcs_from_excel(tmp_path, client=acc) if suffix in (".xlsx", ".xls") else load_rcs_from_csv(tmp_path, client=acc)
+    if not subs:
+        raise HTTPException(status_code=400, detail=f"No valid RCS templates found in '{filename}' to submit.")
+
+    if auto_route:
+        from loader import detect_spreadsheet_account
+        detection = detect_spreadsheet_account(subs, current_account=acc)
+        if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
+            target_acc = detection["detected_account_id"]
+            try:
+                require_tenant_access(target_acc, current_user)
+                acc = target_acc
+            except HTTPException:
+                pass
+
+    to_submit = []
+    duplicate_entries = []
+    if skip_duplicates:
+        live_templates = fetch_rcs_templates(client=acc)
+        live_map = {
+            (lt.get("viTemplate", {}).get("name") or str(lt.get("templateId", ""))).strip().lower(): lt
+            for lt in live_templates
+            if (lt.get("viTemplate", {}).get("name") or lt.get("templateId"))
+        }
+        for s in subs:
+            name_key = s.template_name.strip().lower()
+            if name_key in live_map:
+                live_obj = live_map[name_key]
+                status_str = str(live_obj.get("status", "APPROVED")).upper()
+                dupe_res = RcsSubmissionResult(
+                    source_ref=s.source_ref,
+                    template_name=s.template_name,
+                    status=RcsSubmissionStatus.DUPLICATE,
+                    provider_ref_id=str(live_obj.get("templateId", "")),
+                    error="RCS template already active on DLT Bot — skipped duplicate submission.",
+                    provider_response=live_obj,
+                    approval_status=status_str.lower(),
+                    client=acc,
+                    channel="rcs",
+                    submitted_by=user,
+                    source_file=filename,
+                )
+                log_rcs_result(dupe_res, RCS_LOG_PATH)
+                duplicate_entries.append(asdict(dupe_res))
+            else:
+                to_submit.append(s)
+    else:
+        to_submit = subs
+
+    new_entries = []
+    if to_submit:
+        before_count = len(load_rcs_log(RCS_LOG_PATH))
+        await asyncio.to_thread(run_rcs, [asdict(s) for s in to_submit], RCS_LOG_PATH, client=acc, user=user, source_file=filename)
+        all_entries = load_rcs_log(RCS_LOG_PATH)
+        new_entries = all_entries[before_count:]
+
+    all_combined = duplicate_entries + new_entries
+    cleaned_entries = []
+    for e in all_combined:
+        entry = dict(e)
+        if "error" in entry:
+            entry["error"] = _clean_error_message(entry["error"])
+        cleaned_entries.append(entry)
+
+    log_activity(
+        user=user,
+        action="TEMPLATE_SUBMISSION",
+        account=acc,
+        channel="rcs",
+        details={
+            "filename": filename,
+            "count": len(cleaned_entries),
+            "net_new_submitted": len(to_submit),
+            "duplicates_skipped": len(duplicate_entries),
+            "templates": [e.get("template_name") for e in cleaned_entries],
+            "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
+            "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
+        },
+        status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
+    )
+    return {
+        "submitted": len(to_submit),
+        "skipped_duplicates": len(duplicate_entries),
+        "results": [_json_safe(e) for e in cleaned_entries],
+    }
+
+
+async def _submit_wa_batch(
+    tmp_path: str, suffix: str, acc: str, user: str, skip_duplicates: bool, auto_route: bool, fix_aspect_ratio: bool, fix_grammar: bool, filename: str, current_user: dict
+) -> dict:
+    subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc) if suffix in (".xlsx", ".xls") else await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
+    if not subs:
+        raise HTTPException(status_code=400, detail=f"No valid WhatsApp templates found in '{filename}' to submit.")
+
+    if auto_route:
+        from loader import detect_spreadsheet_account
+        detection = detect_spreadsheet_account(subs, current_account=acc)
+        if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
+            target_acc = detection["detected_account_id"]
+            try:
+                require_tenant_access(target_acc, current_user)
+                acc = target_acc
+            except HTTPException:
+                pass
+
+    to_submit = []
+    duplicate_entries = []
+    if skip_duplicates:
+        live_templates = fetch_whatsapp_templates(client=acc)
+        live_map = {
+            (lt.get("template_name") or "").strip().lower(): lt
+            for lt in live_templates
+            if lt.get("template_name")
+        }
+        for s in subs:
+            name_key = s.template_name.strip().lower()
+            if name_key in live_map:
+                live_obj = live_map[name_key]
+                status_str = str(live_obj.get("template_create_status") or live_obj.get("status", "APPROVED")).upper()
+                approval_val = (
+                    _STATUS_MAP.get(status_str, ApprovalStatus.APPROVED).value
+                    if status_str in _STATUS_MAP
+                    else status_str.lower()
+                )
+                ref_id = str(live_obj.get("fb_template_id", "") or live_obj.get("sno", "") or "")
+                dupe_res = SubmissionResult(
+                    source_ref=s.source_ref,
+                    template_name=s.template_name,
+                    status=SubmissionStatus.DUPLICATE,
+                    provider_ref_id=ref_id,
+                    error="Template already active on WABA — automatically skipped duplicate submission.",
+                    provider_response=live_obj,
+                    approval_status=ApprovalStatus(approval_val) if approval_val in ("approved", "pending", "rejected") else ApprovalStatus.APPROVED,
+                    client=acc,
+                    channel="whatsapp",
+                    submitted_by=user,
+                    source_file=filename,
+                )
+                log_result(dupe_res, LOG_PATH)
+                duplicate_entries.append(asdict(dupe_res))
+            else:
+                to_submit.append(s)
+    else:
+        to_submit = subs
+
+    new_entries = []
+    if to_submit:
+        before_count = len(load_log(LOG_PATH))
+        await asyncio.to_thread(run, [asdict(s) for s in to_submit], LOG_PATH, client=acc, user=user, source_file=filename, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        all_entries = load_log(LOG_PATH)
+        new_entries = all_entries[before_count:]
+
+    all_combined = duplicate_entries + new_entries
+    cleaned_entries = []
+    for e in all_combined:
+        entry = dict(e)
+        if "error" in entry:
+            entry["error"] = _clean_error_message(entry["error"])
+        cleaned_entries.append(entry)
+
+    log_activity(
+        user=user,
+        action="TEMPLATE_SUBMISSION",
+        account=acc,
+        channel="whatsapp",
+        details={
+            "filename": filename,
+            "count": len(cleaned_entries),
+            "net_new_submitted": len(to_submit),
+            "duplicates_skipped": len(duplicate_entries),
+            "templates": [e.get("template_name") for e in cleaned_entries],
+            "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
+            "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
+        },
+        status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
+    )
+    return {
+        "submitted": len(to_submit),
+        "skipped_duplicates": len(duplicate_entries),
+        "results": [_json_safe(e) for e in cleaned_entries],
+    }
+
+
 @app.post("/api/submit")
 async def submit_file(
     file: UploadFile = File(...),
@@ -963,223 +1129,8 @@ async def submit_file(
     chan = channel.lower()
     try:
         if chan == "rcs":
-            if suffix in (".xlsx", ".xls"):
-                subs = load_rcs_from_excel(tmp_path, client=acc)
-            else:
-                subs = load_rcs_from_csv(tmp_path, client=acc)
-            if not subs:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}' to submit.",
-                )
-            if auto_route:
-                from loader import detect_spreadsheet_account
-
-                detection = detect_spreadsheet_account(subs, current_account=acc)
-                if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
-                    target_acc = detection["detected_account_id"]
-                    try:
-                        require_tenant_access(target_acc, current_user)
-                        logger.info(
-                            "Smart Routing: auto-routing RCS submission from %s to %s (confidence: %s)",
-                            acc,
-                            target_acc,
-                            detection.get("confidence"),
-                        )
-                        acc = target_acc
-                    except HTTPException:
-                        pass
-            to_submit = []
-            duplicate_entries = []
-            if skip_duplicates:
-                live_templates = fetch_rcs_templates(client=acc)
-                live_map = {
-                    (lt.get("viTemplate", {}).get("name") or str(lt.get("templateId", ""))).strip().lower(): lt
-                    for lt in live_templates
-                    if (lt.get("viTemplate", {}).get("name") or lt.get("templateId"))
-                }
-                for s in subs:
-                    name_key = s.template_name.strip().lower()
-                    if name_key in live_map:
-                        live_obj = live_map[name_key]
-                        status_str = str(live_obj.get("status", "APPROVED")).upper()
-                        dupe_res = RcsSubmissionResult(
-                            source_ref=s.source_ref,
-                            template_name=s.template_name,
-                            status=RcsSubmissionStatus.DUPLICATE,
-                            provider_ref_id=str(live_obj.get("templateId", "")),
-                            error="RCS template already active on DLT Bot — skipped duplicate submission.",
-                            provider_response=live_obj,
-                            approval_status=status_str.lower(),
-                            client=acc,
-                            channel="rcs",
-                            submitted_by=user,
-                            source_file=file.filename or "upload.csv",
-                        )
-                        log_rcs_result(dupe_res, RCS_LOG_PATH)
-                        duplicate_entries.append(asdict(dupe_res))
-                    else:
-                        to_submit.append(s)
-            else:
-                to_submit = subs
-
-            new_entries = []
-            if to_submit:
-                before_count = len(load_rcs_log(RCS_LOG_PATH))
-                await asyncio.to_thread(
-                    run_rcs,
-                    [asdict(s) for s in to_submit],
-                    RCS_LOG_PATH,
-                    client=acc,
-                    user=user,
-                    source_file=file.filename or "upload.csv",
-                )
-                all_entries = load_rcs_log(RCS_LOG_PATH)
-                new_entries = all_entries[before_count:]
-
-            all_combined = duplicate_entries + new_entries
-            cleaned_entries = []
-            for e in all_combined:
-                entry = dict(e)
-                if "error" in entry:
-                    entry["error"] = _clean_error_message(entry["error"])
-                cleaned_entries.append(entry)
-
-            log_activity(
-                user=user,
-                action="TEMPLATE_SUBMISSION",
-                account=acc,
-                channel=chan,
-                details={
-                    "filename": file.filename or "upload.csv",
-                    "count": len(cleaned_entries),
-                    "net_new_submitted": len(to_submit),
-                    "duplicates_skipped": len(duplicate_entries),
-                    "templates": [e.get("template_name") for e in cleaned_entries],
-                    "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
-                    "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
-                },
-                status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
-            )
-            return {
-                "submitted": len(to_submit),
-                "skipped_duplicates": len(duplicate_entries),
-                "results": [_json_safe(e) for e in cleaned_entries],
-            }
-
-        # WhatsApp
-        if suffix in (".xlsx", ".xls"):
-            subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc)
-        else:
-            subs = await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
-        if not subs:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}' to submit.",
-            )
-        if auto_route:
-            from loader import detect_spreadsheet_account
-
-            detection = detect_spreadsheet_account(subs, current_account=acc)
-            if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
-                target_acc = detection["detected_account_id"]
-                try:
-                    require_tenant_access(target_acc, current_user)
-                    logger.info(
-                        "Smart Routing: auto-routing WhatsApp submission from %s to %s (confidence: %s)",
-                        acc,
-                        target_acc,
-                        detection.get("confidence"),
-                    )
-                    acc = target_acc
-                except HTTPException:
-                    pass
-
-        to_submit = []
-        duplicate_entries = []
-        if skip_duplicates:
-            live_templates = fetch_whatsapp_templates(client=acc)
-            live_map = {
-                (lt.get("template_name") or "").strip().lower(): lt
-                for lt in live_templates
-                if lt.get("template_name")
-            }
-            for s in subs:
-                name_key = s.template_name.strip().lower()
-                if name_key in live_map:
-                    live_obj = live_map[name_key]
-                    status_str = str(live_obj.get("template_create_status") or live_obj.get("status", "APPROVED")).upper()
-                    approval_val = (
-                        _STATUS_MAP.get(status_str, ApprovalStatus.APPROVED).value
-                        if status_str in _STATUS_MAP
-                        else status_str.lower()
-                    )
-                    ref_id = str(live_obj.get("fb_template_id", "") or live_obj.get("sno", "") or "")
-                    dupe_res = SubmissionResult(
-                        source_ref=s.source_ref,
-                        template_name=s.template_name,
-                        status=SubmissionStatus.DUPLICATE,
-                        provider_ref_id=ref_id,
-                        error="Template already active on WABA — automatically skipped duplicate submission.",
-                        provider_response=live_obj,
-                        approval_status=ApprovalStatus(approval_val) if approval_val in ("approved", "pending", "rejected") else ApprovalStatus.APPROVED,
-                        client=acc,
-                        channel="whatsapp",
-                        submitted_by=user,
-                        source_file=file.filename or "upload.csv",
-                    )
-                    log_result(dupe_res, LOG_PATH)
-                    duplicate_entries.append(asdict(dupe_res))
-                else:
-                    to_submit.append(s)
-        else:
-            to_submit = subs
-
-        new_entries = []
-        if to_submit:
-            before_count = len(load_log(LOG_PATH))
-            await asyncio.to_thread(
-                run,
-                [asdict(s) for s in to_submit],
-                LOG_PATH,
-                client=acc,
-                user=user,
-                source_file=file.filename or "upload.csv",
-                fix_aspect_ratio=fix_aspect_ratio,
-                fix_grammar=fix_grammar,
-            )
-            all_entries = load_log(LOG_PATH)
-            new_entries = all_entries[before_count:]
-
-        all_combined = duplicate_entries + new_entries
-        cleaned_entries = []
-        for e in all_combined:
-            entry = dict(e)
-            if "error" in entry:
-                entry["error"] = _clean_error_message(entry["error"])
-            cleaned_entries.append(entry)
-
-        log_activity(
-            user=user,
-            action="TEMPLATE_SUBMISSION",
-            account=acc,
-            channel=chan,
-            details={
-                "filename": file.filename or "upload.csv",
-                "count": len(cleaned_entries),
-                "net_new_submitted": len(to_submit),
-                "duplicates_skipped": len(duplicate_entries),
-                "templates": [e.get("template_name") for e in cleaned_entries],
-                "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
-                "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
-            },
-            status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
-        )
-        return {
-            "submitted": len(to_submit),
-            "skipped_duplicates": len(duplicate_entries),
-            "results": [_json_safe(e) for e in cleaned_entries],
-        }
+            return await _submit_rcs_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, file.filename or "upload.csv", current_user)
+        return await _submit_wa_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, fix_aspect_ratio, fix_grammar, file.filename or "upload.csv", current_user)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1372,9 +1323,7 @@ def get_credentials(
         else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
     )
 
-    waba_id = os.environ.get(w_id_key) or (
-        BAJAJ_WABA_ID if is_bajaj else ("734197179371393" if acc in TATA_SUB_ACCOUNTS else "")
-    )
+    waba_id = os.environ.get(w_id_key) or (BAJAJ_WABA_ID if is_bajaj else "")
     # Strict tenant separation: display ONLY this account's own tokens.
     # Never surface the parent TATA_* session here — it belongs to a different
     # portal login (e.g. TATACAPPROMO) and showing it under TCHFL made it look
@@ -1410,6 +1359,28 @@ def get_credentials(
     }
 
 
+def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata: bool, is_bajaj: bool) -> dict:
+    mapping = {}
+    fields = [
+        (creds.waba_auth_token, "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")),
+        (creds.waba_id, "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")),
+        (creds.bearer_token, "TATA_KARIX_BEARER_TOKEN" if is_tata else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")),
+        (creds.session, "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")),
+        (creds.user, "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")),
+        (creds.portal_username, f"{prefix}_PORTAL_USER"),
+        (creds.portal_password, f"{prefix}_PORTAL_PASSWORD"),
+        (creds.template_namespace_id, f"{prefix}_TEMPLATE_NAMESPACE_ID"),
+        (creds.entity_id, "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")),
+        (creds.lounge_cookie, "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")),
+    ]
+    for val, key in fields:
+        if val is not None and val.strip():
+            v = val.strip()
+            mapping[key] = v
+            os.environ[key] = v
+    return mapping
+
+
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get_current_user)):
     require_tenant_access(creds.account, current_user)
@@ -1420,73 +1391,7 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
 
-    mapping = {}
-    if chan == "whatsapp":
-        if creds.waba_auth_token is not None and creds.waba_auth_token.strip():
-            key = (
-                "TATA_WABA_AUTH_TOKEN"
-                if is_tata
-                else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
-            )
-            val = creds.waba_auth_token.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.waba_id is not None and creds.waba_id.strip():
-            key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
-            val = creds.waba_id.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.bearer_token is not None and creds.bearer_token.strip():
-            key = (
-                "TATA_KARIX_BEARER_TOKEN"
-                if is_tata
-                else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")
-            )
-            val = creds.bearer_token.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.session is not None and creds.session.strip():
-            key = (
-                "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")
-            )
-            val = creds.session.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.user is not None and creds.user.strip():
-            key = "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")
-            val = creds.user.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.portal_username is not None and creds.portal_username.strip():
-            key = f"{prefix}_PORTAL_USER"
-            val = creds.portal_username.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.portal_password is not None and creds.portal_password.strip():
-            key = f"{prefix}_PORTAL_PASSWORD"
-            val = creds.portal_password.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.template_namespace_id is not None and creds.template_namespace_id.strip():
-            key = f"{prefix}_TEMPLATE_NAMESPACE_ID"
-            val = creds.template_namespace_id.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.entity_id is not None and creds.entity_id.strip():
-            key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
-            val = creds.entity_id.strip()
-            mapping[key] = val
-            os.environ[key] = val
-        if creds.lounge_cookie is not None and creds.lounge_cookie.strip():
-            key = (
-                "TATA_KARIX_LOUNGE_COOKIE"
-                if is_tata
-                else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
-            )
-            val = creds.lounge_cookie.strip()
-            mapping[key] = val
-            os.environ[key] = val
-
+    mapping = _build_wa_credentials_mapping(creds, prefix, is_tata, is_bajaj) if chan == "whatsapp" else {}
     if not mapping:
         return {"ok": True}
     # 1. Update .env file
@@ -1586,77 +1491,40 @@ def _commit_credentials_to_github() -> str | None:
         return "error"
 
 
-@app.post("/api/test-credentials")
-def test_credentials(
-    account: str = Query("bajaj"),
-    channel: str = Query("whatsapp"),
-    creds: CredentialUpdate | None = None,
-    current_user: dict = Depends(get_current_user),
-):
-    body_fields = creds.model_fields_set if creds else set()
-    acc = (creds.account if creds and "account" in body_fields else account).lower().strip()
-    require_tenant_access(acc, current_user)
-    chan = (creds.channel if creds and "channel" in body_fields else channel).lower().strip()
-    acc_name = get_account_name(acc)
-    prefix = _account_prefix(acc)
-    is_tata = acc == "tata"
-    is_bajaj = acc == "bajaj"
-    _load_env_file()
-
-    w_id_key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
-    w_tok_key = (
-        "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
-    )
-    e_id_key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
-    l_ck_key = (
-        "TATA_KARIX_LOUNGE_COOKIE"
-        if is_tata
-        else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
-    )
-
-    # Apply any supplied creds directly to environment in memory
-    if creds:
-        if creds.waba_id and creds.waba_id.strip():
-            os.environ[w_id_key] = creds.waba_id.strip()
-        if creds.waba_auth_token and creds.waba_auth_token.strip():
-            os.environ[w_tok_key] = creds.waba_auth_token.strip()
-        if creds.entity_id and creds.entity_id.strip():
-            os.environ[e_id_key] = creds.entity_id.strip()
-        if creds.lounge_cookie and creds.lounge_cookie.strip():
-            os.environ[l_ck_key] = creds.lounge_cookie.strip()
-
-    if chan == "rcs":
-        try:
-            entity_id = (
-                creds.entity_id.strip() if creds and creds.entity_id and creds.entity_id.strip() else None
-            ) or get_rcs_entity_id(acc)
-            headers = get_rcs_auth_headers(acc)
-            resp = http_client.get(
-                "https://karix.solutions/lounge/LoungePage/dltRegistration.php",
-                headers=headers,
-                timeout=15,
-            )
-            has_auth = "sign_in" not in resp.url and resp.status_code == 200
-            if has_auth or entity_id:
-                return {
-                    "ok": True,
-                    "message": f"RCS Configured for {acc_name} (Entity ID: {entity_id or 'Configured'})",
-                }
+def _test_rcs_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -> dict:
+    try:
+        entity_id = (
+            creds.entity_id.strip() if creds and creds.entity_id and creds.entity_id.strip() else None
+        ) or get_rcs_entity_id(acc)
+        headers = get_rcs_auth_headers(acc)
+        resp = http_client.get(
+            "https://karix.solutions/lounge/LoungePage/dltRegistration.php",
+            headers=headers,
+            timeout=15,
+        )
+        has_auth = "sign_in" not in resp.url and resp.status_code == 200
+        if has_auth or entity_id:
             return {
-                "ok": False,
-                "message": f"RCS Session/Cookie for {acc_name} returned {resp.status_code}",
+                "ok": True,
+                "message": f"RCS Configured for {acc_name} (Entity ID: {entity_id or 'Configured'})",
             }
-        except Exception as exc:
-            return {"ok": False, "message": f"RCS Test error for {acc_name}: {exc}"}
+        return {
+            "ok": False,
+            "message": f"RCS Session/Cookie for {acc_name} returned {resp.status_code}",
+        }
+    except Exception as exc:
+        return {"ok": False, "message": f"RCS Test error for {acc_name}: {exc}"}
 
-    # WhatsApp
+
+def _test_whatsapp_channel(
+    acc: str, acc_name: str, prefix: str, is_tata: bool, is_bajaj: bool, creds: CredentialUpdate | None, w_id_key: str, w_tok_key: str
+) -> dict:
     results = []
     try:
         waba_id = (
             (creds.waba_id.strip() if creds and creds.waba_id and creds.waba_id.strip() else None)
             or os.environ.get(f"{prefix}_WABA_ID")
-            or os.environ.get("TATA_WABA_ID" if acc in TATA_SUB_ACCOUNTS else "BAJAJ_WABA_ID")
-            or (BAJAJ_WABA_ID if is_bajaj else "734197179371393")
+            or (BAJAJ_WABA_ID if is_bajaj else "")
         )
         if not waba_id:
             return {
@@ -1708,12 +1576,55 @@ def test_credentials(
         user=(creds.user_name if creds and creds.user_name else "Anonymous Operator"),
         action="CREDENTIALS_TEST",
         account=acc,
-        channel=chan,
+        channel="whatsapp",
         details={"message": " | ".join(results), "valid": is_ok},
         status="success" if is_ok else "failed",
     )
     return {"ok": is_ok, "message": " | ".join(results)}
 
+
+@app.post("/api/test-credentials")
+def test_credentials(
+    account: str = Query("bajaj"),
+    channel: str = Query("whatsapp"),
+    creds: CredentialUpdate | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    body_fields = creds.model_fields_set if creds else set()
+    acc = (creds.account if creds and "account" in body_fields else account).lower().strip()
+    require_tenant_access(acc, current_user)
+    chan = (creds.channel if creds and "channel" in body_fields else channel).lower().strip()
+    acc_name = get_account_name(acc)
+    prefix = _account_prefix(acc)
+    is_tata = acc == "tata"
+    is_bajaj = acc == "bajaj"
+    _load_env_file()
+
+    w_id_key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
+    w_tok_key = (
+        "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")
+    )
+    e_id_key = "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")
+    l_ck_key = (
+        "TATA_KARIX_LOUNGE_COOKIE"
+        if is_tata
+        else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
+    )
+
+    # Apply any supplied creds directly to environment in memory
+    if creds:
+        if creds.waba_id and creds.waba_id.strip():
+            os.environ[w_id_key] = creds.waba_id.strip()
+        if creds.waba_auth_token and creds.waba_auth_token.strip():
+            os.environ[w_tok_key] = creds.waba_auth_token.strip()
+        if creds.entity_id and creds.entity_id.strip():
+            os.environ[e_id_key] = creds.entity_id.strip()
+        if creds.lounge_cookie and creds.lounge_cookie.strip():
+            os.environ[l_ck_key] = creds.lounge_cookie.strip()
+
+    if chan == "rcs":
+        return _test_rcs_channel(acc, acc_name, creds)
+    return _test_whatsapp_channel(acc, acc_name, prefix, is_tata, is_bajaj, creds, w_id_key, w_tok_key)
 
 @app.get("/api/sample-csv")
 def get_sample_csv(channel: str = Query("whatsapp")):

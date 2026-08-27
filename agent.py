@@ -442,458 +442,194 @@ class WhitelistingAgent:
         user: str = "Operator",
         user_profile: dict | None = None,
     ) -> dict[str, Any]:
-        """
-        Parse operator instruction, decide required tools, execute reasoning chain,
-        and synthesize a structured response with actionable suggestions.
-        """
         text = instruction.strip()
-        actions_taken = []
-        suggested_actions = []
+        isolation_err, account = _check_agent_tenant_isolation(text, user_profile, account)
+        if isolation_err:
+            return isolation_err
 
-        # Strict Tenant Isolation Check inside Agent
-        if user_profile and isinstance(user_profile, dict):
-            user_tenant = str(user_profile.get("tenant_id", "all")).lower().strip()
-            user_role = str(user_profile.get("role", "operator")).lower().strip()
+        handlers = [
+            lambda: _handle_agent_team_inquiry(text, account),
+            lambda: _handle_agent_help_inquiry(text, account, channel),
+            lambda: _handle_agent_template_creation(text, account, channel),
+            lambda: _handle_agent_session_refresh(text, account, user),
+            lambda: _handle_agent_copy_lint(text),
+            lambda: _handle_agent_status_poll(text, account, channel),
+            lambda: _handle_agent_list_templates(text, account, channel),
+            lambda: _handle_agent_rejection_diagnosis(text, account, channel, user),
+        ]
+        for handler in handlers:
+            res = handler()
+            if res is not None:
+                return res
 
-            if user_tenant != "all" and user_role != "superadmin":
-                # Block cross-tenant prompt injection
-                forbidden_tenants = [t for t in ["bajaj", "tata"] if t != user_tenant]
-                for forbidden in forbidden_tenants:
-                    if (
-                        f"for {forbidden}" in text.lower()
-                        or f"{forbidden} templates" in text.lower()
-                        or f"on {forbidden}" in text.lower()
-                    ):
-                        return {
-                            "reply": (
-                                f"🚫 **Access Denied**: Your account is assigned to **{user_tenant.upper()}** "
-                                f"and is strictly forbidden from querying or modifying **{forbidden.upper()}** data."
-                            ),
-                            "actions_taken": [],
-                            "suggested_actions": [f"List {user_tenant} templates", "Poll approval status"],
-                        }
-                # Lock account parameter to user's assigned organization
-                account = user_tenant
+        return _handle_agent_fallback_guidance(account, channel)
 
-        # 1. Team / User Accounts inquiry: "show users", "who is on the team", "list team", "show user details"
-        if any(
-            w in text.lower()
-            for w in [
-                "show user",
-                "show users",
-                "list user",
-                "list users",
-                "team member",
-                "who is on the team",
-                "user details",
-                "all users",
-                "my team",
-                "user accounts",
-            ]
-        ):
-            team_res = tool_list_team(tenant_id=account)
-            actions_taken.append({"tool": "list_tenant_team", "result": team_res})
-            members = team_res.get("members", [])
-            if not members:
-                reply = f"No registered team members found for **{account.title()}**."
-            else:
-                lines = [
-                    f"• **{m.get('name')}** (`{m.get('email')}`) — Role: `{m.get('role', 'operator').upper()}` | Org: `{m.get('tenant_id', account).upper()}`"
-                    for m in members
-                ]
-                reply = (
-                    f"### 👥 Registered Users for {account.title()} ({len(members)} operators):\n\n"
-                    + "\n".join(lines)
-                    + "\n\n*Tip: You can also inspect team accounts in **[Settings](/settings)** under Organization Team Directory.*"
-                )
-            suggested_actions = ["Poll approval status", "List rejected templates", "How do I submit templates?"]
-            return {
-                "reply": reply,
-                "actions_taken": actions_taken,
-                "suggested_actions": suggested_actions,
-                "data": team_res,
-            }
 
-        # 2. How to submit / Upload instructions / General Help
-        if any(
-            w in text.lower()
-            for w in [
-                "how to submit",
-                "how do i submit",
-                "how can i submit",
-                "how to upload",
-                "how do i upload",
-                "how to create",
-                "how does this work",
-                "how do i use",
-                "ways to submit",
-                "help",
-                "instructions",
-                "what can you do",
-            ]
-        ):
-            reply = (
-                f"### 🚀 How to Submit Templates for **{account.title()} ({channel.upper()})**\n\n"
-                "You have **3 ways** to submit templates:\n\n"
-                "#### 1. 📂 Bulk Upload via Dashboard (Recommended for marketing sheets)\n"
-                "• Go to **[Submit Templates](/submit)** in the left sidebar.\n"
-                "• Drag & drop your `.xlsx` or `.csv` spreadsheet (or click *Download Sample CSV* for the format).\n"
-                "• Review the instant pre-submission preview with grammar and 16:9 image checks.\n"
-                "• Click **Submit Templates** to submit in parallel with real-time logs.\n\n"
-                "#### 2. 💬 Conversational Submission (Directly in this Copilot)\n"
-                "• Tell me to create and submit a template directly:\n"
-                '  > *"Create a marketing template named diwali_offer with body: Hello {{1}}, your pre-approved loan of {{2}} is ready at bajajfinserv.in"*\n\n'
-                "#### 3. 🔧 Auto-Fix & Resubmit Rejections\n"
-                "• Tell me to diagnose and repair a rejected template:\n"
-                '  > *"Check why template loan_oct_01 was rejected, fix it, and resubmit"*\n\n'
-                "#### 4. ⚡ Terminal CLI Runner\n"
-                "• Run: `python3 runner.py samples/templates.xlsx --client bajaj`"
-            )
-            suggested_actions = [
-                "List rejected templates",
-                "Poll approval status",
-                "Create a template named test_promo",
-            ]
-            return {
-                "reply": reply,
-                "actions_taken": [],
-                "suggested_actions": suggested_actions,
-            }
+def _check_agent_tenant_isolation(text: str, user_profile: dict | None, account: str) -> tuple[dict | None, str]:
+    if user_profile and isinstance(user_profile, dict):
+        user_tenant = str(user_profile.get("tenant_id", "all")).lower().strip()
+        user_role = str(user_profile.get("role", "operator")).lower().strip()
+        if user_tenant != "all" and user_role != "superadmin":
+            for forbidden in [t for t in ["bajaj", "tata"] if t != user_tenant]:
+                if f"for {forbidden}" in text.lower() or f"{forbidden} templates" in text.lower() or f"on {forbidden}" in text.lower():
+                    return {
+                        "reply": f"🚫 **Access Denied**: Your account is assigned to **{user_tenant.upper()}** and is strictly forbidden from querying or modifying **{forbidden.upper()}** data.",
+                        "actions_taken": [],
+                        "suggested_actions": [f"List {user_tenant} templates", "Poll approval status"],
+                    }, account
+            account = user_tenant
+    return None, account
 
-        # 2. Template creation command: e.g. "create a marketing template named X with body Y"
-        has_create_keyword = bool(
-            re.search(
-                r"(?:create|submit|register|new|add)\s+(?:a\s+)?(?:[a-zA-Z]+\s+)?template",
-                text,
-                re.IGNORECASE,
-            )
-        )
-        if has_create_keyword and any(k in text.lower() for k in ["body", ":", "with text", "message"]):
-            name_m = re.search(r"(?:named|name|id)\s+([a-zA-Z0-9_\-]+)", text, re.IGNORECASE)
-            cat_m = re.search(r"\b(marketing|utility|authentication|transactional)\b", text, re.IGNORECASE)
-            body_m = re.search(r"(?:body|message|text|content)[:\s]+(.+)", text, re.IGNORECASE | re.DOTALL)
 
-            t_name = name_m.group(1).strip() if name_m else f"template_{int(time.time())}"
-            t_cat = cat_m.group(1).strip().upper() if cat_m else "MARKETING"
-            t_body = body_m.group(1).strip() if body_m else ""
+def _handle_agent_team_inquiry(text: str, account: str) -> dict | None:
+    if not any(w in text.lower() for w in ["show user", "show users", "list user", "list users", "team member", "who is on the team", "user details", "all users", "my team", "user accounts"]):
+        return None
+    team_res = tool_list_team(tenant_id=account)
+    members = team_res.get("members", [])
+    if not members:
+        reply = f"No registered team members found for **{account.title()}**."
+    else:
+        lines = [f"• **{m.get('name')}** (`{m.get('email')}`) — Role: `{m.get('role', 'operator').upper()}` | Org: `{m.get('tenant_id', account).upper()}`" for m in members]
+        reply = f"### 👥 Registered Users for {account.title()} ({len(members)} operators):\n\n" + "\n".join(lines) + "\n\n*Tip: You can also inspect team accounts in **[Settings](/settings)** under Organization Team Directory.*"
+    return {"reply": reply, "actions_taken": [{"tool": "list_tenant_team", "result": team_res}], "suggested_actions": ["Poll approval status", "List rejected templates", "How do I submit templates?"], "data": team_res}
 
-            if not t_body and ":" in text:
-                t_body = text.split(":", 1)[1].strip()
-            if t_body:
-                create_res = tool_create_template(
-                    name=t_name,
-                    body=t_body,
-                    category=t_cat,
-                    account=account,
-                    channel=channel,
-                )
-                actions_taken.append({"tool": "create_template", "result": create_res})
-                if create_res.get("success"):
-                    reply = (
-                        f"### ✅ Template `{t_name}` Created & Submitted\n\n"
-                        f"**Category:** `{t_cat}`\n"
-                        f"**Channel:** `{channel.upper()}` ({account.title()})\n"
-                        f"**Status:** `{create_res.get('status', 'submitted').upper()}`\n\n"
-                        f"**Submitted Body:**\n```\n{t_body}\n```\n"
-                    )
-                    suggested_actions = [
-                        "Poll approval status",
-                        "List pending templates",
-                        f"Inspect {t_name}",
-                    ]
-                else:
-                    reply = f"### ❌ Submission Failed for `{t_name}`\n\n**Error:** {create_res.get('error')}\n"
-                    suggested_actions = ["Check credentials", "Lint copy"]
 
-                return {
-                    "reply": reply,
-                    "actions_taken": actions_taken,
-                    "suggested_actions": suggested_actions,
-                    "data": create_res,
-                }
+def _handle_agent_help_inquiry(text: str, account: str, channel: str) -> dict | None:
+    if not any(w in text.lower() for w in ["how to submit", "how do i submit", "how can i submit", "how to upload", "how do i upload", "how to create", "how does this work", "how do i use", "ways to submit", "help", "instructions", "what can you do"]):
+        return None
+    reply = (
+        f"### 🚀 How to Submit Templates for **{account.title()} ({channel.upper()})**\n\n"
+        "You have **3 ways** to submit templates:\n\n"
+        "#### 1. 📂 Bulk Upload via Dashboard (Recommended for marketing sheets)\n"
+        "• Go to **[Submit Templates](/submit)** in the left sidebar.\n"
+        "• Drag & drop your `.xlsx` or `.csv` spreadsheet (or click *Download Sample CSV* for the format).\n"
+        "• Review the instant pre-submission preview with grammar and 16:9 image checks.\n"
+        "• Click **Submit Templates** to submit in parallel with real-time logs.\n\n"
+        "#### 2. 💬 Conversational Submission (Directly in this Copilot)\n"
+        "• Tell me to create and submit a template directly:\n"
+        '  > *"Create a marketing template named diwali_offer with body: Hello {{1}}, your pre-approved loan of {{2}} is ready at bajajfinserv.in"*\n\n'
+        "#### 3. 🔧 Auto-Fix & Resubmit Rejections\n"
+        "• Tell me to diagnose and repair a rejected template:\n"
+        '  > *"Check why template loan_oct_01 was rejected, fix it, and resubmit"*\n\n'
+        "#### 4. ⚡ Terminal CLI Runner\n"
+        "• Run: `python3 runner.py samples/templates.xlsx --client bajaj`"
+    )
+    return {"reply": reply, "actions_taken": [], "suggested_actions": ["List rejected templates", "Poll approval status", "Create a template named test_promo"]}
 
-        # 3. Re-login / session refresh: "refresh session", "relogin", "auto-login", "refresh token"
-        if any(
-            w in text.lower()
-            for w in [
-                "refresh session",
-                "relogin",
-                "re-login",
-                "refresh token",
-                "refresh auth",
-                "auto-login",
-                "auto login",
-                "login to karix",
-                "portal login",
-            ]
-        ):
-            refresh_res = tool_refresh_session(account=account, user=user)
-            actions_taken.append({"tool": "refresh_karix_session", "result": refresh_res})
-            if refresh_res.get("success"):
-                reply = (
-                    f"### ⚡ Session Auto-Refreshed\n\n"
-                    f"Successfully logged into Karix portal via headless browser for **{account.title()}**.\n"
-                    f"• **Tokens Updated:** `{', '.join(refresh_res.get('tokens_updated', []))}`\n"
-                    f"• **Active Operator:** `{refresh_res.get('user', 'Portal User')}`\n\n"
-                    f"All subsequent template submissions will use these fresh credentials automatically."
-                )
-                suggested_actions = [
-                    "Poll approval status",
-                    "List rejected templates",
-                    "Check active catalog",
-                ]
-            else:
-                reply = (
-                    f"### ⚠️ Manual Token Update Required\n\n"
-                    f"{refresh_res.get('error')}"
-                )
-                suggested_actions = ["List templates", "Poll approval status"]
 
-            return {
-                "reply": reply,
-                "actions_taken": actions_taken,
-                "suggested_actions": suggested_actions,
-                "data": refresh_res,
-            }
+def _handle_agent_template_creation(text: str, account: str, channel: str) -> dict | None:
+    has_create = bool(re.search(r"(?:create|submit|register|new|add)\s+(?:a\s+)?(?:[a-zA-Z]+\s+)?template", text, re.IGNORECASE))
+    if not (has_create and any(k in text.lower() for k in ["body", ":", "with text", "message"])):
+        return None
+    name_m = re.search(r"(?:named|name|id)\s+([a-zA-Z0-9_\-]+)", text, re.IGNORECASE)
+    cat_m = re.search(r"\b(marketing|utility|authentication|transactional)\b", text, re.IGNORECASE)
+    body_m = re.search(r"(?:body|message|text|content)[:\s]+(.+)", text, re.IGNORECASE | re.DOTALL)
+    t_name = name_m.group(1).strip() if name_m else f"template_{int(time.time())}"
+    t_cat = cat_m.group(1).strip().upper() if cat_m else "MARKETING"
+    t_body = body_m.group(1).strip() if body_m else (text.split(":", 1)[1].strip() if ":" in text else "")
+    if not t_body:
+        return None
+    create_res = tool_create_template(name=t_name, body=t_body, category=t_cat, account=account, channel=channel)
+    if create_res.get("success"):
+        reply = f"### ✅ Template `{t_name}` Created & Submitted\n\n**Category:** `{t_cat}`\n**Channel:** `{channel.upper()}` ({account.title()})\n**Status:** `{create_res.get('status', 'submitted').upper()}`\n\n**Submitted Body:**\n```\n{t_body}\n```\n"
+        suggested = ["Poll approval status", "List pending templates", f"Inspect {t_name}"]
+    else:
+        reply = f"### ❌ Submission Failed for `{t_name}`\n\n**Error:** {create_res.get('error')}\n"
+        suggested = ["Check credentials", "Lint copy"]
+    return {"reply": reply, "actions_taken": [{"tool": "create_template", "result": create_res}], "suggested_actions": suggested, "data": create_res}
 
-        # 2. Text linting / copy checking: "fix grammar in: ...", "lint this copy: ...", "fix message:"
-        if any(
-            w in text.lower()
-            for w in [
-                "lint",
-                "check grammar",
-                "fix copy",
-                "clean text",
-                "fix message",
-                "fix text",
-                "check copy",
-                "grammar in:",
-            ]
-        ) or (
-            ("fix" in text.lower() or "check" in text.lower())
-            and any(k in text.lower() for k in ["{{", "body:", "message:", "copy:"])
-        ):
-            # Extract text payload
-            raw_copy = text.split(":", 1)[1].strip() if ":" in text else text
-            fixed, warns = lint_and_fix_body(raw_copy)
-            actions_taken.append({"tool": "lint_and_fix_body", "warnings_count": len(warns)})
 
-            warn_lines = (
-                "\n".join([f"• **{w['type']}**: {w['issue']} $\\rightarrow$ {w['suggestion']}" for w in warns])
-                or "• No compliance or grammar issues found."
-            )
-            reply = (
-                f"### ✨ Copy Analysis & Remediation\n\n"
-                f"**Cleaned Copy:**\n```\n{fixed}\n```\n\n"
-                f"**Detected Improvements:**\n{warn_lines}\n"
-            )
-            return {
-                "reply": reply,
-                "actions_taken": actions_taken,
-                "suggested_actions": [
-                    "Create template from this copy",
-                    "List rejected templates",
-                    "Poll approval status",
-                ],
-            }
+def _handle_agent_session_refresh(text: str, account: str, user: str) -> dict | None:
+    if not any(w in text.lower() for w in ["refresh session", "relogin", "re-login", "refresh token", "refresh auth", "auto-login", "auto login", "login to karix", "portal login"]):
+        return None
+    refresh_res = tool_refresh_session(account=account, user=user)
+    if refresh_res.get("success"):
+        reply = f"### ⚡ Session Auto-Refreshed\n\nSuccessfully logged into Karix portal via headless browser for **{account.title()}**.\n• **Tokens Updated:** `{', '.join(refresh_res.get('tokens_updated', []))}`\n• **Active Operator:** `{refresh_res.get('user', 'Portal User')}`\n\nAll subsequent template submissions will use these fresh credentials automatically."
+        suggested = ["Poll approval status", "List rejected templates", "Check active catalog"]
+    else:
+        reply = f"### ⚠️ Manual Token Update Required\n\n{refresh_res.get('error')}"
+        suggested = ["List templates", "Poll approval status"]
+    return {"reply": reply, "actions_taken": [{"tool": "refresh_karix_session", "result": refresh_res}], "suggested_actions": suggested, "data": refresh_res}
 
-        # 2. Status Polling: "poll pending", "check approval status"
-        if any(w in text.lower() for w in ["poll", "sync", "refresh status", "check status"]):
-            poll_res = tool_poll_status(account=account, channel=channel)
-            actions_taken.append({"tool": "poll_status", "result": poll_res})
-            return {
-                "reply": f"🔄 **Status sync complete.** Polled live WABA status for all pending templates on **{account.title()}**.",
-                "actions_taken": actions_taken,
-                "suggested_actions": [
-                    "List approved templates",
-                    "List rejected templates",
-                ],
-            }
 
-        # 3. List templates: "list rejected templates", "show pending"
-        if any(w in text.lower() for w in ["list", "show", "get", "fetch", "all"]) and any(
-            s in text.lower() for s in ["rejected", "pending", "approved", "templates", "catalog"]
-        ):
-            s_filter = None
-            if "rejected" in text.lower():
-                s_filter = "rejected"
-            elif "pending" in text.lower():
-                s_filter = "pending"
-            elif "approved" in text.lower():
-                s_filter = "approved"
+def _handle_agent_copy_lint(text: str) -> dict | None:
+    is_lint = any(w in text.lower() for w in ["lint", "check grammar", "fix copy", "clean text", "fix message", "fix text", "check copy", "grammar in:"]) or (
+        ("fix" in text.lower() or "check" in text.lower()) and any(k in text.lower() for k in ["{{", "body:", "message:", "copy:"])
+    )
+    if not is_lint:
+        return None
+    raw_copy = text.split(":", 1)[1].strip() if ":" in text else text
+    fixed, warns = lint_and_fix_body(raw_copy)
+    warn_lines = "\n".join([f"• **{w['type']}**: {w['issue']} $\\rightarrow$ {w['suggestion']}" for w in warns]) or "• No compliance or grammar issues found."
+    reply = f"### ✨ Copy Analysis & Remediation\n\n**Cleaned Copy:**\n```\n{fixed}\n```\n\n**Detected Improvements:**\n{warn_lines}\n"
+    return {"reply": reply, "actions_taken": [{"tool": "lint_and_fix_body", "warnings_count": len(warns)}], "suggested_actions": ["Create template from this copy", "List rejected templates", "Poll approval status"]}
 
-            list_res = tool_list_templates(account=account, channel=channel, status_filter=s_filter, limit=10)
-            actions_taken.append({"tool": "list_templates", "result": list_res})
-            tmpls = list_res.get("templates", [])
 
-            if not tmpls:
-                reply = (
-                    f"No `{s_filter or 'active'}` templates found for **{account.title()}** on **{channel.upper()}**."
-                )
-                suggested_actions = ["Poll status", "Submit new templates"]
-            else:
-                lines = [
-                    f"• **`{t['name']}`** — Status: `{t['status'].upper()}`"
-                    + (f" (Reason: {t.get('reason')})" if t.get("reason") else "")
-                    for t in tmpls
-                ]
-                reply = (
-                    f"### 📋 {s_filter.title() if s_filter else 'Catalog'} Templates for {account.title()} ({list_res['total']} found):\n\n"
-                    + "\n".join(lines)
-                )
-                if s_filter == "rejected" and tmpls:
-                    suggested_actions = [
-                        f"Fix and resubmit {tmpls[0]['name']}",
-                        "Poll approval status",
-                    ]
-                else:
-                    suggested_actions = [
-                        "Poll approval status",
-                        "List rejected templates",
-                    ]
+def _handle_agent_status_poll(text: str, account: str, channel: str) -> dict | None:
+    if not any(w in text.lower() for w in ["poll", "sync", "refresh status", "check status"]):
+        return None
+    poll_res = tool_poll_status(account=account, channel=channel)
+    return {"reply": f"🔄 **Status sync complete.** Polled live WABA status for all pending templates on **{account.title()}**.", "actions_taken": [{"tool": "poll_status", "result": poll_res}], "suggested_actions": ["List approved templates", "List rejected templates"]}
 
-            return {
-                "reply": reply,
-                "actions_taken": actions_taken,
-                "suggested_actions": suggested_actions,
-                "data": list_res,
-            }
 
-        # 4. Rejection diagnosis and resubmission: "check why template X was rejected, fix it, and resubmit"
-        rej_match = re.search(
-            r"(?:check|why|fix|diagnose|resubmit|inspect)\s+.*?(?:template\s+)?([a-zA-Z0-9_\-]+)",
-            text,
-            re.IGNORECASE,
-        )
-        is_fix_resubmit = any(
-            w in text.lower()
-            for w in [
-                "fix",
-                "resubmit",
-                "repair",
-                "remediate",
-                "rejected",
-                "why",
-                "diagnose",
-                "inspect",
-            ]
-        )
+def _handle_agent_list_templates(text: str, account: str, channel: str) -> dict | None:
+    if not (any(w in text.lower() for w in ["list", "show", "get", "fetch", "all"]) and any(s in text.lower() for s in ["rejected", "pending", "approved", "templates", "catalog"])):
+        return None
+    s_filter = "rejected" if "rejected" in text.lower() else ("pending" if "pending" in text.lower() else ("approved" if "approved" in text.lower() else None))
+    list_res = tool_list_templates(account=account, channel=channel, status_filter=s_filter, limit=10)
+    tmpls = list_res.get("templates", [])
+    if not tmpls:
+        reply = f"No `{s_filter or 'active'}` templates found for **{account.title()}** on **{channel.upper()}**."
+        suggested = ["Poll status", "Submit new templates"]
+    else:
+        lines = [f"• **`{t['name']}`** — Status: `{t['status'].upper()}`" + (f" (Reason: {t.get('reason')})" if t.get("reason") else "") for t in tmpls]
+        reply = f"### 📋 {s_filter.title() if s_filter else 'Catalog'} Templates for {account.title()} ({list_res['total']} found):\n\n" + "\n".join(lines)
+        suggested = [f"Fix and resubmit {tmpls[0]['name']}", "Poll approval status"] if s_filter == "rejected" and tmpls else ["Poll approval status", "List rejected templates"]
+    return {"reply": reply, "actions_taken": [{"tool": "list_templates", "result": list_res}], "suggested_actions": suggested, "data": list_res}
 
-        if is_fix_resubmit and rej_match:
-            candidate_name = rej_match.group(1).strip()
-            if candidate_name.lower() in (
-                "why",
-                "template",
-                "rejected",
-                "the",
-                "this",
-                "it",
-            ):
-                tokens = re.findall(r"[a-zA-Z0-9_]{3,}", text)
-                filtered = [
-                    t
-                    for t in tokens
-                    if t.lower()
-                    not in (
-                        "check",
-                        "why",
-                        "template",
-                        "was",
-                        "rejected",
-                        "fix",
-                        "and",
-                        "resubmit",
-                        "for",
-                        "bajaj",
-                        "tata",
-                    )
-                ]
-                candidate_name = filtered[0] if filtered else candidate_name
 
-            auto_submit = any(w in text.lower() for w in ["resubmit", "submit", "apply", "create"])
-            diag_res = tool_diagnose_and_fix(
-                template_name=candidate_name,
-                account=account,
-                channel=channel,
-                user_instructions=text,
-                auto_resubmit=auto_submit,
-                user=user,
-            )
-            actions_taken.append(
-                {
-                    "tool": "diagnose_and_fix",
-                    "target": candidate_name,
-                    "result": diag_res,
-                }
-            )
+def _handle_agent_rejection_diagnosis(text: str, account: str, channel: str, user: str) -> dict | None:
+    rej_match = re.search(r"(?:check|why|fix|diagnose|resubmit|inspect)\s+.*?(?:template\s+)?([a-zA-Z0-9_\-]+)", text, re.IGNORECASE)
+    is_fix = any(w in text.lower() for w in ["fix", "resubmit", "repair", "remediate", "rejected", "why", "diagnose", "inspect"])
+    if not (is_fix and rej_match):
+        return None
+    cand = rej_match.group(1).strip()
+    if cand.lower() in ("why", "template", "rejected", "the", "this", "it"):
+        tokens = re.findall(r"[a-zA-Z0-9_]{3,}", text)
+        filtered = [t for t in tokens if t.lower() not in ("check", "why", "template", "was", "rejected", "fix", "and", "resubmit", "for", "bajaj", "tata")]
+        cand = filtered[0] if filtered else cand
+    auto_submit = any(w in text.lower() for w in ["resubmit", "submit", "apply", "create"])
+    diag_res = tool_diagnose_and_fix(template_name=cand, account=account, channel=channel, user_instructions=text, auto_resubmit=auto_submit, user=user)
+    if not diag_res.get("success"):
+        return {"reply": f"❌ Could not find template `{cand}` in the {account.upper()} {channel.upper()} catalog.\n\n*Tip: Try listing your templates to see exact registered names.*", "actions_taken": [{"tool": "diagnose_and_fix", "target": cand, "result": diag_res}], "suggested_actions": ["List rejected templates", "List all templates", "Poll status"]}
+    d = diag_res["diagnosis"]
+    fixes = d["issues_detected"]
+    fix_summary = "\n".join([f"• **{f.get('type')}**: {f.get('issue')} $\\rightarrow$ {f.get('suggestion')}" for f in fixes]) or "• Applied automated Meta variable spacing and punctuation corrections."
+    reply = f"### 🔍 Diagnosis for `{cand}`\n\n**Current Status:** `{d['current_status'].upper()}`\n**Provider Reason:** {d['rejection_reason']}\n\n#### 🛠️ Corrections Applied:\n{fix_summary}\n\n#### 📝 Remediated Body:\n```\n{d['remediated_body']}\n```\n"
+    if d.get("resubmitted"):
+        sub_res = d.get("submission_result", {})
+        reply += f"\n✅ **Autonomously resubmitted as:** `{d['new_version_name']}` (Status: `{sub_res.get('status', 'submitted').upper()}`)"
+        suggested = ["Poll approval status", "View template in dashboard", f"Inspect {d['new_version_name']}"]
+    else:
+        reply += f"\n💡 Remediated copy is ready. Would you like me to submit `{d['new_version_name']}`?"
+        suggested = [f"Resubmit as {d['new_version_name']}", "Edit copy further"]
+    return {"reply": reply, "actions_taken": [{"tool": "diagnose_and_fix", "target": cand, "result": diag_res}], "suggested_actions": suggested, "data": diag_res}
 
-            if diag_res.get("success"):
-                d = diag_res["diagnosis"]
-                fixes = d["issues_detected"]
-                fix_summary = (
-                    "\n".join(
-                        [f"• **{f.get('type')}**: {f.get('issue')} $\\rightarrow$ {f.get('suggestion')}" for f in fixes]
-                    )
-                    or "• Applied automated Meta variable spacing and punctuation corrections."
-                )
 
-                reply = (
-                    f"### 🔍 Diagnosis for `{candidate_name}`\n\n"
-                    f"**Current Status:** `{d['current_status'].upper()}`\n"
-                    f"**Provider Reason:** {d['rejection_reason']}\n\n"
-                    f"#### 🛠️ Corrections Applied:\n{fix_summary}\n\n"
-                    f"#### 📝 Remediated Body:\n```\n{d['remediated_body']}\n```\n"
-                )
-                if d.get("resubmitted"):
-                    sub_res = d.get("submission_result", {})
-                    reply += f"\n✅ **Autonomously resubmitted as:** `{d['new_version_name']}` (Status: `{sub_res.get('status', 'submitted').upper()}`)"
-                    suggested_actions = [
-                        "Poll approval status",
-                        "View template in dashboard",
-                        f"Inspect {d['new_version_name']}",
-                    ]
-                else:
-                    reply += f"\n💡 Remediated copy is ready. Would you like me to submit `{d['new_version_name']}`?"
-                    suggested_actions = [
-                        f"Resubmit as {d['new_version_name']}",
-                        "Edit copy further",
-                    ]
-
-                return {
-                    "reply": reply,
-                    "actions_taken": actions_taken,
-                    "suggested_actions": suggested_actions,
-                    "data": diag_res,
-                }
-            else:
-                return {
-                    "reply": f"❌ Could not find template `{candidate_name}` in the {account.upper()} {channel.upper()} catalog.\n\n*Tip: Try listing your templates to see exact registered names.*",
-                    "actions_taken": actions_taken,
-                    "suggested_actions": [
-                        "List rejected templates",
-                        "List all templates",
-                        "Poll status",
-                    ],
-                }
-
-        # 5. Fallback conversational guidance
-        return {
-            "reply": (
-                f"I am your **Karix Whitelisting Assistant** for **{account.title()} ({channel.upper()})**.\n\n"
-                "Here are actions I can perform for you:\n\n"
-                '1. 🚀 **Submit Templates:** *"How do I submit templates?"* or *"Create a marketing template named promo_01 with body: Hello {{1}}..."*\n'
-                '2. 🔧 **Fix Rejections:** *"Check why template loan_oct_01 was rejected, fix it, and resubmit"*\n'
-                '3. 📋 **Inspect Catalog:** *"List all rejected templates for bajaj"* or *"Show pending templates"*\n'
-                '4. 🔄 **Sync Approvals:** *"Poll approval status from Meta"*\n'
-                '5. ✍️ **Lint Copy:** *"Check grammar in: Dear {{1}}, your disbursment of {{2}} is ready"*'
-            ),
-            "actions_taken": [],
-            "suggested_actions": [
-                "How do I submit templates?",
-                "List rejected templates",
-                "Poll approval status",
-            ],
-        }
+def _handle_agent_fallback_guidance(account: str, channel: str) -> dict:
+    return {
+        "reply": (
+            f"I am your **Karix Whitelisting Assistant** for **{account.title()} ({channel.upper()})**.\n\n"
+            "Here are actions I can perform for you:\n\n"
+            '1. 🚀 **Submit Templates:** *"How do I submit templates?"* or *"Create a marketing template named promo_01 with body: Hello {{1}}..."*\n'
+            '2. 🔧 **Fix Rejections:** *"Check why template loan_oct_01 was rejected, fix it, and resubmit"*\n'
+            '3. 📋 **Inspect Catalog:** *"List all rejected templates for bajaj"* or *"Show pending templates"*\n'
+            '4. 🔄 **Sync Approvals:** *"Poll approval status from Meta"*\n'
+            '5. ✍️ **Lint Copy:** *"Check grammar in: Dear {{1}}, your disbursment of {{2}} is ready"*'
+        ),
+        "actions_taken": [],
+        "suggested_actions": ["How do I submit templates?", "List rejected templates", "Poll approval status"],
+    }
 
 
 # Singleton agent instance

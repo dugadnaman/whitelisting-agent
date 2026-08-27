@@ -183,6 +183,127 @@ def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
     return suggestions
 
 
+def _build_rcs_clean_suggestions(
+    raw_suggs: list, next_var_idx: int, param_names: list[str]
+) -> tuple[list[dict], int]:
+    clean_suggs = []
+    for s in raw_suggs:
+        stext = s.get("text") or "Apply Now"
+        stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
+        if stype == "url_action" or s.get("url"):
+            url_var_num = str(next_var_idx)
+            param_names.append(url_var_num)
+            next_var_idx += 1
+            b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
+            clean_suggs.append(
+                {
+                    "suggestionType": "url_action",
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    "url": b_url,
+                }
+            )
+        elif stype == "dialer_action" or s.get("phoneNumber"):
+            clean_suggs.append(
+                {
+                    "suggestionType": "dialer_action",
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    "phoneNumber": s.get("phoneNumber") or "+919999999999",
+                }
+            )
+        else:
+            clean_suggs.append(
+                {
+                    "suggestionType": "reply",
+                    "text": stext,
+                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                }
+            )
+    return clean_suggs, next_var_idx
+
+
+def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
+    cards_list = []
+    all_params: list[str] = []
+    next_var_idx = 1
+
+    for c_idx, card in enumerate((payload.carousel_cards or []), 1):
+        c_title_raw = card.get("cardTitle") or card.get("card_title") or f"Offer {c_idx}"
+        c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
+        c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(c_desc_raw, start_index=next_var_idx)
+        all_params.extend(desc_params)
+        c_title_norm = re.sub(r"<[^>]+>|\[[^\]]+\]", "", c_title_raw).strip()[:100] or f"Special Offer {c_idx}"
+
+        raw_suggs = card.get("suggestions") or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}])
+        clean_suggs, next_var_idx = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
+
+        c_entry: dict = {"cardTitle": c_title_norm, "cardDescription": c_desc_norm, "suggestions": clean_suggs}
+        if card.get("fileName") or card.get("file_name"):
+            c_entry["fileName"] = card.get("fileName") or card.get("file_name")
+        elif card.get("mediaUrl") or card.get("media_url"):
+            c_entry["mediaUrl"] = card.get("mediaUrl") or card.get("media_url")
+        else:
+            raise ValueError(f"Card {c_idx} ('{c_title_norm}') is missing an image. Please ensure images are pasted in the Excel file.")
+        cards_list.append(c_entry)
+
+    if len(cards_list) < 2:
+        cards_list.append({
+            "cardTitle": "Instant Approval", "cardDescription": "Fast disbursement with flexible repayment terms.",
+            "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
+            "suggestions": [{"suggestionType": "url_action", "text": "Apply Now", "url": f"https://www.tatacapital.com/personal-loan.html?ref={{{{{next_var_idx}}}}}"}],
+        })
+        all_params.append(str(next_var_idx))
+
+    vi_template = {
+        "name": safe_name, "type": "carousel", "botId": bot_id,
+        "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
+        "width": getattr(payload, "width", "MEDIUM") or "MEDIUM",
+        "carouselCard": cards_list,
+    }
+    return vi_template, all_params
+
+
+def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
+    raw_text = payload.card_description or payload.text_message or getattr(payload, "template_message", "")
+    normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
+    raw_suggs = payload.suggestions or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}])
+    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, param_names)
+
+    card_entry: dict = {
+        "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
+        "cardDescription": normalized_text,
+        "suggestions": clean_suggs,
+    }
+    if getattr(payload, "file_name", None):
+        card_entry["fileName"] = payload.file_name
+    elif payload.media_url:
+        card_entry["mediaUrl"] = payload.media_url
+    else:
+        raise ValueError(f"Rich Card '{payload.template_name}' is missing an image. Please ensure an image is provided.")
+
+    vi_template = {
+        "name": safe_name, "type": "richcard", "botId": bot_id,
+        "orientation": getattr(payload, "orientation", "VERTICAL") or "VERTICAL",
+        "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
+        "standaloneCard": card_entry,
+    }
+    return vi_template, param_names
+
+
+def _build_rcs_text_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
+    raw_text = payload.text_message or getattr(payload, "template_message", "")
+    normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
+    raw_suggs = payload.suggestions or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [])
+    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, param_names)
+
+    vi_template = {
+        "name": safe_name, "type": "text", "botId": bot_id,
+        "textMessage": normalized_text, "suggestions": clean_suggs,
+    }
+    return vi_template, param_names
+
+
 def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata") -> dict:
     """
     Build the JSON payload matching the official Karix RCS Template Management API.
@@ -196,234 +317,18 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
     except (ValueError, TypeError):
         esme_addr = 72516600000000 if c == "tata" else 72148300000000
 
-    # Sanitize and enforce max 25 chars for RCS template name
     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", payload.template_name)[:25]
-
-    # Determine template format
     is_carousel = payload.template_type.lower() == "carousel" or bool(getattr(payload, "carousel_cards", None))
     is_richcard = not is_carousel and (
         payload.template_type.lower() == "richcard" or bool(payload.media_url) or bool(payload.card_title)
     )
 
-    # Assemble viTemplate
     if is_carousel:
-        cards_list = []
-        all_params = []
-        next_var_idx = 1
-
-        for c_idx, card in enumerate((payload.carousel_cards or []), 1):
-            c_title_raw = card.get("cardTitle") or card.get("card_title") or f"Offer {c_idx}"
-            c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
-
-            # Number variables in description sequentially
-            c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(
-                c_desc_raw, start_index=next_var_idx
-            )
-            all_params.extend(desc_params)
-
-            # Title (clean tags)
-            c_title_norm = re.sub(r"<[^>]+>|\[[^\]]+\]", "", c_title_raw).strip()[:100]
-            if not c_title_norm:
-                c_title_norm = f"Special Offer {c_idx}"
-
-            # Build suggestions with guaranteed sequential URL variable
-            clean_suggs = []
-            raw_suggs = card.get("suggestions") or []
-            if not raw_suggs and getattr(payload, "button_text", None):
-                raw_suggs = _build_single_suggestion(payload)
-            if not raw_suggs:
-                raw_suggs = [
-                    {
-                        "suggestionType": "url_action",
-                        "text": "Apply Now",
-                        "url": "https://www.tatacapital.com",
-                    }
-                ]
-
-            for s in raw_suggs:
-                stext = s.get("text") or "Apply Now"
-                stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
-
-                if stype == "url_action" or s.get("url"):
-                    url_var_num = str(next_var_idx)
-                    all_params.append(url_var_num)
-                    next_var_idx += 1
-                    b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
-                    clean_suggs.append(
-                        {
-                            "suggestionType": "url_action",
-                            "text": stext,
-                            "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                            "url": b_url,
-                        }
-                    )
-                elif stype == "dialer_action" or s.get("phoneNumber"):
-                    clean_suggs.append(
-                        {
-                            "suggestionType": "dialer_action",
-                            "text": stext,
-                            "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                            "phoneNumber": s.get("phoneNumber") or "+919999999999",
-                        }
-                    )
-                else:
-                    clean_suggs.append(
-                        {
-                            "suggestionType": "reply",
-                            "text": stext,
-                            "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                        }
-                    )
-
-            c_entry = {
-                "cardTitle": c_title_norm,
-                "cardDescription": c_desc_norm,
-            }
-            if card.get("fileName") or card.get("file_name"):
-                c_entry["fileName"] = card.get("fileName") or card.get("file_name")
-            elif card.get("mediaUrl") or card.get("media_url"):
-                c_entry["mediaUrl"] = card.get("mediaUrl") or card.get("media_url")
-            else:
-                raise ValueError(
-                    f"Card {c_idx} ('{c_title_norm}') is missing an image. "
-                    "Please ensure images are pasted in the Excel file or media URLs are provided."
-                )
-            c_entry["suggestions"] = clean_suggs
-            cards_list.append(c_entry)
-
-        if len(cards_list) < 2:
-            cards_list.append(
-                {
-                    "cardTitle": "Instant Approval",
-                    "cardDescription": "Fast disbursement with flexible repayment terms.",
-                    "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
-                    "suggestions": [
-                        {
-                            "suggestionType": "url_action",
-                            "text": "Apply Now",
-                            "postbackData": "apply_now",
-                            "url": f"https://www.tatacapital.com[{next_var_idx}]",
-                        }
-                    ],
-                }
-            )
-            all_params.append(str(next_var_idx))
-            next_var_idx += 1
-
-        param_names = all_params
-        vi_template = {
-            "name": safe_name,
-            "type": "carousel",
-            "botId": bot_id,
-            "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
-            "width": getattr(payload, "width", "MEDIUM") or "MEDIUM",
-            "carouselCard": cards_list,
-        }
+        vi_template, param_names = _build_rcs_carousel_vi_template(payload, safe_name, bot_id)
     elif is_richcard:
-        raw_text = payload.card_description or payload.text_message or getattr(payload, "template_message", "")
-        normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
-
-        raw_suggs = payload.suggestions or []
-        if not raw_suggs and getattr(payload, "button_text", None):
-            raw_suggs = _build_single_suggestion(payload)
-        if not raw_suggs:
-            raw_suggs = [
-                {
-                    "suggestionType": "url_action",
-                    "text": "Apply Now",
-                    "url": "https://www.tatacapital.com",
-                }
-            ]
-
-        clean_suggs = []
-        for s in raw_suggs:
-            stext = s.get("text") or "Apply Now"
-            stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
-            if stype == "url_action" or s.get("url"):
-                url_var_num = str(next_var_idx)
-                param_names.append(url_var_num)
-                next_var_idx += 1
-                b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
-                clean_suggs.append(
-                    {
-                        "suggestionType": "url_action",
-                        "text": stext,
-                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                        "url": b_url,
-                    }
-                )
-            else:
-                clean_suggs.append(
-                    {
-                        "suggestionType": stype,
-                        "text": stext,
-                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                    }
-                )
-
-        card_entry = {
-            "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
-            "cardDescription": normalized_text,
-            "suggestions": clean_suggs,
-        }
-        if getattr(payload, "file_name", None):
-            card_entry["fileName"] = payload.file_name
-        elif payload.media_url:
-            card_entry["mediaUrl"] = payload.media_url
-        else:
-            raise ValueError(
-                f"Rich Card '{payload.template_name}' is missing an image. "
-                "Please ensure an image is pasted in the Excel file or a media URL is provided."
-            )
-        vi_template = {
-            "name": safe_name,
-            "type": "richcard",
-            "botId": bot_id,
-            "orientation": getattr(payload, "orientation", "VERTICAL") or "VERTICAL",
-            "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
-            "standaloneCard": card_entry,
-        }
+        vi_template, param_names = _build_rcs_richcard_vi_template(payload, safe_name, bot_id)
     else:
-        raw_text = payload.text_message or getattr(payload, "template_message", "")
-        normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
-
-        raw_suggs = payload.suggestions or []
-        if not raw_suggs and getattr(payload, "button_text", None):
-            raw_suggs = _build_single_suggestion(payload)
-
-        clean_suggs = []
-        for s in raw_suggs:
-            stext = s.get("text") or "Apply Now"
-            stype = s.get("suggestionType") or ("url_action" if s.get("url") else "reply")
-            if stype == "url_action" or s.get("url"):
-                url_var_num = str(next_var_idx)
-                param_names.append(url_var_num)
-                next_var_idx += 1
-                b_url = _ensure_url_variable(s.get("url") or "https://www.tatacapital.com", int(url_var_num))
-                clean_suggs.append(
-                    {
-                        "suggestionType": "url_action",
-                        "text": stext,
-                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                        "url": b_url,
-                    }
-                )
-            else:
-                clean_suggs.append(
-                    {
-                        "suggestionType": stype,
-                        "text": stext,
-                        "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
-                    }
-                )
-
-        vi_template = {
-            "name": safe_name,
-            "type": "text",
-            "botId": bot_id,
-            "textMessage": normalized_text,
-            "suggestions": clean_suggs,
-        }
+        vi_template, param_names = _build_rcs_text_vi_template(payload, safe_name, bot_id)
 
     return {
         "esmeAddr": esme_addr,
@@ -432,7 +337,6 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         "viTemplate": vi_template,
         "templateCategory": getattr(payload, "template_category", "TRANSACTIONAL") or "TRANSACTIONAL",
     }
-
 
 def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") -> RcsSubmissionResult:
     """

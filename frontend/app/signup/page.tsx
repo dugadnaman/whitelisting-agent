@@ -200,7 +200,7 @@ export default function SignupPage() {
                     <span className="text-xl">🏢</span>
                     <div>
                       <h3 className="text-xs font-bold text-gray-900">Tata Capital</h3>
-                      <p className="text-[10px] text-gray-500 font-mono mt-0.5">WABA ID: 734197179371393</p>
+                      <p className="text-[10px] text-gray-500 font-mono mt-0.5">Multi-Entity Enterprise</p>
                     </div>
                   </div>
                   <span
