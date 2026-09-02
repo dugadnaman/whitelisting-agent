@@ -784,16 +784,19 @@ def _resolve_button_cta_variables(btns: list, client: str) -> None:
     for b in btns:
         if isinstance(b, dict) and b.get("type") == "URL":
             url = b.get("url", "")
-            if "{{1}}" in url or "{{0}}" in url or "<" in url:
-                if not b.get("example") or not b["example"]:
-                    b["example"] = [
-                        "https://www.tatacapital.com/personal-loan.html"
-                        if client.lower() == "tata"
-                        else "https://www.bajajfinservmarkets.in/"
-                    ]
-                    logger.info("Auto-generated URL variable sample for button")
-            else:
-                b.pop("example", None)
+            # Force every CTA to dynamic: append /{{1}} if no variable present
+            if "{{1}}" not in url and "{{0}}" not in url and "<" not in url:
+                url = url.rstrip("/") + "/{{1}}"
+                b["url"] = url
+                logger.info("Forced static CTA to dynamic: %s", url)
+            # Always ensure a sample example for the dynamic variable
+            if not b.get("example") or not b["example"]:
+                b["example"] = [
+                    "https://www.tatacapital.com/personal-loan.html"
+                    if client.lower() == "tata"
+                    else "https://www.bajajfinservmarkets.in/"
+                ]
+                logger.info("Auto-generated URL variable sample for button")
 
 
 
