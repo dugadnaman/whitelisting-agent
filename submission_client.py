@@ -1443,3 +1443,107 @@ def check_status(provider_ref_id: str, client: str = "bajaj") -> tuple[ApprovalS
         matched.get("template_status_reason"),
         matched,
     )
+
+
+# ---------------------------------------------------------------------------
+# Template Deletion
+# ---------------------------------------------------------------------------
+
+
+def delete_template(template_name: str, client: str = "bajaj") -> dict:
+    """
+    Delete a single WhatsApp template by name.
+
+    Tries Official API (DELETE /api/v1.0/template/{wabaId}?name={name}) first,
+    then Portal API (POST /v1.0/templates/delete) as fallback.
+
+    Returns {"ok": True/False, "template_name": ..., "detail": ...}.
+    """
+    c = (client or "bajaj").lower().strip()
+    name = template_name.strip()
+
+    # 1. Official API — DELETE /api/v1.0/template/{wabaId}?name={name}
+    try:
+        waba_id = get_waba_id(c)
+        headers = get_official_auth_headers(c)
+        url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
+        resp = get_http_session().delete(
+            url, headers=headers, params={"name": name}, timeout=REQUEST_TIMEOUT
+        )
+        if resp.ok:
+            logger.info("Deleted template '%s' via official API (client=%s)", name, c)
+            return {"ok": True, "template_name": name, "detail": "Deleted via official API"}
+        # 400 with "does not exist" is not retryable
+        if resp.status_code == 400:
+            body = _parse_karix_json(resp)
+            detail = str(body) if body else resp.text[:500]
+            if "not exist" in detail.lower() or "not found" in detail.lower():
+                return {"ok": True, "template_name": name, "detail": "Template not found (already deleted)"}
+        logger.debug("Official DELETE returned %d for '%s': %s", resp.status_code, name, resp.text[:300])
+    except Exception as exc:
+        logger.debug("Official DELETE failed for '%s': %s", name, exc)
+
+    # 2. Portal API fallback — POST /v1.0/templates/delete
+    try:
+        waba_id = get_waba_id(c)
+        esmeaddr = get_esmeaddr(c)
+        headers = get_portal_auth_headers(c)
+        headers["Content-Type"] = "application/json"
+        url = f"{KARIX_BASE_URL}/delete"
+        body = {
+            "waba_id": str(waba_id),
+            "esmeaddr": str(esmeaddr),
+            "template_name": name,
+        }
+        resp = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
+        if resp.ok:
+            logger.info("Deleted template '%s' via portal API (client=%s)", name, c)
+            return {"ok": True, "template_name": name, "detail": "Deleted via portal API"}
+        detail = resp.text[:500]
+        if "not exist" in detail.lower() or "not found" in detail.lower():
+            return {"ok": True, "template_name": name, "detail": "Template not found (already deleted)"}
+        logger.warning("Portal DELETE returned %d for '%s': %s", resp.status_code, name, detail)
+        return {"ok": False, "template_name": name, "detail": f"Portal API HTTP {resp.status_code}: {detail}"}
+    except Exception as exc:
+        logger.warning("Portal DELETE failed for '%s': %s", name, exc)
+        return {"ok": False, "template_name": name, "detail": str(exc)}
+
+
+def delete_templates_bulk(
+    template_names: list[str] | None = None,
+    client: str = "bajaj",
+    delete_all: bool = False,
+) -> dict:
+    """
+    Bulk-delete templates by name list, or all templates on the WABA.
+
+    If delete_all=True, fetches the live template list and deletes every one.
+    Returns {"deleted": [...], "failed": [...], "total": N}.
+    """
+    c = (client or "bajaj").lower().strip()
+
+    if delete_all:
+        templates, err = fetch_template_list(c)
+        if err:
+            return {"deleted": [], "failed": [], "total": 0, "error": err}
+        template_names = list({t.get("template_name", "") for t in templates if t.get("template_name")})
+        logger.info("Bulk delete ALL: found %d templates on WABA for client=%s", len(template_names), c)
+    elif not template_names:
+        return {"deleted": [], "failed": [], "total": 0, "error": "No template names provided"}
+
+    deleted = []
+    failed = []
+    for name in template_names:
+        result = delete_template(name, client=c)
+        if result["ok"]:
+            deleted.append(result)
+        else:
+            failed.append(result)
+        # Small delay to avoid rate limiting
+        time.sleep(0.3)
+
+    logger.info(
+        "Bulk delete complete for client=%s: %d deleted, %d failed out of %d",
+        c, len(deleted), len(failed), len(template_names),
+    )
+    return {"deleted": deleted, "failed": failed, "total": len(template_names)}

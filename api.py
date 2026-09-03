@@ -57,7 +57,7 @@ from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
 from rcs_runner import run_rcs
 from rcs_tracker import load_rcs_log, log_rcs_result
 from runner import get_pending_templates_sla_insights, poll_pending, run
-from submission_client import _GOVERNOR, _STATUS_MAP
+from submission_client import _GOVERNOR, _STATUS_MAP, delete_template, delete_templates_bulk
 from tracker import load_log, log_result, pending_entries
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
@@ -1179,6 +1179,50 @@ def poll(
             status_code=400,
             detail=f"Poll failed for {acc}: {exc!s}",
         ) from exc
+
+
+
+class DeleteTemplatesRequest(BaseModel):
+    template_names: list[str] | None = None
+    delete_all: bool = False
+
+
+@app.post("/api/templates/delete")
+def delete_templates_endpoint(
+    body: DeleteTemplatesRequest,
+    account: str = Query("bajaj"),
+    channel: str = Query("whatsapp"),
+    user: str = Query("Anonymous Operator"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Bulk-delete WhatsApp templates by name list, or all templates on the WABA."""
+    require_tenant_access(account, current_user)
+    acc = account.lower()
+    if channel.lower() != "whatsapp":
+        raise HTTPException(status_code=400, detail="Template deletion is only supported for WhatsApp.")
+
+    if not body.template_names and not body.delete_all:
+        raise HTTPException(status_code=400, detail="Provide template_names or set delete_all=true.")
+
+    result = delete_templates_bulk(
+        template_names=body.template_names,
+        client=acc,
+        delete_all=body.delete_all,
+    )
+    log_activity(
+        user=user,
+        action="TEMPLATE_DELETE",
+        account=acc,
+        channel="whatsapp",
+        details={
+            "total": result["total"],
+            "deleted": len(result["deleted"]),
+            "failed": len(result["failed"]),
+            "delete_all": body.delete_all,
+        },
+        status="success" if not result["failed"] else "partial",
+    )
+    return _json_safe(result)
 
 
 @app.get("/api/accounts")
