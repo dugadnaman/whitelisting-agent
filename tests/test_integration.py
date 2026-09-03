@@ -25,15 +25,29 @@ from submission_client import check_status
 
 
 def test_check_status():
-    """Verify check_status can reach the API and find a known template."""
+    """Verify check_status can reach the API and find a known template.
 
-    # Known template from real traffic — sno used as provider_ref_id
-    KNOWN_SNO = "58106108"
-    KNOWN_TEMPLATE_NAME = "emic_check_wa_07aug"
+    Picks the first APPROVED template from the live WABA list as the fixture
+    so the test stays stable as templates churn on the Karix side.
+    """
+    from submission_client import fetch_template_list
 
-    print(f"\n--- Testing check_status(provider_ref_id={KNOWN_SNO!r}) ---\n")
+    templates, err = fetch_template_list("bajaj")
+    assert err is None, f"fetch_template_list failed: {err}"
+    assert templates, "WABA returned no templates — cannot select fixture"
 
-    approval_status, reason, raw = check_status(KNOWN_SNO)
+    fixture = next(
+        (t for t in templates if (t.get("template_create_status") or t.get("status")) == "APPROVED"),
+        None,
+    )
+    assert fixture is not None, "No APPROVED template found on WABA — cannot select fixture"
+
+    known_sno = str(fixture["sno"])
+    known_template_name = fixture["template_name"]
+
+    print(f"\n--- Testing check_status(provider_ref_id={known_sno!r}) ---\n")
+
+    approval_status, reason, raw = check_status(known_sno)
 
     print(f"  Approval status : {approval_status.value}")
     print(f"  Status reason   : {reason}")
@@ -45,8 +59,8 @@ def test_check_status():
     assert approval_status != ApprovalStatus.UNKNOWN, (
         f"Got UNKNOWN — likely an auth/transport error. Raw: {json.dumps(raw, indent=2, default=str)[:1000]}"
     )
-    assert raw.get("template_name") == KNOWN_TEMPLATE_NAME, (
-        f"Expected template_name={KNOWN_TEMPLATE_NAME!r}, got {raw.get('template_name')!r}"
+    assert raw.get("template_name") == known_template_name, (
+        f"Expected template_name={known_template_name!r}, got {raw.get('template_name')!r}"
     )
 
     print(f"✓ check_status returned: {approval_status.value}")

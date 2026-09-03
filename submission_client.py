@@ -653,19 +653,21 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
 
     matches = list(re.finditer(pattern, text))
     samples = []
-    is_tata = _is_tata_group(client)
-    company_name = "Tata Capital" if is_tata else "Bajaj Markets"
+    company_name = "Tata Capital"
 
+    last_end = 0
     for idx, match in enumerate(matches, 1):
         raw_tag = match.group(0)
         start, end = match.span()
 
-        before_text = text[max(0, start - 30) : start]
-        after_text = text[end : min(len(text), end + 30)]
+        next_start = matches[idx].start() if idx < len(matches) else len(text)
+        before_text = text[max(last_end, start - 30) : start]
+        after_text = text[end : min(next_start, end + 30)]
 
         line_prefix = before_text.split("\n")[-1].lower().strip()
         line_suffix = after_text.split("\n")[0].lower().strip()
         tag_clean = re.sub(r"[^a-zA-Z0-9_]", "", raw_tag).lower()
+        last_end = end
 
         # 1. Suffix cues (e.g. {{2}} T&Cs apply). NOTE: bare "apply" is too
         #    common ("Apply now" CTA text) — require explicit T&C phrasing.
@@ -679,12 +681,13 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
                 "conditions apply",
                 "disclaimer",
                 "ltd.",
+                "ltd",
             )
         ):
             samples.append(company_name)
         elif any(w in line_suffix for w in ("days", "months", "years", "hours", "mins", "minutes")):
             samples.append("30")
-        elif any(w in line_suffix for w in ("%", "percent", "p.a.", "rate")):
+        elif any(w in line_suffix for w in ("%", "percent", "p.a.", "rate", "roi")):
             samples.append("9.5%")
         elif any(w in line_suffix for w in ("emi", "per month", "/month")):
             samples.append("12,500")
@@ -702,9 +705,11 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
                 "worth",
                 "upto",
                 "up to",
-                "loan",
                 "limit",
-                "of",
+                "loan",
+                "disbursal",
+                "disbursed",
+                "balance",
             )
         ):
             samples.append("5,00,000")
@@ -713,6 +718,8 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
             or "name" in tag_clean
         ):
             samples.append("John")
+        elif any(w in line_prefix for w in ("from", "with", "at", "by", "team", "regards", "experience with")) or any(w in tag_clean for w in ("company", "brand", "org")):
+            samples.append(company_name)
         elif any(w in line_prefix for w in ("interest", "rate", "roi")):
             samples.append("9.5%")
 
@@ -801,8 +808,6 @@ def _resolve_button_cta_variables(btns: list, client: str) -> None:
             if not b.get("example") or not b["example"]:
                 b["example"] = [
                     "https://www.tatacapital.com/personal-loan.html"
-                    if _is_tata_group(client)
-                    else "https://www.bajajfinservmarkets.in/"
                 ]
                 logger.info("Auto-generated URL variable sample for button")
 
@@ -990,7 +995,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
     # Pre-process: upload media for HEADER IMAGE components and auto-fill variable samples
     try:
         body["components"] = _resolve_header_media(body["components"], client=c)
-        body["components"] = _resolve_body_variables(body["components"])
+        body["components"] = _resolve_body_variables(body["components"], client=c)
 
         for comp in body.get("components", []):
             if isinstance(comp, dict):

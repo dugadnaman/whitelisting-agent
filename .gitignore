@@ -8,6 +8,7 @@ node_modules/
 .next/
 **/.next/
 
+*.tsbuildinfo
 # Python
 __pycache__/
 *.pyc

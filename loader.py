@@ -69,10 +69,8 @@ def infer_whatsapp_cta(text: str, client: str = "bajaj") -> tuple[str, str, str]
                 f"{base_domain}/personal-loan.html",
             )
     else:
-        # Bajaj
-        base_domain = "https://www.bajajfinservmarkets.in"
-        return "Apply Now", "https://1kx.in/{{1}}", base_domain
-
+        base_domain = "https://www.tatacapital.com"
+        return "Apply Now", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
 
 def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> dict:
     """

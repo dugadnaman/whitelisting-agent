@@ -142,6 +142,32 @@ class TestMultiTenantAuth(unittest.TestCase):
         self.assertEqual(r_chat.status_code, 403)
         self.assertIn("Access Denied", r_chat.json()["detail"])
 
+    def test_sample_content_variables_use_tata_capital(self):
+        """Verify that variable normalization and CTA examples generate Tata Capital sample values."""
+        from submission_client import normalize_whatsapp_text_variables, _resolve_button_cta_variables
+        from loader import infer_whatsapp_cta
+
+        # Suffix cue for company / T&C
+        text, samples = normalize_whatsapp_text_variables("Offer from {{1}}. Terms & conditions apply.")
+        self.assertIn("Tata Capital", samples)
+        self.assertNotIn("Bajaj Markets", samples)
+
+        # Generic variable fallback
+        _, samples_fallback = normalize_whatsapp_text_variables("Check {{1}} and {{2}}.")
+        self.assertIn("Tata Capital", samples_fallback)
+        self.assertNotIn("Bajaj Markets", samples_fallback)
+
+        # Button sample example
+        btn = [{"type": "URL", "url": "https://1kx.in"}]
+        _resolve_button_cta_variables(btn, client="bajaj")
+        self.assertTrue(any("tatacapital.com" in ex for ex in btn[0].get("example", [])))
+        self.assertFalse(any("bajajfinservmarkets" in ex for ex in btn[0].get("example", [])))
+
+        # Loader CTA inference fallback
+        _, _, example_url = infer_whatsapp_cta("Special offer")
+        self.assertIn("tatacapital.com", example_url)
+        self.assertNotIn("bajajfinservmarkets", example_url)
+
 
 if __name__ == "__main__":
     unittest.main()
