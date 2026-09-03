@@ -1454,36 +1454,49 @@ def delete_template(template_name: str, client: str = "bajaj") -> dict:
     """
     Delete a single WhatsApp template by name.
 
-    Tries Official API (DELETE /api/v1.0/template/{wabaId}?name={name}) first,
-    then Portal API (POST /v1.0/templates/delete) as fallback.
+    Per Karix docs: DELETE /api/v1.0/template/{wabaId}/{templateId}
+    with Authentication: Bearer {token}.
+
+    Looks up the template by name in the live list to get fb_template_id,
+    then issues the DELETE. Falls back to portal API POST /v1.0/templates/delete.
 
     Returns {"ok": True/False, "template_name": ..., "detail": ...}.
     """
     c = (client or "bajaj").lower().strip()
     name = template_name.strip()
 
-    # 1. Official API — DELETE /api/v1.0/template/{wabaId}?name={name}
-    try:
-        waba_id = get_waba_id(c)
-        headers = get_official_auth_headers(c)
-        url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
-        resp = get_http_session().delete(
-            url, headers=headers, params={"name": name}, timeout=REQUEST_TIMEOUT
-        )
-        if resp.ok:
-            logger.info("Deleted template '%s' via official API (client=%s)", name, c)
-            return {"ok": True, "template_name": name, "detail": "Deleted via official API"}
-        # 400 with "does not exist" is not retryable
-        if resp.status_code == 400:
-            body = _parse_karix_json(resp)
-            detail = str(body) if body else resp.text[:500]
-            if "not exist" in detail.lower() or "not found" in detail.lower():
-                return {"ok": True, "template_name": name, "detail": "Template not found (already deleted)"}
-        logger.debug("Official DELETE returned %d for '%s': %s", resp.status_code, name, resp.text[:300])
-    except Exception as exc:
-        logger.debug("Official DELETE failed for '%s': %s", name, exc)
+    # Step 1: Look up template ID from live list
+    templates, fetch_err = fetch_template_list(c)
+    template_id = None
+    if not fetch_err and templates:
+        for t in templates:
+            if t.get("template_name") == name:
+                template_id = str(t.get("fb_template_id") or t.get("sno", "")).strip()
+                break
 
-    # 2. Portal API fallback — POST /v1.0/templates/delete
+    # Step 2: Official API — DELETE /api/v1.0/template/{wabaId}/{templateId}
+    if template_id:
+        try:
+            waba_id = get_waba_id(c)
+            headers = get_official_auth_headers(c)
+            url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}/{template_id}"
+            resp = get_http_session().delete(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            if resp.ok:
+                logger.info("Deleted template '%s' (id=%s) via official API (client=%s)", name, template_id, c)
+                return {"ok": True, "template_name": name, "template_id": template_id, "detail": "Deleted via official API"}
+            if resp.status_code == 400:
+                body = _parse_karix_json(resp)
+                detail = str(body) if body else resp.text[:500]
+                if "not exist" in detail.lower() or "not found" in detail.lower():
+                    return {"ok": True, "template_name": name, "detail": "Template not found (already deleted)"}
+            logger.debug("Official DELETE returned %d for '%s' (id=%s): %s", resp.status_code, name, template_id, resp.text[:300])
+        except Exception as exc:
+            logger.debug("Official DELETE failed for '%s' (id=%s): %s", name, template_id, exc)
+    elif not fetch_err:
+        # Template name not found in live list — already deleted or never existed
+        return {"ok": True, "template_name": name, "detail": "Template not found on WABA (already deleted)"}
+
+    # Step 3: Portal API fallback — POST /v1.0/templates/delete
     try:
         waba_id = get_waba_id(c)
         esmeaddr = get_esmeaddr(c)
@@ -1517,30 +1530,62 @@ def delete_templates_bulk(
     """
     Bulk-delete templates by name list, or all templates on the WABA.
 
-    If delete_all=True, fetches the live template list and deletes every one.
+    Fetches the live template list once, resolves fb_template_id for each name,
+    then issues DELETE /api/v1.0/template/{wabaId}/{templateId} per template.
+
+    If delete_all=True, deletes every template on the WABA.
     Returns {"deleted": [...], "failed": [...], "total": N}.
     """
     c = (client or "bajaj").lower().strip()
 
+    # Fetch template list once for ID resolution
+    templates, fetch_err = fetch_template_list(c)
+    if fetch_err:
+        return {"deleted": [], "failed": [], "total": 0, "error": fetch_err}
+
+    # Build name→id lookup
+    name_to_id: dict[str, str] = {}
+    for t in templates:
+        tname = t.get("template_name", "")
+        tid = str(t.get("fb_template_id") or t.get("sno", "")).strip()
+        if tname and tid:
+            name_to_id[tname] = tid
+
     if delete_all:
-        templates, err = fetch_template_list(c)
-        if err:
-            return {"deleted": [], "failed": [], "total": 0, "error": err}
-        template_names = list({t.get("template_name", "") for t in templates if t.get("template_name")})
+        template_names = list(name_to_id.keys())
         logger.info("Bulk delete ALL: found %d templates on WABA for client=%s", len(template_names), c)
     elif not template_names:
         return {"deleted": [], "failed": [], "total": 0, "error": "No template names provided"}
 
+    waba_id = get_waba_id(c)
+    headers = get_official_auth_headers(c)
     deleted = []
     failed = []
+
     for name in template_names:
-        result = delete_template(name, client=c)
-        if result["ok"]:
-            deleted.append(result)
-        else:
-            failed.append(result)
-        # Small delay to avoid rate limiting
-        time.sleep(0.3)
+        tid = name_to_id.get(name)
+        if not tid:
+            deleted.append({"ok": True, "template_name": name, "detail": "Not found on WABA (already deleted)"})
+            continue
+
+        try:
+            url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}/{tid}"
+            resp = get_http_session().delete(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            if resp.ok:
+                logger.info("Deleted '%s' (id=%s) client=%s", name, tid, c)
+                deleted.append({"ok": True, "template_name": name, "template_id": tid, "detail": "Deleted"})
+            else:
+                detail = resp.text[:500]
+                if "not exist" in detail.lower() or "not found" in detail.lower():
+                    deleted.append({"ok": True, "template_name": name, "detail": "Already deleted"})
+                else:
+                    failed.append({"ok": False, "template_name": name, "template_id": tid, "detail": f"HTTP {resp.status_code}: {detail}"})
+                    logger.warning("DELETE failed for '%s' (id=%s): HTTP %d", name, tid, resp.status_code)
+        except Exception as exc:
+            failed.append({"ok": False, "template_name": name, "template_id": tid, "detail": str(exc)})
+            logger.warning("DELETE exception for '%s' (id=%s): %s", name, tid, exc)
+
+        time.sleep(0.3)  # rate-limit guard
 
     logger.info(
         "Bulk delete complete for client=%s: %d deleted, %d failed out of %d",
