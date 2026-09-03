@@ -56,6 +56,14 @@ MEDIA_UPLOAD_TIMEOUT = 30  # seconds — generous for Render free-tier cold star
 
 # HTTP status codes worth retrying (transport-level, not validation errors)
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+# All Tata Capital sub-accounts share Tata sample content (URLs, company name).
+_TATA_GROUP = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
+
+
+def _is_tata_group(client: str) -> bool:
+    """Return True for any Tata Capital sub-account (TCHFL, TCL Promo, etc.)."""
+    return (client or "").lower() in _TATA_GROUP
+
 
 _session: requests.Session | None = None
 
@@ -645,7 +653,7 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
 
     matches = list(re.finditer(pattern, text))
     samples = []
-    is_tata = (client or "bajaj").lower() == "tata"
+    is_tata = _is_tata_group(client)
     company_name = "Tata Capital" if is_tata else "Bajaj Markets"
 
     for idx, match in enumerate(matches, 1):
@@ -793,7 +801,7 @@ def _resolve_button_cta_variables(btns: list, client: str) -> None:
             if not b.get("example") or not b["example"]:
                 b["example"] = [
                     "https://www.tatacapital.com/personal-loan.html"
-                    if client.lower() == "tata"
+                    if _is_tata_group(client)
                     else "https://www.bajajfinservmarkets.in/"
                 ]
                 logger.info("Auto-generated URL variable sample for button")

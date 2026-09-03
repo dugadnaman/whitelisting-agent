@@ -17,6 +17,9 @@ from config import get_waba_id
 from models import TemplateComponent, TemplateSubmission
 
 logger = logging.getLogger(__name__)
+# Mirror of submission_client._TATA_GROUP — kept in sync manually.
+_TATA_GROUP = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
+
 
 
 def infer_whatsapp_cta(text: str, client: str = "bajaj") -> tuple[str, str, str]:
@@ -25,7 +28,7 @@ def infer_whatsapp_cta(text: str, client: str = "bajaj") -> tuple[str, str, str]
     Infers the appropriate button text, dynamic URL, and Meta sample example.
     """
     t_lower = text.lower()
-    is_tata = client.lower() == "tata"
+    is_tata = (client or "").lower() in _TATA_GROUP
 
     if is_tata:
         base_domain = "https://www.tatacapital.com"
