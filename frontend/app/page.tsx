@@ -251,34 +251,6 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDeleteAll = async () => {
-    const totalCount = templates.length;
-    const confirmed = window.confirm(
-      `⚠️ DANGER: Are you sure you want to delete ALL (${totalCount}) WhatsApp templates for ${accountLabel} on Karix/Meta?\n\nThis will permanently remove all templates on the WABA.`
-    );
-    if (!confirmed) return;
-
-    try {
-      setDeleting(true);
-      setDeleteFeedback(null);
-      const res = await deleteTemplates([], account, channel, user, true);
-      const deletedCount = res.deleted.length;
-      const failedCount = res.failed.length;
-      setSelectedTemplates(new Set());
-      setDeleteFeedback({
-        type: failedCount > 0 ? 'error' : 'success',
-        message: `Bulk delete complete: ${deletedCount} template${deletedCount === 1 ? '' : 's'} deleted${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`,
-      });
-      await Promise.all([loadStats(), loadTemplates()]);
-    } catch (err) {
-      setDeleteFeedback({
-        type: 'error',
-        message: err instanceof Error ? err.message : 'Delete all failed',
-      });
-    } finally {
-      setDeleting(false);
-    }
-  };
   const handleDeleteFromFile = async () => {
     if (!deleteFile) return;
     try {
@@ -682,15 +654,6 @@ export default function DashboardPage() {
                   Delete by File (CSV/Excel)
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleDeleteAll}
-                  disabled={deleting || templates.length === 0}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer disabled:opacity-40"
-                  title="Delete all templates on this WABA account"
-                >
-                  Delete All on WABA
-                </button>
               </div>
             </div>
           )}
