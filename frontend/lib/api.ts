@@ -636,3 +636,30 @@ export async function inviteColleague(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export type DeleteTemplatesResult = {
+  deleted: Array<{ ok: boolean; template_name: string; detail: string }>;
+  failed: Array<{ ok: boolean; template_name: string; detail: string }>;
+  total: number;
+  error?: string;
+};
+
+export async function deleteTemplates(
+  templateNames: string[],
+  account: Account = "bajaj",
+  channel: Channel = "whatsapp",
+  user: string = "Operator",
+  deleteAll: boolean = false
+): Promise<DeleteTemplatesResult> {
+  const qs = new URLSearchParams({ account, channel, user });
+  const res = await fetchWithRetry(getApiUrl(`/api/templates/delete?${qs}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      template_names: deleteAll ? null : templateNames,
+      delete_all: deleteAll,
+    }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}

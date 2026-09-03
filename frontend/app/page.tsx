@@ -7,6 +7,7 @@ import {
   pollPending,
   fetchActivityLogs,
   fetchActivityStats,
+  deleteTemplates,
 } from '@/lib/api';
 import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -90,6 +91,10 @@ export default function DashboardPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [selectedTemplates, setSelectedTemplates] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFeedback, setDeleteFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
 
   // Debounce search input
   useEffect(() => {
@@ -103,6 +108,8 @@ export default function DashboardPage() {
     setOperatorFilter('all');
     setSearch('');
     setExpandedRow(null);
+    setSelectedTemplates(new Set());
+    setDeleteFeedback(null);
   }, [account, channel]);
 
   const loadStats = useCallback(async () => {
@@ -189,6 +196,82 @@ export default function DashboardPage() {
       setError(err instanceof Error ? err.message : 'Failed to poll pending');
     } finally {
       setPolling(false);
+    }
+  };
+  const handleToggleSelect = (name: string) => {
+    setSelectedTemplates(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    const selectable = visibleTemplates.map(t => t.template_name).filter(Boolean);
+    if (selectedTemplates.size === selectable.length && selectable.length > 0) {
+      setSelectedTemplates(new Set());
+    } else {
+      setSelectedTemplates(new Set(selectable));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedTemplates.size === 0) return;
+    const count = selectedTemplates.size;
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${count} selected template${count === 1 ? '' : 's'} from ${accountLabel} on Karix/Meta? This action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeleting(true);
+      setDeleteFeedback(null);
+      const res = await deleteTemplates(Array.from(selectedTemplates), account, channel, user, false);
+      const deletedCount = res.deleted.length;
+      const failedCount = res.failed.length;
+      setSelectedTemplates(new Set());
+      setDeleteFeedback({
+        type: failedCount > 0 ? 'error' : 'success',
+        message: `Deleted ${deletedCount} template${deletedCount === 1 ? '' : 's'}${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`,
+      });
+      await Promise.all([loadStats(), loadTemplates()]);
+    } catch (err) {
+      setDeleteFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Delete failed',
+      });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    const totalCount = templates.length;
+    const confirmed = window.confirm(
+      `⚠️ DANGER: Are you sure you want to delete ALL (${totalCount}) WhatsApp templates for ${accountLabel} on Karix/Meta?\n\nThis will permanently remove all templates on the WABA.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeleting(true);
+      setDeleteFeedback(null);
+      const res = await deleteTemplates([], account, channel, user, true);
+      const deletedCount = res.deleted.length;
+      const failedCount = res.failed.length;
+      setSelectedTemplates(new Set());
+      setDeleteFeedback({
+        type: failedCount > 0 ? 'error' : 'success',
+        message: `Bulk delete complete: ${deletedCount} template${deletedCount === 1 ? '' : 's'} deleted${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`,
+      });
+      await Promise.all([loadStats(), loadTemplates()]);
+    } catch (err) {
+      setDeleteFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Delete all failed',
+      });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -498,12 +581,94 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          {/* Selection Actions & Delete Feedback Banner */}
+          {deleteFeedback && (
+            <div className={`p-3.5 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-2xs ${
+              deleteFeedback.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}>
+              <div className="flex items-center gap-2">
+                <span>{deleteFeedback.type === 'success' ? '✅' : '⚠️'}</span>
+                <span className="font-semibold">{deleteFeedback.message}</span>
+              </div>
+              <button onClick={() => setDeleteFeedback(null)} className="text-gray-400 hover:text-gray-600">&times;</button>
+            </div>
+          )}
+
+          {channel === 'whatsapp' && (
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-200/80 shadow-xs">
+              <div className="flex items-center gap-2 text-xs text-gray-600">
+                <span className="font-bold text-gray-900">{selectedTemplates.size}</span>
+                <span>of {visibleTemplates.length} selected</span>
+                {selectedTemplates.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTemplates(new Set())}
+                    className="text-blue-600 hover:text-blue-800 font-medium ml-1 cursor-pointer"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {selectedTemplates.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteSelected}
+                    disabled={deleting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {deleting ? (
+                      <>
+                        <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                        </svg>
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        Delete Selected ({selectedTemplates.size})
+                      </>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleDeleteAll}
+                  disabled={deleting || templates.length === 0}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer disabled:opacity-40"
+                  title="Delete all templates on this WABA account"
+                >
+                  Delete All on WABA
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Table */}
           <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left">
                 <thead>
                   <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                    {channel === 'whatsapp' && (
+                      <th className="w-10 px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedTemplates.size === visibleTemplates.length && visibleTemplates.length > 0}
+                          onChange={handleSelectAll}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          title="Select all visible templates"
+                        />
+                      </th>
+                    )}
                     {channel === 'whatsapp' ? (
                       <>
                         <th className="px-4 py-3">Template Name</th>
@@ -531,7 +696,7 @@ export default function DashboardPage() {
                 <tbody className="divide-y divide-gray-200 text-xs text-gray-800">
                   {templatesLoading ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center text-gray-400">
+                      <td colSpan={channel === 'whatsapp' ? 9 : 8} className="px-6 py-12 text-center text-gray-400">
                         <div className="flex items-center justify-center gap-2">
                           <svg className="animate-spin h-4 w-4 text-blue-600" viewBox="0 0 24 24" fill="none">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -543,7 +708,7 @@ export default function DashboardPage() {
                     </tr>
                   ) : visibleTemplates.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-6 py-12 text-center">
+                      <td colSpan={channel === 'whatsapp' ? 9 : 8} className="px-6 py-12 text-center">
                         <div className="flex flex-col items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
                             <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -592,6 +757,17 @@ export default function DashboardPage() {
                             }}
                             className={`hover:bg-gray-50/70 transition-colors cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`}
                           >
+                            {channel === 'whatsapp' && (
+                              <td className="w-10 px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedTemplates.has(t.template_name)}
+                                  onChange={() => handleToggleSelect(t.template_name)}
+                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  title={`Select ${t.template_name}`}
+                                />
+                              </td>
+                            )}
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold text-gray-900 font-mono text-[11px]">{t.template_name}</span>
@@ -670,7 +846,7 @@ export default function DashboardPage() {
                           {/* Expandable detail panel */}
                           {isExpanded && (
                             <tr className="bg-gray-50/90 border-b border-gray-200">
-                              <td colSpan={8} className="px-6 py-4">
+                              <td colSpan={channel === 'whatsapp' ? 9 : 8} className="px-6 py-4">
                                 <div className="space-y-3">
                                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
                                     <div>
