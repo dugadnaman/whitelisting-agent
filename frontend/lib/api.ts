@@ -663,3 +663,20 @@ export async function deleteTemplates(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export async function deleteTemplatesFromFile(
+  file: File,
+  account: Account = "bajaj",
+  channel: Channel = "whatsapp",
+  user: string = "Operator"
+): Promise<DeleteTemplatesResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const qs = new URLSearchParams({ account, channel, user });
+  const res = await fetchWithRetry(getApiUrl(`/api/templates/delete-file?${qs}`), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}

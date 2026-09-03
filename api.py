@@ -1225,6 +1225,75 @@ def delete_templates_endpoint(
     return _json_safe(result)
 
 
+@app.post("/api/templates/delete-file")
+async def delete_templates_from_file(
+    file: UploadFile = File(...),
+    account: str = Query("bajaj"),
+    channel: str = Query("whatsapp"),
+    user: str = Query("Anonymous Operator"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete WhatsApp templates parsed from an uploaded spreadsheet (CSV / XLSX)."""
+    require_tenant_access(account, current_user)
+    acc = account.lower()
+    if channel.lower() != "whatsapp":
+        raise HTTPException(status_code=400, detail="File-based template deletion is only supported for WhatsApp.")
+
+    suffix = Path(file.filename or "upload.csv").suffix.lower()
+    if suffix not in (".csv", ".xlsx", ".xls"):
+        raise HTTPException(status_code=400, detail="Only .csv and .xlsx/.xls files are supported.")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        if suffix in (".xlsx", ".xls"):
+            subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc)
+        else:
+            subs = await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
+
+        if not subs:
+            raise HTTPException(status_code=400, detail=f"No valid template names found in '{file.filename}'.")
+
+        # Extract unique template names in order of appearance
+        seen = set()
+        template_names = []
+        for s in subs:
+            tname = s.template_name.strip()
+            if tname and tname not in seen:
+                seen.add(tname)
+                template_names.append(tname)
+
+        if not template_names:
+            raise HTTPException(status_code=400, detail="No template names extracted from the file.")
+
+        result = await asyncio.to_thread(
+            delete_templates_bulk,
+            template_names=template_names,
+            client=acc,
+            delete_all=False,
+        )
+
+        log_activity(
+            user=user,
+            action="TEMPLATE_DELETE_FILE",
+            account=acc,
+            channel="whatsapp",
+            details={
+                "filename": file.filename,
+                "total_in_file": len(template_names),
+                "deleted": len(result["deleted"]),
+                "failed": len(result["failed"]),
+            },
+            status="success" if not result["failed"] else "partial",
+        )
+        return _json_safe(result)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
 @app.get("/api/accounts")
 def get_accounts(current_user: dict = Depends(get_current_user)):
     accs = load_accounts()

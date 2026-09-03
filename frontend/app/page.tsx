@@ -8,6 +8,7 @@ import {
   fetchActivityLogs,
   fetchActivityStats,
   deleteTemplates,
+  deleteTemplatesFromFile,
 } from '@/lib/api';
 import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -94,6 +95,10 @@ export default function DashboardPage() {
   const [selectedTemplates, setSelectedTemplates] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [showFileDeleteModal, setShowFileDeleteModal] = useState(false);
+  const [deleteFile, setDeleteFile] = useState<File | null>(null);
+  const [fileDeleting, setFileDeleting] = useState(false);
+
 
 
   // Debounce search input
@@ -274,6 +279,31 @@ export default function DashboardPage() {
       setDeleting(false);
     }
   };
+  const handleDeleteFromFile = async () => {
+    if (!deleteFile) return;
+    try {
+      setFileDeleting(true);
+      setDeleteFeedback(null);
+      const res = await deleteTemplatesFromFile(deleteFile, account, channel, user);
+      const deletedCount = res.deleted.length;
+      const failedCount = res.failed.length;
+      setShowFileDeleteModal(false);
+      setDeleteFile(null);
+      setDeleteFeedback({
+        type: failedCount > 0 ? 'error' : 'success',
+        message: `File delete complete: ${deletedCount} template${deletedCount === 1 ? '' : 's'} deleted${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`,
+      });
+      await Promise.all([loadStats(), loadTemplates()]);
+    } catch (err) {
+      setDeleteFeedback({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'File deletion failed',
+      });
+    } finally {
+      setFileDeleting(false);
+    }
+  };
+
 
   const toggleRow = (sourceRef: string) => {
     setExpandedRow(prev => (prev === sourceRef ? null : sourceRef));
@@ -641,6 +671,19 @@ export default function DashboardPage() {
 
                 <button
                   type="button"
+                  onClick={() => setShowFileDeleteModal(true)}
+                  disabled={deleting || fileDeleting}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                  title="Upload a spreadsheet (CSV/Excel) to delete all templates listed in it"
+                >
+                  <svg className="w-3.5 h-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                  </svg>
+                  Delete by File (CSV/Excel)
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleDeleteAll}
                   disabled={deleting || templates.length === 0}
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 border border-red-200 transition-colors cursor-pointer disabled:opacity-40"
@@ -978,6 +1021,106 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      {/* Delete from Spreadsheet Modal */}
+      {showFileDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
+                  <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Delete Templates from Spreadsheet</h3>
+                  <p className="text-[11px] text-gray-500">Target Account: <span className="font-semibold text-gray-800">{accountLabel}</span></p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowFileDeleteModal(false); setDeleteFile(null); }}
+                className="text-gray-400 hover:text-gray-600 text-lg leading-none cursor-pointer"
+                disabled={fileDeleting}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <p className="text-gray-600 leading-relaxed">
+                Upload the spreadsheet (<strong>.csv</strong>, <strong>.xlsx</strong>, or <strong>.xls</strong>) containing the templates you want to delete. The system will parse every template name from the file and delete only those from Karix/Meta.
+              </p>
+
+              <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-red-400 transition-colors bg-gray-50/50">
+                <input
+                  type="file"
+                  id="delete-file-input"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      setDeleteFile(e.target.files[0]);
+                    }
+                  }}
+                  className="hidden"
+                  disabled={fileDeleting}
+                />
+                <label htmlFor="delete-file-input" className="cursor-pointer block space-y-2">
+                  <div className="w-10 h-10 mx-auto rounded-full bg-red-50 text-red-500 flex items-center justify-center">
+                    <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  {deleteFile ? (
+                    <div>
+                      <span className="font-bold text-gray-900 font-mono text-xs">{deleteFile.name}</span>
+                      <p className="text-[10px] text-gray-400 mt-0.5">{(deleteFile.size / 1024).toFixed(1)} KB — Click to change file</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <span className="font-semibold text-blue-600 hover:underline">Choose a file</span>
+                      <span className="text-gray-500"> or drag and drop</span>
+                      <p className="text-[10px] text-gray-400 mt-1">CSV or Excel (.xlsx, .xls)</p>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl text-amber-900 text-[11px] leading-relaxed">
+                <strong>⚠️ Warning:</strong> This will permanently delete all templates defined in this file from your active WABA on Karix and Meta.
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => { setShowFileDeleteModal(false); setDeleteFile(null); }}
+                disabled={fileDeleting}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteFromFile}
+                disabled={!deleteFile || fileDeleting}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-700 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {fileDeleting ? (
+                  <>
+                    <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    Deleting from WABA...
+                  </>
+                ) : (
+                  'Delete Templates from File'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
