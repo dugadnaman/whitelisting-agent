@@ -35,7 +35,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py ./
 COPY *.csv ./
 COPY *.png ./
-COPY accounts.json ./
+COPY accounts.json credentials*.json* ./
 COPY default_sample_header.* ./
 COPY media_cache/ ./media_cache/
 COPY samples/ ./samples/
