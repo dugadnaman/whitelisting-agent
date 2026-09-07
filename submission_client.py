@@ -853,6 +853,78 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         "category": payload.category,
         "components": components_raw,
     }
+def _is_duplicate_or_exists_error(err: object) -> bool:
+    """Check if an error string/dict from Karix or Meta indicates the template already exists."""
+    if not err:
+        return False
+    s = str(err).lower()
+    if "already exist" in s:  # matches "Template Already Exist.", "already exists", "already existed"
+        return True
+    if "there is already" in s and "content for this template" in s:  # Meta duplicate content
+        return True
+    if "template with this name" in s and "already exists" in s:
+        return True
+    if "duplicate template" in s:
+        return True
+    if "2388042" in s or "2388043" in s:  # Meta API error subcodes for duplicate template
+        return True
+    return False
+
+
+def _resolve_existing_template_result(
+    payload: TemplateSubmission,
+    client: str,
+    attempt: int,
+    err_msg: object,
+    provider_resp: dict,
+) -> SubmissionResult:
+    """
+    When Karix or Meta indicates that a template already exists on the WABA,
+    self-heal by reconciling against Karix's live template list.
+    Extracts the actual live approval status (e.g. APPROVED or PENDING) and provider ref ID
+    instead of wrongly reporting the submission as FAILED with UNKNOWN status.
+    """
+    c = client.lower().strip()
+    try:
+        live_status, live_reason, matched = check_status(payload.template_name, client=c)
+        if matched and not matched.get("_not_found") and not matched.get("_transport_error"):
+            ref_id = str(matched.get("fb_template_id") or matched.get("sno") or payload.template_name)
+            approval = (
+                live_status
+                if live_status in (ApprovalStatus.APPROVED, ApprovalStatus.PENDING, ApprovalStatus.REJECTED)
+                else ApprovalStatus.APPROVED
+            )
+            return SubmissionResult(
+                source_ref=payload.source_ref,
+                template_name=payload.template_name,
+                status=SubmissionStatus.DUPLICATE,
+                provider_ref_id=ref_id,
+                error=f"Template already active on WABA ({approval.value.upper()}) — automatically synced from Karix.",
+                provider_response=matched,
+                approval_status=approval,
+                approval_reason=live_reason,
+                client=c,
+                channel="whatsapp",
+                retry_count=attempt,
+            )
+    except Exception as exc:
+        logger.debug("Failed to reconcile existing template %s against Karix: %s", payload.template_name, exc)
+
+    clean_err = str(err_msg).strip()
+    return SubmissionResult(
+        source_ref=payload.source_ref,
+        template_name=payload.template_name,
+        status=SubmissionStatus.DUPLICATE,
+        provider_ref_id=payload.template_name,
+        error=f"Template already active on WABA — {clean_err}",
+        provider_response=provider_resp,
+        approval_status=ApprovalStatus.PENDING,
+        approval_reason=None,
+        client=c,
+        channel="whatsapp",
+        retry_count=attempt,
+    )
+
 def _evaluate_portal_create_response(
     resp: requests.Response, data: dict, payload: TemplateSubmission, c: str, attempt: int
 ) -> SubmissionResult:
@@ -887,6 +959,9 @@ def _evaluate_portal_create_response(
         )
 
     if "Failed" in data:
+        failed_val = data["Failed"]
+        if _is_duplicate_or_exists_error(failed_val):
+            return _resolve_existing_template_result(payload, c, attempt, failed_val, data)
         return SubmissionResult(
             source_ref=payload.source_ref,
             template_name=payload.template_name,
@@ -903,6 +978,8 @@ def _evaluate_portal_create_response(
     if resp_status in ("failure", "error", "failed"):
         reason_data = data.get("reason", {})
         reason_str = str(reason_data)
+        if _is_duplicate_or_exists_error(reason_str) or _is_duplicate_or_exists_error(data):
+            return _resolve_existing_template_result(payload, c, attempt, reason_data or data, data)
         recovered = _handle_portal_media_auto_recovery(payload, c, reason_str)
         if recovered is not None:
             return recovered
@@ -1242,11 +1319,14 @@ def _submit_official_template(
             )
 
         if response.status_code != 201:
+            resp_text = response.text[:2000]
+            if _is_duplicate_or_exists_error(resp_text) or _is_duplicate_or_exists_error(data):
+                return _resolve_existing_template_result(payload, c, attempt, resp_text or data, data)
             return SubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,
                 status=SubmissionStatus.FAILED,
-                error=f"HTTP {response.status_code}: {response.text[:2000]}",
+                error=f"HTTP {response.status_code}: {resp_text}",
                 provider_response=data,
                 approval_status=ApprovalStatus.UNKNOWN,
                 client=c,
@@ -1404,14 +1484,17 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
 
 
 def _match_template(templates: list[dict], provider_ref_id: str) -> dict | None:
-    """Match a provider ref against fb_template_id, sno, or template name."""
+    """Match a provider ref against fb_template_id, sno, or template name (case-insensitive)."""
+    if not provider_ref_id:
+        return None
+    pref = str(provider_ref_id).strip().lower()
     return next(
         (
             t
             for t in templates
-            if str(t.get("fb_template_id", "")) == provider_ref_id
-            or str(t.get("sno", "")) == provider_ref_id
-            or t.get("template_name") == provider_ref_id
+            if str(t.get("fb_template_id", "")).strip().lower() == pref
+            or str(t.get("sno", "")).strip().lower() == pref
+            or str(t.get("template_name", "")).strip().lower() == pref
         ),
         None,
     )

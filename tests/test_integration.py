@@ -324,6 +324,185 @@ def test_predictive_category_approval_polling():
 
     print("✓ test_predictive_category_approval_polling passed!")
 
+def test_duplicate_error_reconciliation_to_approved():
+    """
+    Verify that when Karix or Meta returns 'Template Already Exist.' or
+    'There is already English content for this template', the client recognizes
+    it as a duplicate, fetches the live status from Karix, and returns
+    SubmissionStatus.DUPLICATE with the true ApprovalStatus (e.g. APPROVED)
+    and fb_template_id instead of wrongly reporting FAILED.
+    """
+    from unittest.mock import MagicMock, patch
+    from models import ApprovalStatus, SubmissionStatus, TemplateSubmission
+    from submission_client import _evaluate_portal_create_response
+
+    sub = TemplateSubmission(
+        client="tchfl",
+        channel="whatsapp",
+        template_name="hfl_patp_fcst_030926",
+        language="en_US",
+        category="MARKETING",
+        waba_id="123456",
+        components=[],
+        source_ref="test_ref_1",
+    )
+
+    # Case 1: Karix returns {"Failed": "Template Already Exist."}
+    mock_resp = MagicMock()
+    mock_resp.ok = True
+    mock_resp.status_code = 200
+    portal_data_exist = {"Failed": "Template Already Exist."}
+
+    with patch("submission_client.check_status") as mock_check:
+        mock_check.return_value = (
+            ApprovalStatus.APPROVED,
+            None,
+            {"fb_template_id": "2323001988540102", "template_name": "hfl_patp_fcst_030926"},
+        )
+        res = _evaluate_portal_create_response(mock_resp, portal_data_exist, sub, "tchfl", 0)
+
+    assert res.status == SubmissionStatus.DUPLICATE
+    assert res.approval_status == ApprovalStatus.APPROVED
+    assert res.provider_ref_id == "2323001988540102"
+    assert "already active on waba (approved)" in res.error.lower()
+
+    # Case 2: Meta returns "There is already English content for this template. You can create a new template and try again."
+    portal_data_meta_dupe = {
+        "status": "failure",
+        "reason": "There is already English content for this template. You can create a new template and try again.",
+    }
+    with patch("submission_client.check_status") as mock_check:
+        mock_check.return_value = (
+            ApprovalStatus.APPROVED,
+            None,
+            {"fb_template_id": "1009521115473587", "template_name": "hfl_patp_qcst_030926"},
+        )
+        res2 = _evaluate_portal_create_response(mock_resp, portal_data_meta_dupe, sub, "tchfl", 0)
+
+    assert res2.status == SubmissionStatus.DUPLICATE
+    assert res2.approval_status == ApprovalStatus.APPROVED
+    assert res2.provider_ref_id == "1009521115473587"
+    assert "already active on waba" in res2.error.lower()
+    print("✓ test_duplicate_error_reconciliation_to_approved passed!")
+
+
+def test_in_batch_duplicate_skipping_and_row_order():
+    """
+    Verify that duplicate template names within the same uploaded batch/spreadsheet
+    are deduplicated in-batch without sending duplicate requests to Karix/Meta,
+    and that results maintain exact row order matching the input spreadsheet.
+    """
+    import io
+    from unittest.mock import patch
+    from fastapi.testclient import TestClient
+    import api
+    from models import SubmissionResult, SubmissionStatus
+
+    client = TestClient(api.app)
+    email = "batch_dupe_test@attributics.com"
+    client.post("/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Batch Tester", "tenant_id": "tchfl"})
+    r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
+    token = r.json().get("token") or r.json().get("access_token")
+    H = {"Authorization": f"Bearer {token}"}
+
+    # 3 rows: row 1 and row 3 have the identical template name
+    csv_content = (
+        "template_name,template_category,header_type,header_text,body_text\n"
+        "hfl_patp_qcst_030926,MARKETING,TEXT,Header,First copy\n"
+        "hfl_patp_new_unique_1,MARKETING,TEXT,Header,Unique template\n"
+        "hfl_patp_qcst_030926,MARKETING,TEXT,Header,Duplicate copy\n"
+    )
+
+    submitted_names = []
+    def fake_run(raw_list, log_path, **kwargs):
+        from tracker import log_result
+        for item in raw_list:
+            tname = item.get("template_name", "")
+            submitted_names.append(tname)
+            res = SubmissionResult(
+                source_ref=item.get("source_ref", tname),
+                template_name=tname,
+                status=SubmissionStatus.SUBMITTED,
+                provider_ref_id=f"ref_{tname}",
+            )
+            log_result(res, log_path)
+
+    with patch("api.fetch_whatsapp_templates", return_value=[]), patch("api.run", side_effect=fake_run):
+        r = client.post(
+            "/api/submit?account=tchfl&channel=whatsapp&skip_duplicates=true",
+            files={"file": ("batch.csv", io.BytesIO(csv_content.encode()), "text/csv")},
+            headers=H,
+        )
+    assert r.status_code == 200
+    data = r.json()
+    results = data.get("results", [])
+    assert len(results) == 3, f"Expected 3 results, got {len(results)}"
+
+    # Row 1: hfl_patp_qcst_030926 -> submitted
+    assert results[0]["template_name"] == "hfl_patp_qcst_030926"
+    assert results[0]["status"] == "submitted"
+
+    # Row 2: hfl_patp_new_unique_1 -> submitted
+    assert results[1]["template_name"] == "hfl_patp_new_unique_1"
+    assert results[1]["status"] == "submitted"
+
+    # Row 3: hfl_patp_qcst_030926 -> duplicate skipped in-batch!
+    assert results[2]["template_name"] == "hfl_patp_qcst_030926"
+    assert results[2]["status"] == "duplicate"
+    assert "within uploaded file" in results[2]["error"].lower()
+
+    # Verify run was only invoked with the 2 unique templates, not the duplicate!
+    assert submitted_names == ["hfl_patp_qcst_030926", "hfl_patp_new_unique_1"]
+    print("✓ test_in_batch_duplicate_skipping_and_row_order passed!")
+
+
+def test_poll_pending_updates_duplicate_templates():
+    """
+    Verify that pending_entries includes duplicate templates that are still pending on Meta,
+    and poll_pending successfully updates their approval_status to approved.
+    """
+    import tempfile
+    from models import ApprovalStatus, SubmissionResult, SubmissionStatus
+    from runner import poll_pending
+    from tracker import log_result, pending_entries
+    from unittest.mock import patch
+
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    # Log a duplicate template with approval_status="pending"
+    dupe_pending = SubmissionResult(
+        source_ref="dupe_ref_1",
+        template_name="hfl_patp_rnr_030926",
+        status=SubmissionStatus.DUPLICATE,
+        provider_ref_id="",
+        approval_status=ApprovalStatus.PENDING,
+        client="tchfl",
+    )
+    log_result(dupe_pending, tmp_path)
+
+    # Ensure pending_entries picks it up
+    pending = pending_entries(tmp_path)
+    assert len(pending) == 1
+    assert pending[0]["template_name"] == "hfl_patp_rnr_030926"
+    assert pending[0]["status"] == "duplicate"
+
+    # Mock live template list returning APPROVED
+    mock_templates = [
+        {"template_name": "hfl_patp_rnr_030926", "template_create_status": "APPROVED", "fb_template_id": "2029846117715567"}
+    ]
+    with patch("runner.fetch_template_list", return_value=(mock_templates, None)):
+        summary = poll_pending(tmp_path, client="tchfl")
+
+    assert summary["updated"] == 1
+    assert summary["pending"] == 0
+
+    from tracker import load_log
+    updated_log = load_log(tmp_path)
+    assert updated_log[0]["approval_status"] == "approved"
+    assert updated_log[0]["provider_ref_id"] == "2029846117715567"
+    print("✓ test_poll_pending_updates_duplicate_templates passed!")
+
 if __name__ == "__main__":
     # Check credentials are set
     if not os.environ.get("WABA_AUTH_TOKEN"):

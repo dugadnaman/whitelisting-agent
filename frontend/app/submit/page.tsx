@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { previewFile, submitFile, getSampleCsvUrl } from '@/lib/api';
-import type { TemplatePreview, Template } from '@/lib/api';
+import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob } from '@/lib/api';
+import type { TemplatePreview, Template, JobTask } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import { formatError } from '@/lib/format';
 function StatusBadge({ status }: { status: string }) {
@@ -29,7 +29,15 @@ type State =
   | { step: 'previewing' }
   | { step: 'previewed'; previews: TemplatePreview[] }
   | { step: 'submitting' }
-  | { step: 'submitted'; submitted: number; results: Template[] }
+  | {
+      step: 'submitted';
+      submitted: number;
+      results: Template[];
+      jobId?: string;
+      isStreaming?: boolean;
+      authPaused?: boolean;
+      authPausedMessage?: string;
+    }
   | { step: 'error'; message: string; previews: TemplatePreview[] | null };
 
 function formatBytes(bytes: number): string {
@@ -55,6 +63,129 @@ export default function SubmitPage() {
   const [autoSkipDuplicates, setAutoSkipDuplicates] = useState(true);
   const [showAspectRatioModal, setShowAspectRatioModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  const pollJobFallback = useCallback(async (jobId: string) => {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      if (attempts > 60) {
+        clearInterval(interval);
+        setState((prev) => (prev.step === 'submitted' ? { ...prev, isStreaming: false } : prev));
+        return;
+      }
+      try {
+        const data = await fetchJob(jobId);
+        if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.job.status)) {
+          clearInterval(interval);
+          setState((prev) => {
+            if (prev.step !== 'submitted') return prev;
+            const taskMap: Record<string, JobTask> = {};
+            for (const t of data.tasks) {
+              taskMap[t.template_name.toLowerCase()] = t;
+            }
+            const nextResults = prev.results.map((r) => {
+              const t = taskMap[r.template_name.toLowerCase()];
+              if (t) {
+                return {
+                  ...r,
+                  status: (t.status.toLowerCase() as Template['status']),
+                  approval_status: (t.approval_status.toLowerCase() as Template['approval_status']),
+                  provider_ref_id: t.provider_ref_id || r.provider_ref_id,
+                  error: t.error || r.error,
+                };
+              }
+              return r;
+            });
+            return { ...prev, results: nextResults, isStreaming: false, authPaused: false };
+          });
+        } else if (data.job.status === 'PAUSED_FOR_AUTH') {
+          setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: true, authPausedMessage: data.job.error_message } : prev));
+        }
+      } catch {
+        clearInterval(interval);
+      }
+    }, 2500);
+  }, []);
+
+  const setupJobStream = useCallback((jobId: string) => {
+    if (typeof window === 'undefined') return;
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const es = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream`);
+    eventSourceRef.current = es;
+
+    es.addEventListener('task_update', (e: MessageEvent) => {
+      try {
+        const task = JSON.parse(e.data);
+        setState((prev) => {
+          if (prev.step !== 'submitted') return prev;
+          const nextResults = prev.results.map((r) => {
+            if (
+              (r.template_name && task.template_name && r.template_name.toLowerCase() === task.template_name.toLowerCase()) ||
+              (r.source_ref && task.source_ref && r.source_ref === task.source_ref)
+            ) {
+              return {
+                ...r,
+                status: ((task.status || r.status).toLowerCase() as Template['status']),
+                approval_status: ((task.approval_status || r.approval_status).toLowerCase() as Template['approval_status']),
+                provider_ref_id: task.provider_ref_id || r.provider_ref_id,
+                error: task.error || r.error,
+              };
+            }
+            return r;
+          });
+          return { ...prev, results: nextResults };
+        });
+      } catch (err) {
+        console.debug('Task update parse notice:', err);
+      }
+    });
+
+    es.addEventListener('auth_paused', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data);
+        setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: true, authPausedMessage: data.message } : prev));
+      } catch (err) {
+        console.debug('Auth pause parse notice:', err);
+      }
+    });
+
+    es.addEventListener('auth_resumed', () => {
+      setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: false, authPausedMessage: undefined } : prev));
+    });
+
+    es.addEventListener('job_status', (e: MessageEvent) => {
+      try {
+        const job = JSON.parse(e.data);
+        if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(job.status)) {
+          es.close();
+          eventSourceRef.current = null;
+          setState((prev) => (prev.step === 'submitted' ? { ...prev, isStreaming: false, authPaused: false } : prev));
+        } else if (job.status === 'PAUSED_FOR_AUTH') {
+          setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: true, authPausedMessage: job.error_message } : prev));
+        }
+      } catch (err) {
+        console.debug('Job status parse notice:', err);
+      }
+    });
+
+    es.onerror = () => {
+      es.close();
+      eventSourceRef.current = null;
+      pollJobFallback(jobId);
+    };
+  }, [pollJobFallback]);
+
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, []);
   useEffect(() => {
     setState({ step: 'idle' });
     setFile(null);
@@ -125,7 +256,17 @@ export default function SubmitPage() {
     setState({ step: 'submitting' });
     try {
       const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates, true);
-      setState({ step: 'submitted', submitted: res.submitted, results: res.results });
+      const isComplete = res.status === 'COMPLETED' || !res.job_id;
+      setState({
+        step: 'submitted',
+        submitted: res.submitted,
+        results: res.results,
+        jobId: res.job_id,
+        isStreaming: !isComplete,
+      });
+      if (res.job_id && !isComplete) {
+        setupJobStream(res.job_id);
+      }
     } catch (err) {
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
       setState({
@@ -747,28 +888,120 @@ export default function SubmitPage() {
       {/* STEP 3: Results */}
       {state.step === 'submitted' && (
         <div className="space-y-6">
+          {/* PAUSED_FOR_AUTH Banner if session expired */}
+          {state.authPaused && (
+            <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl space-y-3 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5">
+                    ⚠️
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-amber-950">
+                      Karix Session Expired (401) — Queue Paused in Place
+                    </h4>
+                    <p className="text-[11px] text-amber-900/90 mt-0.5 leading-relaxed">
+                      {state.authPausedMessage ||
+                        `Portal session token has expired for ${accountLabel}. Your remaining templates are safely paused in the queue without duplicate rejections. Update credentials in Settings to auto-resume.`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <a
+                    href={`/settings?account=${account}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 transition-colors"
+                  >
+                    Open Settings →
+                  </a>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (state.jobId) {
+                        await resumeJob(state.jobId);
+                        setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: false } : prev));
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 transition-colors"
+                  >
+                    Resume Queue ⚡
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center font-bold">
-                  ✓
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
+                    state.isStreaming
+                      ? 'bg-blue-100 text-blue-600 animate-pulse'
+                      : 'bg-emerald-100 text-emerald-600'
+                  }`}
+                >
+                  {state.isStreaming ? '⋯' : '✓'}
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-gray-900">
-                    Submission Complete!
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-gray-900">
+                      {state.isStreaming ? 'Processing Batch Submissions...' : 'Submission Complete!'}
+                    </h3>
+                    {state.isStreaming && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />
+                        Live SSE Stream Active
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     Processed {state.results.length} templates for {accountLabel} on {channelLabel}.
+                    {state.jobId && <span className="font-mono text-[10px] ml-1.5 text-gray-400">({state.jobId})</span>}
                   </p>
                 </div>
               </div>
 
-              <button
-                onClick={handleReset}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
-              >
-                + Submit Another File
-              </button>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const failed = state.results.filter((r) => r.status === 'failed');
+                  if (!failed.length) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const headers = ['template_name', 'status', 'approval_status', 'error'];
+                        const rows = failed.map((r) =>
+                          [
+                            `"${(r.template_name || '').replace(/"/g, '""')}"`,
+                            `"${(r.status || '').replace(/"/g, '""')}"`,
+                            `"${(r.approval_status || '').replace(/"/g, '""')}"`,
+                            `"${(r.error || '').replace(/"/g, '""')}"`,
+                          ].join(',')
+                        );
+                        const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+                        const link = document.createElement('a');
+                        link.href = encodeURI(csvContent);
+                        link.download = `failed_templates_${state.jobId || 'batch'}.csv`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      }}
+                      className="px-3 py-2 rounded-lg text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors"
+                    >
+                      Download Failed Rows ({failed.length} CSV)
+                    </button>
+                  );
+                })()}
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+                >
+                  + Submit Another File
+                </button>
+              </div>
             </div>
           </div>
 

@@ -6,6 +6,7 @@ Wraps the existing Python pipelines and exposes REST endpoints consumed by the N
 """
 
 import asyncio
+import collections
 import json
 import logging
 import os
@@ -14,11 +15,21 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
+import uuid
 import requests as http_client
-from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
+from db_queue import (
+    create_job_with_tasks,
+    get_job,
+    get_job_tasks,
+    init_queue_db,
+    record_task_result,
+    update_template_approval_monotonic,
+)
+from queue_manager import QUEUE_MANAGER
 
 logger = logging.getLogger(__name__)
 from activity_tracker import (
@@ -942,6 +953,10 @@ async def _submit_rcs_batch(
 
     to_submit = []
     duplicate_entries = []
+    seen_in_batch: set[str] = set()
+    results_by_index: list[dict | None] = [None] * len(subs)
+
+    live_map = {}
     if skip_duplicates:
         live_templates = fetch_rcs_templates(client=acc)
         live_map = {
@@ -949,39 +964,133 @@ async def _submit_rcs_batch(
             for lt in live_templates
             if (lt.get("viTemplate", {}).get("name") or lt.get("templateId"))
         }
-        for s in subs:
-            name_key = s.template_name.strip().lower()
-            if name_key in live_map:
-                live_obj = live_map[name_key]
-                status_str = str(live_obj.get("status", "APPROVED")).upper()
-                dupe_res = RcsSubmissionResult(
-                    source_ref=s.source_ref,
-                    template_name=s.template_name,
-                    status=RcsSubmissionStatus.DUPLICATE,
-                    provider_ref_id=str(live_obj.get("templateId", "")),
-                    error="RCS template already active on DLT Bot — skipped duplicate submission.",
-                    provider_response=live_obj,
-                    approval_status=status_str.lower(),
-                    client=acc,
-                    channel="rcs",
-                    submitted_by=user,
-                    source_file=filename,
-                )
-                log_rcs_result(dupe_res, RCS_LOG_PATH)
-                duplicate_entries.append(asdict(dupe_res))
-            else:
-                to_submit.append(s)
-    else:
-        to_submit = subs
+
+    for idx, s in enumerate(subs):
+        name_key = s.template_name.strip().lower()
+        if not name_key:
+            to_submit.append((idx, s))
+            continue
+
+        if skip_duplicates and name_key in live_map:
+            live_obj = live_map[name_key]
+            status_str = str(live_obj.get("status", "APPROVED")).upper()
+            dupe_res = RcsSubmissionResult(
+                source_ref=s.source_ref,
+                template_name=s.template_name,
+                status=RcsSubmissionStatus.DUPLICATE,
+                provider_ref_id=str(live_obj.get("templateId", "")),
+                error=f"RCS template already active on DLT Bot ({status_str}) — skipped duplicate submission.",
+                provider_response=live_obj,
+                approval_status=status_str.lower(),
+                client=acc,
+                channel="rcs",
+                submitted_by=user,
+                source_file=filename,
+            )
+            log_rcs_result(dupe_res, RCS_LOG_PATH)
+            entry_dict = asdict(dupe_res)
+            duplicate_entries.append(entry_dict)
+            results_by_index[idx] = entry_dict
+            seen_in_batch.add(name_key)
+        elif name_key in seen_in_batch:
+            dupe_res = RcsSubmissionResult(
+                source_ref=s.source_ref,
+                template_name=s.template_name,
+                status=RcsSubmissionStatus.DUPLICATE,
+                provider_ref_id="",
+                error="Duplicate RCS template within uploaded file — skipped duplicate submission.",
+                provider_response=None,
+                approval_status="pending",
+                client=acc,
+                channel="rcs",
+                submitted_by=user,
+                source_file=filename,
+            )
+            log_rcs_result(dupe_res, RCS_LOG_PATH)
+            entry_dict = asdict(dupe_res)
+            duplicate_entries.append(entry_dict)
+            results_by_index[idx] = entry_dict
+        else:
+            seen_in_batch.add(name_key)
+            to_submit.append((idx, s))
+
+    new_entries = []
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    task_payloads = []
+    for idx, s in enumerate(subs):
+        existing_res = results_by_index[idx]
+        task_payloads.append({
+            "source_ref": s.source_ref,
+            "template_name": s.template_name,
+            "status": existing_res["status"].upper() if existing_res else "PENDING",
+            "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
+            "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
+            "error": existing_res.get("error") if existing_res else None,
+        })
+
+    create_job_with_tasks(
+        tenant_id=acc,
+        channel="rcs",
+        filename=filename,
+        submitted_by=user,
+        tasks_data=task_payloads,
+        job_id=job_id,
+    )
 
     new_entries = []
     if to_submit:
         before_count = len(load_rcs_log(RCS_LOG_PATH))
-        await asyncio.to_thread(run_rcs, [asdict(s) for s in to_submit], RCS_LOG_PATH, client=acc, user=user, source_file=filename)
+        await asyncio.to_thread(
+            run_rcs,
+            [asdict(s) for _, s in to_submit],
+            RCS_LOG_PATH,
+            client=acc,
+            user=user,
+            source_file=filename,
+        )
         all_entries = load_rcs_log(RCS_LOG_PATH)
         new_entries = all_entries[before_count:]
 
-    all_combined = duplicate_entries + new_entries
+        by_ref: dict[str, list[dict]] = collections.defaultdict(list)
+        for e in new_entries:
+            key = str(e.get("source_ref") or e.get("template_name") or "").strip().lower()
+            by_ref[key].append(e)
+
+        for idx, s in to_submit:
+            s_key = str(s.source_ref or s.template_name or "").strip().lower()
+            matched_pool = by_ref.get(s_key) or by_ref.get(s.template_name.strip().lower())
+            if matched_pool:
+                res_item = matched_pool.pop(0)
+                results_by_index[idx] = res_item
+                tid = f"task_{job_id}_{idx:04d}"
+                record_task_result(
+                    task_id=tid,
+                    status=res_item.get("status", "FAILED"),
+                    approval_status=res_item.get("approval_status", "unknown"),
+                    provider_ref_id=res_item.get("provider_ref_id") or res_item.get("template_id"),
+                    error=res_item.get("error"),
+                )
+                QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item})
+
+    all_combined = [e for e in results_by_index if e is not None]
+    if len(all_combined) < (len(duplicate_entries) + len(new_entries)):
+        used_ids = {id(e) for e in all_combined}
+        for e in duplicate_entries + new_entries:
+            if id(e) not in used_ids:
+                all_combined.append(e)
+    cleaned_entries = []
+    for e in all_combined:
+        entry = dict(e)
+        if "error" in entry:
+            entry["error"] = _clean_error_message(entry["error"])
+        cleaned_entries.append(entry)
+
+    final_job = get_job(job_id)
+    if final_job:
+        QUEUE_MANAGER.broadcast_event(job_id, "job_status", final_job)
+        for e in duplicate_entries + new_entries:
+            if id(e) not in used_ids:
+                all_combined.append(e)
     cleaned_entries = []
     for e in all_combined:
         entry = dict(e)
@@ -1006,6 +1115,9 @@ async def _submit_rcs_batch(
         status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
     )
     return {
+        "job_id": job_id,
+        "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
+        "total": len(subs),
         "submitted": len(to_submit),
         "skipped_duplicates": len(duplicate_entries),
         "results": [_json_safe(e) for e in cleaned_entries],
@@ -1032,6 +1144,10 @@ async def _submit_wa_batch(
 
     to_submit = []
     duplicate_entries = []
+    seen_in_batch: set[str] = set()
+    results_by_index: list[dict | None] = [None] * len(subs)
+
+    live_map = {}
     if skip_duplicates:
         live_templates = fetch_whatsapp_templates(client=acc)
         live_map = {
@@ -1039,45 +1155,135 @@ async def _submit_wa_batch(
             for lt in live_templates
             if lt.get("template_name")
         }
-        for s in subs:
-            name_key = s.template_name.strip().lower()
-            if name_key in live_map:
-                live_obj = live_map[name_key]
-                status_str = str(live_obj.get("template_create_status") or live_obj.get("status", "APPROVED")).upper()
-                approval_val = (
-                    _STATUS_MAP.get(status_str, ApprovalStatus.APPROVED).value
-                    if status_str in _STATUS_MAP
-                    else status_str.lower()
-                )
-                ref_id = str(live_obj.get("fb_template_id", "") or live_obj.get("sno", "") or "")
-                dupe_res = SubmissionResult(
-                    source_ref=s.source_ref,
-                    template_name=s.template_name,
-                    status=SubmissionStatus.DUPLICATE,
-                    provider_ref_id=ref_id,
-                    error="Template already active on WABA — automatically skipped duplicate submission.",
-                    provider_response=live_obj,
-                    approval_status=ApprovalStatus(approval_val) if approval_val in ("approved", "pending", "rejected") else ApprovalStatus.APPROVED,
-                    client=acc,
-                    channel="whatsapp",
-                    submitted_by=user,
-                    source_file=filename,
-                )
-                log_result(dupe_res, LOG_PATH)
-                duplicate_entries.append(asdict(dupe_res))
-            else:
-                to_submit.append(s)
-    else:
-        to_submit = subs
+
+    for idx, s in enumerate(subs):
+        name_key = s.template_name.strip().lower()
+        if not name_key:
+            to_submit.append((idx, s))
+            continue
+
+        if skip_duplicates and name_key in live_map:
+            live_obj = live_map[name_key]
+            status_str = str(live_obj.get("template_create_status") or live_obj.get("status", "APPROVED")).upper()
+            approval_val = (
+                _STATUS_MAP.get(status_str, ApprovalStatus.APPROVED).value
+                if status_str in _STATUS_MAP
+                else status_str.lower()
+            )
+            ref_id = str(live_obj.get("fb_template_id", "") or live_obj.get("sno", "") or "")
+            dupe_res = SubmissionResult(
+                source_ref=s.source_ref,
+                template_name=s.template_name,
+                status=SubmissionStatus.DUPLICATE,
+                provider_ref_id=ref_id,
+                error=f"Template already active on WABA ({approval_val.upper()}) — automatically skipped duplicate submission.",
+                provider_response=live_obj,
+                approval_status=ApprovalStatus(approval_val) if approval_val in ("approved", "pending", "rejected") else ApprovalStatus.APPROVED,
+                client=acc,
+                channel="whatsapp",
+                submitted_by=user,
+                source_file=filename,
+            )
+            log_result(dupe_res, LOG_PATH)
+            entry_dict = asdict(dupe_res)
+            duplicate_entries.append(entry_dict)
+            results_by_index[idx] = entry_dict
+            seen_in_batch.add(name_key)
+        elif name_key in seen_in_batch:
+            dupe_res = SubmissionResult(
+                source_ref=s.source_ref,
+                template_name=s.template_name,
+                status=SubmissionStatus.DUPLICATE,
+                provider_ref_id="",
+                error="Duplicate template within uploaded file — automatically skipped duplicate submission.",
+                provider_response=None,
+                approval_status=ApprovalStatus.PENDING,
+                client=acc,
+                channel="whatsapp",
+                submitted_by=user,
+                source_file=filename,
+            )
+            log_result(dupe_res, LOG_PATH)
+            entry_dict = asdict(dupe_res)
+            duplicate_entries.append(entry_dict)
+            results_by_index[idx] = entry_dict
+        else:
+            seen_in_batch.add(name_key)
+            to_submit.append((idx, s))
+
+    new_entries = []
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    task_payloads = []
+    for idx, s in enumerate(subs):
+        existing_res = results_by_index[idx]
+        task_payloads.append({
+            "source_ref": s.source_ref,
+            "template_name": s.template_name,
+            "language": s.language,
+            "category": s.category,
+            "components": [asdict(c) for c in s.components],
+            "status": existing_res["status"].upper() if existing_res else "PENDING",
+            "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
+            "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
+            "error": existing_res.get("error") if existing_res else None,
+        })
+
+    create_job_with_tasks(
+        tenant_id=acc,
+        channel="whatsapp",
+        filename=filename,
+        submitted_by=user,
+        tasks_data=task_payloads,
+        job_id=job_id,
+    )
 
     new_entries = []
     if to_submit:
         before_count = len(load_log(LOG_PATH))
-        await asyncio.to_thread(run, [asdict(s) for s in to_submit], LOG_PATH, client=acc, user=user, source_file=filename, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        await asyncio.to_thread(
+            run,
+            [asdict(s) for _, s in to_submit],
+            LOG_PATH,
+            client=acc,
+            user=user,
+            source_file=filename,
+            fix_aspect_ratio=fix_aspect_ratio,
+            fix_grammar=fix_grammar,
+        )
         all_entries = load_log(LOG_PATH)
         new_entries = all_entries[before_count:]
 
-    all_combined = duplicate_entries + new_entries
+        by_ref: dict[str, list[dict]] = collections.defaultdict(list)
+        for e in new_entries:
+            key = str(e.get("source_ref") or e.get("template_name") or "").strip().lower()
+            by_ref[key].append(e)
+
+        for idx, s in to_submit:
+            s_key = str(s.source_ref or s.template_name or "").strip().lower()
+            matched_pool = by_ref.get(s_key) or by_ref.get(s.template_name.strip().lower())
+            if matched_pool:
+                res_item = matched_pool.pop(0)
+                results_by_index[idx] = res_item
+                tid = f"task_{job_id}_{idx:04d}"
+                record_task_result(
+                    task_id=tid,
+                    status=res_item.get("status", "FAILED"),
+                    approval_status=res_item.get("approval_status", "unknown"),
+                    provider_ref_id=res_item.get("provider_ref_id"),
+                    error=res_item.get("error"),
+                    approval_reason=res_item.get("approval_reason"),
+                )
+                QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item})
+
+    final_job = get_job(job_id)
+    if final_job:
+        QUEUE_MANAGER.broadcast_event(job_id, "job_status", final_job)
+    all_combined = [e for e in results_by_index if e is not None]
+    if len(all_combined) < (len(duplicate_entries) + len(new_entries)):
+        used_ids = {id(e) for e in all_combined}
+        for e in duplicate_entries + new_entries:
+            if id(e) not in used_ids:
+                all_combined.append(e)
     cleaned_entries = []
     for e in all_combined:
         entry = dict(e)
@@ -1102,6 +1308,9 @@ async def _submit_wa_batch(
         status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
     )
     return {
+        "job_id": job_id,
+        "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
+        "total": len(subs),
         "submitted": len(to_submit),
         "skipped_duplicates": len(duplicate_entries),
         "results": [_json_safe(e) for e in cleaned_entries],
@@ -1143,6 +1352,133 @@ async def submit_file(
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+
+@app.get("/api/jobs/{job_id}")
+def get_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
+    """Fetch status and per-template tasks for an asynchronous ingestion job."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    require_tenant_access(job["tenant_id"], current_user)
+    tasks = get_job_tasks(job_id)
+    return {
+        "job": _json_safe(job),
+        "tasks": [_json_safe(t) for t in tasks],
+    }
+
+
+@app.get("/api/jobs/{job_id}/stream")
+async def stream_job_endpoint(job_id: str):
+    """Server-Sent Events (SSE) stream yielding real-time per-task progress and job completion events."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    return StreamingResponse(
+        QUEUE_MANAGER.sse_event_stream(job_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/jobs/{job_id}/resume")
+def resume_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
+    """Resume a job currently paused due to auth expiration (PAUSED_FOR_AUTH)."""
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    require_tenant_access(job["tenant_id"], current_user)
+    resumed = QUEUE_MANAGER.notify_credentials_updated(job["tenant_id"])
+    return {"ok": True, "resumed_jobs": resumed}
+
+
+@app.post("/api/webhooks/karix/{tenant}")
+async def karix_webhook_endpoint(
+    tenant: str,
+    request: Request,
+    token: str | None = Query(None),
+    x_webhook_token: str | None = Header(None, alias="X-Webhook-Token"),
+    x_karix_token: str | None = Header(None, alias="X-Karix-Token"),
+    authorization: str | None = Header(None, alias="Authorization"),
+):
+    """
+    Real-time webhook receiver for Karix WhatsApp template status updates.
+    Enforces Q12 (A + C):
+    1. Validates shared webhook secret token header.
+    2. Extracts template_name and verifies ground truth via targeted check_status against Karix official API.
+    3. Updates database via monotonic state precedence (APPROVED/REJECTED are immutable).
+    """
+    clean_tenant = tenant.lower().strip()
+    configured_secret = (
+        os.environ.get(f"{_account_prefix(clean_tenant)}_WEBHOOK_SECRET")
+        or os.environ.get("KARIX_WEBHOOK_SECRET")
+        or "karix_webhook_secret_2026"
+    )
+
+    auth_header = (
+        authorization.replace("Bearer ", "").strip()
+        if authorization and authorization.startswith("Bearer ")
+        else authorization
+    )
+    incoming_token = x_webhook_token or x_karix_token or auth_header or token
+    if incoming_token != configured_secret:
+        raise HTTPException(status_code=401, detail="Invalid webhook authentication token.")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    template_name = str(
+        body.get("templateName")
+        or body.get("template_name")
+        or body.get("name")
+        or body.get("data", {}).get("name")
+        or body.get("data", {}).get("template_name")
+        or ""
+    ).strip()
+
+    if not template_name:
+        return {"ok": True, "note": "Ignored webhook: missing template_name in payload"}
+
+    from submission_client import check_status
+
+    live_status, live_reason, matched = check_status(template_name, client=clean_tenant)
+    official_status = live_status.value if live_status else str(body.get("status", "pending")).lower()
+    ref_id = str(matched.get("fb_template_id") or matched.get("sno") or "")
+
+    updated_count = update_template_approval_monotonic(
+        tenant_id=clean_tenant,
+        template_name=template_name,
+        new_approval_status=official_status,
+        provider_ref_id=ref_id or None,
+        approval_reason=live_reason,
+    )
+
+    log_activity(
+        user="Karix Webhook",
+        action="WEBHOOK_APPROVAL_UPDATE",
+        account=clean_tenant,
+        channel="whatsapp",
+        details={
+            "template_name": template_name,
+            "status": official_status,
+            "verified_upstream": True,
+            "tasks_updated": updated_count,
+        },
+        status="success",
+    )
+
+    return {
+        "ok": True,
+        "template_name": template_name,
+        "status": official_status,
+        "tasks_updated": updated_count,
+    }
 
 @app.post("/api/poll")
 def poll(
@@ -1560,6 +1896,10 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
         details={"keys_updated": list(mapping.keys()), "github_persisted": gh_status},
         status="success",
     )
+    try:
+        QUEUE_MANAGER.notify_credentials_updated(acc)
+    except Exception as exc:
+        logger.debug("Auto-resume notice: %s", exc)
     return {"ok": True, "github_persisted": gh_status}
 
 

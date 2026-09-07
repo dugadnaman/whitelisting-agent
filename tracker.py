@@ -111,4 +111,4 @@ def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl")
 
 def pending_entries(log_path: str = "submission_log.jsonl") -> list[dict]:
     """Entries still awaiting a final approval outcome."""
-    return [e for e in load_log(log_path) if e.get("status") == "submitted" and e.get("approval_status") == "pending"]
+    return [e for e in load_log(log_path) if e.get("status") in ("submitted", "duplicate") and e.get("approval_status") == "pending"]

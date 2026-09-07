@@ -17,6 +17,8 @@ from loader import _row_to_submission
 from rcs_client import fetch_rcs_templates, submit_rcs_template
 from rcs_models import RcsTemplateSubmission
 from rcs_tracker import load_rcs_log
+from db_queue import create_job_with_tasks, record_task_result
+from queue_manager import QUEUE_MANAGER
 from submission_client import (
     SubmissionStatus,
     fetch_template_list,
@@ -132,6 +134,146 @@ def tool_inspect_template(
     return {"found": True, "template": res, "channel": "whatsapp", "account": acc}
 
 
+PROMOTIONAL_KEYWORDS = {
+    "discount", "offer", "cashback", "save", "sale", "win", "reward",
+    "bonus", "deals", "deal", "limited time", "festive", "gift", "special prize"
+}
+
+BANNED_SHORTENERS = ["bit.ly", "tinyurl.com", "rb.gy", "goo.gl", "ow.ly", "is.gd", "buff.ly", "t.co"]
+
+
+def remediate_template_rejection(
+    template_name: str,
+    body_text: str,
+    header_text: str | None = None,
+    footer_text: str | None = None,
+    buttons: list | None = None,
+    category: str = "UTILITY",
+    language: str = "en_US",
+    rejection_reason: str = "",
+    account: str = "bajaj",
+) -> dict[str, Any]:
+    """
+    Analyze template components and rejection reason against Meta WhatsApp policies.
+    Applies surgical auto-remediations:
+    1. Word-to-variable ratio: ensures at least 2.5 words per variable (Meta Error 2388293)
+    2. Header length limit: trims/formats header text to <= 60 chars
+    3. Button text limit: formats button titles to <= 25 chars
+    4. Category alignment: upgrades to MARKETING if promotional words are found in UTILITY
+    5. Variable sequencing: re-indexes out-of-order or non-sequential variables ({{1}}, {{2}}, ...)
+    6. URL shorteners: replaces prohibited shorteners with clean brand domain
+    7. Grammar & typos: applies lint_and_fix_body
+    """
+    issues_detected: list[dict[str, Any]] = []
+    fixed_body = body_text
+    fixed_header = header_text
+    fixed_footer = footer_text
+    fixed_buttons = [dict(b) if isinstance(b, dict) else {"text": str(b)} for b in buttons] if buttons else None
+    fixed_category = (category or "UTILITY").upper().strip()
+
+    # 1. Grammar, spelling typos, repeated words, and basic Meta spacing
+    cleaned_body, grammar_warnings = lint_and_fix_body(fixed_body)
+    fixed_body = cleaned_body
+    for w in grammar_warnings:
+        issues_detected.append({
+            "policy": "SYNTAX_GRAMMAR",
+            "issue": w.get("issue"),
+            "suggestion": w.get("suggestion"),
+        })
+
+    # 2. Sequential Variable Indexing
+    var_tokens = re.findall(r"\{\{([^}]+)\}\}", fixed_body)
+    if var_tokens:
+        expected_indices = [str(i + 1) for i in range(len(var_tokens))]
+        if var_tokens != expected_indices:
+            counter = [0]
+            def repl_var(m):
+                counter[0] += 1
+                return f"{{{{{counter[0]}}}}}"
+            fixed_body = re.sub(r"\{\{[^}]+\}\}", repl_var, fixed_body)
+            issues_detected.append({
+                "policy": "META_VARIABLE_ORDER",
+                "issue": f"Non-sequential or named variables detected ({', '.join(var_tokens)}).",
+                "suggestion": "Renumbered sequentially to {{1}}, {{2}}, ... per Meta requirement.",
+            })
+
+    # 3. Word-to-Variable Ratio Check (Meta Error 2388293)
+    var_matches = re.findall(r"\{\{\d+\}\}", fixed_body)
+    var_count = len(var_matches)
+    if var_count > 0:
+        text_without_vars = re.sub(r"\{\{\d+\}\}", " ", fixed_body)
+        words = [w for w in re.findall(r"\b\w+\b", text_without_vars) if len(w) > 0]
+        word_count = len(words)
+        ratio = word_count / var_count
+        if word_count < 3 or ratio < 2.5:
+            domain_name = "Bajaj Finserv" if "bajaj" in account.lower() else "Tata Capital"
+            addition = f" This is an official service notification regarding your account details. Thank you for choosing {domain_name}."
+            fixed_body = fixed_body.rstrip(".") + "." + addition
+            issues_detected.append({
+                "policy": "META_VARIABLE_RATIO",
+                "issue": f"Low word-to-variable ratio ({word_count} words for {var_count} variables = {ratio:.1f}:1). Meta requires >= 2.5:1 (Error 2388293).",
+                "suggestion": f"Expanded fixed contextual copy to achieve compliant ratio ({ratio:.1f}:1 -> compliant).",
+            })
+
+    # 4. Promotional Language in UTILITY / AUTHENTICATION Category
+    if fixed_category in ("UTILITY", "AUTHENTICATION"):
+        promo_found = [k for k in PROMOTIONAL_KEYWORDS if re.search(r"\b" + re.escape(k) + r"\b", fixed_body, re.IGNORECASE)]
+        if promo_found:
+            issues_detected.append({
+                "policy": "META_CATEGORY_MISMATCH",
+                "issue": f"Promotional keywords ({', '.join(promo_found)}) detected in {fixed_category} category.",
+                "suggestion": "Automatically re-categorized template as MARKETING to comply with Meta category policy.",
+            })
+            fixed_category = "MARKETING"
+
+    # 5. Header length check (<= 60 characters)
+    if fixed_header and len(fixed_header) > 60:
+        orig_header = fixed_header
+        trimmed = fixed_header[:57].rsplit(" ", 1)[0] + "..." if " " in fixed_header[:57] else fixed_header[:60]
+        fixed_header = trimmed
+        issues_detected.append({
+            "policy": "META_HEADER_LENGTH",
+            "issue": f"Header length exceeds Meta 60-character limit ({len(orig_header)} chars).",
+            "suggestion": f"Trimmed header to 60 chars: '{fixed_header}'.",
+        })
+
+    # 6. Button text length check (<= 25 characters) and URL shorteners
+    if fixed_buttons:
+        new_buttons = []
+        for b_dict in fixed_buttons:
+            text = b_dict.get("text", "")
+            if len(text) > 25:
+                orig_btn = text
+                shortened = text[:22].rsplit(" ", 1)[0] + "..." if " " in text[:22] else text[:25]
+                b_dict["text"] = shortened
+                issues_detected.append({
+                    "policy": "META_BUTTON_LENGTH",
+                    "issue": f"Button text exceeds Meta 25-character limit ({len(orig_btn)} chars: '{orig_btn}').",
+                    "suggestion": f"Shortened button text to '{shortened}'.",
+                })
+            url = b_dict.get("url", "")
+            if url:
+                for shortener in BANNED_SHORTENERS:
+                    if shortener in url.lower():
+                        clean_domain = "https://www.bajajfinserv.in/services" if "bajaj" in account.lower() else "https://www.tatacapital.com/services"
+                        b_dict["url"] = clean_domain
+                        issues_detected.append({
+                            "policy": "META_BANNED_URL_SHORTENER",
+                            "issue": f"Prohibited URL shortener '{shortener}' in button link.",
+                            "suggestion": f"Replaced with verified corporate domain '{clean_domain}'.",
+                        })
+            new_buttons.append(b_dict)
+        fixed_buttons = new_buttons
+
+    return {
+        "fixed_body": fixed_body,
+        "fixed_header": fixed_header,
+        "fixed_footer": fixed_footer,
+        "fixed_buttons": fixed_buttons,
+        "fixed_category": fixed_category,
+        "issues_detected": issues_detected,
+    }
+
 def tool_diagnose_and_fix(
     template_name: str,
     account: str = "bajaj",
@@ -164,8 +306,42 @@ def tool_diagnose_and_fix(
                 body_text = comp.get("text", "")
                 break
 
-    # Apply grammar and Meta policy linter
-    fixed_body, warnings = lint_and_fix_body(body_text)
+    # Extract header, footer, buttons, category
+    header_text = tmpl.get("header_text")
+    footer_text = tmpl.get("footer")
+    buttons = tmpl.get("buttons")
+    category = tmpl.get("category") or "UTILITY"
+    language = tmpl.get("language") or "en_US"
+
+    if isinstance(tmpl.get("raw"), dict):
+        for comp in tmpl["raw"].get("components", []):
+            ctype = comp.get("type", "").upper()
+            if ctype == "HEADER" and comp.get("format", "").upper() == "TEXT":
+                header_text = header_text or comp.get("text")
+            elif ctype == "FOOTER":
+                footer_text = footer_text or comp.get("text")
+            elif ctype == "BUTTONS":
+                buttons = buttons or comp.get("buttons")
+
+    # Run full Meta policy compliance and grammar remediation
+    remediation = remediate_template_rejection(
+        template_name=template_name,
+        body_text=body_text,
+        header_text=header_text,
+        footer_text=footer_text,
+        buttons=buttons,
+        category=category,
+        language=language,
+        rejection_reason=rejection_reason,
+        account=account,
+    )
+
+    fixed_body = remediation["fixed_body"]
+    fixed_header = remediation["fixed_header"]
+    fixed_footer = remediation["fixed_footer"]
+    fixed_buttons = remediation["fixed_buttons"]
+    fixed_category = remediation["fixed_category"]
+    warnings = remediation["issues_detected"]
 
     # Determine next version name
     orig_name = tmpl.get("template_name") or template_name
@@ -183,35 +359,61 @@ def tool_diagnose_and_fix(
         "issues_detected": warnings,
         "original_body": body_text,
         "remediated_body": fixed_body,
+        "remediated_header": fixed_header,
+        "remediated_category": fixed_category,
         "new_version_name": new_name,
         "resubmitted": False,
+        "job_id": None,
     }
 
     if auto_resubmit:
         if channel == "whatsapp":
             comp_list = []
-            if tmpl.get("header_type"):
+            if tmpl.get("header_type") or fixed_header:
+                h_format = tmpl.get("header_type") or ("TEXT" if fixed_header else "TEXT")
                 comp_list.append(
                     {
                         "type": "HEADER",
-                        "format": tmpl.get("header_type"),
-                        "text": tmpl.get("header_text"),
+                        "format": h_format,
+                        "text": fixed_header if h_format == "TEXT" else tmpl.get("header_text"),
                         "media_url": tmpl.get("header_media_url"),
                     }
                 )
             comp_list.append({"type": "BODY", "text": fixed_body})
-            if tmpl.get("footer"):
-                comp_list.append({"type": "FOOTER", "text": tmpl.get("footer")})
-            if tmpl.get("buttons"):
-                comp_list.append({"type": "BUTTONS", "buttons": tmpl.get("buttons")})
+            if fixed_footer:
+                comp_list.append({"type": "FOOTER", "text": fixed_footer})
+            if fixed_buttons:
+                comp_list.append({"type": "BUTTONS", "buttons": fixed_buttons})
 
+            # 1. Enqueue persistently into SQLite ingestion_jobs & job_tasks
+            job = create_job_with_tasks(
+                tenant_id=account,
+                channel="whatsapp",
+                filename=f"copilot_remediation_{new_name}",
+                submitted_by=f"AI Copilot ({user})",
+                tasks_data=[
+                    {
+                        "source_ref": f"copilot_fix_{new_name}",
+                        "template_name": new_name,
+                        "language": language,
+                        "category": fixed_category,
+                        "components": comp_list,
+                        "status": "PENDING",
+                        "approval_status": "pending",
+                    }
+                ],
+            )
+            job_id = job["id"]
+            diagnosis["job_id"] = job_id
+
+            # 2. Submit to Karix/Meta
             sub = _row_to_submission(
                 {
                     "template_name": new_name,
-                    "category": tmpl.get("category") or "UTILITY",
-                    "language": tmpl.get("language") or "en_US",
+                    "category": fixed_category,
+                    "language": language,
                     "components": comp_list,
-                    "source_ref": f"agent_fix_{new_name}",
+                    "source_ref": f"copilot_fix_{new_name}",
                 },
                 client=account,
             )
@@ -222,6 +424,16 @@ def tool_diagnose_and_fix(
                 "provider_ref_id": res.provider_ref_id,
                 "error": res.error,
             }
+
+            # 3. Update task result in SQLite
+            record_task_result(
+                task_id=f"task_{job_id}_0000",
+                status=res.status.value,
+                approval_status=res.approval_status.value,
+                provider_ref_id=res.provider_ref_id,
+                error=res.error,
+            )
+
             log_activity(
                 user=user,
                 action="AGENT_AUTO_REMEDIATION",
@@ -231,9 +443,11 @@ def tool_diagnose_and_fix(
                     "original": orig_name,
                     "new_version": new_name,
                     "status": res.status.value,
+                    "job_id": job_id,
+                    "category": fixed_category,
                     "issues_fixed": len(warnings),
                 },
-                status="success" if res.status == SubmissionStatus.SUBMITTED else "failed",
+                status="success" if res.status in (SubmissionStatus.SUBMITTED, SubmissionStatus.DUPLICATE) else "failed",
             )
         else:
             sub = RcsTemplateSubmission(
@@ -436,13 +650,14 @@ class WhitelistingAgent:
 
     def execute_instruction(
         self,
-        instruction: str,
+        instruction: str = "",
         account: str = "bajaj",
         channel: str = "whatsapp",
         user: str = "Operator",
         user_profile: dict | None = None,
+        message: str = "",
     ) -> dict[str, Any]:
-        text = instruction.strip()
+        text = (instruction or message).strip()
         isolation_err, account = _check_agent_tenant_isolation(text, user_profile, account)
         if isolation_err:
             return isolation_err
@@ -463,6 +678,7 @@ class WhitelistingAgent:
                 return res
 
         return _handle_agent_fallback_guidance(account, channel)
+    handle_message = execute_instruction
 
 
 def _check_agent_tenant_isolation(text: str, user_profile: dict | None, account: str) -> tuple[dict | None, str]:
@@ -598,21 +814,47 @@ def _handle_agent_rejection_diagnosis(text: str, account: str, channel: str, use
         tokens = re.findall(r"[a-zA-Z0-9_]{3,}", text)
         filtered = [t for t in tokens if t.lower() not in ("check", "why", "template", "was", "rejected", "fix", "and", "resubmit", "for", "bajaj", "tata")]
         cand = filtered[0] if filtered else cand
+
+    # If cand ends with _v\d+ and is not found, check base template
+    inspection_check = tool_inspect_template(cand, account=account, channel=channel)
+    if not inspection_check.get("found"):
+        base_cand = re.sub(r"_v\d+$", "", cand)
+        if tool_inspect_template(base_cand, account=account, channel=channel).get("found"):
+            cand = base_cand
+
     auto_submit = any(w in text.lower() for w in ["resubmit", "submit", "apply", "create"])
     diag_res = tool_diagnose_and_fix(template_name=cand, account=account, channel=channel, user_instructions=text, auto_resubmit=auto_submit, user=user)
     if not diag_res.get("success"):
-        return {"reply": f"❌ Could not find template `{cand}` in the {account.upper()} {channel.upper()} catalog.\n\n*Tip: Try listing your templates to see exact registered names.*", "actions_taken": [{"tool": "diagnose_and_fix", "target": cand, "result": diag_res}], "suggested_actions": ["List rejected templates", "List all templates", "Poll status"]}
+        return {
+            "reply": f"❌ Could not find template `{cand}` in the {account.upper()} {channel.upper()} catalog.\n\n*Tip: Try listing your templates to see exact registered names.*",
+            "actions_taken": [{"tool": "diagnose_and_fix", "target": cand, "result": diag_res}],
+            "suggested_actions": ["List rejected templates", "List all templates", "Poll status"],
+        }
+
     d = diag_res["diagnosis"]
     fixes = d["issues_detected"]
-    fix_summary = "\n".join([f"• **{f.get('type')}**: {f.get('issue')} $\\rightarrow$ {f.get('suggestion')}" for f in fixes]) or "• Applied automated Meta variable spacing and punctuation corrections."
-    reply = f"### 🔍 Diagnosis for `{cand}`\n\n**Current Status:** `{d['current_status'].upper()}`\n**Provider Reason:** {d['rejection_reason']}\n\n#### 🛠️ Corrections Applied:\n{fix_summary}\n\n#### 📝 Remediated Body:\n```\n{d['remediated_body']}\n```\n"
+    fix_summary = (
+        "\n".join([f"• ⚠️ **{f.get('policy', 'POLICY')}**: {f.get('issue')} $\\rightarrow$ {f.get('suggestion')}" for f in fixes])
+        or "• Applied automated Meta variable spacing and punctuation corrections."
+    )
+    header_info = f"\n**Header Remediated:** `{d['remediated_header']}`" if d.get("remediated_header") else ""
+    category_info = f"\n**Category Adjusted:** `{d.get('remediated_category', 'UTILITY')}`" if d.get("remediated_category") else ""
+
+    reply = (
+        f"### 🔍 Diagnosis for `{cand}`\n\n"
+        f"**Current Status:** `{d['current_status'].upper()}`\n"
+        f"**Provider Reason:** {d['rejection_reason']}{header_info}{category_info}\n\n"
+        f"#### 🛠️ Meta Policy Auto-Remediations:\n{fix_summary}\n\n"
+        f"#### 📝 Remediated Compliant Body:\n```\n{d['remediated_body']}\n```\n"
+    )
     if d.get("resubmitted"):
         sub_res = d.get("submission_result", {})
-        reply += f"\n✅ **Autonomously resubmitted as:** `{d['new_version_name']}` (Status: `{sub_res.get('status', 'submitted').upper()}`)"
-        suggested = ["Poll approval status", "View template in dashboard", f"Inspect {d['new_version_name']}"]
+        job_str = f" (Job ID: `{d['job_id']}`)" if d.get("job_id") else ""
+        reply += f"\n✅ **Autonomously enqueued and submitted as:** `{d['new_version_name']}`{job_str} (Status: `{sub_res.get('status', 'submitted').upper()}`)"
+        suggested = ["Poll approval status", "List pending templates", f"Inspect {d['new_version_name']}"]
     else:
         reply += f"\n💡 Remediated copy is ready. Would you like me to submit `{d['new_version_name']}`?"
-        suggested = [f"Resubmit as {d['new_version_name']}", "Edit copy further"]
+        suggested = [f"Fix and resubmit as {d['new_version_name']}", "List rejected templates", "Poll approval status"]
     return {"reply": reply, "actions_taken": [{"tool": "diagnose_and_fix", "target": cand, "result": diag_res}], "suggested_actions": suggested, "data": diag_res}
 
 

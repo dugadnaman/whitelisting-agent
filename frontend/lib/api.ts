@@ -357,7 +357,7 @@ export async function submitFile(
   fixGrammar: boolean = true,
   skipDuplicates: boolean = true,
   autoRoute: boolean = true
-): Promise<{ submitted: number; skipped_duplicates?: number; results: Template[] }> {
+): Promise<{ submitted: number; skipped_duplicates?: number; results: Template[]; job_id?: string; status?: string }> {
   const form = new FormData();
   form.append("file", file);
   const qs = new URLSearchParams({
@@ -373,6 +373,52 @@ export async function submitFile(
     method: "POST",
     headers: { "X-User": user },
     body: form,
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export type IngestionJob = {
+  id: string;
+  tenant_id: string;
+  channel: string;
+  filename: string;
+  total_count: number;
+  submitted_count: number;
+  duplicate_count: number;
+  failed_count: number;
+  status: "QUEUED" | "RUNNING" | "PAUSED_FOR_AUTH" | "COMPLETED" | "PARTIALLY_COMPLETED" | "FAILED";
+  submitted_by?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type JobTask = {
+  id: string;
+  job_id: string;
+  tenant_id: string;
+  channel: string;
+  source_ref?: string;
+  template_name: string;
+  category?: string;
+  language?: string;
+  status: "PENDING" | "SUBMITTED" | "DUPLICATE" | "FAILED";
+  approval_status: "pending" | "approved" | "rejected" | "unknown";
+  provider_ref_id?: string;
+  error?: string;
+  approval_reason?: string;
+};
+
+export async function fetchJob(jobId: string): Promise<{ job: IngestionJob; tasks: JobTask[] }> {
+  const res = await fetchWithRetry(getApiUrl(`/api/jobs/${encodeURIComponent(jobId)}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function resumeJob(jobId: string): Promise<{ ok: boolean; resumed_jobs?: number }> {
+  const res = await fetchWithRetry(getApiUrl(`/api/jobs/${encodeURIComponent(jobId)}/resume`), {
+    method: "POST",
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

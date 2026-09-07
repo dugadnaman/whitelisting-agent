@@ -219,7 +219,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
     updates: dict[str, dict] = {}
     for entry in to_check:
         ref = entry["source_ref"]
-        matched = _match_template(templates, entry["provider_ref_id"])
+        matched = _match_template(templates, entry.get("provider_ref_id", "")) or _match_template(templates, entry.get("template_name", ""))
         if matched is None:
             print(f"  {entry['template_name']}: not on WABA yet (stays pending)")
             continue
@@ -228,12 +228,16 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
         status = _STATUS_MAP.get(raw_status, ApprovalStatus.UNKNOWN)
 
         if status in _TERMINAL_STATUSES:
-            updates[ref] = {
+            update_payload = {
                 "approval_status": status.value,
                 "approval_reason": matched.get("template_status_reason"),
                 "provider_response": matched,
                 "updated_at": now,
             }
+            fb_id = str(matched.get("fb_template_id") or matched.get("sno") or "")
+            if fb_id and (not entry.get("provider_ref_id") or entry.get("provider_ref_id") == entry.get("template_name")):
+                update_payload["provider_ref_id"] = fb_id
+            updates[ref] = update_payload
             print(f"  {entry['template_name']}: {status.value}")
         else:
             # PENDING or unknown provider state — keep pollable.

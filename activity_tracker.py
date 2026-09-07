@@ -7,22 +7,24 @@ Guarantees zero log loss, full attribution, and unlimited historical auditing.
 
 import json
 import logging
+import os
 import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path("karix_store.db")
+DB_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
 ACTIVITY_LOG_PATH = "activity_log.jsonl"
 
 
 def _get_db() -> sqlite3.Connection:
     """Return a connection with Write-Ahead Logging (WAL) and busy timeouts for concurrent safety."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), timeout=15)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -53,6 +55,12 @@ def init_store() -> None:
         init_auth_db()
     except Exception as e:
         logger.debug("Auth DB init check: %s", e)
+    try:
+        from db_queue import init_queue_db
+
+        init_queue_db()
+    except Exception as e:
+        logger.debug("Queue DB init check: %s", e)
     # Migrate any historical JSONL logs into SQLite
     _migrate_jsonl_to_sqlite()
 

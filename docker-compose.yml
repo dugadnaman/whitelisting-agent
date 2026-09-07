@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   karix-app:
     build:
@@ -11,11 +9,21 @@ services:
       - "3000:3000"
       - "8000:8000"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - PYTHONUNBUFFERED=1
+      - BACKEND_INTERNAL_URL=http://127.0.0.1:8000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - KARIX_DB_PATH=/app/data/karix_store.db
     volumes:
-      - ./submission_log.jsonl:/app/submission_log.jsonl
-      - ./rcs_submission_log.jsonl:/app/rcs_submission_log.jsonl
-      - ./.env:/app/.env
+      # Mount a directory, not a possibly-absent SQLite file. Docker creates
+      # missing file bind sources as directories, which breaks sqlite3.connect.
+      - ./data:/app/data
+      - ./media_cache:/app/media_cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
