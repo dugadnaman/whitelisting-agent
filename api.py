@@ -1922,7 +1922,19 @@ def _commit_credentials_to_github() -> str | None:
             logger.warning("GitHub credentials access denied: HTTP %s: %s", r.status_code, reason)
             return f"failed_http_{r.status_code}: {reason}"
         sha = r.json().get("sha") if r.ok else None
-        content = base64.b64encode(Path("credentials.json").read_bytes()).decode()
+        local_path = Path("credentials.json")
+        local_data = json.loads(local_path.read_text(encoding="utf-8")) if local_path.exists() else {}
+        if r.ok:
+            try:
+                remote_raw = base64.b64decode(r.json().get("content", "")).decode("utf-8")
+                remote_data = json.loads(remote_raw)
+                if isinstance(remote_data, dict):
+                    remote_data.update(local_data)
+                    local_data = remote_data
+                    local_path.write_text(json.dumps(local_data, indent=2) + "\n", encoding="utf-8")
+            except Exception as e:
+                logger.debug("Remote credentials merge notice: %s", e)
+        content = base64.b64encode(local_path.read_bytes()).decode()
         payload = {
             "message": "chore: update saved credentials from Settings",
             "content": content,
