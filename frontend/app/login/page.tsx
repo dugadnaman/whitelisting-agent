@@ -2,16 +2,42 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { loginUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
+const DEMO_PERSONAS = [
+  {
+    role: 'Tata Capital Admin',
+    email: 'dugadnaman@gmail.com',
+    pass: 'Naman@123',
+    badge: 'TATA',
+    badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    desc: 'Full access to TCHFL, TCL Promo, Trans & Wealth',
+  },
+  {
+    role: 'Bajaj Finserv Admin',
+    email: 'bajaj@karix.com',
+    pass: 'Bajaj@123',
+    badge: 'BAJAJ',
+    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    desc: 'Primary admin for Bajaj WhatsApp & RCS WABA',
+  },
+  {
+    role: 'Platform SuperAdmin',
+    email: 'admin@karix.com',
+    pass: 'Admin@123',
+    badge: 'ALL',
+    badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
+    desc: 'Cross-tenant oversight and team management',
+  },
+];
+
 export default function LoginPage() {
-  const router = useRouter();
-  const { setCurrentUser, setUser } = useApp();
+  const { setCurrentUser, setUser, setAccount } = useApp();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,7 +47,7 @@ export default function LoginPage() {
     const finalPass = (customPass || password).trim();
 
     if (!finalEmail || !finalPass) {
-      setError('Please enter both email and password.');
+      setError('Please enter both work email and password.');
       return;
     }
 
@@ -32,6 +58,15 @@ export default function LoginPage() {
       const res = await loginUser(finalEmail, finalPass);
       setCurrentUser(res.user);
       setUser(res.user.name || res.user.email);
+
+      // Pre-select the appropriate account in localStorage
+      const tenant = (res.user.tenant_id || 'bajaj').toLowerCase();
+      const targetAccount = tenant === 'tata' ? 'tchfl' : tenant === 'all' ? 'bajaj' : tenant;
+      setAccount(targetAccount);
+      try {
+        localStorage.setItem('karix_account', targetAccount);
+      } catch {}
+
       window.location.href = '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -39,24 +74,32 @@ export default function LoginPage() {
     }
   };
 
+  const handlePersonaLogin = (demoEmail: string, demoPass: string) => {
+    setEmail(demoEmail);
+    setPassword(demoPass);
+    handleSubmit(undefined, demoEmail, demoPass);
+  };
 
   return (
-    <div className="min-h-screen -ml-64 -m-8 flex items-center justify-center bg-gray-50/70 p-6">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-200/80 p-8 space-y-6">
+    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50/40 p-4 sm:p-6 font-sans">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-200/80 p-6 sm:p-8 space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex w-12 h-12 rounded-xl bg-blue-600 text-white font-bold text-xl items-center justify-center shadow-md">
+          <div className="inline-flex w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-bold text-xl items-center justify-center shadow-md">
             K
           </div>
-          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Karix Whitelisting Agent</h1>
+          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Karix Whitelisting Platform</h1>
           <p className="text-xs text-gray-500">Sign in to your organization workspace</p>
         </div>
 
         {/* Error Alert */}
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-medium flex items-center gap-2">
-            <span>⚠️</span>
-            <span>{error}</span>
+          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium flex items-start gap-2.5">
+            <span className="text-sm shrink-0 mt-0.5">⚠️</span>
+            <div className="flex-1 leading-relaxed">
+              <span className="font-semibold">Sign in failed: </span>
+              <span>{error}</span>
+            </div>
           </div>
         )}
 
@@ -73,7 +116,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="e.g. namandugad@attributics.com"
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-sans"
+              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-sans"
             />
           </div>
 
@@ -81,20 +124,30 @@ export default function LoginPage() {
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
               Password
             </label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-sans"
-            />
+            <div className="relative">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 pr-10 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-sans"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-medium p-1"
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? '👁️' : '👁️‍🗨️'}
+              </button>
+            </div>
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center justify-center gap-2"
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center justify-center gap-2 mt-2"
           >
             {loading ? (
               <>
@@ -102,14 +155,46 @@ export default function LoginPage() {
                 <span>Signing in...</span>
               </>
             ) : (
-              <span>Sign In to Workspace</span>
+              <span>Sign In to Workspace →</span>
             )}
           </button>
         </form>
 
+        {/* 1-Click Quick Demo / Team Login */}
+        <div className="pt-2 border-t border-gray-100 space-y-2">
+          <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider text-center">
+            Quick 1-Click Team Access
+          </div>
+          <div className="grid grid-cols-1 gap-2 pt-1">
+            {DEMO_PERSONAS.map((p, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handlePersonaLogin(p.email, p.pass)}
+                disabled={loading}
+                className="w-full p-2.5 rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50/50 bg-gray-50/50 transition flex items-center justify-between text-left group"
+              >
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-gray-900 group-hover:text-blue-700">
+                      {p.role}
+                    </span>
+                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${p.badgeColor}`}>
+                      {p.badge}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{p.desc}</p>
+                </div>
+                <span className="text-xs text-gray-400 group-hover:text-blue-600 font-bold ml-2">
+                  ⚡ Log in
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
 
         {/* Sign up link */}
-        <div className="text-center text-xs text-gray-500 pt-2">
+        <div className="text-center text-xs text-gray-500 pt-1 border-t border-gray-100">
           <span>Don&apos;t have an account? </span>
           <Link href="/signup" className="text-blue-600 hover:underline font-semibold">
             Create new account
