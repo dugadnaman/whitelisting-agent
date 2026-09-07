@@ -5,32 +5,6 @@ import Link from 'next/link';
 import { loginUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
-const DEMO_PERSONAS = [
-  {
-    role: 'Tata Capital Admin',
-    email: 'dugadnaman@gmail.com',
-    pass: 'Naman@123',
-    badge: 'TATA',
-    badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    desc: 'Full access to TCHFL, TCL Promo, Trans & Wealth',
-  },
-  {
-    role: 'Bajaj Finserv Admin',
-    email: 'bajaj@karix.com',
-    pass: 'Bajaj@123',
-    badge: 'BAJAJ',
-    badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    desc: 'Primary admin for Bajaj WhatsApp & RCS WABA',
-  },
-  {
-    role: 'Platform SuperAdmin',
-    email: 'admin@karix.com',
-    pass: 'Admin@123',
-    badge: 'ALL',
-    badgeColor: 'bg-purple-50 text-purple-700 border-purple-200',
-    desc: 'Cross-tenant oversight and team management',
-  },
-];
 
 export default function LoginPage() {
   const { setCurrentUser, setUser, setAccount } = useApp();
@@ -74,11 +48,6 @@ export default function LoginPage() {
     }
   };
 
-  const handlePersonaLogin = (demoEmail: string, demoPass: string) => {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    handleSubmit(undefined, demoEmail, demoPass);
-  };
 
   return (
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50/40 p-4 sm:p-6 font-sans">
@@ -160,38 +129,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* 1-Click Quick Demo / Team Login */}
-        <div className="pt-2 border-t border-gray-100 space-y-2">
-          <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider text-center">
-            Quick 1-Click Team Access
-          </div>
-          <div className="grid grid-cols-1 gap-2 pt-1">
-            {DEMO_PERSONAS.map((p, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => handlePersonaLogin(p.email, p.pass)}
-                disabled={loading}
-                className="w-full p-2.5 rounded-xl border border-gray-200 hover:border-blue-300 hover:bg-blue-50/50 bg-gray-50/50 transition flex items-center justify-between text-left group"
-              >
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-bold text-gray-900 group-hover:text-blue-700">
-                      {p.role}
-                    </span>
-                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${p.badgeColor}`}>
-                      {p.badge}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-gray-500 mt-0.5">{p.desc}</p>
-                </div>
-                <span className="text-xs text-gray-400 group-hover:text-blue-600 font-bold ml-2">
-                  ⚡ Log in
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Sign up link */}
         <div className="text-center text-xs text-gray-500 pt-1 border-t border-gray-100">
