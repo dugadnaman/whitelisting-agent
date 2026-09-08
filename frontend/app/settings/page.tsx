@@ -141,7 +141,7 @@ export default function SettingsPage() {
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
   const accountTitle = getAccountLabel(selectedAccount);
-  const channelTitle = isWhatsApp ? 'WhatsApp' : isSms ? 'SMS (Karix)' : 'RCS (DLT)';
+  const channelTitle = isWhatsApp ? 'WhatsApp' : isSms ? 'SMS' : 'RCS';
   const envPrefix = selectedAccount.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
   const selectedAccountItem = accounts.find((a) => a.id === selectedAccount);
   const isCustomAccount = selectedAccountItem && !selectedAccountItem.is_builtin;
@@ -581,7 +581,7 @@ export default function SettingsPage() {
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            {accountTitle} — WhatsApp
+            WhatsApp
           </button>
 
           {/* RCS Tab */}
@@ -597,7 +597,7 @@ export default function SettingsPage() {
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-blue-400" />
-            {accountTitle} — RCS (DLT)
+            RCS
           </button>
 
           {/* SMS Tab */}
@@ -613,7 +613,7 @@ export default function SettingsPage() {
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-purple-400" />
-            {accountTitle} — SMS (Karix)
+            SMS
           </button>
         </div>
       </div>
