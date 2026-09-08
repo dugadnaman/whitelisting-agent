@@ -44,7 +44,12 @@ export default function SettingsPage() {
   const [templateNamespaceId, setTemplateNamespaceId] = useState('');
   const [entityId, setEntityId] = useState('');
   const [loungeCookie, setLoungeCookie] = useState('');
-
+  // SMS form fields
+  const [smsKey, setSmsKey] = useState('');
+  const [smsUsername, setSmsUsername] = useState('');
+  const [smsEncryptionKey, setSmsEncryptionKey] = useState('');
+  const [smsSenderId, setSmsSenderId] = useState('');
+  const [smsDlrAuthToken, setSmsDlrAuthToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
@@ -73,6 +78,13 @@ export default function SettingsPage() {
           setPortalUsername(creds.portal_username || '');
           setPortalPassword(creds.portal_password || '');
           setTemplateNamespaceId(creds.template_namespace_id || '');
+        } else if (selectedChannel === 'sms') {
+          setSmsKey(creds.sms_key || '');
+          setSmsUsername(creds.sms_username || '');
+          setSmsEncryptionKey(creds.sms_encryption_key || '');
+          setSmsSenderId(creds.sms_sender_id || '');
+          setSmsDlrAuthToken(creds.sms_dlr_auth_token || '');
+          setEntityId(creds.entity_id || '');
         } else {
           setEntityId(creds.entity_id || '');
           setLoungeCookie(creds.lounge_cookie || '');
@@ -92,6 +104,12 @@ export default function SettingsPage() {
               setBearerToken(parsed.bearer_token || '');
               setSession(parsed.session || '');
               setUser(parsed.user || '');
+            } else if (selectedChannel === 'sms') {
+              setSmsKey(parsed.sms_key || '');
+              setSmsUsername(parsed.sms_username || '');
+              setSmsEncryptionKey(parsed.sms_encryption_key || '');
+              setSmsSenderId(parsed.sms_sender_id || '');
+              setSmsDlrAuthToken(parsed.sms_dlr_auth_token || '');
             } else {
               setEntityId(parsed.entity_id || '');
               setLoungeCookie(parsed.lounge_cookie || '');
@@ -120,8 +138,10 @@ export default function SettingsPage() {
     };
   }, [selectedAccount, selectedChannel]);
   const isWhatsApp = selectedChannel === 'whatsapp';
+  const isSms = selectedChannel === 'sms';
+  const isRcs = selectedChannel === 'rcs';
   const accountTitle = getAccountLabel(selectedAccount);
-  const channelTitle = isWhatsApp ? 'WhatsApp' : 'RCS (DLT)';
+  const channelTitle = isWhatsApp ? 'WhatsApp' : isSms ? 'SMS (Karix)' : 'RCS (DLT)';
   const envPrefix = selectedAccount.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
   const selectedAccountItem = accounts.find((a) => a.id === selectedAccount);
   const isCustomAccount = selectedAccountItem && !selectedAccountItem.is_builtin;
@@ -197,6 +217,11 @@ export default function SettingsPage() {
         user: user.trim() || undefined,
         entity_id: entityId.trim() || undefined,
         lounge_cookie: loungeCookie.trim() || undefined,
+        sms_key: smsKey.trim() || undefined,
+        sms_username: smsUsername.trim() || undefined,
+        sms_encryption_key: smsEncryptionKey.trim() || undefined,
+        sms_sender_id: smsSenderId.trim() || undefined,
+        sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
         user_name: currentOperator,
       });
       if (res.ok) {
@@ -231,6 +256,11 @@ export default function SettingsPage() {
         template_namespace_id: templateNamespaceId.trim() || undefined,
         entity_id: entityId.trim() || undefined,
         lounge_cookie: loungeCookie.trim() || undefined,
+        sms_key: smsKey.trim() || undefined,
+        sms_username: smsUsername.trim() || undefined,
+        sms_encryption_key: smsEncryptionKey.trim() || undefined,
+        sms_sender_id: smsSenderId.trim() || undefined,
+        sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
@@ -241,11 +271,7 @@ export default function SettingsPage() {
       } catch {}
 
       // Run immediate test to verify
-      const testRes = await testCredentials(selectedAccount, selectedChannel, {
-        waba_auth_token: wabaAuthToken.trim() || undefined,
-        waba_id: wabaId.trim() || undefined,
-        user_name: currentOperator,
-      });
+      const testRes = await testCredentials(selectedAccount, selectedChannel, credsToSave);
 
       if (testRes.ok) {
         setBanner({
@@ -573,6 +599,22 @@ export default function SettingsPage() {
             <span className="w-2 h-2 rounded-full bg-blue-400" />
             {accountTitle} — RCS (DLT)
           </button>
+
+          {/* SMS Tab */}
+          <button
+            onClick={() => {
+              setSelectedChannel('sms');
+              setBanner(null);
+            }}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
+              selectedChannel === 'sms'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-purple-400" />
+            {accountTitle} — SMS (Karix)
+          </button>
         </div>
       </div>
 
@@ -589,6 +631,8 @@ export default function SettingsPage() {
             <div className="text-[11px] text-gray-500">
               {isWhatsApp
                 ? 'Official WhatsApp Template REST API via static Bearer Token'
+                : isSms
+                ? 'Karix Send SMS JSON API with AES-256 PII encryption & DLR callbacks'
                 : 'DLT Template Registration via Karix Lounge / RCS Bot Builder'}
             </div>
           </div>
@@ -708,6 +752,134 @@ export default function SettingsPage() {
                   </div>
                 </div>
               )}
+            </div>
+          </>
+        ) : isSms ? (
+          <>
+            {/* Karix SMS Access Key */}
+            <div>
+              <label htmlFor="sms_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                Karix SMS Access Key ({envPrefix}_SMS_KEY)
+              </label>
+              <input
+                id="sms_key"
+                type="password"
+                value={smsKey}
+                onChange={(e) => setSmsKey(e.target.value)}
+                placeholder="e.g. ZOucgqXGgGSfKfNWqQdYJA=="
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Authorization key provided by Karix for JsonReceiver API requests (passed as <code>key</code> in payload).
+              </p>
+            </div>
+
+            {/* Karix SMS Username */}
+            <div>
+              <label htmlFor="sms_username" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                SMS Account Username ({envPrefix}_SMS_USERNAME)
+              </label>
+              <input
+                id="sms_username"
+                type="text"
+                value={smsUsername}
+                onChange={(e) => setSmsUsername(e.target.value)}
+                placeholder="e.g. bajaj_sms_prod"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Account username used for Basic HTTP Authorization header (<code>Authorization: Basic Base64(User:Key)</code>).
+              </p>
+            </div>
+
+            {/* Default Approved Sender ID */}
+            <div>
+              <label htmlFor="sms_sender_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                Default Sender ID / Header ({envPrefix}_SMS_SENDER_ID)
+              </label>
+              <input
+                id="sms_sender_id"
+                type="text"
+                value={smsSenderId}
+                onChange={(e) => setSmsSenderId(e.target.value)}
+                placeholder="e.g. BAJAJF"
+                maxLength={15}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Registered 6-character telecom sender ID / header approved for this account (max 15 chars).
+              </p>
+            </div>
+
+            {/* DLT Principal Entity ID */}
+            <div>
+              <label htmlFor="sms_entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                DLT Principal Entity ID ({envPrefix}_ENTITY_ID)
+              </label>
+              <input
+                id="sms_entity_id"
+                type="text"
+                value={entityId}
+                onChange={(e) => setEntityId(e.target.value)}
+                placeholder="e.g. 1001492930000010179"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Government DLT Principal Entity ID required by TRAI regulations for commercial SMS transmission.
+              </p>
+            </div>
+
+            {/* AES-256 PII Encryption Key */}
+            <div>
+              <label htmlFor="sms_encryption_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                AES-256 PII Encryption Key ({envPrefix}_SMS_ENCRYPTION_KEY)
+              </label>
+              <input
+                id="sms_encryption_key"
+                type="password"
+                value={smsEncryptionKey}
+                onChange={(e) => setSmsEncryptionKey(e.target.value)}
+                placeholder="Base64-encoded key, e.g. ODAyMjY5MDAwMDAwMDAmbUdQclNhbGU="
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Base64 encryption key used when <code>encrypt_pii=True</code> (encrpt=1) for encrypting mobile numbers and message content.
+              </p>
+            </div>
+
+            {/* DLR Callback Webhook Secret Token */}
+            <div>
+              <label htmlFor="sms_dlr_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                DLR Webhook Authorization Token ({envPrefix}_SMS_DLR_AUTH_TOKEN)
+              </label>
+              <input
+                id="sms_dlr_auth_token"
+                type="password"
+                value={smsDlrAuthToken}
+                onChange={(e) => setSmsDlrAuthToken(e.target.value)}
+                placeholder="Static authorization token for webhook verification..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Static token expected in incoming HTTP <code>Authorization: Basic &lt;token&gt;</code> headers from Karix.
+              </p>
+            </div>
+
+            {/* Webhook Configuration Guide */}
+            <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-xl space-y-2">
+              <div className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                <span>📡</span> Karix Webhook Callback URLs (Configure in Karix Portal)
+              </div>
+              <div className="space-y-1.5 text-[11px] text-purple-800">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 p-2 bg-white/80 rounded-lg border border-purple-100 font-mono">
+                  <span className="text-purple-600 font-semibold">Delivery Reports (DLR):</span>
+                  <span className="select-all text-gray-800">https://&lt;your-domain&gt;/api/sms/dlr</span>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 p-2 bg-white/80 rounded-lg border border-purple-100 font-mono">
+                  <span className="text-purple-600 font-semibold">Click Tracking:</span>
+                  <span className="select-all text-gray-800">https://&lt;your-domain&gt;/api/sms/click</span>
+                </div>
+              </div>
             </div>
           </>
         ) : (
