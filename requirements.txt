@@ -7,3 +7,4 @@ python-dotenv
 Pillow
 pyjwt
 bcrypt
+cryptography>=42.0.0

@@ -7,10 +7,10 @@ async function handle(req: NextRequest, { params }: { params: { path: string[] }
   const url = `${backendUrl}/api/${path}${searchParams ? '?' + searchParams : ''}`;
 
   const headers = new Headers(req.headers);
-  // Point Host to the internal backend service
-  const host = backendUrl.replace(/^https?:\/\//, '');
-  headers.set('host', host);
-
+  // Remove hop-by-hop headers that Node fetch manages automatically
+  headers.delete('host');
+  headers.delete('connection');
+  headers.delete('content-length');
   try {
     // Forward the request body stream directly (duplex: 'half' required for Node fetch streaming)
     const res = await fetch(url, {
@@ -27,7 +27,11 @@ async function handle(req: NextRequest, { params }: { params: { path: string[] }
     });
   } catch (err) {
     console.error(`Proxy error for ${url}:`, err);
-    return NextResponse.json({ detail: String(err) }, { status: 502 });
+    const msg =
+      err instanceof Error && err.message.includes('fetch failed')
+        ? 'Backend service is starting up or temporarily unreachable. Please wait a few seconds and try again.'
+        : String(err);
+    return NextResponse.json({ detail: msg }, { status: 502 });
   }
 }
 
