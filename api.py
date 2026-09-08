@@ -14,7 +14,7 @@ import re
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
-
+from typing import Any
 import uuid
 import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
@@ -70,6 +70,40 @@ from rcs_tracker import load_rcs_log, log_rcs_result
 from runner import get_pending_templates_sla_insights, poll_pending, run
 from submission_client import _GOVERNOR, _STATUS_MAP, delete_template, delete_templates_bulk
 from tracker import load_log, log_result, pending_entries
+
+# SMS pipeline imports
+from sms_client import send_sms, test_sms_connection
+from sms_config import (
+    get_sms_dlt_entity_id,
+    get_sms_dlr_auth_token,
+    get_sms_dlr_gcm_iv,
+    get_sms_dlr_gcm_key,
+    get_sms_sender_id,
+)
+from sms_crypto import decrypt_dlr_gcm
+from sms_loader import (
+    _clean_phone_number,
+    load_sms_from_csv,
+    load_sms_from_excel,
+    load_sms_from_list,
+    preview_sms_rows,
+)
+from sms_models import (
+    SmsClickReport,
+    SmsDlrReport,
+    SmsMessage,
+    SmsSubmissionResult,
+)
+from sms_runner import run_sms_file
+from sms_tracker import (
+    get_sms_stats,
+    load_sms_clicks,
+    load_sms_dlrs,
+    load_sms_submissions,
+    log_sms_click,
+    log_sms_dlr,
+    log_sms_submission,
+)
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -230,7 +264,7 @@ class UserRegister(BaseModel):
 
 class CredentialUpdate(BaseModel):
     account: str = "bajaj"  # e.g. "bajaj", "tata", "tchfl", etc.
-    channel: str = "whatsapp"  # "whatsapp" | "rcs"
+    channel: str = "whatsapp"  # "whatsapp" | "rcs" | "sms"
     waba_auth_token: str | None = None
     waba_id: str | None = None
     bearer_token: str | None = None
@@ -242,7 +276,11 @@ class CredentialUpdate(BaseModel):
     template_namespace_id: str | None = None
     entity_id: str | None = None
     lounge_cookie: str | None = None
-
+    sms_key: str | None = None
+    sms_username: str | None = None
+    sms_encryption_key: str | None = None
+    sms_sender_id: str | None = None
+    sms_dlr_auth_token: str | None = None
 
 # ---------------------------------------------------------------------------
 def _clean_error_message(err) -> str | None:
@@ -301,6 +339,9 @@ def _json_safe(obj):
         return {str(k): _json_safe(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple, set, frozenset)):
         return [_json_safe(v) for v in obj]
+    import dataclasses
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return _json_safe(dataclasses.asdict(obj))
     return str(obj)
 
 
@@ -439,7 +480,29 @@ def get_stats(
     acc = account.lower()
     chan = channel.lower()
     try:
-        if chan == "rcs":
+        if chan == "sms":
+            s_stats = get_sms_stats(client=acc)
+            return {
+                "total": s_stats["total_submissions"],
+                "submitted": s_stats["accepted_submissions"],
+                "failed": s_stats["failed_submissions"],
+                "duplicate": 0,
+                "pending": s_stats["pending"],
+                "approved": s_stats["delivered"],
+                "rejected": s_stats["rejected"] + s_stats["failed"],
+                "delivered": s_stats["delivered"],
+                "clicks": s_stats["clicks"],
+                "delivery_rate": s_stats["delivery_rate"],
+                "error": None,
+                "karix_health": _GOVERNOR.get_health_stats(),
+                "sla_insights": {
+                    "pending_count": s_stats["pending"],
+                    "due_for_poll_count": 0,
+                    "categories": {},
+                    "next_recommended_poll_sec": 120,
+                },
+            }
+        elif chan == "rcs":
             local_entries = load_rcs_log(RCS_LOG_PATH)
             local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
             live_templates = fetch_rcs_templates(client=acc)
@@ -685,6 +748,53 @@ def _merge_wa_templates(acc: str, status: str | None, search: str | None) -> lis
             seen_names.add(le_name)
 
     return _filter_and_sort_templates(merged_entries, status, search)
+def _merge_sms_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
+    local_entries = load_sms_submissions(client=acc)
+    dlrs = load_sms_dlrs(client=acc)
+    dlr_by_ackid = {}
+    for d in dlrs:
+        ack = d.get("ackid")
+        if ack:
+            dlr_by_ackid[str(ack).strip()] = d
+
+    items = []
+    for sub in local_entries:
+        ack = str(sub.get("ackid", "")).strip()
+        dlr_info = dlr_by_ackid.get(ack)
+        if dlr_info:
+            d_flag = str(dlr_info.get("status_flag") or "").lower()
+            d_reason = str(dlr_info.get("reason") or "").lower()
+            if d_flag == "success" or d_reason == "delivered":
+                appr_status = "approved"
+            elif d_flag in ("failed", "rejected") or "fail" in d_reason:
+                appr_status = "rejected"
+            else:
+                appr_status = "pending"
+        else:
+            appr_status = "approved" if sub.get("status_code") == "200" else "rejected"
+
+        t_name = f"{sub.get('sender_id', 'SMS')}_{ack}" if ack and ack != "N/A" else f"SMS_{sub.get('id', '')[:8]}"
+        items.append({
+            "source_ref": t_name,
+            "template_name": t_name,
+            "template_id": sub.get("dlt_template_id") or ack,
+            "template_type": "SMS (Text)",
+            "category": "TRANSACTIONAL",
+            "template_message": sub.get("message_preview") or "",
+            "sender_ids": [sub.get("sender_id")] if sub.get("sender_id") else [],
+            "status": "submitted" if sub.get("status_code") == "200" else "failed",
+            "approval_status": appr_status,
+            "submitted_at": sub.get("submitted_at") or "",
+            "client": sub.get("client") or acc,
+            "channel": "sms",
+            "submitted_by": sub.get("submitted_by"),
+            "source_file": sub.get("source_file"),
+            "dest_count": sub.get("dest_count", 0),
+            "error": sub.get("error"),
+            "live": True,
+            "exists_on_waba": False,
+        })
+    return _filter_and_sort_templates(items, status, search)
 
 
 @app.get("/api/templates")
@@ -699,7 +809,9 @@ def get_templates(
     acc = account.lower()
     chan = channel.lower()
     try:
-        if chan == "rcs":
+        if chan == "sms":
+            entries = _merge_sms_templates(acc, status, search)
+        elif chan == "rcs":
             entries = _merge_rcs_templates(acc, status, search)
         else:
             entries = _merge_wa_templates(acc, status, search)
@@ -855,7 +967,58 @@ async def preview_file(
         tmp.write(await file.read())
         tmp_path = tmp.name
     try:
-        if chan == "rcs":
+        if chan == "sms":
+            if suffix in (".xlsx", ".xls"):
+                sms_msgs = await asyncio.to_thread(load_sms_from_excel, tmp_path, client=account)
+            else:
+                sms_msgs = await asyncio.to_thread(load_sms_from_csv, tmp_path, client=account)
+            if not sms_msgs:
+                log_activity(
+                    user=user,
+                    action="TEMPLATE_PREVIEW",
+                    account=account,
+                    channel="sms",
+                    details={"filename": file.filename or "upload.csv", "count": 0},
+                    status="failed",
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No valid SMS messages found in '{file.filename or 'uploaded file'}'.",
+                )
+            log_activity(
+                user=user,
+                action="TEMPLATE_PREVIEW",
+                account=account,
+                channel="sms",
+                details={
+                    "filename": file.filename or "upload.csv",
+                    "count": len(sms_msgs),
+                },
+                status="success",
+            )
+            previews = preview_sms_rows(sms_msgs, client=account)
+            return [
+                {
+                    "template_name": f"{p['sender_id']}_{idx+1}",
+                    "category": "TRANSACTIONAL",
+                    "language": "en",
+                    "status": "VALID",
+                    "dest_count": p["dest_count"],
+                    "sender_id": p["sender_id"],
+                    "components": [
+                        {
+                            "type": "BODY",
+                            "text": p["message"],
+                        }
+                    ],
+                    "raw_sms": p,
+                    "aspect_ratio_warnings": [],
+                    "grammar_warnings": [],
+                    "compliance_warnings": [],
+                }
+                for idx, p in enumerate(previews)
+            ]
+        elif chan == "rcs":
             if suffix in (".xlsx", ".xls"):
                 submissions = await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=account)
             else:
@@ -1315,6 +1478,38 @@ async def _submit_wa_batch(
         "skipped_duplicates": len(duplicate_entries),
         "results": [_json_safe(e) for e in cleaned_entries],
     }
+async def _submit_sms_batch(
+    tmp_path: str,
+    suffix: str,
+    acc: str,
+    user: str,
+    filename: str,
+    current_user: dict,
+) -> dict:
+    res = await asyncio.to_thread(
+        run_sms_file,
+        tmp_path,
+        client=acc,
+        user=user or current_user.get("name", "Operator"),
+    )
+    is_success = res.status == "accepted"
+    return {
+        "status": "COMPLETED",
+        "job_id": res.id,
+        "results": [
+            {
+                "template_name": f"{res.sender_id}_{res.ackid}" if res.ackid != "N/A" else f"SMS_{res.id[:8]}",
+                "status": "submitted" if is_success else "failed",
+                "approval_status": "approved" if is_success else "rejected",
+                "ackid": res.ackid,
+                "dest_count": res.dest_count,
+                "error": res.error,
+            }
+        ],
+        "total_count": res.dest_count,
+        "submitted_count": res.dest_count if is_success else 0,
+        "failed_count": 0 if is_success else res.dest_count,
+    }
 
 
 @app.post("/api/submit")
@@ -1337,7 +1532,9 @@ async def submit_file(
     acc = account.lower()
     chan = channel.lower()
     try:
-        if chan == "rcs":
+        if chan == "sms":
+            return await _submit_sms_batch(tmp_path, suffix, acc, user, file.filename or "upload.csv", current_user)
+        elif chan == "rcs":
             return await _submit_rcs_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, file.filename or "upload.csv", current_user)
         return await _submit_wa_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, fix_aspect_ratio, fix_grammar, file.filename or "upload.csv", current_user)
     except HTTPException:
@@ -1790,6 +1987,18 @@ def get_credentials(
         or (os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") if acc in TATA_SUB_ACCOUNTS else "")
         or "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
     )
+    sms_key = os.environ.get(f"{prefix}_SMS_KEY") or os.environ.get("KARIX_SMS_KEY") or ""
+    sms_username = os.environ.get(f"{prefix}_SMS_USERNAME") or os.environ.get("KARIX_SMS_USERNAME") or ""
+    sms_encryption_key = os.environ.get(f"{prefix}_SMS_ENCRYPTION_KEY") or os.environ.get("KARIX_SMS_ENCRYPTION_KEY") or ""
+    sms_sender_id = os.environ.get(f"{prefix}_SMS_SENDER_ID") or ("BAJAJF" if is_bajaj else "TATACP")
+    sms_dlr_auth_token = os.environ.get(f"{prefix}_SMS_DLR_AUTH_TOKEN") or os.environ.get("KARIX_SMS_DLR_AUTH_TOKEN") or ""
+
+    if chan == "sms":
+        is_configured = bool(sms_key or sms_username)
+    elif chan == "whatsapp":
+        is_configured = bool(waba_id and waba_auth_token)
+    else:
+        is_configured = bool(entity_id)
 
     return {
         "account": acc,
@@ -1804,7 +2013,12 @@ def get_credentials(
         "template_namespace_id": template_namespace_id or "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5",
         "entity_id": entity_id or "",
         "lounge_cookie": lounge_cookie or "",
-        "is_configured": bool(waba_id and waba_auth_token) if chan == "whatsapp" else bool(entity_id),
+        "sms_key": sms_key or "",
+        "sms_username": sms_username or "",
+        "sms_encryption_key": sms_encryption_key or "",
+        "sms_sender_id": sms_sender_id or "",
+        "sms_dlr_auth_token": sms_dlr_auth_token or "",
+        "is_configured": is_configured,
     }
 
 
@@ -1828,6 +2042,22 @@ def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata:
             mapping[key] = v
             os.environ[key] = v
     return mapping
+def _build_sms_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict:
+    mapping = {}
+    fields = [
+        (creds.sms_key, f"{prefix}_SMS_KEY"),
+        (creds.sms_username, f"{prefix}_SMS_USERNAME"),
+        (creds.sms_encryption_key, f"{prefix}_SMS_ENCRYPTION_KEY"),
+        (creds.sms_sender_id, f"{prefix}_SMS_SENDER_ID"),
+        (creds.sms_dlr_auth_token, f"{prefix}_SMS_DLR_AUTH_TOKEN"),
+    ]
+    for val, key in fields:
+        if val is not None and val.strip():
+            v = val.strip()
+            mapping[key] = v
+            os.environ[key] = v
+    return mapping
+
 
 
 @app.put("/api/credentials")
@@ -1840,7 +2070,12 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
 
-    mapping = _build_wa_credentials_mapping(creds, prefix, is_tata, is_bajaj) if chan == "whatsapp" else {}
+    if chan == "sms":
+        mapping = _build_sms_credentials_mapping(creds, prefix)
+    elif chan == "whatsapp":
+        mapping = _build_wa_credentials_mapping(creds, prefix, is_tata, is_bajaj)
+    else:
+        mapping = {}
     if not mapping:
         return {"ok": True}
     # 1. Update .env file
@@ -2046,6 +2281,13 @@ def _test_whatsapp_channel(
         status="success" if is_ok else "failed",
     )
     return {"ok": is_ok, "message": " | ".join(results)}
+def _test_sms_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -> dict:
+    conn_info = test_sms_connection(client=acc)
+    return {
+        "ok": conn_info["configured"],
+        "message": conn_info["message"],
+        "details": conn_info,
+    }
 
 
 @app.post("/api/test-credentials")
@@ -2087,14 +2329,19 @@ def test_credentials(
         if creds.lounge_cookie and creds.lounge_cookie.strip():
             os.environ[l_ck_key] = creds.lounge_cookie.strip()
 
-    if chan == "rcs":
+    if chan == "sms":
+        return _test_sms_channel(acc, acc_name, creds)
+    elif chan == "rcs":
         return _test_rcs_channel(acc, acc_name, creds)
     return _test_whatsapp_channel(acc, acc_name, prefix, is_tata, is_bajaj, creds, w_id_key, w_tok_key)
 
 @app.get("/api/sample-csv")
 def get_sample_csv(channel: str = Query("whatsapp")):
     chan = channel.lower()
-    if chan == "rcs":
+    if chan == "sms":
+        sample_path = Path("sms_sample.csv")
+        filename = "sms_templates_sample.csv"
+    elif chan == "rcs":
         sample_path = Path("rcs_templates_sample.csv")
         filename = "rcs_templates_sample.csv"
     else:
@@ -2218,3 +2465,368 @@ def agent_chat_endpoint(req: AgentChatRequest, current_user: dict = Depends(get_
         user_profile=current_user,
     )
     return _json_safe(res)
+
+
+# ---------------------------------------------------------------------------
+# Dedicated SMS Endpoints (Send, Preview, Upload, DLR Webhook, Click Webhook)
+# ---------------------------------------------------------------------------
+
+class SmsSendApiRequest(BaseModel):
+    dest: list[str] | str | None = None
+    text: str | None = None
+    send: str | None = None
+    type: str = "PM"
+    dlt_entity_id: str | None = None
+    dlt_template_id: str | None = None
+    cust_ref: str | None = None
+    tag: str | None = None
+    tag1: str | None = None
+    tag2: str | None = None
+    tag3: str | None = None
+    tag4: str | None = None
+    tag5: str | None = None
+    messages: list[dict[str, Any]] | None = None
+    account: str = "bajaj"
+    user: str = "Operator"
+    encrypt_pii: bool = False
+    schedule_at: str | None = None
+
+
+@app.post("/api/sms/send")
+def send_sms_api_endpoint(
+    req: SmsSendApiRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Send single or batch SMS messages directly via JSON.
+    Supports plain or AES-256 PII encrypted payloads, DLT template mapping, and scheduling.
+    """
+    require_tenant_access(req.account, current_user)
+    acc = req.account.lower().strip()
+
+    if req.messages:
+        messages = load_sms_from_list(req.messages, client=acc)
+    elif req.dest and req.text:
+        dests = _clean_phone_number(req.dest)
+        messages = [
+            SmsMessage(
+                dest=dests,
+                text=req.text,
+                send=req.send or get_sms_sender_id(acc),
+                type=req.type,
+                dlt_entity_id=req.dlt_entity_id or get_sms_dlt_entity_id(acc),
+                dlt_template_id=req.dlt_template_id,
+                cust_ref=req.cust_ref,
+                tag=req.tag,
+                tag1=req.tag1,
+                tag2=req.tag2,
+                tag3=req.tag3,
+                tag4=req.tag4,
+                tag5=req.tag5,
+            )
+        ]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Must provide either (dest and text) for single SMS or messages array for batch SMS.",
+        )
+
+    resp = send_sms(
+        messages=messages,
+        client=acc,
+        encrypt_pii=req.encrypt_pii,
+        schedule_at=req.schedule_at,
+    )
+
+    all_dests = []
+    for m in messages:
+        all_dests.extend(m.dest)
+
+    preview_text = messages[0].text if messages else ""
+    if len(preview_text) > 100:
+        preview_text = preview_text[:97] + "..."
+
+    status_str = "accepted" if resp.success else "failed"
+    sub_res = SmsSubmissionResult(
+        client=acc,
+        channel="sms",
+        ackid=resp.ackid,
+        status=status_str,
+        status_code=resp.status_code,
+        status_desc=resp.status_desc,
+        dest_count=len(all_dests),
+        recipients=all_dests[:20],
+        sender_id=messages[0].send if messages else "",
+        message_preview=preview_text,
+        dlt_entity_id=messages[0].dlt_entity_id if messages else None,
+        dlt_template_id=messages[0].dlt_template_id if messages else None,
+        submitted_by=req.user or current_user.get("name", "Operator"),
+        encrypted_pii=req.encrypt_pii,
+        scheduled_at=req.schedule_at,
+        error=resp.error_message,
+        raw_response=resp.raw,
+    )
+    log_sms_submission(sub_res)
+
+    try:
+        log_activity(
+            user=req.user or current_user.get("name", "Operator"),
+            action="SEND_SMS",
+            account=acc,
+            channel="sms",
+            details={
+                "ackid": resp.ackid,
+                "status_code": resp.status_code,
+                "recipient_count": len(all_dests),
+                "sender_id": sub_res.sender_id,
+                "encrypted": req.encrypt_pii,
+            },
+            status=status_str,
+        )
+    except Exception as exc:
+        logger.warning("Failed to record SMS activity: %s", exc)
+
+    return _json_safe(resp)
+
+
+@app.post("/api/sms/preview")
+async def preview_sms_file_endpoint(
+    file: UploadFile = File(...),
+    account: str = Query("bajaj"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Preview SMS messages from uploaded CSV or Excel file."""
+    require_tenant_access(account, current_user)
+    suffix = Path(file.filename or "sms.csv").suffix.lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        if suffix in (".xlsx", ".xls"):
+            messages = await asyncio.to_thread(load_sms_from_excel, tmp_path, client=account)
+        else:
+            messages = await asyncio.to_thread(load_sms_from_csv, tmp_path, client=account)
+
+        previews = preview_sms_rows(messages, client=account)
+        return {
+            "filename": file.filename,
+            "total_messages": len(messages),
+            "total_recipients": sum(len(m.dest) for m in messages),
+            "previews": previews,
+        }
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+@app.post("/api/sms/upload")
+async def upload_and_send_sms_file_endpoint(
+    file: UploadFile = File(...),
+    account: str = Query("bajaj"),
+    user: str = Query("Anonymous Operator"),
+    encrypt_pii: bool = Query(False),
+    schedule_at: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Upload CSV or Excel file and send all contained SMS messages via Karix."""
+    require_tenant_access(account, current_user)
+    suffix = Path(file.filename or "sms.csv").suffix.lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        res = await asyncio.to_thread(
+            run_sms_file,
+            tmp_path,
+            client=account,
+            user=user or current_user.get("name", "Operator"),
+            encrypt_pii=encrypt_pii,
+            schedule_at=schedule_at,
+        )
+        return _json_safe(res)
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+@app.post("/api/sms/dlr")
+async def receive_sms_dlr_webhook(
+    request: Request,
+    authorization: str | None = Header(None),
+):
+    """
+    Karix SMS Delivery Report (DLR) Forwarding via HTTPs Callback API.
+
+    Supports both:
+    - Plain HTTPs Callback API (JSON Format)
+    - Encrypted HTTPs Callback API (AES GCM Mode)
+    """
+    body_bytes = await request.body()
+    if not body_bytes:
+        raise HTTPException(status_code=400, detail="Empty DLR request body")
+
+    # 1. Parse JSON payload
+    try:
+        data = json.loads(body_bytes.decode("utf-8"))
+    except Exception as exc:
+        logger.warning("Invalid JSON received in SMS DLR: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
+
+    # 2. Check and decrypt if AES-GCM encrypted
+    if isinstance(data, dict) and (data.get("aes_mode") == "GCM" or "payload" in data):
+        gcm_key = data.get("key") or get_sms_dlr_gcm_key("bajaj")
+        gcm_iv = data.get("iv_key") or get_sms_dlr_gcm_iv("bajaj")
+        payload_b64 = data.get("payload") or ""
+        if payload_b64 and gcm_key and gcm_iv:
+            try:
+                decrypted_text = decrypt_dlr_gcm(payload_b64, gcm_key, gcm_iv)
+                data = json.loads(decrypted_text)
+            except Exception as exc:
+                logger.error("Failed to decrypt GCM DLR payload: %s", exc)
+                raise HTTPException(status_code=400, detail=f"Failed to decrypt GCM payload: {exc}") from exc
+
+    # 3. Determine client from account code (acode)
+    acode = str(data.get("acode") or data.get("uname") or "").strip()
+    client_name = "tata" if "tata" in acode.lower() else "bajaj"
+
+    # 4. Optional authorization token check
+    expected_token = get_sms_dlr_auth_token(client_name)
+    if expected_token and authorization:
+        clean_auth = authorization.replace("Basic ", "").strip()
+        if clean_auth != expected_token and authorization.strip() != expected_token:
+            logger.warning("DLR token mismatch for client '%s'", client_name)
+            raise HTTPException(status_code=401, detail="Unauthorized DLR callback")
+
+    # 5. Extract DLR parameters
+    report = SmsDlrReport(
+        acode=acode or None,
+        pcode=str(data.get("pcode") or "") or None,
+        ackid=str(data.get("ackid") or data.get("fileid") or "") or None,
+        mid=str(data.get("mid") or "") or None,
+        dest=str(data.get("dest") or "") or None,
+        send=str(data.get("send") or "") or None,
+        stime=str(data.get("stime") or "") or None,
+        dtime=str(data.get("dtime") or "") or None,
+        status=str(data.get("status") or "") or None,
+        status_flag=str(data.get("Statusflag") or data.get("statusflag") or "") or None,
+        reason=str(data.get("reason") or "") or None,
+        type=str(data.get("type") or "") or None,
+        msg=str(data.get("msg") or "") or None,
+        split_msg_no=str(data.get("Splitmsgno") or "") or None,
+        split_msg_parts=str(data.get("Splitmsgpatrs") or "") or None,
+        operator=str(data.get("operator") or "") or None,
+        circle=str(data.get("circle") or "") or None,
+        cust_mid=str(data.get("cust_mid") or "") or None,
+        tags={k: v for k, v in data.items() if k.startswith("tag") and v},
+        raw_payload=data,
+        client=client_name,
+    )
+    log_sms_dlr(report)
+    logger.info(
+        "Received SMS DLR for ackid=%s, mid=%s, dest=%s: %s (%s)",
+        report.ackid,
+        report.mid,
+        report.dest,
+        report.status_flag,
+        report.reason,
+    )
+
+    return {
+        "status": "OK",
+        "ackid": report.ackid,
+        "mid": report.mid,
+        "status_flag": report.status_flag,
+        "reason": report.reason,
+    }
+
+
+@app.post("/api/sms/click")
+async def receive_sms_click_webhook(request: Request):
+    """
+    Karix SMS Click Report Webhook Callback.
+    Logs URL link clicks from shortened URLs in SMS messages.
+    """
+    try:
+        data = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}") from exc
+
+    sender_id = str(data.get("senderid") or "")
+    client_name = "tata" if "tata" in sender_id.lower() else "bajaj"
+
+    report = SmsClickReport(
+        mobile_number=str(data.get("mobile_number") or ""),
+        mid=str(data.get("mid") or "") or None,
+        clicked_date=str(data.get("clicked_date") or "") or None,
+        clicked_time=str(data.get("clicked_time") or "") or None,
+        shorturl=str(data.get("shorturl") or "") or None,
+        longurl=str(data.get("longurl") or "") or None,
+        device_type=str(data.get("device_type") or "") or None,
+        operating_system=str(data.get("operating_system") or "") or None,
+        browser_name=str(data.get("browser_name") or "") or None,
+        browser_version=str(data.get("browser_version") or "") or None,
+        platform_version=str(data.get("platform_version") or "") or None,
+        campaign_name=str(data.get("campaign_name") or "") or None,
+        campaign_type=str(data.get("campaign_type") or "") or None,
+        senderid=sender_id or None,
+        operator=str(data.get("operator") or "") or None,
+        circle=str(data.get("circle") or "") or None,
+        raw_payload=data,
+        client=client_name,
+    )
+    log_sms_click(report)
+    logger.info("Recorded SMS click event: mid=%s, phone=%s, url=%s", report.mid, report.mobile_number, report.shorturl)
+
+    return {
+        "status": "OK",
+        "mobile_number": report.mobile_number,
+        "mid": report.mid,
+    }
+
+
+@app.get("/api/sms/logs")
+def get_sms_logs_endpoint(
+    account: str = Query("all"),
+    type: str = Query("all"),
+    limit: int = Query(100),
+    current_user: dict = Depends(get_current_user),
+):
+    """Query logged SMS submissions, delivery reports (DLR), and click events."""
+    require_tenant_access(account, current_user)
+    acc = account.lower().strip()
+    t = type.lower().strip()
+
+    submissions = load_sms_submissions(client=acc)[:limit] if t in ("all", "submissions") else []
+    dlrs = load_sms_dlrs(client=acc)[:limit] if t in ("all", "dlr") else []
+    clicks = load_sms_clicks(client=acc)[:limit] if t in ("all", "clicks") else []
+
+    return {
+        "account": acc,
+        "submissions": [_json_safe(s) for s in submissions],
+        "dlrs": [_json_safe(d) for d in dlrs],
+        "clicks": [_json_safe(c) for c in clicks],
+    }
+
+
+@app.get("/api/sms/stats")
+def get_sms_stats_endpoint(
+    account: str = Query("all"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get consolidated SMS delivery and click rate metrics."""
+    require_tenant_access(account, current_user)
+    acc = account.lower().strip()
+    stats = get_sms_stats(client=acc)
+    return _json_safe(stats)
+
+
+@app.post("/api/sms/test")
+def test_sms_endpoint(
+    account: str = Query("bajaj"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Verify credentials and test reachability of the SMS integration."""
+    require_tenant_access(account, current_user)
+    return _json_safe(test_sms_connection(client=account))

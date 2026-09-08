@@ -1,0 +1,6 @@
+dest,text,send,type,dlt_entity_id,dlt_template_id,cust_ref,tag1
+919876543210,"Your OTP for Bajaj Finserv login is 849201. Valid for 10 minutes. Do not share this with anyone - BAJAJ",BAJAJF,PM,1001492930000010179,1107161951486743588,REF1001,AUTHENTICATION
+919876543211,"Dear Customer, your EMI of Rs. 4,500 for Loan Account ending 8921 is due on 10-Oct-2026. Pay now: https://bjfv.in/p/8921 - BAJAJ",BAJAJF,PM,1001492930000010179,1107161951486743589,REF1002,COLLECTIONS
+919876543212,"Congratulations! You are eligible for an instant Personal Loan up to Rs. 5 Lakhs with minimal documentation. Apply now: https://bjfv.in/l/500k - BAJAJ",BAJAJF,PM,1001492930000010179,1107161951486743590,REF1003,PROMOTIONAL
+919876543213,"Dear Customer, your transaction of Rs. 1,250.00 on card ending 4321 was successful on 08-Sep-2026. - BAJAJ",BAJAJF,PM,1001492930000010179,1107161951486743591,REF1004,TRANSACTIONAL
+919876543214,"Hi, thank you for contacting Bajaj Customer Support. Your query #SR89234 has been resolved. Rate us: https://bjfv.in/f/89234 - BAJAJ",BAJAJF,PM,1001492930000010179,1107161951486743592,REF1005,SERVICE

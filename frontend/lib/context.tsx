@@ -129,7 +129,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         const savedChannel = localStorage.getItem('karix_channel') as Channel;
-        if (savedChannel === 'whatsapp' || savedChannel === 'rcs') {
+        if (savedChannel === 'whatsapp' || savedChannel === 'rcs' || savedChannel === 'sms') {
           setChannelState(savedChannel);
         }
 

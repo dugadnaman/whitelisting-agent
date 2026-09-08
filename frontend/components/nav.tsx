@@ -134,6 +134,7 @@ export default function Nav() {
             >
               <option value="whatsapp">WhatsApp</option>
               <option value="rcs">RCS (DLT)</option>
+              <option value="sms">SMS (Karix)</option>
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
               <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -150,15 +151,17 @@ export default function Nav() {
             className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
               channel === 'whatsapp'
                 ? 'bg-emerald-100 text-emerald-800'
-                : 'bg-blue-100 text-blue-800'
+                : channel === 'rcs'
+                ? 'bg-blue-100 text-blue-800'
+                : 'bg-purple-100 text-purple-800'
             }`}
           >
             <span
               className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                channel === 'whatsapp' ? 'bg-emerald-500' : 'bg-blue-500'
+                channel === 'whatsapp' ? 'bg-emerald-500' : channel === 'rcs' ? 'bg-blue-500' : 'bg-purple-500'
               }`}
             />
-            {getAccountLabel(account)} &bull; {channel === 'whatsapp' ? 'WhatsApp' : 'RCS'}
+            {getAccountLabel(account)} &bull; {channel === 'whatsapp' ? 'WhatsApp' : channel === 'rcs' ? 'RCS' : 'SMS'}
           </span>
         </div>
       </div>

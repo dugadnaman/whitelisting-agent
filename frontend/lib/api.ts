@@ -1,5 +1,5 @@
 export type Account = string;
-export type Channel = "whatsapp" | "rcs";
+export type Channel = "whatsapp" | "rcs" | "sms";
 
 export type AccountItem = {
   id: string;
@@ -454,6 +454,11 @@ export async function fetchCredentials(
   template_namespace_id?: string;
   entity_id: string;
   lounge_cookie: string;
+  sms_key?: string;
+  sms_username?: string;
+  sms_encryption_key?: string;
+  sms_sender_id?: string;
+  sms_dlr_auth_token?: string;
   is_configured: boolean;
 }> {
   const qs = new URLSearchParams({ account, channel }).toString();
@@ -476,6 +481,11 @@ export async function updateCredentials(creds: {
   template_namespace_id?: string;
   entity_id?: string;
   lounge_cookie?: string;
+  sms_key?: string;
+  sms_username?: string;
+  sms_encryption_key?: string;
+  sms_sender_id?: string;
+  sms_dlr_auth_token?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetchWithRetry(getApiUrl(`/api/credentials`), {
     method: "PUT",
@@ -500,7 +510,12 @@ export async function testCredentials(
     user?: string;
     user_name?: string;
     entity_id?: string;
-    lounge_cookie?: string;
+  lounge_cookie?: string;
+  sms_key?: string;
+  sms_username?: string;
+  sms_encryption_key?: string;
+  sms_sender_id?: string;
+  sms_dlr_auth_token?: string;
   }
 ): Promise<{
   ok: boolean;
@@ -515,6 +530,61 @@ export async function testCredentials(
     },
     body: JSON.stringify({ account, channel, ...creds }),
   });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function sendSms(payload: {
+  dest?: string[] | string;
+  text?: string;
+  send?: string;
+  type?: string;
+  dlt_entity_id?: string;
+  dlt_template_id?: string;
+  messages?: Array<Record<string, unknown>>;
+  account?: Account;
+  user?: string;
+  encrypt_pii?: boolean;
+  schedule_at?: string;
+}): Promise<{
+  ackid: string;
+  time: string;
+  status_code: string;
+  status_desc: string;
+  success: boolean;
+  raw: Record<string, unknown>;
+}> {
+  const res = await fetchWithRetry(getApiUrl("/api/sms/send"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchSmsStats(account: Account = "all"): Promise<Record<string, unknown>> {
+  const qs = new URLSearchParams({ account }).toString();
+  const res = await fetchWithRetry(getApiUrl(`/api/sms/stats?${qs}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchSmsLogs(params?: {
+  account?: Account;
+  type?: "submissions" | "dlr" | "clicks" | "all";
+  limit?: number;
+}): Promise<{
+  account: string;
+  submissions: Array<Record<string, unknown>>;
+  dlrs: Array<Record<string, unknown>>;
+  clicks: Array<Record<string, unknown>>;
+}> {
+  const qs = new URLSearchParams();
+  if (params?.account) qs.set("account", params.account);
+  if (params?.type) qs.set("type", params.type);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const res = await fetchWithRetry(getApiUrl(`/api/sms/logs?${qs.toString()}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
