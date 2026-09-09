@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 from typing import Any
 LEARNED_PATTERNS_FILE = "learned_patterns.json"
+logger = logging.getLogger(__name__)
 
 try:
     import fcntl

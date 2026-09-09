@@ -137,5 +137,43 @@
     "preventative_action": "Grammar and compliance engine auto-pads surrounding boilerplate context words to ensure >= 2.5:1 ratio.",
     "auto_fixable": true,
     "confidence": 1.0
+  },
+  {
+    "id": "pattern_attributeerror___nonetype__obj",
+    "name": "Error: AttributeError: 'NoneType' object has no...",
+    "signature": "AttributeError:\\ 'NoneType'\\ object\\ has\\ no",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-09T11:48:16.498577+00:00",
+    "last_seen": "2026-09-09T11:48:16.498577+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "AttributeError: 'NoneType' object has no attribute 'lower' in record_task_result",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "pattern_attributeerror__nonetype_objec",
+    "name": "Error: AttributeError: NoneType object has no a...",
+    "signature": "AttributeError:\\ NoneType\\ object\\ has\\ no\\ a",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-09T11:48:43.831566+00:00",
+    "last_seen": "2026-09-09T11:48:43.831566+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "AttributeError: NoneType object has no attribute lower in record_task_result",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
   }
 ]

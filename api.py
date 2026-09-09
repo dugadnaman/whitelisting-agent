@@ -1369,7 +1369,7 @@ async def _submit_rcs_batch(
 
         for idx, s in to_submit:
             s_key = str(s.source_ref or s.template_name or "").strip().lower()
-            matched_pool = by_ref.get(s_key) or by_ref.get(s.template_name.strip().lower())
+            matched_pool = by_ref.get(s_key) or by_ref.get(str(s.template_name or "").strip().lower())
             if matched_pool:
                 res_item = matched_pool.pop(0)
                 results_by_index[idx] = res_item
@@ -1377,7 +1377,7 @@ async def _submit_rcs_batch(
                 record_task_result(
                     task_id=tid,
                     status=res_item.get("status", "FAILED"),
-                    approval_status=res_item.get("approval_status", "unknown"),
+                    approval_status=res_item.get("approval_status") or "pending",
                     provider_ref_id=res_item.get("provider_ref_id") or res_item.get("template_id"),
                     error=res_item.get("error"),
                 )
@@ -1560,7 +1560,7 @@ async def _submit_wa_batch(
 
         for idx, s in to_submit:
             s_key = str(s.source_ref or s.template_name or "").strip().lower()
-            matched_pool = by_ref.get(s_key) or by_ref.get(s.template_name.strip().lower())
+            matched_pool = by_ref.get(s_key) or by_ref.get(str(s.template_name or "").strip().lower())
             if matched_pool:
                 res_item = matched_pool.pop(0)
                 results_by_index[idx] = res_item
@@ -1568,7 +1568,7 @@ async def _submit_wa_batch(
                 record_task_result(
                     task_id=tid,
                     status=res_item.get("status", "FAILED"),
-                    approval_status=res_item.get("approval_status", "unknown"),
+                    approval_status=res_item.get("approval_status") or "pending",
                     provider_ref_id=res_item.get("provider_ref_id"),
                     error=res_item.get("error"),
                     approval_reason=res_item.get("approval_reason"),

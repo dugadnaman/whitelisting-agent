@@ -21,8 +21,36 @@ from error_tracker import get_error_summary, load_errors
 def _fmt_ts(iso_str: str) -> str:
     if not iso_str:
         return ""
-    return iso_str.replace("T", " ")[:19]
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        local_dt = dt.astimezone()
+        tz_name = local_dt.tzname() or "Local"
+        return f"{local_dt.strftime('%H:%M:%S')} {tz_name} ({dt.strftime('%H:%M')} UTC)"
+    except Exception:
+        return iso_str.replace("T", " ")[:19]
 
+
+def sync_remote_errors(server_url: str = "https://whitelisting-agent.onrender.com"):
+    """Silently pull newly logged errors from production server into local error_log.jsonl."""
+    try:
+        import urllib.request
+        api_endpoint = f"{server_url.rstrip('/')}/api/system/errors?limit=50"
+        req = urllib.request.Request(api_endpoint, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            remote_errs = json.loads(resp.read().decode("utf-8")).get("errors", [])
+        if not remote_errs:
+            return
+        from error_tracker import ERROR_LOG_PATH, load_errors
+        local_errs = load_errors(limit=5000)
+        local_ids = {e.get("id") for e in local_errs}
+        new_ones = [e for e in remote_errs if e.get("id") not in local_ids]
+        if new_ones:
+            with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+                for e in reversed(new_ones):
+                    f.write(json.dumps(e) + "\n")
+    except Exception:
+        pass
 
 def show_summary():
     s = get_error_summary()
@@ -111,13 +139,12 @@ def show_error_list(account=None, channel=None, category=None, severity=None, li
         print("✅ No errors found matching criteria.")
         return
 
-    print("\n" + "=" * 90)
+    print("\n" + "=" * 105)
     print(f"🚨 CENTRAL ERROR LOG (Showing {len(errs)} most recent incidents)")
-    print("=" * 90)
-    header = f"{'ID':14} {'TIMESTAMP':19} {'CHANNEL':8} {'ACCOUNT':12} {'TYPE':20} {'MESSAGE'}"
+    print("=" * 105)
+    header = f"{'ID':14} {'TIMESTAMP (LOCAL / UTC)':28} {'CHANNEL':8} {'ACCOUNT':12} {'TYPE':20} {'MESSAGE'}"
     print(header)
-    print("-" * 90)
-
+    print("-" * 105)
     for e in errs:
         eid = e.get("id", "")
         ts = _fmt_ts(e.get("timestamp", ""))
@@ -127,9 +154,9 @@ def show_error_list(account=None, channel=None, category=None, severity=None, li
         msg = e.get("error_message", "")
         if len(msg) > 40:
             msg = msg[:37] + "..."
-        print(f"{eid:14} {ts:19} {chan:8} {acc:12} {etype:20} {msg}")
+        print(f"{eid:14} {ts:28} {chan:8} {acc:12} {etype:20} {msg}")
 
-    print("-" * 90)
+    print("-" * 105)
     print("Tip: Run 'python view_errors.py --id <ID>' to see the full stack trace and context.\n")
 
 
@@ -144,7 +171,7 @@ def main():
     parser.add_argument("--summary", action="store_true", help="Show error summary breakdown")
     parser.add_argument("--learned", action="store_true", help="View synthesized learned error patterns and preventative rules")
     args = parser.parse_args()
-
+    sync_remote_errors()
     if args.learned:
         show_learned_patterns()
     elif args.summary:

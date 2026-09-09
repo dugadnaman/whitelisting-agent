@@ -224,11 +224,11 @@ def record_task_result(
     Record task outcome, atomically incrementing parent job counters and resolving job settlement.
     """
     now = datetime.now(UTC).isoformat()
-    norm_status = status.upper()
+    norm_status = str(status or "FAILED").upper()
     if norm_status not in ("PENDING", "SUBMITTED", "DUPLICATE", "FAILED"):
         norm_status = "FAILED"
 
-    norm_approval = approval_status.lower()
+    norm_approval = str(approval_status or "pending").lower()
     if norm_approval not in ("pending", "approved", "rejected", "unknown"):
         norm_approval = "unknown"
 
