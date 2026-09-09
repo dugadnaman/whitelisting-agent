@@ -7,6 +7,7 @@ POST https://rcsgui.karix.solutions/api/rcstemplate/save
 
 import json
 import logging
+import os
 import re
 import time
 
@@ -243,13 +244,13 @@ def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: s
             c_entry["fileName"] = card.get("fileName") or card.get("file_name")
         elif card.get("mediaUrl") or card.get("media_url"):
             m_url = str(card.get("mediaUrl") or card.get("media_url"))
-            if "tata-capital-logo.png" in m_url:
+            if "tata-capital-logo.png" in m_url or "default_rcs_3x4.png" in m_url:
                 public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
-                m_url = f"{public_base}/api/media/default_rcs_3x4.png"
+                m_url = f"{public_base}/api/media/default_rcs_16x9.png"
             c_entry["mediaUrl"] = m_url
         else:
             public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
-            c_entry["mediaUrl"] = f"{public_base}/api/media/default_rcs_3x4.png"
+            c_entry["mediaUrl"] = f"{public_base}/api/media/default_rcs_16x9.png"
         cards_list.append(c_entry)
 
     if len(cards_list) < 2:
@@ -285,12 +286,10 @@ def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: s
     elif payload.media_url:
         m_url = str(payload.media_url)
         if "tata-capital-logo.png" in m_url:
-            public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
-            m_url = f"{public_base}/api/media/default_rcs_2x1.png"
+            m_url = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
         card_entry["mediaUrl"] = m_url
     else:
-        public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
-        card_entry["mediaUrl"] = f"{public_base}/api/media/default_rcs_2x1.png"
+        card_entry["mediaUrl"] = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
 
     vi_template = {
         "name": safe_name, "type": "richcard", "botId": bot_id,

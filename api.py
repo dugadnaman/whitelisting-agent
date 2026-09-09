@@ -155,6 +155,7 @@ def _init_media_cache():
             ("default_rcs_3x1.png", (1440, 480)),
             ("default_rcs_2x1.png", (1440, 720)),
             ("default_rcs_3x4.png", (768, 1024)),
+            ("default_rcs_16x9.png", (1280, 720)),
         ):
             img_p = MEDIA_CACHE_DIR / fname
             if not img_p.exists():

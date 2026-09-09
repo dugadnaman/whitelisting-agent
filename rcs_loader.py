@@ -316,7 +316,7 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
         or os.environ.get("PUBLIC_APP_URL")
         or "https://whitelisting-agent.onrender.com"
     )
-    fallback_card_img = f"{public_base}/api/media/default_rcs_3x4.png"
+    fallback_card_img = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop"
 
     cards = []
     for i in range(max_cards):
@@ -415,7 +415,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     elif height_key == "SHORT":
         _fallback_media = f"{public_base}/api/media/default_rcs_3x1.png"
     else:
-        _fallback_media = f"{public_base}/api/media/default_rcs_2x1.png"
+        _fallback_media = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
 
     if is_carousel:
         template_type = "carousel"
