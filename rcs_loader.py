@@ -322,15 +322,7 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
     for i in range(max_cards):
         c_title = titles[i] if i < len(titles) else (f"Card {i + 1}" if titles else "")
         c_desc = descriptions[i] if i < len(descriptions) else (descriptions[0] if descriptions else "")
-        c_url = (
-            media_urls[i]
-            if i < len(media_urls)
-            else (
-                media_urls[0]
-                if media_urls
-                else fallback_card_img
-            )
-        )
+        c_url = media_urls[i] if i < len(media_urls) else ""
 
         card_suggs = []
         if i < len(button_texts):
@@ -428,8 +420,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     ):
         template_type = "richcard"
         carousel_cards = []
-        if not media_url:
-            media_url = _fallback_media
+        # Leave media_url as None if not in cell text, so pasted image in Excel is bound
     else:
         template_type = "text"
         carousel_cards = []
@@ -738,6 +729,8 @@ def _upload_and_bind_rcs_images(
         excel_row = getattr(sub, "_excel_row", None)
         row_images = spatial_images.get(excel_row, []) if (spatial_images and excel_row) else []
 
+        safe_tname = re.sub(r"[^a-zA-Z0-9_]", "_", sub.template_name or f"tpl_{excel_row or 1}")[:25]
+
         if sub.template_type == "richcard":
             target_img = row_images[0] if row_images else (raw_media[media_cursor] if media_cursor < len(raw_media) else None)
             if not row_images and target_img:
@@ -745,36 +738,43 @@ def _upload_and_bind_rcs_images(
             if target_img:
                 try:
                     fname, media_data = target_img
-                    if not upload_now:
-                        sub.image_bytes = media_data
-                        sub.file_name = fname
-                    else:
-                        ext = Path(fname).suffix.lower()
-                        fitted = (
-                            media_data
-                            if ext in ACCEPTED_VIDEO_FORMATS
-                            else _fit_rcs_image(media_data, _spec_for_richcard(sub), crop_to_aspect=fix_aspect_ratio)
-                        )
-                        k_name = upload_rcs_media(fitted, filename=fname, client=client)
-                        sub.file_name = k_name
-                        logger.info("Bound rich card media %s -> %s", fname, k_name)
-                except Exception as ex:
-                    logger.warning("Karix portal mediaUpload failed (%s); fallback to public app media URL: %s", ex, fname)
-                    cache_p = media_cache_dir / fname
+                    unique_fn = f"{client}_{safe_tname}_rich.png"
+                    ext = Path(fname).suffix.lower()
+                    fitted = (
+                        media_data
+                        if ext in ACCEPTED_VIDEO_FORMATS
+                        else _fit_rcs_image(media_data, _spec_for_richcard(sub), crop_to_aspect=fix_aspect_ratio)
+                    )
+                    # Cache the user's actual image so our public server can serve it to Karix
+                    cache_p = media_cache_dir / unique_fn
                     cache_p.write_bytes(fitted)
-                    sub.media_url = f"{public_base}/api/media/{fname}"
-                    sub.file_name = None
+                    sub.media_url = f"{public_base}/api/media/{unique_fn}"
+
+                    if not upload_now:
+                        sub.image_bytes = fitted
+                        sub.file_name = unique_fn
+                    else:
+                        try:
+                            k_name = upload_rcs_media(fitted, filename=unique_fn, client=client)
+                            sub.file_name = k_name
+                            logger.info("Bound user pasted rich card media %s -> Karix %s", unique_fn, k_name)
+                        except Exception as up_ex:
+                            logger.info("Portal mediaUpload unavailable (%s); serving user image via %s", up_ex, sub.media_url)
+                            sub.file_name = None
+                except Exception as ex:
+                    logger.warning("Failed to process rich card media: %s", ex)
+            elif not sub.media_url:
+                sub.media_url = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
 
         elif sub.template_type == "carousel" and sub.carousel_cards:
             spec = _spec_for_carousel(sub)
             for c_idx, card in enumerate(sub.carousel_cards):
                 existing_url = card.get("mediaUrl") or ""
-                if existing_url and not existing_url.endswith("tata-capital-logo.png"):
-                    continue
 
+                # Find the user's image for this card
                 if c_idx < len(row_images):
                     target_img = row_images[c_idx]
-                elif media_cursor < len(raw_media):
+                elif not existing_url and media_cursor < len(raw_media):
                     target_img = raw_media[media_cursor]
                     media_cursor += 1
                 else:
@@ -783,25 +783,33 @@ def _upload_and_bind_rcs_images(
                 if target_img:
                     try:
                         fname, media_data = target_img
-                        if not upload_now:
-                            card["image_bytes"] = media_data
-                            card["fileName"] = fname
-                        else:
-                            ext = Path(fname).suffix.lower()
-                            fitted = (
-                                media_data
-                                if ext in ACCEPTED_VIDEO_FORMATS
-                                else _fit_rcs_image(media_data, spec, crop_to_aspect=fix_aspect_ratio)
-                            )
-                            k_name = upload_rcs_media(fitted, filename=fname, client=client)
-                            card["fileName"] = k_name
-                            logger.info("Bound carousel card %d media %s -> %s", c_idx + 1, fname, k_name)
-                    except Exception as ex:
-                        logger.warning("Karix portal mediaUpload failed (%s); fallback to public app media URL: %s", ex, fname)
-                        cache_p = media_cache_dir / fname
+                        unique_fn = f"{client}_{safe_tname}_card_{c_idx + 1}.png"
+                        ext = Path(fname).suffix.lower()
+                        fitted = (
+                            media_data
+                            if ext in ACCEPTED_VIDEO_FORMATS
+                            else _fit_rcs_image(media_data, spec, crop_to_aspect=fix_aspect_ratio)
+                        )
+                        # Cache the user's actual image so our public server serves it to Karix
+                        cache_p = media_cache_dir / unique_fn
                         cache_p.write_bytes(fitted)
-                        card["mediaUrl"] = f"{public_base}/api/media/{fname}"
-                        card.pop("fileName", None)
+                        card["mediaUrl"] = f"{public_base}/api/media/{unique_fn}"
+
+                        if not upload_now:
+                            card["image_bytes"] = fitted
+                            card["fileName"] = unique_fn
+                        else:
+                            try:
+                                k_name = upload_rcs_media(fitted, filename=unique_fn, client=client)
+                                card["fileName"] = k_name
+                                logger.info("Bound user pasted carousel card %d media -> Karix %s", c_idx + 1, k_name)
+                            except Exception as up_ex:
+                                logger.info("Portal mediaUpload unavailable (%s); serving user image via %s", up_ex, card["mediaUrl"])
+                                card.pop("fileName", None)
+                    except Exception as ex:
+                        logger.warning("Failed to process carousel card media: %s", ex)
+                elif not card.get("mediaUrl"):
+                    card["mediaUrl"] = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop"
 def load_rcs_from_excel(
     path: str,
     client: str = "tata",
