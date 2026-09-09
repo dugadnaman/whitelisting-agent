@@ -675,10 +675,12 @@ def _upload_and_bind_rcs_images(
         from rcs_client import upload_rcs_media
     except Exception:
         return
+    media_cursor = 0
     for sub in subs:
-        if sub.template_type == "richcard" and raw_media:
+        if sub.template_type == "richcard" and media_cursor < len(raw_media):
             try:
-                fname, media_data = raw_media[0]
+                fname, media_data = raw_media[media_cursor]
+                media_cursor += 1
                 ext = Path(fname).suffix.lower()
                 if ext in ACCEPTED_VIDEO_FORMATS:
                     fitted = media_data
@@ -699,11 +701,16 @@ def _upload_and_bind_rcs_images(
                 logger.warning("Failed to bind rich card media: %s", ex)
         elif sub.template_type == "carousel" and sub.carousel_cards:
             spec = _spec_for_carousel(sub)
-            for c_idx, card in enumerate(sub.carousel_cards):
-                if c_idx >= len(raw_media):
+            for card in sub.carousel_cards:
+                # If card already has an explicit custom URL, preserve it
+                existing_url = card.get("mediaUrl") or ""
+                if existing_url and not existing_url.endswith("tata-capital-logo.png"):
+                    continue
+                if media_cursor >= len(raw_media):
                     break
                 try:
-                    fname, media_data = raw_media[c_idx]
+                    fname, media_data = raw_media[media_cursor]
+                    media_cursor += 1
                     ext = Path(fname).suffix.lower()
                     if ext in ACCEPTED_VIDEO_FORMATS:
                         fitted = media_data
@@ -713,7 +720,6 @@ def _upload_and_bind_rcs_images(
                     card["fileName"] = k_name
                 except Exception as ex:
                     logger.warning("Failed to bind carousel card media %s: %s", fname, ex)
-
 
 def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
