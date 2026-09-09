@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 5 minutes max duration for Next.js proxy
 async function handle(req: NextRequest, { params }: { params: { path: string[] } }) {
   const path = params.path.join('/');
   const searchParams = req.nextUrl.searchParams.toString();

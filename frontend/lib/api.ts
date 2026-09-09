@@ -241,7 +241,7 @@ async function fetchWithRetry(
   for (let i = 0; i <= retries; i++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-      controller.abort();
+      controller.abort(new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds. The server may still be processing your batch.`));
     }, timeoutMs);
 
     try {
@@ -267,7 +267,14 @@ async function fetchWithRetry(
       return res;
     } catch (err) {
       clearTimeout(timeoutId);
-      lastError = err;
+      if (controller.signal.aborted) {
+        lastError =
+          controller.signal.reason instanceof Error
+            ? controller.signal.reason
+            : new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds. The server may still be processing your batch.`);
+      } else {
+        lastError = err;
+      }
       if (i < retries) {
         await delay(delayMs * Math.pow(1.5, i));
         continue;
@@ -340,10 +347,16 @@ export async function previewFile(
   const form = new FormData();
   form.append("file", file);
   const qs = new URLSearchParams({ account, channel }).toString();
-  const res = await fetchWithRetry(getApiUrl(`/api/preview?${qs}`), {
-    method: "POST",
-    body: form,
-  });
+  const res = await fetchWithRetry(
+    getApiUrl(`/api/preview?${qs}`),
+    {
+      method: "POST",
+      body: form,
+    },
+    1,
+    800,
+    180000 // 3 minutes timeout for previewing large spreadsheets
+  );
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -369,11 +382,17 @@ export async function submitFile(
     skip_duplicates: String(skipDuplicates),
     auto_route: String(autoRoute),
   }).toString();
-  const res = await fetchWithRetry(getApiUrl(`/api/submit?${qs}`), {
-    method: "POST",
-    headers: { "X-User": user },
-    body: form,
-  });
+  const res = await fetchWithRetry(
+    getApiUrl(`/api/submit?${qs}`),
+    {
+      method: "POST",
+      headers: { "X-User": user },
+      body: form,
+    },
+    0, // 0 retries on submit to prevent duplicate batch processing
+    800,
+    600000 // 10 minutes timeout for batch submissions
+  );
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
