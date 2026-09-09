@@ -577,7 +577,15 @@ export default function SubmitPage() {
                         Image Aspect Ratio Warning ({warned.length} of {state.previews.length} template{warned.length === 1 ? '' : 's'} non-standard)
                       </h4>
                       <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
-                        WhatsApp and RCS recommend a <strong>16:9 aspect ratio (1280x720)</strong> for header creatives. Images with square (1:1), portrait (9:16), or irregular dimensions can result in unexpected edge cropping on end-user devices.
+                        {channel === 'rcs' ? (
+                          <>
+                            Karix RCS recommends a <strong>3:4 aspect ratio (Portrait)</strong> or <strong>1:1 (Square)</strong> for carousel cards, and <strong>2:1 (1200x600)</strong> for rich cards. Non-standard creatives may be distorted or rejected by Karix Bot Builder.
+                          </>
+                        ) : (
+                          <>
+                            WhatsApp recommends a <strong>16:9 aspect ratio (1280x720)</strong> for header creatives. Images with square (1:1), portrait (9:16), or irregular dimensions can result in unexpected edge cropping on end-user devices.
+                          </>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -590,7 +598,7 @@ export default function SubmitPage() {
                       onChange={(e) => setAutoFixAspectRatio(e.target.checked)}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                    <span>Auto-Pad to 16:9 Canvas (Recommended)</span>
+                    <span>{channel === 'rcs' ? 'Auto-Fit to 3:4 Aspect Ratio (Recommended)' : 'Auto-Pad to 16:9 Canvas (Recommended)'}</span>
                   </label>
                 </div>
 
@@ -1105,10 +1113,12 @@ export default function SubmitPage() {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-gray-900">
-                    Non-16:9 Images Detected ({currentPreviews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0).length} templates)
+                    Non-Standard Images Detected ({currentPreviews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0).length} templates)
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    How would you like to handle creatives that do not match the recommended 16:9 ratio?
+                    {channel === 'rcs'
+                      ? 'Karix RCS requires a 3:4 portrait or 1:1 ratio for carousel cards (and 2:1 for rich cards). Would you like to auto-crop and fit to 3:4, or keep original images as-is?'
+                      : 'How would you like to handle creatives that do not match the recommended 16:9 ratio?'}
                   </p>
                 </div>
               </div>
@@ -1140,7 +1150,7 @@ export default function SubmitPage() {
                       className="text-blue-600 focus:ring-blue-500"
                     />
                     <span className="text-xs font-bold text-gray-900">
-                      Auto-Pad to 16:9 Canvas (Recommended)
+                      {channel === 'rcs' ? 'Auto-Crop & Fit to 3:4 Ratio (Recommended)' : 'Auto-Pad to 16:9 Canvas (Recommended)'}
                     </span>
                   </div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase">
@@ -1148,7 +1158,9 @@ export default function SubmitPage() {
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-600 pl-5 leading-relaxed">
-                  Places non-16:9 images centered onto a clean 16:9 canvas with matching background color. Prevents WhatsApp from cropping your logo, text, or buttons.
+                  {channel === 'rcs'
+                    ? 'Center-crops and resizes non-standard images to the official Karix 3:4 carousel aspect ratio so cards are displayed properly without distortion or platform rejection.'
+                    : 'Places non-16:9 images centered onto a clean 16:9 canvas with matching background color. Prevents WhatsApp from cropping your logo, text, or buttons.'}
                 </p>
               </label>
 
@@ -1171,7 +1183,7 @@ export default function SubmitPage() {
                       className="text-amber-600 focus:ring-amber-500"
                     />
                     <span className="text-xs font-bold text-gray-900">
-                      Keep Original Dimensions (Raw Upload)
+                      Keep Original Dimensions (Do Not Resize / Upload As-Is)
                     </span>
                   </div>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 uppercase">
@@ -1179,7 +1191,7 @@ export default function SubmitPage() {
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-600 pl-5 leading-relaxed">
-                  Uploads the original image files as-is without any canvas modification. End-user device screens may automatically crop the top and bottom edges.
+                  Uploads your images exactly as they appear in your Excel file without any cropping, resizing, or padding.
                 </p>
               </label>
             </div>
@@ -1195,12 +1207,10 @@ export default function SubmitPage() {
               <button
                 type="button"
                 onClick={() => executeSubmit(autoFixAspectRatio, autoFixGrammar)}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors flex items-center gap-2"
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
               >
-                <span>Confirm &amp; Submit ({currentPreviews.length})</span>
-                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
+                <span>{autoFixAspectRatio ? 'Approve & Resize' : 'Submit Unmodified'}</span>
+                <span>&rarr;</span>
               </button>
             </div>
           </div>

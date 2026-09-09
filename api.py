@@ -973,6 +973,67 @@ def _inspect_single_submission(
                 _, g_warns = lint_and_fix_body(val)
                 grammar_warnings.extend(g_warns)
 
+        # Inspect carousel cards images for aspect ratio warnings & thumbnails
+        c_cards = item.get("carousel_cards") or []
+        for c_idx, card in enumerate(c_cards):
+            if isinstance(card, dict):
+                c_img = card.get("image_bytes")
+                if c_img:
+                    try:
+                        import base64
+                        import io
+                        from PIL import Image
+
+                        img = Image.open(io.BytesIO(c_img))
+                        w, h = img.size
+                        ratio = w / h
+                        # Official Karix RCS carousel ratio is 3:4 (0.75:1) or 1:1 (1.0:1)
+                        is_3_4 = abs(ratio - 0.75) < 0.06
+                        is_1_1 = abs(ratio - 1.0) < 0.05
+                        if not is_3_4 and not is_1_1:
+                            aspect_warnings.append(
+                                {
+                                    "component": f"Card {c_idx + 1} Image",
+                                    "original_size": f"{w}x{h}px",
+                                    "current_ratio": f"{ratio:.2f}:1",
+                                    "recommended_ratio": "3:4 (Portrait) or 1:1 (Square)",
+                                    "action": "Center-crop to 3:4 ratio for optimal carousel display on user handsets.",
+                                }
+                            )
+                        card["thumbnail_url"] = f"data:image/png;base64,{base64.b64encode(c_img).decode()}"
+                    except Exception as exc:
+                        logger.debug("RCS card image inspection notice: %s", exc)
+                    finally:
+                        card.pop("image_bytes", None)
+
+        # Standalone rich card image
+        standalone_img = item.get("image_bytes")
+        if standalone_img:
+            try:
+                import base64
+                import io
+                from PIL import Image
+
+                img = Image.open(io.BytesIO(standalone_img))
+                w, h = img.size
+                ratio = w / h
+                is_2_1 = abs(ratio - 2.0) < 0.08
+                is_16_9 = abs(ratio - (16 / 9)) < 0.08
+                if not is_2_1 and not is_16_9:
+                    aspect_warnings.append(
+                        {
+                            "component": "Rich Card Image",
+                            "original_size": f"{w}x{h}px",
+                            "current_ratio": f"{ratio:.2f}:1",
+                            "recommended_ratio": "2:1 (1200x600) or 16:9 (1280x720)",
+                            "action": "Center-crop to 2:1 ratio for rich card display.",
+                        }
+                    )
+                item["thumbnail_url"] = f"data:image/png;base64,{base64.b64encode(standalone_img).decode()}"
+            except Exception as exc:
+                logger.debug("RCS standalone image inspection notice: %s", exc)
+            finally:
+                item.pop("image_bytes", None)
     item["aspect_ratio_warnings"] = aspect_warnings
     item["grammar_warnings"] = grammar_warnings
 
@@ -1083,7 +1144,9 @@ async def preview_file(
             ]
         elif chan == "rcs":
             if suffix in (".xlsx", ".xls"):
-                submissions = await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=account)
+                submissions = await asyncio.to_thread(
+                    load_rcs_from_excel, tmp_path, client=account, upload_media=False
+                )
             else:
                 submissions = await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=account)
             if not submissions:
@@ -1160,9 +1223,21 @@ async def preview_file(
 
 
 async def _submit_rcs_batch(
-    tmp_path: str, suffix: str, acc: str, user: str, skip_duplicates: bool, auto_route: bool, filename: str, current_user: dict
+    tmp_path: str,
+    suffix: str,
+    acc: str,
+    user: str,
+    skip_duplicates: bool,
+    auto_route: bool,
+    filename: str,
+    current_user: dict,
+    fix_aspect_ratio: bool = True,
 ) -> dict:
-    subs = load_rcs_from_excel(tmp_path, client=acc) if suffix in (".xlsx", ".xls") else load_rcs_from_csv(tmp_path, client=acc)
+    subs = (
+        load_rcs_from_excel(tmp_path, client=acc, fix_aspect_ratio=fix_aspect_ratio, upload_media=True)
+        if suffix in (".xlsx", ".xls")
+        else load_rcs_from_csv(tmp_path, client=acc)
+    )
     if not subs:
         raise HTTPException(status_code=400, detail=f"No valid RCS templates found in '{filename}' to submit.")
 
@@ -1598,7 +1673,17 @@ async def submit_file(
         if chan == "sms":
             return await _submit_sms_batch(tmp_path, suffix, acc, user, file.filename or "upload.csv", current_user)
         elif chan == "rcs":
-            return await _submit_rcs_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, file.filename or "upload.csv", current_user)
+            return await _submit_rcs_batch(
+                tmp_path,
+                suffix,
+                acc,
+                user,
+                skip_duplicates,
+                auto_route,
+                file.filename or "upload.csv",
+                current_user,
+                fix_aspect_ratio=fix_aspect_ratio,
+            )
         return await _submit_wa_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, fix_aspect_ratio, fix_grammar, file.filename or "upload.csv", current_user)
     except HTTPException:
         raise

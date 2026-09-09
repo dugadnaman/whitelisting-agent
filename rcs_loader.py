@@ -545,7 +545,7 @@ def _spec_for_carousel(sub: RcsTemplateSubmission) -> dict:
     )
 
 
-def _fit_rcs_image(img_bytes: bytes, spec: dict) -> bytes:
+def _fit_rcs_image(img_bytes: bytes, spec: dict, crop_to_aspect: bool = True) -> bytes:
     """
     Fit image to the official spec ratio, resize to optimal resolution, and compress
     below the max file size using progressive JPEG quality reduction.
@@ -570,8 +570,8 @@ def _fit_rcs_image(img_bytes: bytes, spec: dict) -> bytes:
         target_aspect = ratio_w / ratio_h
         current_aspect = current_w / current_h
 
-        # Center-crop to the required aspect ratio
-        if abs(current_aspect - target_aspect) > 0.02:
+        # Center-crop to the required aspect ratio only if approved
+        if crop_to_aspect and abs(current_aspect - target_aspect) > 0.02:
             if current_aspect > target_aspect:
                 new_w = int(current_h * target_aspect)
                 left = (current_w - new_w) // 2
@@ -580,7 +580,6 @@ def _fit_rcs_image(img_bytes: bytes, spec: dict) -> bytes:
                 new_h = int(current_w / target_aspect)
                 top = (current_h - new_h) // 2
                 img = img.crop((0, top, current_w, top + new_h))
-
         # Resize down to optimal resolution if larger
         opt_w, opt_h = spec["optimal"]
         if img.width > opt_w or img.height > opt_h:
@@ -703,6 +702,8 @@ def _upload_and_bind_rcs_images(
     subs: list[RcsTemplateSubmission],
     client: str,
     spatial_images: dict[int, list[tuple[str, bytes]]] | None = None,
+    fix_aspect_ratio: bool = True,
+    upload_now: bool = True,
 ) -> None:
     """
     Fit each extracted image to the official RCS spec ratio for the template's
@@ -728,11 +729,19 @@ def _upload_and_bind_rcs_images(
             if target_img:
                 try:
                     fname, media_data = target_img
-                    ext = Path(fname).suffix.lower()
-                    fitted = media_data if ext in ACCEPTED_VIDEO_FORMATS else _fit_rcs_image(media_data, _spec_for_richcard(sub))
-                    k_name = upload_rcs_media(fitted, filename=fname, client=client)
-                    sub.file_name = k_name
-                    logger.info("Bound rich card media %s -> %s", fname, k_name)
+                    if not upload_now:
+                        sub.image_bytes = media_data
+                        sub.file_name = fname
+                    else:
+                        ext = Path(fname).suffix.lower()
+                        fitted = (
+                            media_data
+                            if ext in ACCEPTED_VIDEO_FORMATS
+                            else _fit_rcs_image(media_data, _spec_for_richcard(sub), crop_to_aspect=fix_aspect_ratio)
+                        )
+                        k_name = upload_rcs_media(fitted, filename=fname, client=client)
+                        sub.file_name = k_name
+                        logger.info("Bound rich card media %s -> %s", fname, k_name)
                 except Exception as ex:
                     logger.warning("Failed to bind rich card media: %s", ex)
 
@@ -754,14 +763,27 @@ def _upload_and_bind_rcs_images(
                 if target_img:
                     try:
                         fname, media_data = target_img
-                        ext = Path(fname).suffix.lower()
-                        fitted = media_data if ext in ACCEPTED_VIDEO_FORMATS else _fit_rcs_image(media_data, spec)
-                        k_name = upload_rcs_media(fitted, filename=fname, client=client)
-                        card["fileName"] = k_name
-                        logger.info("Bound carousel card %d media %s -> %s", c_idx + 1, fname, k_name)
+                        if not upload_now:
+                            card["image_bytes"] = media_data
+                            card["fileName"] = fname
+                        else:
+                            ext = Path(fname).suffix.lower()
+                            fitted = (
+                                media_data
+                                if ext in ACCEPTED_VIDEO_FORMATS
+                                else _fit_rcs_image(media_data, spec, crop_to_aspect=fix_aspect_ratio)
+                            )
+                            k_name = upload_rcs_media(fitted, filename=fname, client=client)
+                            card["fileName"] = k_name
+                            logger.info("Bound carousel card %d media %s -> %s", c_idx + 1, fname, k_name)
                     except Exception as ex:
                         logger.warning("Failed to bind carousel card media %s: %s", fname, ex)
-def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
+def load_rcs_from_excel(
+    path: str,
+    client: str = "tata",
+    fix_aspect_ratio: bool = True,
+    upload_media: bool = True,
+) -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
     # Extract spatial images mapped by row and column, plus raw media fallback
@@ -832,7 +854,13 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
                 channel="rcs",
                 source_ref=t_name,
             )
-            _upload_and_bind_rcs_images(raw_media, [sub], client)
+            _upload_and_bind_rcs_images(
+                raw_media,
+                [sub],
+                client,
+                fix_aspect_ratio=fix_aspect_ratio,
+                upload_now=upload_media,
+            )
             return [sub]
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
@@ -852,7 +880,14 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
         sub._excel_row = idx
         rows.append(sub)
 
-    _upload_and_bind_rcs_images(raw_media, rows, client, spatial_images=spatial_images)
+    _upload_and_bind_rcs_images(
+        raw_media,
+        rows,
+        client,
+        spatial_images=spatial_images,
+        fix_aspect_ratio=fix_aspect_ratio,
+        upload_now=upload_media,
+    )
     return rows
 
 
