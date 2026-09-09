@@ -640,6 +640,43 @@ def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> byt
         return img_bytes
 
 
+def _extract_images_spatially(path: str) -> dict[int, list[tuple[str, bytes]]]:
+    """
+    Extract embedded images from an Excel (.xlsx) file, mapping each image
+    to its exact (row, col) cell coordinates in the worksheet.
+    Returns: dict mapping row_idx (1-indexed matching sheet rows) to list of (filename, bytes)
+    sorted by column (left-to-right).
+    """
+    import collections
+    import openpyxl
+
+    images_by_row: dict[int, list[tuple[int, str, bytes]]] = collections.defaultdict(list)
+    try:
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb.active
+        if hasattr(ws, "_images") and ws._images:
+            for idx, img in enumerate(ws._images):
+                anchor_from = getattr(img.anchor, "_from", None)
+                if anchor_from:
+                    r = anchor_from.row + 1  # 1-indexed Excel row
+                    c = anchor_from.col + 1  # 1-indexed Excel col
+                    fname = getattr(img, "name", None) or f"row{r}_col{c}_{idx}.png"
+                    try:
+                        data = img._data()
+                        images_by_row[r].append((c, fname, data))
+                    except Exception:
+                        pass
+        wb.close()
+    except Exception as e:
+        logger.debug("Could not extract spatial images via openpyxl: %s", e)
+
+    sorted_map: dict[int, list[tuple[str, bytes]]] = {}
+    for r, items in images_by_row.items():
+        items.sort(key=lambda x: x[0])
+        sorted_map[r] = [(fname, data) for _, fname, data in items]
+    return sorted_map
+
+
 def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
     """Extract embedded media (images/videos) from an Excel (.xlsx) file in order, preserving original bytes."""
     media = []
@@ -662,72 +699,74 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
 
 
 def _upload_and_bind_rcs_images(
-    raw_media: list[tuple[str, bytes]], subs: list[RcsTemplateSubmission], client: str
+    raw_media: list[tuple[str, bytes]],
+    subs: list[RcsTemplateSubmission],
+    client: str,
+    spatial_images: dict[int, list[tuple[str, bytes]]] | None = None,
 ) -> None:
     """
     Fit each extracted image to the official RCS spec ratio for the template's
     orientation/height/width, compress to the max file size, upload, and bind the
     Karix fileName back onto the templates.
     """
-    if not raw_media:
+    if not raw_media and not spatial_images:
         return
     try:
         from rcs_client import upload_rcs_media
     except Exception:
         return
+
     media_cursor = 0
     for sub in subs:
-        if sub.template_type == "richcard" and media_cursor < len(raw_media):
-            try:
-                fname, media_data = raw_media[media_cursor]
+        excel_row = getattr(sub, "_excel_row", None)
+        row_images = spatial_images.get(excel_row, []) if (spatial_images and excel_row) else []
+
+        if sub.template_type == "richcard":
+            target_img = row_images[0] if row_images else (raw_media[media_cursor] if media_cursor < len(raw_media) else None)
+            if not row_images and target_img:
                 media_cursor += 1
-                ext = Path(fname).suffix.lower()
-                if ext in ACCEPTED_VIDEO_FORMATS:
-                    fitted = media_data
-                    ratio_label = "video"
-                else:
-                    spec = _spec_for_richcard(sub)
-                    fitted = _fit_rcs_image(media_data, spec)
-                    ratio_label = str(spec["ratio"])
-                k_name = upload_rcs_media(fitted, filename=fname, client=client)
-                sub.file_name = k_name
-                logger.info(
-                    "Bound rich card media %s -> %s (ratio %s)",
-                    fname,
-                    k_name,
-                    ratio_label,
-                )
-            except Exception as ex:
-                logger.warning("Failed to bind rich card media: %s", ex)
+            if target_img:
+                try:
+                    fname, media_data = target_img
+                    ext = Path(fname).suffix.lower()
+                    fitted = media_data if ext in ACCEPTED_VIDEO_FORMATS else _fit_rcs_image(media_data, _spec_for_richcard(sub))
+                    k_name = upload_rcs_media(fitted, filename=fname, client=client)
+                    sub.file_name = k_name
+                    logger.info("Bound rich card media %s -> %s", fname, k_name)
+                except Exception as ex:
+                    logger.warning("Failed to bind rich card media: %s", ex)
+
         elif sub.template_type == "carousel" and sub.carousel_cards:
             spec = _spec_for_carousel(sub)
-            for card in sub.carousel_cards:
-                # If card already has an explicit custom URL, preserve it
+            for c_idx, card in enumerate(sub.carousel_cards):
                 existing_url = card.get("mediaUrl") or ""
                 if existing_url and not existing_url.endswith("tata-capital-logo.png"):
                     continue
-                if media_cursor >= len(raw_media):
-                    break
-                try:
-                    fname, media_data = raw_media[media_cursor]
-                    media_cursor += 1
-                    ext = Path(fname).suffix.lower()
-                    if ext in ACCEPTED_VIDEO_FORMATS:
-                        fitted = media_data
-                    else:
-                        fitted = _fit_rcs_image(media_data, spec)
-                    k_name = upload_rcs_media(fitted, filename=fname, client=client)
-                    card["fileName"] = k_name
-                except Exception as ex:
-                    logger.warning("Failed to bind carousel card media %s: %s", fname, ex)
 
+                if c_idx < len(row_images):
+                    target_img = row_images[c_idx]
+                elif media_cursor < len(raw_media):
+                    target_img = raw_media[media_cursor]
+                    media_cursor += 1
+                else:
+                    target_img = None
+
+                if target_img:
+                    try:
+                        fname, media_data = target_img
+                        ext = Path(fname).suffix.lower()
+                        fitted = media_data if ext in ACCEPTED_VIDEO_FORMATS else _fit_rcs_image(media_data, spec)
+                        k_name = upload_rcs_media(fitted, filename=fname, client=client)
+                        card["fileName"] = k_name
+                        logger.info("Bound carousel card %d media %s -> %s", c_idx + 1, fname, k_name)
+                    except Exception as ex:
+                        logger.warning("Failed to bind carousel card media %s: %s", fname, ex)
 def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
-
-    # Extract raw embedded media without transforming them
+    # Extract spatial images mapped by row and column, plus raw media fallback
+    spatial_images = _extract_images_spatially(path)
     raw_media = _extract_images_from_xlsx(path)
-
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
     all_raw_rows = list(sheet.iter_rows(values_only=True))
@@ -797,7 +836,7 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
             return [sub]
     headers = [str(cell.value or "").strip() for cell in sheet[1]]
     rows = []
-    for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 1):
+    for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
         if not any(row):
             continue
 
@@ -809,10 +848,11 @@ def load_rcs_from_excel(path: str, client: str = "tata") -> list[RcsTemplateSubm
         if not any(raw_row.values()):
             continue
 
-        sub = _row_to_rcs_submission(raw_row, client=client, fallback_idx=idx)
+        sub = _row_to_rcs_submission(raw_row, client=client, fallback_idx=idx - 1)
+        sub._excel_row = idx
         rows.append(sub)
 
-    _upload_and_bind_rcs_images(raw_media, rows, client)
+    _upload_and_bind_rcs_images(raw_media, rows, client, spatial_images=spatial_images)
     return rows
 
 
