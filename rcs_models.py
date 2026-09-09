@@ -76,8 +76,11 @@ class RcsSubmissionResult:
 
     source_ref: str
     template_name: str
-    template_id: str | None
-    status: RcsSubmissionStatus
+    template_id: str | None = None
+    status: RcsSubmissionStatus = RcsSubmissionStatus.SUBMITTED
+    provider_ref_id: str | None = None
+    approval_status: str | None = None
+    approval_reason: str | None = None
     provider_response: dict | None = None
     error: str | None = None
     retry_count: int = 0
@@ -86,3 +89,9 @@ class RcsSubmissionResult:
     submitted_by: str = "Anonymous Operator"
     source_file: str | None = None  # name of the uploaded spreadsheet, for dashboard attribution
     submitted_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+    def __post_init__(self):
+        if not self.template_id and self.provider_ref_id:
+            self.template_id = self.provider_ref_id
+        if not self.provider_ref_id and self.template_id:
+            self.provider_ref_id = self.template_id

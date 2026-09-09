@@ -1373,6 +1373,9 @@ async def _submit_rcs_batch(
                 )
                 QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item})
 
+    final_job = get_job(job_id)
+    if final_job:
+        QUEUE_MANAGER.broadcast_event(job_id, "job_status", final_job)
     all_combined = [e for e in results_by_index if e is not None]
     if len(all_combined) < (len(duplicate_entries) + len(new_entries)):
         used_ids = {id(e) for e in all_combined}
@@ -1385,20 +1388,6 @@ async def _submit_rcs_batch(
         if "error" in entry:
             entry["error"] = _clean_error_message(entry["error"])
         cleaned_entries.append(entry)
-
-    final_job = get_job(job_id)
-    if final_job:
-        QUEUE_MANAGER.broadcast_event(job_id, "job_status", final_job)
-        for e in duplicate_entries + new_entries:
-            if id(e) not in used_ids:
-                all_combined.append(e)
-    cleaned_entries = []
-    for e in all_combined:
-        entry = dict(e)
-        if "error" in entry:
-            entry["error"] = _clean_error_message(entry["error"])
-        cleaned_entries.append(entry)
-
     log_activity(
         user=user,
         action="TEMPLATE_SUBMISSION",
