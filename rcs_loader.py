@@ -226,7 +226,6 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
             return json.loads(row["carousel_cards"])
         except (json.JSONDecodeError, TypeError):
             pass
-
     titles = [t.strip() for t in str(row.get("card_title") or row.get("title") or "").split("|") if t.strip()]
     descriptions = [
         d.strip()
@@ -246,6 +245,70 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
     button_urls = [u.strip() for u in str(row.get("button_url") or row.get("link") or "").split("|") if u.strip()]
     button_types = [t.strip().upper() for t in str(row.get("button_type") or "").split("|") if t.strip()]
 
+    # Support numbered columns: card1_title / card_1_title, card1_image / card1_media_url, etc.
+    if not titles and not media_urls and not descriptions:
+        for idx in range(1, 11):
+            t = (
+                row.get(f"card{idx}_title")
+                or row.get(f"card_{idx}_title")
+                or row.get(f"card{idx}_heading")
+                or row.get(f"card_{idx}_heading")
+                or row.get(f"title_{idx}")
+                or row.get(f"title{idx}")
+            )
+            d = (
+                row.get(f"card{idx}_body")
+                or row.get(f"card_{idx}_body")
+                or row.get(f"card{idx}_description")
+                or row.get(f"card_{idx}_description")
+                or row.get(f"card{idx}_desc")
+                or row.get(f"card_{idx}_desc")
+                or row.get(f"body_{idx}")
+                or row.get(f"body{idx}")
+            )
+            u = (
+                row.get(f"card{idx}_image")
+                or row.get(f"card_{idx}_image")
+                or row.get(f"card{idx}_image_url")
+                or row.get(f"card_{idx}_image_url")
+                or row.get(f"card{idx}_media_url")
+                or row.get(f"card_{idx}_media_url")
+                or row.get(f"image_{idx}")
+                or row.get(f"image{idx}")
+                or row.get(f"media_{idx}")
+            )
+            bt = (
+                row.get(f"card{idx}_button_text")
+                or row.get(f"card_{idx}_button_text")
+                or row.get(f"card{idx}_button")
+                or row.get(f"card_{idx}_button")
+                or row.get(f"button_{idx}_text")
+                or row.get(f"button{idx}_text")
+            )
+            bu = (
+                row.get(f"card{idx}_button_url")
+                or row.get(f"card_{idx}_button_url")
+                or row.get(f"card{idx}_url")
+                or row.get(f"card_{idx}_url")
+                or row.get(f"button_{idx}_url")
+                or row.get(f"button{idx}_url")
+            )
+            b_type = (
+                row.get(f"card{idx}_button_type")
+                or row.get(f"card_{idx}_button_type")
+                or row.get(f"button_{idx}_type")
+                or "URL"
+            )
+            if t or d or u or bt:
+                titles.append(str(t).strip() if t else f"Card {idx}")
+                descriptions.append(str(d).strip() if d else "")
+                if u:
+                    media_urls.append(str(u).strip())
+                if bt:
+                    button_texts.append(str(bt).strip())
+                    button_types.append(str(b_type).strip().upper())
+                if bu:
+                    button_urls.append(str(bu).strip())
     max_cards = max(len(titles), len(descriptions), len(media_urls), len(button_texts), 2)
 
     cards = []
