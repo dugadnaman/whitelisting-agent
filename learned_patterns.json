@@ -175,5 +175,43 @@
     "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
     "auto_fixable": false,
     "confidence": 0.8
+  },
+  {
+    "id": "pattern_http_400__unable_to_read_data",
+    "name": "Error: HTTP 400: Unable to read data from https...",
+    "signature": "HTTP\\ 400:\\ Unable\\ to\\ read\\ data\\ from\\ https",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-09T12:10:08.047323+00:00",
+    "last_seen": "2026-09-09T12:10:08.047323+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "HTTP 400: Unable to read data from https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "pattern_http_400__template_with_name",
+    "name": "Error: HTTP 400: Template with name [test_reply...",
+    "signature": "HTTP\\ 400:\\ Template\\ with\\ name\\ \\[test_reply",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-09T12:10:08.047981+00:00",
+    "last_seen": "2026-09-09T12:10:08.047981+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "HTTP 400: Template with name [test_reply_variable_conte] and bot [Uv9tdd0KNADbq3pX] already exists",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
   }
 ]

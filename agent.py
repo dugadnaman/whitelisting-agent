@@ -738,7 +738,9 @@ def _handle_agent_error_inquiry(text: str, account: str, channel: str) -> dict |
     error_keywords = [
         "error log", "error logs", "recent errors", "what error", "what errors",
         "why did it fail", "why failed", "what went wrong", "show errors", "system errors",
-        "last error", "incident", "failure log", "errors faced", "failures"
+        "last error", "incident", "failure log", "errors faced", "failures", "why did",
+        "why my", "why templates fail", "why template failed", "why fail", "failed templates",
+        "failed due to", "link error", "png error"
     ]
     if not any(w in t_lower for w in error_keywords):
         return None
@@ -892,11 +894,13 @@ def _handle_agent_rejection_diagnosis(text: str, account: str, channel: str, use
     if not (is_fix and rej_match):
         return None
     cand = rej_match.group(1).strip()
-    if cand.lower() in ("why", "template", "rejected", "the", "this", "it"):
+    stopwords = ("why", "template", "templates", "rejected", "the", "this", "it", "did", "my", "our", "all", "error", "errors", "fail", "failed", "rcs", "whatsapp", "sms")
+    if cand.lower() in stopwords:
         tokens = re.findall(r"[a-zA-Z0-9_]{3,}", text)
-        filtered = [t for t in tokens if t.lower() not in ("check", "why", "template", "was", "rejected", "fix", "and", "resubmit", "for", "bajaj", "tata")]
+        filtered = [t for t in tokens if t.lower() not in stopwords and t.lower() not in ("check", "was", "fix", "and", "resubmit", "for", "bajaj", "tata")]
         cand = filtered[0] if filtered else cand
-
+    if cand.lower() in stopwords:
+        return None
     # If cand ends with _v\d+ and is not found, check base template
     inspection_check = tool_inspect_template(cand, account=account, channel=channel)
     if not inspection_check.get("found"):

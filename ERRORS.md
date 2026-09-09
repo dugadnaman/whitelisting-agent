@@ -110,3 +110,23 @@ Below is the record of key error patterns faced and resolved in this project:
 * **Symptoms**: Image/media uploads on WhatsApp portal API failed with 401.
 * **Root Cause**: Karix browser session tokens (`KARIX_SESSION`, `KARIX_BEARER_TOKEN`) are session-bound and expire when the operator's browser session closes.
 * **Remediation**: Updated session tokens from Karix portal DevTools under Settings.
+
+---
+
+### Incident 7: `HTTP 400: Unable to read data from ...tata-capital-logo.png`
+* **Category**: `CREATIVE_SPEC`
+* **Symptoms**: Carousel templates failed submission with "Unable to read data from https://www.tatacapital.com/.../tata-capital-logo.png".
+* **Root Cause**: When an uploaded card had no image, the loader fell back to an external URL on `tatacapital.com`. Tata Capital's enterprise Akamai/WAF blocked Karix's scraper bots with 403 Forbidden.
+* **Remediation**:
+  1. Swapped the fallback to the platform's own public media endpoint: `/api/media/default_rcs_3x4.png`.
+  2. Added automatic local caching in `_upload_and_bind_rcs_images`: if Karix's portal `mediaUpload` endpoint is unavailable, extracted images are saved directly to `media_cache/` and served with 200 OK via `/api/media/{filename}`.
+
+---
+
+### Incident 8: `HTTP 400: Template with name [...] already exists (25-Char Limit Collision)`
+* **Category**: `DUPLICATE_TEMPLATE`
+* **Symptoms**: Re-submitting templates after deletion or with long names failed with Karix reporting the template already exists.
+* **Root Cause**: Karix RCS Bot Builder truncates all template names to a hard 25-character limit (`[:25]`). Long template names with shared prefixes collided with existing templates. The pre-flight duplicate checker was comparing 32-character names against 25-character bot entries and missing the collision.
+* **Remediation**:
+  1. Updated the pre-flight duplicate checker in `api.py` to compare normalized 25-character safe keys against the bot's live catalog.
+  2. Pre-emptively flags duplicates before making HTTP calls to Karix, reporting which bot already holds that template name.

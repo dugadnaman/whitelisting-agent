@@ -311,6 +311,13 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
                     button_urls.append(str(bu).strip())
     max_cards = max(len(titles), len(descriptions), len(media_urls), len(button_texts), 2)
 
+    public_base = (
+        os.environ.get("RENDER_EXTERNAL_URL")
+        or os.environ.get("PUBLIC_APP_URL")
+        or "https://whitelisting-agent.onrender.com"
+    )
+    fallback_card_img = f"{public_base}/api/media/default_rcs_3x4.png"
+
     cards = []
     for i in range(max_cards):
         c_title = titles[i] if i < len(titles) else (f"Card {i + 1}" if titles else "")
@@ -321,7 +328,7 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
             else (
                 media_urls[0]
                 if media_urls
-                else "https://www.tatacapital.com/content/dam/tata-capital/header-logo/tata-capital-logo.png"
+                else fallback_card_img
             )
         )
 
@@ -712,6 +719,15 @@ def _upload_and_bind_rcs_images(
     """
     if not raw_media and not spatial_images:
         return
+
+    media_cache_dir = Path("media_cache")
+    media_cache_dir.mkdir(parents=True, exist_ok=True)
+    public_base = (
+        os.environ.get("RENDER_EXTERNAL_URL")
+        or os.environ.get("PUBLIC_APP_URL")
+        or "https://whitelisting-agent.onrender.com"
+    )
+
     try:
         from rcs_client import upload_rcs_media
     except Exception:
@@ -743,7 +759,11 @@ def _upload_and_bind_rcs_images(
                         sub.file_name = k_name
                         logger.info("Bound rich card media %s -> %s", fname, k_name)
                 except Exception as ex:
-                    logger.warning("Failed to bind rich card media: %s", ex)
+                    logger.warning("Karix portal mediaUpload failed (%s); fallback to public app media URL: %s", ex, fname)
+                    cache_p = media_cache_dir / fname
+                    cache_p.write_bytes(fitted)
+                    sub.media_url = f"{public_base}/api/media/{fname}"
+                    sub.file_name = None
 
         elif sub.template_type == "carousel" and sub.carousel_cards:
             spec = _spec_for_carousel(sub)
@@ -777,7 +797,11 @@ def _upload_and_bind_rcs_images(
                             card["fileName"] = k_name
                             logger.info("Bound carousel card %d media %s -> %s", c_idx + 1, fname, k_name)
                     except Exception as ex:
-                        logger.warning("Failed to bind carousel card media %s: %s", fname, ex)
+                        logger.warning("Karix portal mediaUpload failed (%s); fallback to public app media URL: %s", ex, fname)
+                        cache_p = media_cache_dir / fname
+                        cache_p.write_bytes(fitted)
+                        card["mediaUrl"] = f"{public_base}/api/media/{fname}"
+                        card.pop("fileName", None)
 def load_rcs_from_excel(
     path: str,
     client: str = "tata",

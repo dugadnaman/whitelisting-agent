@@ -1270,26 +1270,37 @@ async def _submit_rcs_batch(
     live_map = {}
     if skip_duplicates:
         live_templates = fetch_rcs_templates(client=acc)
-        live_map = {
-            (lt.get("viTemplate", {}).get("name") or str(lt.get("templateId", ""))).strip().lower(): lt
-            for lt in live_templates
-            if (lt.get("viTemplate", {}).get("name") or lt.get("templateId"))
-        }
+        for lt in live_templates:
+            if not isinstance(lt, dict):
+                continue
+            vi = lt.get("viTemplate") if isinstance(lt.get("viTemplate"), dict) else {}
+            name = str(vi.get("name") or lt.get("template_name") or lt.get("templateId") or "").strip().lower()
+            if name:
+                live_map[name] = lt
+                safe_k = re.sub(r"[^a-zA-Z0-9_]", "_", name)[:25].strip("_").lower()
+                live_map[safe_k] = lt
 
     for idx, s in enumerate(subs):
-        name_key = s.template_name.strip().lower()
-        if not name_key:
+        tname = str(s.template_name or "").strip()
+        if not tname:
             to_submit.append((idx, s))
             continue
 
-        if skip_duplicates and name_key in live_map:
-            live_obj = live_map[name_key]
+        name_key = tname.lower()
+        safe_key = re.sub(r"[^a-zA-Z0-9_]", "_", tname)[:25].strip("_").lower()
+
+        matched_live = (live_map.get(name_key) or live_map.get(safe_key)) if skip_duplicates else None
+
+        if skip_duplicates and matched_live:
+            live_obj = matched_live
             status_str = str(live_obj.get("status", "APPROVED")).upper()
+            ref_id = str(live_obj.get("templateId", "") or live_obj.get("id", "") or "")
             dupe_res = RcsSubmissionResult(
                 source_ref=s.source_ref,
                 template_name=s.template_name,
+                template_id=ref_id,
                 status=RcsSubmissionStatus.DUPLICATE,
-                provider_ref_id=str(live_obj.get("templateId", "")),
+                provider_ref_id=ref_id,
                 error=f"RCS template already active on DLT Bot ({status_str}) — skipped duplicate submission.",
                 provider_response=live_obj,
                 approval_status=status_str.lower(),
@@ -1303,10 +1314,12 @@ async def _submit_rcs_batch(
             duplicate_entries.append(entry_dict)
             results_by_index[idx] = entry_dict
             seen_in_batch.add(name_key)
-        elif name_key in seen_in_batch:
+            seen_in_batch.add(safe_key)
+        elif name_key in seen_in_batch or safe_key in seen_in_batch:
             dupe_res = RcsSubmissionResult(
                 source_ref=s.source_ref,
                 template_name=s.template_name,
+                template_id="",
                 status=RcsSubmissionStatus.DUPLICATE,
                 provider_ref_id="",
                 error="Duplicate RCS template within uploaded file — skipped duplicate submission.",
@@ -1323,6 +1336,7 @@ async def _submit_rcs_batch(
             results_by_index[idx] = entry_dict
         else:
             seen_in_batch.add(name_key)
+            seen_in_batch.add(safe_key)
             to_submit.append((idx, s))
 
     new_entries = []

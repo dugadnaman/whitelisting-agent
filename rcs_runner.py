@@ -32,6 +32,35 @@ def run_rcs(
         result.submitted_by = user
         result.source_file = source_file or result.source_file
         log_rcs_result(result, log_path)
+
+        # Record template failures into central error log & feed learning engine
+        if result.status == RcsSubmissionStatus.FAILED or (result.error and result.status != RcsSubmissionStatus.SUBMITTED):
+            try:
+                from error_tracker import log_error
+                log_error(
+                    message=f"RCS template '{result.template_name}' creation failed: {result.error}",
+                    account=client,
+                    channel="rcs",
+                    severity="ERROR" if result.status == RcsSubmissionStatus.FAILED else "WARNING",
+                    category="TEMPLATE_CREATION_FAILED" if result.status == RcsSubmissionStatus.FAILED else "DUPLICATE_TEMPLATE",
+                    module="rcs_client.py",
+                    function="submit_rcs_template",
+                    context={
+                        "template_name": result.template_name,
+                        "template_id": result.template_id,
+                        "status": result.status.value,
+                        "error": result.error,
+                        "provider_response": result.provider_response,
+                    },
+                    remediation_hint=(
+                        "Check image URL reachability or shorten template name to <= 25 characters to prevent collision."
+                        if "already exists" in str(result.error).lower() or "read data" in str(result.error).lower()
+                        else "Check Karix Bot Builder parameters."
+                    ),
+                )
+            except Exception as log_ex:
+                logger.warning("Failed to record template failure in error_tracker: %s", log_ex)
+
         note = f" ({result.retry_count} retries)" if result.retry_count else ""
         print(f"  {result.template_name} (ID: {result.template_id}): {result.status.value}{note}")
 
