@@ -663,6 +663,7 @@ class WhitelistingAgent:
             return isolation_err
 
         handlers = [
+            lambda: _handle_agent_learning_inquiry(text, account, channel),
             lambda: _handle_agent_error_inquiry(text, account, channel),
             lambda: _handle_agent_team_inquiry(text, account),
             lambda: _handle_agent_help_inquiry(text, account, channel),
@@ -696,6 +697,41 @@ def _check_agent_tenant_isolation(text: str, user_profile: dict | None, account:
                     }, account
             account = user_tenant
     return None, account
+
+def _handle_agent_learning_inquiry(text: str, account: str, channel: str) -> dict | None:
+    t_lower = text.lower()
+    learn_keywords = [
+        "what have you learned", "learn from error", "learned pattern", "learned patterns",
+        "error pattern", "error patterns", "what did you learn", "how do you prevent",
+        "preventative rules", "self-healing", "learned rules", "learned insights"
+    ]
+    if not any(w in t_lower for w in learn_keywords):
+        return None
+
+    from error_learning import load_learned_patterns
+
+    patterns = load_learned_patterns()
+    lines = []
+    for p in patterns:
+        lines.append(
+            f"• **{p.get('name')}** (`{p.get('category')}`, seen {p.get('frequency', 1)}x):\n"
+            f"  *Root Cause*: {p.get('root_cause')}\n"
+            f"  *Preventative Action*: {p.get('preventative_action')}\n"
+            f"  *Auto-Fixable*: {'✅ Yes' if p.get('auto_fixable') else '⚠️ Manual Guidance'}"
+        )
+
+    reply = (
+        f"### 🧠 Self-Learning Engine: Learned Error Patterns ({len(patterns)} Active Rules)\n\n"
+        "The system continuously analyzes logged errors in `error_log.jsonl` and synthesizes preventative rules applied during pre-flight checks:\n\n"
+        + "\n\n".join(lines)
+        + "\n\n*All learned rules are stored in `learned_patterns.json` and automatically applied before calling Karix APIs.*"
+    )
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "get_learned_patterns", "count": len(patterns)}],
+        "suggested_actions": ["Show recent errors", "Poll approval status", "Help"],
+        "data": {"patterns": patterns},
+    }
 
 def _handle_agent_error_inquiry(text: str, account: str, channel: str) -> dict | None:
     t_lower = text.lower()

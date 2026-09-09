@@ -85,6 +85,26 @@ def show_error_detail(err_id: str):
     print("=" * 70 + "\n")
 
 
+def show_learned_patterns():
+    from error_learning import load_learned_patterns
+
+    patterns = load_learned_patterns()
+    print("\n" + "=" * 80)
+    print(f"🧠 LEARNED ERROR PATTERNS & PREVENTATIVE RULES ({len(patterns)} Active Rules)")
+    print("=" * 80)
+
+    for p in patterns:
+        print(f"\n[{p.get('id')}] {p.get('name')}")
+        print(f"  • Category         : {p.get('category')}")
+        print(f"  • Seen             : {p.get('frequency', 1)} times (last: {_fmt_ts(p.get('last_seen', ''))})")
+        print(f"  • Channels         : {', '.join(p.get('channels_affected', []))}")
+        print(f"  • Root Cause       : {p.get('root_cause')}")
+        print(f"  • Preventative Fix : {p.get('preventative_action')}")
+        print(f"  • Auto-Fixable     : {'✅ Yes' if p.get('auto_fixable') else '⚠️ Manual Guidance'}")
+        print("-" * 80)
+    print()
+
+
 def show_error_list(account=None, channel=None, category=None, severity=None, limit=15):
     errs = load_errors(account=account, channel=channel, category=category, severity=severity, limit=limit)
     if not errs:
@@ -122,9 +142,12 @@ def main():
     parser.add_argument("--severity", help="Filter by severity (ERROR, CRITICAL, WARNING)")
     parser.add_argument("--limit", type=int, default=15, help="Number of records to show (default: 15)")
     parser.add_argument("--summary", action="store_true", help="Show error summary breakdown")
+    parser.add_argument("--learned", action="store_true", help="View synthesized learned error patterns and preventative rules")
     args = parser.parse_args()
 
-    if args.summary:
+    if args.learned:
+        show_learned_patterns()
+    elif args.summary:
         show_summary()
     elif args.id:
         show_error_detail(args.id)

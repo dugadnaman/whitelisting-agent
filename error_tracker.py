@@ -118,6 +118,17 @@ def log_error(
                 _unlock(f)
     except Exception as io_err:
         logger.error("Failed to write to error_log.jsonl: %s", io_err)
+    # Feed learning engine to extract patterns and update knowledge base
+    try:
+        from error_learning import learn_from_error
+        learn_from_error(
+            error_message=rec.error_message,
+            account=rec.account,
+            channel=rec.channel,
+            exc=exc,
+        )
+    except Exception as learn_err:
+        logger.debug("Failed to feed error learning engine: %s", learn_err)
 
     logger.error(
         "[%s] [%s:%s] %s: %s (ID: %s)",

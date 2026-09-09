@@ -1,0 +1,141 @@
+[
+  {
+    "id": "missing_dependency_module",
+    "name": "Missing Python Package in Production Image",
+    "signature": "(No module named|ModuleNotFoundError)",
+    "category": "DEPENDENCY",
+    "frequency": 3,
+    "first_seen": "2026-09-08T10:00:00Z",
+    "last_seen": "2026-09-09T11:12:37Z",
+    "channels_affected": [
+      "system"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "A module imported in backend code was absent from requirements.txt, causing uvicorn to crash on boot.",
+    "preventative_action": "Auto-verify all root module dependencies against requirements.txt during container builds.",
+    "auto_fixable": true,
+    "confidence": 0.99
+  },
+  {
+    "id": "rcs_submission_result_model_mismatch",
+    "name": "RcsSubmissionResult Missing Property Argument",
+    "signature": "RcsSubmissionResult\\.__init__\\(\\) got an unexpected keyword argument 'provider_ref_id'",
+    "category": "MODEL_VALIDATION",
+    "frequency": 2,
+    "first_seen": "2026-09-09T10:00:00Z",
+    "last_seen": "2026-09-09T11:12:37Z",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo",
+      "tchfl",
+      "wealth",
+      "moneyfy",
+      "tcl_trans"
+    ],
+    "root_cause": "RcsSubmissionResult dataclass lacked provider_ref_id and approval_status passed by duplicate filter.",
+    "preventative_action": "Standardized constructor kwargs and bi-directionally synchronized template_id with provider_ref_id in __post_init__.",
+    "auto_fixable": true,
+    "confidence": 1.0
+  },
+  {
+    "id": "batch_timeout_large_creative",
+    "name": "HTTP Client Abort on Large Batch or Carousel Submissions",
+    "signature": "(AbortError|signal.*aborted|timed out|fetch failed)",
+    "category": "NETWORK_TIMEOUT",
+    "frequency": 4,
+    "first_seen": "2026-09-09T10:00:00Z",
+    "last_seen": "2026-09-09T11:12:37Z",
+    "channels_affected": [
+      "rcs",
+      "whatsapp"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "Default 60s client fetch timeout expired while uploading multi-card images and calling Karix Bot Builder sequentially.",
+    "preventative_action": "Extended submission timeout to 600,000ms (10m), disabled client POST retries, and set maxDuration=300 on proxy.",
+    "auto_fixable": true,
+    "confidence": 0.98
+  },
+  {
+    "id": "rcs_carousel_aspect_ratio_distortion",
+    "name": "Non-Standard Image Dimensions for RCS Carousel Cards",
+    "signature": "(aspect_ratio|aspect ratio|Non-standard|3:4|16:9 for carousel)",
+    "category": "CREATIVE_SPEC",
+    "frequency": 5,
+    "first_seen": "2026-09-08T12:00:00Z",
+    "last_seen": "2026-09-09T11:12:37Z",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "RCS carousel cards require 3:4 portrait or 1:1 square ratio; 16:9 banners cause distortion or rejection by Karix Bot Builder.",
+    "preventative_action": "Pre-flight checks detect non-standard dimensions during preview, prompt user for approval, and center-crop to 3:4.",
+    "auto_fixable": true,
+    "confidence": 0.99
+  },
+  {
+    "id": "unbound_local_used_ids",
+    "name": "UnboundLocalError in Batch Deduplication List Merge",
+    "signature": "UnboundLocalError: cannot access local variable 'used_ids'",
+    "category": "SYSTEM",
+    "frequency": 2,
+    "first_seen": "2026-09-09T10:00:00Z",
+    "last_seen": "2026-09-09T11:12:37Z",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "Variable used_ids was scoped inside conditional block and accessed outside.",
+    "preventative_action": "Mirrored stable WhatsApp batch deduplication list logic without duplicate blocks.",
+    "auto_fixable": true,
+    "confidence": 1.0
+  },
+  {
+    "id": "karix_portal_session_expired",
+    "name": "Karix Portal Session Cookie Expiration",
+    "signature": "(401 Unauthorized|session expired|invalid token|KARIX_SESSION)",
+    "category": "AUTH",
+    "frequency": 6,
+    "first_seen": "2026-09-07T14:00:00Z",
+    "last_seen": "2026-09-09T11:12:37Z",
+    "channels_affected": [
+      "whatsapp",
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "Browser session tokens expire when operator logs out of Karix portal.",
+    "preventative_action": "Pre-flight credential verification flags expired sessions before submission and guides token refresh under Settings.",
+    "auto_fixable": false,
+    "confidence": 0.95
+  },
+  {
+    "id": "meta_word_variable_ratio_violation",
+    "name": "Meta Variable to Word Ratio Violation (Error 2388293)",
+    "signature": "(2388293|variable ratio|too many variables)",
+    "category": "META_POLICY",
+    "frequency": 8,
+    "first_seen": "2026-09-06T10:00:00Z",
+    "last_seen": "2026-09-09T11:12:37Z",
+    "channels_affected": [
+      "whatsapp"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "Meta requires >= 2.5 fixed words per variable placeholder {{N}} to prevent phishing.",
+    "preventative_action": "Grammar and compliance engine auto-pads surrounding boilerplate context words to ensure >= 2.5:1 ratio.",
+    "auto_fixable": true,
+    "confidence": 1.0
+  }
+]
