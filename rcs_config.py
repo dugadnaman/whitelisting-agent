@@ -21,9 +21,26 @@ KARIX_RCS_FETCH_URL = "https://rcsgui.karix.solutions/api/v1.0/rcstemplate/getTe
 KARIX_RCS_MEDIA_UPLOAD_URL = "https://rcsgui.karix.solutions/v1.0/templates/mediaUpload"
 
 # Default Bot IDs / Sender IDs
+DEFAULT_RCS_BOT_IDS: dict[str, str] = {
+    "tcl_promo": "Uv9tdd0KNADbq3pX",
+    "tcl_trans": "Uv9tdd0KNADbq3pX",
+    "tchfl": "G0OedCS9mbsMYBq1",
+    "wealth": "Wk22bU8IZqDRyIwQ",
+    "moneyfy": "ouwJCTgIe0QDBPPI",
+    "tata": "Uv9tdd0KNADbq3pX",
+}
+
+DEFAULT_RCS_BOT_NAMES: dict[str, str] = {
+    "tcl_promo": "Tata Capital Limited",
+    "tcl_trans": "Tata Capital Limited",
+    "tchfl": "TCHFL",
+    "wealth": "Tata Capital Wealth",
+    "moneyfy": "Moneyfy by Tata Capital",
+    "tata": "Tata Capital Limited",
+}
+
 TATA_RCS_BOT_ID = "Uv9tdd0KNADbq3pX"
 BAJAJ_RCS_BOT_ID = "af2vdbyFh3RX8eee"
-
 # Legacy Lounge URLs
 KARIX_LOUNGE_BASE_URL = "https://karix.solutions/lounge/LoungePage"
 KARIX_DLT_ACTION_URL = f"{KARIX_LOUNGE_BASE_URL}/dltRegistrationAction.php"
@@ -68,17 +85,27 @@ def get_rcs_bot_id(client: str = "tata") -> str:
     _load_env_file()
     c = (client or "tata").lower().strip()
     prefix = _account_prefix(c)
+    if c in DEFAULT_RCS_BOT_IDS and not os.environ.get(f"{prefix}_RCS_BOT_ID"):
+        return DEFAULT_RCS_BOT_IDS[c]
     if c == "tata":
         return os.environ.get("TATA_RCS_BOT_ID") or os.environ.get("TATA_RCS_SENDER_ID") or TATA_RCS_BOT_ID
     elif c == "bajaj":
         return os.environ.get("BAJAJ_RCS_BOT_ID") or os.environ.get("BAJAJ_RCS_SENDER_ID") or BAJAJ_RCS_BOT_ID
-    bot = os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID")
+    bot = os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID") or DEFAULT_RCS_BOT_IDS.get(c)
     if not bot:
         raise OSError(
             f"Missing RCS Bot ID for {client} ({prefix}_RCS_BOT_ID). "
             f"Configure it in Settings under {client} — never fall back to another account's Bot ID."
         )
     return bot
+
+
+def get_rcs_bot_name(client: str = "tcl_promo") -> str:
+    """Return the active RCS Bot Name for the given client."""
+    _load_env_file()
+    c = (client or "tcl_promo").lower().strip()
+    prefix = _account_prefix(c)
+    return os.environ.get(f"{prefix}_RCS_BOT_NAME") or DEFAULT_RCS_BOT_NAMES.get(c, "")
 
 def get_rcs_entity_id(client: str = "tata") -> str:
     """Return the Entity ID for RCS DLT templates."""

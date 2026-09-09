@@ -1,30 +1,9 @@
 [
   {
-    "id": "bajaj",
-    "name": "Bajaj Finserv",
-    "is_builtin": true,
-    "group": "Bajaj",
-    "headers": [
-      "BAJAJ"
-    ]
-  },
-  {
-    "id": "tata",
-    "name": "Tata Capital (All Sub-Products)",
-    "is_builtin": true,
-    "group": "Tata Capital",
-    "headers": [
-      "PLTATA",
-      "TATABL",
-      "ALTATA",
-      "TCLLAP",
-      "HLTATA",
-      "TATAWL"
-    ]
-  },
-  {
     "id": "tcl_promo",
-    "name": "TCL \u2014 Promotional (PL, BL, UCL, NCL, LAP)",
+    "name": "Tata Capital Limited (Promotional)",
+    "entity": "Tata Capital Limited",
+    "type": "Promotional",
     "is_builtin": true,
     "group": "Tata Capital",
     "headers": [
@@ -34,47 +13,75 @@
       "TCLLAP",
       "Tatacl"
     ],
-    "sub_products": "Personal Loans (PL), Business Loans (BL), Used Car Loans (UCL), New Car Loans (NCL), LAP"
+    "sub_products": "Personal Loans (PL), Business Loans (BL), Used Car Loans (UCL), New Car Loans (NCL), LAP",
+    "portal_username": "TATACAPPROMO",
+    "rcs_username": "TATACAPRCS",
+    "rcs_bot_id": "Uv9tdd0KNADbq3pX",
+    "rcs_bot_name": "Tata Capital Limited"
   },
   {
     "id": "tcl_trans",
-    "name": "TCL \u2014 Transactional (LAP, Services & Collections)",
+    "name": "Tata Capital Limited (Transactional)",
+    "entity": "Tata Capital Limited",
+    "type": "Trans",
     "is_builtin": true,
     "group": "Tata Capital",
     "headers": [
       "TCLLAP",
       "Tatacl"
     ],
-    "sub_products": "LAP, Services & Collections"
+    "sub_products": "LAP, Services & Collections",
+    "portal_username": "TATACAPTRANS",
+    "rcs_username": "TATACAPRCS",
+    "rcs_bot_id": "Uv9tdd0KNADbq3pX",
+    "rcs_bot_name": "Tata Capital Limited"
   },
   {
     "id": "tchfl",
-    "name": "TCHFL \u2014 Housing Finance (HLTATA)",
+    "name": "Tata Capital Housing Finance Limited",
+    "entity": "Tata Capital Housing finance Limited",
+    "type": "Promo&trans",
     "is_builtin": true,
     "group": "Tata Capital",
     "headers": [
       "HLTATA"
     ],
-    "sub_products": "Marketing SMS, Services & collections"
+    "sub_products": "Home Loans, Housing Finance",
+    "portal_username": "TATACAPWABA",
+    "rcs_username": "TATACAPRCS2",
+    "rcs_bot_id": "G0OedCS9mbsMYBq1",
+    "rcs_bot_name": "TCHFL"
   },
   {
     "id": "wealth",
-    "name": "Tata Wealth & Securities (TATAWL)",
+    "name": "Tata Capital Wealth",
+    "entity": "Tata Capital Wealth",
+    "type": "Promo&trans",
     "is_builtin": true,
     "group": "Tata Capital",
     "headers": [
       "TATAWL"
     ],
-    "sub_products": "Wealth & Securities Marketing & Transactional"
+    "sub_products": "Wealth Management & Securities",
+    "portal_username": "TATASEC_MUSKAN",
+    "rcs_username": "TATASECRCS",
+    "rcs_bot_id": "Wk22bU8IZqDRyIwQ",
+    "rcs_bot_name": "Tata Capital Wealth"
   },
   {
     "id": "moneyfy",
-    "name": "Tata Moneyfy",
+    "name": "Tata Capital Moneyfy",
+    "entity": "Tata Capital Moneyfy",
+    "type": "Promo&trans",
     "is_builtin": true,
     "group": "Tata Capital",
     "headers": [
       "MONEYFY"
     ],
-    "sub_products": "Moneyfy Mutual Funds & Investments"
+    "sub_products": "Mutual Funds, Digital Investments",
+    "portal_username": "TATASEC_MUSKAN",
+    "rcs_username": "TATACAPRCS2",
+    "rcs_bot_id": "ouwJCTgIe0QDBPPI",
+    "rcs_bot_name": "Moneyfy by Tata Capital"
   }
 ]

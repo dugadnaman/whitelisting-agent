@@ -12,8 +12,11 @@ import {
 import type { Account, Channel, AccountItem, AuthUser, UserItem } from './api';
 
 const DEFAULT_ACCOUNTS: AccountItem[] = [
-  { id: 'bajaj', name: 'Bajaj Finserv', is_builtin: true },
-  { id: 'tata', name: 'Tata Capital', is_builtin: true },
+  { id: 'tcl_promo', name: 'Tata Capital Limited (Promotional)', is_builtin: true },
+  { id: 'tcl_trans', name: 'Tata Capital Limited (Transactional)', is_builtin: true },
+  { id: 'tchfl', name: 'Tata Capital Housing Finance Limited', is_builtin: true },
+  { id: 'wealth', name: 'Tata Capital Wealth', is_builtin: true },
+  { id: 'moneyfy', name: 'Tata Capital Moneyfy', is_builtin: true },
 ];
 
 type AppContextType = {
@@ -42,7 +45,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const [account, setAccountState] = useState<Account>('bajaj');
+  const [account, setAccountState] = useState<Account>('tcl_promo');
   const [channel, setChannelState] = useState<Channel>('whatsapp');
   const [user, setUserState] = useState<string>('');
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
@@ -125,7 +128,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             setAccountState(savedAccount);
           }
         } else {
-          setAccountState(userProfile.tenant_id === 'tata' ? 'tchfl' : userProfile.tenant_id || 'bajaj');
+          setAccountState(userProfile.tenant_id === 'tata' ? 'tcl_promo' : userProfile.tenant_id || 'tcl_promo');
         }
 
         const savedChannel = localStorage.getItem('karix_channel') as Channel;
