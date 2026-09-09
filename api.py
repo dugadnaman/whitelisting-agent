@@ -104,6 +104,7 @@ from sms_tracker import (
     log_sms_dlr,
     log_sms_submission,
 )
+from error_tracker import log_error
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -1212,8 +1213,17 @@ async def preview_file(
     except HTTPException:
         raise
     except Exception as exc:
-        # Don't leak a bare 500 for malformed/non-template uploads — surface a clean error.
         logger.exception("Preview failed for %s (%s): %s", account, channel, exc)
+        log_error(
+            message=f"Preview failed for {account} ({channel}): {exc!s}",
+            exc=exc,
+            account=account,
+            channel=channel,
+            category="PREVIEW_ERROR",
+            module="api.py",
+            function="preview_file",
+            context={"filename": file.filename},
+        )
         raise HTTPException(
             status_code=400,
             detail=f"Preview failed for {channel}: {exc!s}",
@@ -1674,10 +1684,30 @@ async def submit_file(
                 fix_aspect_ratio=fix_aspect_ratio,
             )
         return await _submit_wa_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, fix_aspect_ratio, fix_grammar, file.filename or "upload.csv", current_user)
-    except HTTPException:
+    except HTTPException as http_exc:
+        log_error(
+            message=f"Submission failed for {acc} ({chan}): {http_exc.detail}",
+            exc=http_exc,
+            account=acc,
+            channel=chan,
+            category="SUBMISSION_HTTP_ERROR",
+            module="api.py",
+            function="submit_file",
+            context={"filename": file.filename, "status_code": http_exc.status_code},
+        )
         raise
     except Exception as exc:
         logger.exception("Submission failed for %s (%s): %s", acc, chan, exc)
+        log_error(
+            message=f"Submission failed for {acc} ({chan}): {exc!s}",
+            exc=exc,
+            account=acc,
+            channel=chan,
+            category="SUBMISSION_ERROR",
+            module="api.py",
+            function="submit_file",
+            context={"filename": file.filename},
+        )
         raise HTTPException(
             status_code=400,
             detail=f"Submission failed for {acc} ({chan}): {exc!s}",
@@ -2967,3 +2997,20 @@ def test_sms_endpoint(
     """Verify credentials and test reachability of the SMS integration."""
     require_tenant_access(account, current_user)
     return _json_safe(test_sms_connection(client=account))
+
+
+@app.get("/api/system/errors")
+def get_system_errors(
+    account: str = Query("all"),
+    channel: str = Query("all"),
+    limit: int = Query(50),
+    current_user: dict = Depends(get_current_user),
+):
+    """Retrieve error logs for debugging and agent remediation."""
+    require_tenant_access(account, current_user)
+    from error_tracker import get_error_summary, load_errors
+
+    return {
+        "summary": get_error_summary(),
+        "errors": [_json_safe(e) for e in load_errors(account=account, channel=channel, limit=limit)],
+    }

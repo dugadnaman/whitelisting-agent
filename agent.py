@@ -663,6 +663,7 @@ class WhitelistingAgent:
             return isolation_err
 
         handlers = [
+            lambda: _handle_agent_error_inquiry(text, account, channel),
             lambda: _handle_agent_team_inquiry(text, account),
             lambda: _handle_agent_help_inquiry(text, account, channel),
             lambda: _handle_agent_template_creation(text, account, channel),
@@ -695,6 +696,51 @@ def _check_agent_tenant_isolation(text: str, user_profile: dict | None, account:
                     }, account
             account = user_tenant
     return None, account
+
+def _handle_agent_error_inquiry(text: str, account: str, channel: str) -> dict | None:
+    t_lower = text.lower()
+    error_keywords = [
+        "error log", "error logs", "recent errors", "what error", "what errors",
+        "why did it fail", "why failed", "what went wrong", "show errors", "system errors",
+        "last error", "incident", "failure log", "errors faced", "failures"
+    ]
+    if not any(w in t_lower for w in error_keywords):
+        return None
+
+    from error_tracker import get_error_summary, load_errors
+
+    errs = load_errors(account=account, channel=channel, limit=5)
+    if not errs:
+        errs = load_errors(limit=5)
+
+    if not errs:
+        return {
+            "reply": f"✅ **No recent errors recorded** in the central error log for **{account} ({channel.upper()})**.",
+            "actions_taken": [],
+            "suggested_actions": ["Poll approval status", "List templates", "Help"],
+        }
+
+    lines = []
+    for e in errs:
+        ts = e.get("timestamp", "")[:19].replace("T", " ")
+        lines.append(
+            f"• **[{e.get('severity', 'ERROR')}]** `{e.get('error_type', 'Error')}` on `{e.get('channel', 'system').upper()}` ({ts}):\n"
+            f"  `{e.get('error_message')}`\n"
+            f"  *Remediation*: {e.get('remediation_hint') or 'Check system logs.'}"
+        )
+
+    summary = get_error_summary()
+    reply = (
+        f"### 🚨 Central Error Log ({len(errs)} Recent Incidents | Total: {summary['total_errors']})\n\n"
+        + "\n\n".join(lines)
+        + "\n\n*Tip: Run `python view_errors.py` or inspect `error_log.jsonl` in your repo for complete stack traces and details.*"
+    )
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "query_error_log", "count": len(errs)}],
+        "suggested_actions": ["Diagnose rejection", "Poll approval status", "Help"],
+        "data": {"errors": errs, "summary": summary},
+    }
 
 
 def _handle_agent_team_inquiry(text: str, account: str) -> dict | None:
