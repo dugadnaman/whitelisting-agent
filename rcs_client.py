@@ -304,14 +304,19 @@ def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: s
     }
     return vi_template, all_params
 def _build_rcs_text_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
-    raw_text = payload.text_message or getattr(payload, "template_message", "")
+    raw_text = payload.text_message or getattr(payload, "template_message", "") or ""
+    if payload.card_title and payload.card_title.strip() and payload.card_title.strip() not in raw_text:
+        raw_text = f"{payload.card_title.strip()}\n\n{raw_text}"
     normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
     raw_suggs = payload.suggestions or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [])
     clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, param_names)
 
     vi_template = {
-        "name": safe_name, "type": "text", "botId": bot_id,
-        "textMessage": normalized_text, "suggestions": clean_suggs,
+        "name": safe_name,
+        "type": "text",
+        "botId": bot_id,
+        "textMessage": normalized_text,
+        "suggestions": clean_suggs,
     }
     return vi_template, param_names
 
@@ -330,11 +335,17 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         esme_addr = 72516600000000 if c == "tata" else 72148300000000
 
     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", payload.template_name)[:25]
-    is_carousel = payload.template_type.lower() == "carousel" or bool(getattr(payload, "carousel_cards", None))
-    is_richcard = not is_carousel and (
-        payload.template_type.lower() == "richcard" or bool(payload.media_url) or bool(payload.card_title)
-    )
+    t_type = str(getattr(payload, "template_type", "text") or "text").strip().lower()
+    has_carousel_cards = bool(getattr(payload, "carousel_cards", None)) and len(payload.carousel_cards) >= 2
+    is_carousel = t_type in ("carousel", "carousal", "carousel_cards", "multi_card") or has_carousel_cards
 
+    is_text = t_type in ("text", "plain", "standard", "plain_text") and not is_carousel
+
+    is_richcard = not is_carousel and not is_text and (
+        t_type in ("richcard", "card", "standalone", "rich_card", "image")
+        or bool(getattr(payload, "file_name", None))
+        or bool(payload.media_url)
+    )
     if is_carousel:
         vi_template, param_names = _build_rcs_carousel_vi_template(payload, safe_name, bot_id)
     elif is_richcard:
