@@ -110,7 +110,7 @@ def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[
     current_idx = start_index
     param_numbers = []
 
-    pattern = r"(<[^>]+>|\[[^\]]+\]|\{[^}]+\}|\{#[^#]+#\})"
+    pattern = r"(<[^>]+>|\[[^\]]+\]|\{[^}]+\}|\{#[^#]+#\}|#[a-zA-Z0-9_\-]+#)"
 
     def repl(m):
         nonlocal current_idx
@@ -123,7 +123,8 @@ def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[
     spaced_text = re.sub(r"([A-Za-z0-9])(<[^>]+>)", r"\1 \2", text)
     spaced_text = re.sub(r"(<[^>]+>)([A-Za-z0-9])", r"\1 \2", spaced_text)
     spaced_text = re.sub(r"([A-Za-z0-9])(\{#[^#]+#\})", r"\1 \2", spaced_text)
-
+    spaced_text = re.sub(r"([A-Za-z0-9])(#[a-zA-Z0-9_\-]+#)", r"\1 \2", spaced_text)
+    spaced_text = re.sub(r"(#[a-zA-Z0-9_\-]+#)([A-Za-z0-9])", r"\1 \2", spaced_text)
     normalized_text = re.sub(pattern, repl, spaced_text)
     return normalized_text, param_numbers, current_idx
 
@@ -152,15 +153,14 @@ def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
                         {
                             "suggestionType": "reply",
                             "text": clean,
-                            "postbackData": clean.lower().replace(" ", "_"),
+                            "postbackData": clean,
                         }
                     )
         elif btype in ("URL", "URL_ACTION", "LINK") or burl:
             suggestions.append(
                 {
                     "suggestionType": "url_action",
-                    "text": btext or "Open Link",
-                    "postbackData": btext.lower().replace(" ", "_") if btext else "open_url",
+                    "postbackData": btext or "Open Link",
                     "url": burl or "https://www.tatacapital.com",
                 }
             )
@@ -168,8 +168,7 @@ def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
             suggestions.append(
                 {
                     "suggestionType": "dialer_action",
-                    "text": btext or "Call Now",
-                    "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
+                    "postbackData": btext or "Call Now",
                     "phoneNumber": bphone or "+919999999999",
                 }
             )
@@ -177,8 +176,7 @@ def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
             suggestions.append(
                 {
                     "suggestionType": "reply",
-                    "text": btext,
-                    "postbackData": btext.lower().replace(" ", "_"),
+                    "postbackData": btext,
                 }
             )
     return suggestions
@@ -200,7 +198,7 @@ def _build_rcs_clean_suggestions(
                 {
                     "suggestionType": "url_action",
                     "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    "postbackData": stext,
                     "url": b_url,
                 }
             )
@@ -209,7 +207,7 @@ def _build_rcs_clean_suggestions(
                 {
                     "suggestionType": "dialer_action",
                     "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    "postbackData": stext,
                     "phoneNumber": s.get("phoneNumber") or "+919999999999",
                 }
             )
@@ -218,7 +216,7 @@ def _build_rcs_clean_suggestions(
                 {
                     "suggestionType": "reply",
                     "text": stext,
-                    "postbackData": s.get("postbackData") or stext.lower().replace(" ", "_"),
+                    "postbackData": stext,
                 }
             )
     return clean_suggs, next_var_idx
@@ -231,10 +229,12 @@ def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: s
 
     for c_idx, card in enumerate((payload.carousel_cards or []), 1):
         c_title_raw = card.get("cardTitle") or card.get("card_title") or f"Offer {c_idx}"
+        c_title_norm, title_params, next_var_idx = _extract_and_number_rcs_variables(c_title_raw, start_index=next_var_idx)
+        all_params.extend(title_params)
+
         c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
         c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(c_desc_raw, start_index=next_var_idx)
         all_params.extend(desc_params)
-        c_title_norm = re.sub(r"<[^>]+>|\[[^\]]+\]", "", c_title_raw).strip()[:100] or f"Special Offer {c_idx}"
 
         raw_suggs = card.get("suggestions") or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}])
         clean_suggs, next_var_idx = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
@@ -271,13 +271,18 @@ def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: s
 
 
 def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
+    raw_title = payload.card_title or payload.template_name.replace("_", " ").title()
+    c_title_norm, title_params, next_var_idx = _extract_and_number_rcs_variables(raw_title, start_index=1)
+
     raw_text = payload.card_description or payload.text_message or getattr(payload, "template_message", "")
-    normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
+    normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=next_var_idx)
+    all_params = title_params + param_names
+
     raw_suggs = payload.suggestions or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}])
-    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, param_names)
+    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
 
     card_entry: dict = {
-        "cardTitle": payload.card_title or payload.template_name.replace("_", " ").title(),
+        "cardTitle": c_title_norm,
         "cardDescription": normalized_text,
         "suggestions": clean_suggs,
     }
@@ -297,9 +302,7 @@ def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: s
         "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
         "standaloneCard": card_entry,
     }
-    return vi_template, param_names
-
-
+    return vi_template, all_params
 def _build_rcs_text_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
     raw_text = payload.text_message or getattr(payload, "template_message", "")
     normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)

@@ -11,20 +11,23 @@ from pathlib import Path
 
 from rcs_client import submit_rcs_template
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel, load_rcs_from_list
-from rcs_models import RcsSubmissionStatus
+from rcs_models import RcsSubmissionStatus, RcsTemplateSubmission
 from rcs_tracker import log_rcs_result
 
 logger = logging.getLogger(__name__)
 
 def run_rcs(
-    templates_raw: list[dict],
+    templates_raw: list,
     log_path: str = "rcs_submission_log.jsonl",
     client: str = "bajaj",
     user: str = "Anonymous Operator",
     source_file: str | None = None,
 ) -> None:
     """Submit each RCS DLT template, log the attempt."""
-    submissions = load_rcs_from_list(templates_raw, client=client)
+    if templates_raw and isinstance(templates_raw[0], RcsTemplateSubmission):
+        submissions = templates_raw
+    else:
+        submissions = load_rcs_from_list(templates_raw, client=client)
     print(f"Loaded {len(submissions)} RCS template(s) for {client} to submit (by {user}).")
 
     for submission in submissions:

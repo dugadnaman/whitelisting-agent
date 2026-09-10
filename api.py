@@ -1368,7 +1368,7 @@ async def _submit_rcs_batch(
         before_count = len(load_rcs_log(RCS_LOG_PATH))
         await asyncio.to_thread(
             run_rcs,
-            [asdict(s) for _, s in to_submit],
+            [s for _, s in to_submit],
             RCS_LOG_PATH,
             client=acc,
             user=user,

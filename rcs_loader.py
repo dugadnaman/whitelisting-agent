@@ -139,7 +139,7 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                         {
                             "suggestionType": "reply",
                             "text": clean,
-                            "postbackData": clean.lower().replace(" ", "_"),
+                            "postbackData": clean,
                         }
                     )
         elif btype in ("DIALER", "DIALER_ACTION", "CALL", "PHONE") or bphone:
@@ -147,7 +147,7 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                 {
                     "suggestionType": "dialer_action",
                     "text": btext or "Call Now",
-                    "postbackData": btext.lower().replace(" ", "_") if btext else "call_now",
+                    "postbackData": btext or "Call Now",
                     "phoneNumber": bphone or "+919999999999",
                 }
             )
@@ -156,7 +156,7 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                 {
                     "suggestionType": "url_action",
                     "text": btext or "Apply Now",
-                    "postbackData": btext.lower().replace(" ", "_") if btext else "apply_now",
+                    "postbackData": btext or "Apply Now",
                     "url": burl or "https://www.tatacapital.com",
                 }
             )
@@ -165,7 +165,7 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                 {
                     "suggestionType": "reply",
                     "text": btext,
-                    "postbackData": btext.lower().replace(" ", "_"),
+                    "postbackData": btext,
                 }
             )
 
@@ -339,7 +339,7 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
                     {
                         "suggestionType": "url_action",
                         "text": btext,
-                        "postbackData": btext.lower().replace(" ", "_"),
+                        "postbackData": btext,
                         "url": b_link,
                     }
                 )
@@ -348,7 +348,7 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
                     {
                         "suggestionType": "reply",
                         "text": btext,
-                        "postbackData": btext.lower().replace(" ", "_"),
+                        "postbackData": btext,
                     }
                 )
 
@@ -408,23 +408,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         _fallback_media = f"{public_base}/api/media/default_rcs_3x1.png"
     else:
         _fallback_media = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
-
-    if is_carousel:
-        template_type = "carousel"
-        carousel_cards = _build_carousel_cards_from_row(row)
-    elif (
-        raw_type in ("richcard", "card", "image")
-        or header_type in ("image", "media", "richcard")
-        or media_url
-        or card_title
-    ):
-        template_type = "richcard"
-        carousel_cards = []
-        # Leave media_url as None if not in cell text, so pasted image in Excel is bound
-    else:
-        template_type = "text"
-        carousel_cards = []
-    message = (
+    message = str(
         row.get("text_message")
         or row.get("body")
         or row.get("card_description")
@@ -433,6 +417,25 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         or row.get("message")
         or ""
     ).strip()
+
+    if is_carousel:
+        template_type = "carousel"
+        carousel_cards = _build_carousel_cards_from_row(row)
+    elif raw_type in ("text", "plain", "standard", "plain_text") and not media_url and header_type not in ("image", "media", "richcard"):
+        template_type = "text"
+        carousel_cards = []
+        if card_title and card_title not in message:
+            message = f"{card_title}\n\n{message}"
+    elif (
+        raw_type in ("richcard", "card", "image")
+        or header_type in ("image", "media", "richcard")
+        or media_url
+    ):
+        template_type = "richcard"
+        carousel_cards = []
+    else:
+        template_type = "text"
+        carousel_cards = []
 
     suggestions = _build_suggestions_from_row(row)
     category = str(row.get("category") or row.get("template_category") or "TRANSACTIONAL").strip().upper()

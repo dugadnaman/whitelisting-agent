@@ -31,7 +31,7 @@ class RcsSuggestion:
         d: dict = {
             "suggestionType": self.suggestion_type,
             "text": self.text,
-            "postbackData": self.postback_data or self.text.lower().replace(" ", "_"),
+            "postbackData": self.postback_data or self.text,
         }
         if self.suggestion_type == "url_action" and self.url:
             d["url"] = self.url
