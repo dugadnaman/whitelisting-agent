@@ -232,5 +232,195 @@
     "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
     "auto_fixable": false,
     "confidence": 0.8
+  },
+  {
+    "id": "pattern_nameerror__name__rcssubmission",
+    "name": "Error: NameError: name 'RcsSubmissionStatus' is...",
+    "signature": "NameError:\\ name\\ 'RcsSubmissionStatus'\\ is",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-10T09:43:14.714719+00:00",
+    "last_seen": "2026-09-10T09:43:14.714719+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "NameError: name 'RcsSubmissionStatus' is not defined in rcs_runner.py line 37",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "pattern_logicerror__text_template_with",
+    "name": "Error: LogicError: Text template with card_titl...",
+    "signature": "LogicError:\\ Text\\ template\\ with\\ card_titl",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-10T09:43:14.715606+00:00",
+    "last_seen": "2026-09-10T09:43:14.715606+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "LogicError: Text template with card_title converted to richcard standalone with image header",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "pattern_specificationerror__postbackda",
+    "name": "Error: SpecificationError: PostbackData forced ...",
+    "signature": "SpecificationError:\\ PostbackData\\ forced\\ ",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-10T09:43:14.716015+00:00",
+    "last_seen": "2026-09-10T09:43:14.716015+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "SpecificationError: PostbackData forced to lowercase with underscores instead of matching suggestion text",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "pattern_parsererror__variables_in_hash",
+    "name": "Error: ParserError: Variables in hashtags like ...",
+    "signature": "ParserError:\\ Variables\\ in\\ hashtags\\ like\\ ",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-10T09:43:14.716382+00:00",
+    "last_seen": "2026-09-10T09:43:14.716382+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "ParserError: Variables in hashtags like #urg# not recognized as dynamic placeholders",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "pattern_validationwarning__variables_i",
+    "name": "Error: ValidationWarning: Variables in cardTitl...",
+    "signature": "ValidationWarning:\\ Variables\\ in\\ cardTitl",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-10T09:43:14.716750+00:00",
+    "last_seen": "2026-09-10T09:43:14.716750+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "ValidationWarning: Variables in cardTitle like {name} not extracted or added to templateParamNames",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "rcs_text_template_richcard_override",
+    "name": "Text Template Overridden to Richcard When Card Title Present",
+    "signature": "(converted to richcard|header as a text|card_title overrides text)",
+    "category": "PARSER_SPEC",
+    "frequency": 2,
+    "first_seen": "2026-09-10T06:00:00Z",
+    "last_seen": "2026-09-10T09:43:25.315810+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "is_richcard check evaluated bool(payload.card_title), overriding explicit type=text and attaching fallback images.",
+    "preventative_action": "Strictly preserve type=text templates as pure text without images; format card_title as bold header text in body.",
+    "auto_fixable": true,
+    "confidence": 1.0
+  },
+  {
+    "id": "rcs_postback_underscore_mismatch",
+    "name": "PostbackData Lowercasing and Underscore Mismatch",
+    "signature": "(postbackData|underscore in postback|suggestion text.*same)",
+    "category": "CREATIVE_SPEC",
+    "frequency": 3,
+    "first_seen": "2026-09-09T12:00:00Z",
+    "last_seen": "2026-09-10T09:43:25.315810+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "Suggestion builders previously applied .lower().replace(\" \", \"_\") to postbackData instead of preserving exact button text.",
+    "preventative_action": "PostbackData is strictly set to match the suggestion button text verbatim without transformations.",
+    "auto_fixable": true,
+    "confidence": 1.0
+  },
+  {
+    "id": "rcs_hashtag_variable_placeholder",
+    "name": "Hashtag Variables (#var#) Not Extracted as Placeholders",
+    "signature": "(hastags|hashtags|#urg#|#var#|hashtag variable)",
+    "category": "PARSER_SPEC",
+    "frequency": 2,
+    "first_seen": "2026-09-10T06:00:00Z",
+    "last_seen": "2026-09-10T09:43:25.315810+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "Variable extraction regex only matched <...>, [...], and {...}, ignoring tokens enclosed in hashtags.",
+    "preventative_action": "Regex matches #[a-zA-Z0-9_-]+# and converts tokens to sequential Karix [N] placeholders.",
+    "auto_fixable": true,
+    "confidence": 1.0
+  },
+  {
+    "id": "rcs_card_title_variable_extraction",
+    "name": "Variables in Carousel / Card Titles Unnumbered",
+    "signature": "(variable in card title|cardTitle.*placeholder|title variable)",
+    "category": "VALIDATION",
+    "frequency": 2,
+    "first_seen": "2026-09-10T06:00:00Z",
+    "last_seen": "2026-09-10T09:43:25.315810+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "cardTitle was having brackets stripped rather than passing through _extract_and_number_rcs_variables.",
+    "preventative_action": "Card titles are sequentially processed through variable numbering and included in templateParamNames.",
+    "auto_fixable": true,
+    "confidence": 1.0
+  },
+  {
+    "id": "rcs_runner_missing_status_import",
+    "name": "NameError RcsSubmissionStatus Missing in Runner",
+    "signature": "name .RcsSubmissionStatus. is not defined",
+    "category": "DEPENDENCY",
+    "frequency": 2,
+    "first_seen": "2026-09-10T06:07:00Z",
+    "last_seen": "2026-09-10T09:43:25.315810+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "RcsSubmissionStatus enum was referenced in error handling block without import in rcs_runner.py.",
+    "preventative_action": "Imported RcsSubmissionStatus and configured logger in rcs_runner.py; verified via ruff check.",
+    "auto_fixable": true,
+    "confidence": 1.0
   }
 ]

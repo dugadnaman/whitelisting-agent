@@ -130,3 +130,43 @@ Below is the record of key error patterns faced and resolved in this project:
 * **Remediation**:
   1. Updated the pre-flight duplicate checker in `api.py` to compare normalized 25-character safe keys against the bot's live catalog.
   2. Pre-emptively flags duplicates before making HTTP calls to Karix, reporting which bot already holds that template name.
+
+---
+
+### Incident 9: `NameError: name 'RcsSubmissionStatus' is not defined`
+* **Category**: `DEPENDENCY`
+* **Symptoms**: Web UI displayed `Submission failed for tcl_promo (rcs): name 'RcsSubmissionStatus' is not defined`.
+* **Root Cause**: An error-logging block added to `rcs_runner.py` referenced `RcsSubmissionStatus` and `logger` without importing them at the top of the file.
+* **Remediation**: Imported `RcsSubmissionStatus` and initialized `logger = logging.getLogger(__name__)`.
+
+---
+
+### Incident 10: `Text Template Overridden to Rich Card Stand Alone with Image`
+* **Category**: `PARSER_SPEC`
+* **Symptoms**: User specified `type: text` with a `card_title` in Excel, but Karix whitelisted it as a Rich Card with an unwanted image header.
+* **Root Cause**: In `rcs_client.py`, `is_richcard` evaluated `bool(payload.card_title)`, hijacking text templates into rich cards and attaching fallback images.
+* **Remediation**: Guarded `is_text` so that `type="text"` templates strictly remain text; prepended any `card_title` to the body text without generating images or standalone card structures.
+
+---
+
+### Incident 11: `PostbackData Lowercasing and Underscore Mismatch`
+* **Category**: `CREATIVE_SPEC`
+* **Symptoms**: Suggestion buttons had `postbackData: "apply_now"` while button text was `"Apply Now"`.
+* **Root Cause**: Suggestion builders previously applied `.lower().replace(" ", "_")` to postbackData.
+* **Remediation**: Set `postbackData` strictly identical to the suggestion button text without lowercase or underscore formatting.
+
+---
+
+### Incident 12: `Hashtag Variables (#var#) Not Extracted as Placeholders`
+* **Category**: `PARSER_SPEC`
+* **Symptoms**: Variables like `#urg#` were left as raw text instead of being converted to sequential `[N]` Karix placeholders.
+* **Root Cause**: Variable extraction regex only looked for `<...>`, `[...]`, and `{...}`, ignoring bare hashtag tokens.
+* **Remediation**: Updated regex to `(<[^>]+>|\[[^\]]+\]|\{[^}]+\}|\{#[^#]+#\}|#[a-zA-Z0-9_\-]+#)`.
+
+---
+
+### Incident 13: `Variables in Card Titles Unnumbered / Missing from templateParamNames`
+* **Category**: `VALIDATION`
+* **Symptoms**: Card titles like `{name}, Explore Our Offers` had brackets stripped instead of being numbered.
+* **Root Cause**: `_build_rcs_carousel_vi_template` only ran variable numbering on `cardDescription`, leaving card titles unnumbered.
+* **Remediation**: Sequentially process card titles through `_extract_and_number_rcs_variables` and include them in `templateParamNames`.
