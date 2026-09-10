@@ -213,5 +213,24 @@
     "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
     "auto_fixable": false,
     "confidence": 0.8
+  },
+  {
+    "id": "pattern_rcs_template__tpl_test_fail_1",
+    "name": "Error: RCS template 'tpl_test_fail_1' creation ...",
+    "signature": "RCS\\ template\\ 'tpl_test_fail_1'\\ creation\\ ",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-10T06:11:50.178302+00:00",
+    "last_seen": "2026-09-10T06:11:50.178302+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "tcl_promo"
+    ],
+    "root_cause": "RCS template 'tpl_test_fail_1' creation failed: HTTP 400: Mocked Karix Error",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
   }
 ]
