@@ -316,7 +316,6 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
         or os.environ.get("PUBLIC_APP_URL")
         or "https://whitelisting-agent.onrender.com"
     )
-    fallback_card_img = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop"
 
     cards = []
     for i in range(max_cards):
@@ -402,12 +401,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     # Resolve default media fallback per official spec ratio
     orientation_key = str(row.get("orientation") or "VERTICAL").strip().upper()
     height_key = str(row.get("height") or "MEDIUM").strip().upper()
-    if orientation_key == "HORIZONTAL":
-        _fallback_media = f"{public_base}/api/media/default_rcs_3x4.png"
-    elif height_key == "SHORT":
-        _fallback_media = f"{public_base}/api/media/default_rcs_3x1.png"
-    else:
-        _fallback_media = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
+
     message = str(
         row.get("text_message")
         or row.get("body")
@@ -731,8 +725,7 @@ def _upload_and_bind_rcs_images(
                             sub.file_name = None
                 except Exception as ex:
                     logger.warning("Failed to process rich card media: %s", ex)
-            elif not sub.media_url:
-                sub.media_url = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
+
 
         elif sub.template_type == "carousel" and sub.carousel_cards:
             spec = _spec_for_carousel(sub)
@@ -779,8 +772,7 @@ def _upload_and_bind_rcs_images(
                                 card.pop("fileName", None)
                     except Exception as ex:
                         logger.warning("Failed to process carousel card media: %s", ex)
-                elif not card.get("mediaUrl"):
-                    card["mediaUrl"] = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop"
+
 def load_rcs_from_excel(
     path: str,
     client: str = "tata",

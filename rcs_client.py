@@ -243,24 +243,8 @@ def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: s
         if card.get("fileName") or card.get("file_name"):
             c_entry["fileName"] = card.get("fileName") or card.get("file_name")
         elif card.get("mediaUrl") or card.get("media_url"):
-            m_url = str(card.get("mediaUrl") or card.get("media_url"))
-            if "tata-capital-logo.png" in m_url or "default_rcs_3x4.png" in m_url:
-                public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
-                m_url = f"{public_base}/api/media/default_rcs_16x9.png"
-            c_entry["mediaUrl"] = m_url
-        else:
-            public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
-            c_entry["mediaUrl"] = f"{public_base}/api/media/default_rcs_16x9.png"
+            c_entry["mediaUrl"] = str(card.get("mediaUrl") or card.get("media_url"))
         cards_list.append(c_entry)
-
-    if len(cards_list) < 2:
-        cards_list.append({
-            "cardTitle": "Instant Approval", "cardDescription": "Fast disbursement with flexible repayment terms.",
-            "mediaUrl": "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1280&h=720&fit=crop",
-            "suggestions": [{"suggestionType": "url_action", "text": "Apply Now", "url": f"https://www.tatacapital.com/personal-loan.html?ref={{{{{next_var_idx}}}}}"}],
-        })
-        all_params.append(str(next_var_idx))
-
     vi_template = {
         "name": safe_name, "type": "carousel", "botId": bot_id,
         "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
@@ -289,13 +273,7 @@ def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: s
     if getattr(payload, "file_name", None):
         card_entry["fileName"] = payload.file_name
     elif payload.media_url:
-        m_url = str(payload.media_url)
-        if "tata-capital-logo.png" in m_url:
-            m_url = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
-        card_entry["mediaUrl"] = m_url
-    else:
-        card_entry["mediaUrl"] = "https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop"
-
+        card_entry["mediaUrl"] = str(payload.media_url)
     vi_template = {
         "name": safe_name, "type": "richcard", "botId": bot_id,
         "orientation": getattr(payload, "orientation", "VERTICAL") or "VERTICAL",
