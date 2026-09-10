@@ -164,9 +164,9 @@ def _init_media_cache():
         pass
 
 
-@app.get("/api/media/{filename}")
+@app.api_route("/api/media/{filename}", methods=["GET", "HEAD"])
 def get_public_media(filename: str):
-    """Serve cached template header images/videos/documents directly to Meta and frontend previews."""
+    """Serve cached template header images/videos/documents directly to Karix, Meta, and frontend previews."""
     clean_fn = Path(filename).name
     file_p = MEDIA_CACHE_DIR / clean_fn
     if not file_p.exists():
@@ -176,13 +176,33 @@ def get_public_media(filename: str):
             file_p = root_p
         else:
             raise HTTPException(status_code=404, detail="Media not found")
+
     media_type = "image/png"
-    if clean_fn.endswith((".jpg", ".jpeg")):
+    lower_fn = clean_fn.lower()
+    if lower_fn.endswith((".jpg", ".jpeg")):
         media_type = "image/jpeg"
-    elif clean_fn.endswith(".mp4"):
+    elif lower_fn.endswith(".gif"):
+        media_type = "image/gif"
+    elif lower_fn.endswith(".mp4"):
         media_type = "video/mp4"
-    elif clean_fn.endswith(".pdf"):
+    elif lower_fn.endswith(".pdf"):
         media_type = "application/pdf"
+    else:
+        # Inspect magic bytes to detect real media format regardless of extension
+        try:
+            with open(file_p, "rb") as f:
+                header = f.read(16)
+            if header.startswith(b"\xff\xd8\xff"):
+                media_type = "image/jpeg"
+            elif header.startswith(b"\x89PNG\r\n\x1a\n"):
+                media_type = "image/png"
+            elif header.startswith(b"GIF87a") or header.startswith(b"GIF89a"):
+                media_type = "image/gif"
+            elif header.startswith(b"%PDF"):
+                media_type = "application/pdf"
+        except Exception:
+            pass
+
     return FileResponse(str(file_p), media_type=media_type)
 
 

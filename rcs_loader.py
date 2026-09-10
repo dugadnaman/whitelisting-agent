@@ -686,7 +686,19 @@ def _upload_and_bind_rcs_images(
     except Exception:
         return
 
-    media_cursor = 0
+    def _detect_media_ext(data: bytes, orig_fname: str = "") -> str:
+        if data.startswith(b"\xff\xd8\xff"):
+            return ".jpg"
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return ".png"
+        if data.startswith(b"GIF8"):
+            return ".gif"
+        if data.startswith(b"%PDF"):
+            return ".pdf"
+        if orig_fname and Path(orig_fname).suffix:
+            return Path(orig_fname).suffix.lower()
+        return ".png"
+
     for sub in subs:
         excel_row = getattr(sub, "_excel_row", None)
         row_images = spatial_images.get(excel_row, []) if (spatial_images and excel_row) else []
@@ -700,8 +712,8 @@ def _upload_and_bind_rcs_images(
             if target_img:
                 try:
                     fname, media_data = target_img
-                    unique_fn = f"{client}_{safe_tname}_rich.png"
-                    ext = Path(fname).suffix.lower()
+                    ext = _detect_media_ext(media_data, fname)
+                    unique_fn = f"{client}_{safe_tname}_rich{ext}"
                     # Preserve original raw bytes - zero auto-resizing or cropping
                     cache_p = media_cache_dir / unique_fn
                     cache_p.write_bytes(media_data)
@@ -744,8 +756,8 @@ def _upload_and_bind_rcs_images(
                 if target_img:
                     try:
                         fname, media_data = target_img
-                        unique_fn = f"{client}_{safe_tname}_card_{c_idx + 1}.png"
-                        ext = Path(fname).suffix.lower()
+                        ext = _detect_media_ext(media_data, fname)
+                        unique_fn = f"{client}_{safe_tname}_card_{c_idx + 1}{ext}"
                         # Preserve original raw bytes - zero auto-resizing or cropping
                         cache_p = media_cache_dir / unique_fn
                         cache_p.write_bytes(media_data)
