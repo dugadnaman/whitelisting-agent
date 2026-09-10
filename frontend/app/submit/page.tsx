@@ -13,12 +13,17 @@ function StatusBadge({ status }: { status: string }) {
     failed: 'bg-red-100 text-red-800 border border-red-200',
     submitted: 'bg-blue-100 text-blue-800 border border-blue-200',
     duplicate: 'bg-blue-100 text-blue-800 border border-blue-200',
+    blocked_aspect_ratio: 'bg-rose-100 text-rose-900 border border-rose-300 font-bold',
+    blocked: 'bg-rose-100 text-rose-900 border border-rose-300 font-bold',
     unknown: 'bg-gray-100 text-gray-800 border border-gray-200',
   };
   const s = (status || 'unknown').toLowerCase();
+  const isBlocked = s === 'blocked_aspect_ratio' || s === 'blocked';
+  const label = isBlocked ? 'BLOCKED (Aspect Ratio)' : status;
   return (
-    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${colors[s] || colors.unknown}`}>
-      {status}
+    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${colors[s] || colors.unknown}`}>
+      {isBlocked && <span>⛔</span>}
+      {label}
     </span>
   );
 }
@@ -58,10 +63,9 @@ export default function SubmitPage() {
   const [state, setState] = useState<State>({ step: 'idle' });
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [autoFixAspectRatio, setAutoFixAspectRatio] = useState(true);
   const [autoFixGrammar, setAutoFixGrammar] = useState(true);
   const [autoSkipDuplicates, setAutoSkipDuplicates] = useState(true);
-  const [showAspectRatioModal, setShowAspectRatioModal] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -252,7 +256,7 @@ export default function SubmitPage() {
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
   const executeSubmit = useCallback(async (fixRatio: boolean, fixGrammar: boolean) => {
     if (!file || !currentPreviews) return;
-    setShowAspectRatioModal(false);
+    setShowBlockedModal(false);
     setState({ step: 'submitting' });
     try {
       const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates, true);
@@ -279,14 +283,21 @@ export default function SubmitPage() {
 
   const handleInitiateSubmit = useCallback(() => {
     if (!file || !currentPreviews) return;
-    // If non-16:9 images are detected, explicitly prompt the user before modifying creatives
-    const warned = currentPreviews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0);
-    if (warned.length > 0) {
-      setShowAspectRatioModal(true);
+    const blocked = currentPreviews.filter(
+      p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))
+    );
+    if (blocked.length === currentPreviews.length) {
+      alert(
+        `Cannot submit: All ${blocked.length} templates have invalid image aspect ratios and will NOT be created. Auto-resizing has been removed. Please update the images in your spreadsheet to the recommended aspect ratio (e.g. 16:9 or 1:1).`
+      );
       return;
     }
-    executeSubmit(autoFixAspectRatio, autoFixGrammar);
-  }, [file, currentPreviews, autoFixAspectRatio, autoFixGrammar, executeSubmit]);
+    if (blocked.length > 0) {
+      setShowBlockedModal(true);
+      return;
+    }
+    executeSubmit(false, autoFixGrammar);
+  }, [file, currentPreviews, autoFixGrammar, executeSubmit]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -562,61 +573,38 @@ export default function SubmitPage() {
 
 
           {/* Aspect Ratio Alert Banner if non-16:9 images are detected */}
+          {/* Strict Aspect Ratio Block Banner */}
           {(() => {
-            const warned = state.previews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0);
-            if (!warned.length) return null;
+            const blocked = state.previews.filter(
+              p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))
+            );
+            if (!blocked.length) return null;
             return (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3 shadow-xs">
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl space-y-3 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
-                      ⚠️
+                    <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-bold text-sm shrink-0 mt-0.5 shadow-xs">
+                      ⛔
                     </div>
                     <div>
-                      <h4 className="text-xs font-bold text-amber-950">
-                        Image Aspect Ratio Warning ({warned.length} of {state.previews.length} template{warned.length === 1 ? '' : 's'} non-standard)
+                      <h4 className="text-xs font-bold text-red-950">
+                        {blocked.length} of {state.previews.length} Template{blocked.length === 1 ? '' : 's'} Will NOT Be Created (Invalid Aspect Ratio)
                       </h4>
-                      <p className="text-[11px] text-amber-800/90 mt-0.5 leading-relaxed">
+                      <p className="text-[11px] text-red-800/90 mt-0.5 leading-relaxed">
+                        Auto-resizing has been removed to preserve creative design. Templates with non-compliant image dimensions are strictly blocked from creation.
                         {channel === 'rcs' ? (
-                          <>
-                            Karix RCS recommends a <strong>3:4 aspect ratio (Portrait)</strong> or <strong>1:1 (Square)</strong> for carousel cards, and <strong>2:1 (1200x600)</strong> for rich cards. Non-standard creatives may be distorted or rejected by Karix Bot Builder.
-                          </>
+                          <> Required for RCS: <strong>16:9 (1280x720)</strong>, <strong>1:1 (770x720)</strong>, or <strong>3:4 (Portrait)</strong> for carousel cards; <strong>2:1 (1200x600)</strong> for rich cards.</>
                         ) : (
-                          <>
-                            WhatsApp recommends a <strong>16:9 aspect ratio (1280x720)</strong> for header creatives. Images with square (1:1), portrait (9:16), or irregular dimensions can result in unexpected edge cropping on end-user devices.
-                          </>
+                          <> Required for WhatsApp: <strong>16:9 (1280x720)</strong> or <strong>1:1 (Square)</strong> for header creatives.</>
                         )}
                       </p>
                     </div>
                   </div>
 
-                  {/* Auto-fix Toggle */}
-                  <label className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-amber-300 text-xs font-semibold text-amber-900 shadow-xs cursor-pointer shrink-0 hover:bg-amber-50/50 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={autoFixAspectRatio}
-                      onChange={(e) => setAutoFixAspectRatio(e.target.checked)}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>{channel === 'rcs' ? 'Auto-Fit to 3:4 Aspect Ratio (Recommended)' : 'Auto-Pad to 16:9 Canvas (Recommended)'}</span>
-                  </label>
+                  <span className="px-2.5 py-1 rounded-lg bg-red-100 text-red-800 border border-red-200 text-xs font-bold shrink-0">
+                    {blocked.length} Blocked
+                  </span>
                 </div>
-
-                {autoFixAspectRatio ? (
-                  <div className="text-[11px] text-amber-900 bg-amber-100/70 p-2.5 rounded-lg border border-amber-200/80 flex items-center gap-2">
-                    <span className="text-xs">✨</span>
-                    <span>
-                      <strong>Auto-Adjustment Enabled:</strong> The system will place non-standard images centered onto a clean 16:9 canvas with matching background padding so <strong>100% of your text, buttons, and logos</strong> remain visible on mobile devices.
-                    </span>
-                  </div>
-                ) : (
-                  <div className="text-[11px] text-amber-900 bg-white/80 p-2.5 rounded-lg border border-amber-200 flex items-center gap-2">
-                    <span className="text-xs">⚠️</span>
-                    <span>
-                      <strong>Raw Upload Active:</strong> Images will be submitted without canvas padding. WhatsApp and RCS mobile apps may crop top/bottom edges of non-16:9 creatives.
-                    </span>
-                  </div>
-                )}
               </div>
             );
           })()}
@@ -698,7 +686,16 @@ export default function SubmitPage() {
                   className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
                 >
                   {(() => {
+                    const blocked = state.previews.filter(p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked)));
                     const dupes = state.previews.filter(p => p.already_exists_on_waba || p.exists_on_waba || p.duplicate_warning);
+                    const compliant = Math.max(0, state.previews.length - blocked.length);
+                    if (blocked.length > 0) {
+                      return (
+                        <span>
+                          Submit {compliant} Compliant ({blocked.length} Blocked)
+                        </span>
+                      );
+                    }
                     const netNew = state.previews.length - dupes.length;
                     if (dupes.length > 0 && autoSkipDuplicates) {
                       return (
@@ -782,21 +779,26 @@ export default function SubmitPage() {
                                 })}
                               </div>
 
-                              {p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0 && (
+                              {(p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0)) && (
                                 <div className="flex flex-wrap gap-1 mt-1">
-                                  {p.aspect_ratio_warnings.map((w, wIdx) => (
+                                  {p.aspect_ratio_warnings?.map((w, wIdx) => (
                                     <span
                                       key={wIdx}
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200"
-                                      title={w.action}
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-300"
+                                      title={w.error || w.action}
                                     >
-                                      <span>⚠️ Ratio {w.current_ratio}</span>
-                                      <span className="font-normal text-amber-700">({w.original_size})</span>
-                                      <span className={`px-1 py-0.2 rounded font-semibold ${autoFixAspectRatio ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}`}>
-                                        {autoFixAspectRatio ? '→ Fix to 16:9' : '→ Keep Raw'}
-                                      </span>
+                                      <span>⛔ Will NOT Be Created</span>
+                                      <span className="font-normal text-rose-700">({w.original_size} &bull; {w.current_ratio})</span>
                                     </span>
                                   ))}
+                                  {(!p.aspect_ratio_warnings || p.aspect_ratio_warnings.length === 0) && p.aspect_ratio_blocked && (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-300"
+                                      title={p.aspect_ratio_block_reason || 'Invalid aspect ratio'}
+                                    >
+                                      <span>⛔ Will NOT Be Created (Invalid Aspect Ratio)</span>
+                                    </span>
+                                  )}
                                 </div>
                               )}
 
@@ -1103,113 +1105,58 @@ export default function SubmitPage() {
       )}
 
       {/* Aspect Ratio Adjustment Confirmation Modal */}
-      {showAspectRatioModal && currentPreviews && (
+      {/* Aspect Ratio Block Confirmation Modal */}
+      {showBlockedModal && currentPreviews && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 space-y-5">
             <div className="flex items-start justify-between pb-3 border-b border-gray-100">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-lg shrink-0 mt-0.5 shadow-xs">
-                  ⚠️
+                <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold text-lg shrink-0 mt-0.5 shadow-xs">
+                  ⛔
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-gray-900">
-                    Non-Standard Images Detected ({currentPreviews.filter(p => p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0).length} templates)
+                    Aspect Ratio Block: {currentPreviews.filter(p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))).length} Templates Will NOT Be Created
                   </h3>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {channel === 'rcs'
-                      ? 'Karix RCS requires a 3:4 portrait or 1:1 ratio for carousel cards (and 2:1 for rich cards). Would you like to auto-crop and fit to 3:4, or keep original images as-is?'
-                      : 'How would you like to handle creatives that do not match the recommended 16:9 ratio?'}
+                    Auto-resizing has been removed to preserve creative design. Templates with non-compliant image dimensions are strictly blocked from creation.
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setShowAspectRatioModal(false)}
+                onClick={() => setShowBlockedModal(false)}
                 className="text-gray-400 hover:text-gray-600 font-bold p-1"
               >
                 &times;
               </button>
             </div>
 
-            <div className="space-y-3">
-              {/* Option 1: Auto-Pad (Recommended) */}
-              <label
-                onClick={() => setAutoFixAspectRatio(true)}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all block ${
-                  autoFixAspectRatio
-                    ? 'bg-blue-50/70 border-blue-500 ring-2 ring-blue-500/20'
-                    : 'bg-gray-50/60 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="aspect_choice"
-                      checked={autoFixAspectRatio}
-                      onChange={() => setAutoFixAspectRatio(true)}
-                      className="text-blue-600 focus:ring-blue-500"
-                    />
-                    <span className="text-xs font-bold text-gray-900">
-                      {channel === 'rcs' ? 'Auto-Crop & Fit to 3:4 Ratio (Recommended)' : 'Auto-Pad to 16:9 Canvas (Recommended)'}
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase">
-                    Safe for Devices
-                  </span>
-                </div>
-                <p className="text-[11px] text-gray-600 pl-5 leading-relaxed">
-                  {channel === 'rcs'
-                    ? 'Center-crops and resizes non-standard images to the official Karix 3:4 carousel aspect ratio so cards are displayed properly without distortion or platform rejection.'
-                    : 'Places non-16:9 images centered onto a clean 16:9 canvas with matching background color. Prevents WhatsApp from cropping your logo, text, or buttons.'}
-                </p>
-              </label>
-
-              {/* Option 2: Keep Original Raw */}
-              <label
-                onClick={() => setAutoFixAspectRatio(false)}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all block ${
-                  !autoFixAspectRatio
-                    ? 'bg-amber-50/70 border-amber-500 ring-2 ring-amber-500/20'
-                    : 'bg-gray-50/60 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="aspect_choice"
-                      checked={!autoFixAspectRatio}
-                      onChange={() => setAutoFixAspectRatio(false)}
-                      className="text-amber-600 focus:ring-amber-500"
-                    />
-                    <span className="text-xs font-bold text-gray-900">
-                      Keep Original Dimensions (Do Not Resize / Upload As-Is)
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 uppercase">
-                    Unmodified
-                  </span>
-                </div>
-                <p className="text-[11px] text-gray-600 pl-5 leading-relaxed">
-                  Uploads your images exactly as they appear in your Excel file without any cropping, resizing, or padding.
-                </p>
-              </label>
+            <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900 space-y-2">
+              <p className="font-semibold">
+                Only compliant templates ({currentPreviews.filter(p => !p.aspect_ratio_blocked && (!p.aspect_ratio_warnings || !p.aspect_ratio_warnings.some(w => w.blocked))).length}) will be submitted to {channelLabel}.
+              </p>
+              <p className="text-[11px] text-red-700 leading-relaxed">
+                Blocked templates will be clearly distinguished in the results table as <strong>BLOCKED (Invalid Aspect Ratio)</strong> so you can correct their dimensions and re-upload.
+              </p>
             </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-100">
               <button
                 type="button"
-                onClick={() => setShowAspectRatioModal(false)}
+                onClick={() => setShowBlockedModal(false)}
                 className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors"
               >
-                Cancel
+                Cancel &amp; Fix File
               </button>
               <button
                 type="button"
-                onClick={() => executeSubmit(autoFixAspectRatio, autoFixGrammar)}
+                onClick={() => {
+                  setShowBlockedModal(false);
+                  executeSubmit(false, autoFixGrammar);
+                }}
                 className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
               >
-                <span>{autoFixAspectRatio ? 'Approve & Resize' : 'Submit Unmodified'}</span>
+                <span>Proceed with Compliant Templates Only</span>
                 <span>&rarr;</span>
               </button>
             </div>

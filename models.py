@@ -17,7 +17,7 @@ class SubmissionStatus(StrEnum):
     SUBMITTED = "submitted"
     FAILED = "failed"
     DUPLICATE = "duplicate"
-
+    BLOCKED_ASPECT_RATIO = "blocked_aspect_ratio"
 
 class ApprovalStatus(StrEnum):
     """
@@ -29,8 +29,9 @@ class ApprovalStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+    BLOCKED = "blocked"
+    BLOCKED_ASPECT_RATIO = "blocked_aspect_ratio"
     UNKNOWN = "unknown"  # submission failed, or status check errored
-
 
 @dataclass
 class TemplateComponent:
@@ -60,7 +61,8 @@ class TemplateSubmission:
     waba_id: str
     components: list[TemplateComponent]
     source_ref: str  # traces back to wherever this row came from
-
+    aspect_ratio_blocked: bool = False
+    aspect_ratio_error: str | None = None
 
 @dataclass
 class SubmissionResult:

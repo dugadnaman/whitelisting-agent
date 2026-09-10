@@ -901,12 +901,12 @@ def _inspect_image_aspect_ratio(comp: dict, aspect_warnings: list[dict]) -> None
         ratio = w / h
 
         is_16_9 = abs(ratio - (16 / 9)) < 0.08
+        is_1_1 = abs(ratio - 1.0) < 0.08
         is_2_1 = abs(ratio - 2.0) < 0.08
-        is_3_4 = abs(ratio - 0.75) < 0.08
 
-        if not is_16_9 and not is_2_1 and not is_3_4:
+        if not is_16_9 and not is_1_1 and not is_2_1:
             shape_name = (
-                "1:1 (Square)"
+                "Square (1:1)"
                 if abs(ratio - 1.0) < 0.05
                 else ("Portrait / Vertical" if ratio < 1.0 else f"Non-standard ({ratio:.2f}:1)")
             )
@@ -915,8 +915,10 @@ def _inspect_image_aspect_ratio(comp: dict, aspect_warnings: list[dict]) -> None
                     "component": "HEADER (IMAGE)",
                     "original_size": f"{w}x{h}px",
                     "current_ratio": shape_name,
-                    "recommended_ratio": "16:9 (1280x720) or 2:1 (1200x600)",
-                    "action": "Auto-pad onto standard canvas with matching background so no text/logo is cropped.",
+                    "recommended_ratio": "16:9 (1280x720) or 1:1 (Square)",
+                    "action": "BLOCKED: Template will NOT be created because image is not in recommended ratio. Auto-resizing has been removed.",
+                    "error": f"Header image dimension {w}x{h} ({ratio:.2f}:1) does not match required WhatsApp aspect ratio: 16:9 (1280x720) or 1:1 (Square). Auto-resizing is disabled; this template will not be created.",
+                    "blocked": True,
                 }
             )
         f_type = comp.get("file_type") or "image/png"
@@ -990,19 +992,24 @@ def _inspect_single_submission(
                         w, h = img.size
                         ratio = w / h
                         # Official Karix RCS carousel ratio is 3:4 (0.75:1) or 1:1 (1.0:1)
-                        is_3_4 = abs(ratio - 0.75) < 0.06
-                        is_1_1 = abs(ratio - 1.0) < 0.05
-                        if not is_3_4 and not is_1_1:
+                        # Official Karix RCS carousel ratio: 16:9 (~1.78), 1:1 (1.0), or 3:4 (0.75)
+                        is_16_9 = abs(ratio - (16 / 9)) < 0.08
+                        is_1_1 = abs(ratio - 1.0) < 0.08
+                        is_3_4 = abs(ratio - 0.75) < 0.08
+                        if not is_16_9 and not is_1_1 and not is_3_4:
                             aspect_warnings.append(
                                 {
                                     "component": f"Card {c_idx + 1} Image",
                                     "original_size": f"{w}x{h}px",
                                     "current_ratio": f"{ratio:.2f}:1",
-                                    "recommended_ratio": "3:4 (Portrait) or 1:1 (Square)",
-                                    "action": "Center-crop to 3:4 ratio for optimal carousel display on user handsets.",
+                                    "recommended_ratio": "16:9 (1280x720), 1:1 (770x720), or 3:4 (768x1024)",
+                                    "action": "BLOCKED: Template will NOT be created because card image is not in recommended ratio. Auto-resizing has been removed.",
+                                    "error": f"Card {c_idx + 1} image dimension {w}x{h} ({ratio:.2f}:1) does not match required Carousel aspect ratio: 16:9, 1:1, or 3:4. Auto-resizing is disabled; this template will not be created.",
+                                    "blocked": True,
                                 }
                             )
-                        card["thumbnail_url"] = f"data:image/png;base64,{base64.b64encode(c_img).decode()}"
+                            card["aspect_ratio_blocked"] = True
+                            card["aspect_ratio_error"] = f"Card {c_idx + 1} image dimension {w}x{h} ({ratio:.2f}:1) does not match required ratio."
                     except Exception as exc:
                         logger.debug("RCS card image inspection notice: %s", exc)
                     finally:
@@ -1021,14 +1028,18 @@ def _inspect_single_submission(
                 ratio = w / h
                 is_2_1 = abs(ratio - 2.0) < 0.08
                 is_16_9 = abs(ratio - (16 / 9)) < 0.08
-                if not is_2_1 and not is_16_9:
+                is_3_4 = abs(ratio - 0.75) < 0.08
+                is_3_1 = abs(ratio - 3.0) < 0.10
+                if not is_2_1 and not is_16_9 and not is_3_4 and not is_3_1:
                     aspect_warnings.append(
                         {
                             "component": "Rich Card Image",
                             "original_size": f"{w}x{h}px",
                             "current_ratio": f"{ratio:.2f}:1",
-                            "recommended_ratio": "2:1 (1200x600) or 16:9 (1280x720)",
-                            "action": "Center-crop to 2:1 ratio for rich card display.",
+                            "recommended_ratio": "2:1 (1440x720 / 1200x600), 16:9 (1280x720), or 3:4",
+                            "action": "BLOCKED: Template will NOT be created because image is not in recommended ratio. Auto-resizing has been removed.",
+                            "error": f"Rich card image dimension {w}x{h} ({ratio:.2f}:1) does not match required Rich Card aspect ratio: 2:1, 16:9, or 3:4. Auto-resizing is disabled; this template will not be created.",
+                            "blocked": True,
                         }
                     )
                 item["thumbnail_url"] = f"data:image/png;base64,{base64.b64encode(standalone_img).decode()}"
@@ -1036,8 +1047,17 @@ def _inspect_single_submission(
                 logger.debug("RCS standalone image inspection notice: %s", exc)
             finally:
                 item.pop("image_bytes", None)
+
+    blocked_aspect = [w for w in aspect_warnings if w.get("blocked")]
     item["aspect_ratio_warnings"] = aspect_warnings
-    item["grammar_warnings"] = grammar_warnings
+    item["aspect_ratio_blocked"] = bool(blocked_aspect) or item.get("aspect_ratio_blocked", False)
+    if item["aspect_ratio_blocked"]:
+        item["aspect_ratio_block_reason"] = (
+            blocked_aspect[0]["error"]
+            if blocked_aspect
+            else item.get("aspect_ratio_error")
+            or "Image is not in recommended aspect ratio. Template will NOT be created."
+        )
 
     body_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "BODY"), "")
     header_comp = next((c for c in components if isinstance(c, dict) and c.get("type") == "HEADER"), None)
@@ -1283,10 +1303,35 @@ async def _submit_rcs_batch(
 
     for idx, s in enumerate(subs):
         tname = str(s.template_name or "").strip()
+
+        # Strict Aspect Ratio Validation Gate
+        if getattr(s, "aspect_ratio_blocked", False):
+            blocked_err = (
+                getattr(s, "aspect_ratio_error", None)
+                or "Template not created: Image is not in recommended aspect ratio (16:9, 1:1, or 3:4). Auto-resizing has been removed."
+            )
+            block_res = RcsSubmissionResult(
+                source_ref=s.source_ref,
+                template_name=s.template_name,
+                template_id="",
+                status=RcsSubmissionStatus.BLOCKED_ASPECT_RATIO,
+                provider_ref_id="",
+                error=f"BLOCKED (Invalid Aspect Ratio): {blocked_err}",
+                provider_response=None,
+                approval_status="blocked_aspect_ratio",
+                client=acc,
+                channel="rcs",
+                submitted_by=user,
+                source_file=filename,
+            )
+            log_rcs_result(block_res, RCS_LOG_PATH)
+            entry_dict = asdict(block_res)
+            results_by_index[idx] = entry_dict
+            continue
+
         if not tname:
             to_submit.append((idx, s))
             continue
-
         name_key = tname.lower()
         safe_key = re.sub(r"[^a-zA-Z0-9_]", "_", tname)[:25].strip("_").lower()
 
@@ -1429,15 +1474,16 @@ async def _submit_rcs_batch(
         },
         status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
     )
+    blocked_count = len([e for e in cleaned_entries if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"])
     return {
         "job_id": job_id,
         "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
         "total": len(subs),
         "submitted": len(to_submit),
         "skipped_duplicates": len(duplicate_entries),
+        "blocked_aspect_ratio": blocked_count,
         "results": [_json_safe(e) for e in cleaned_entries],
     }
-
 
 async def _submit_wa_batch(
     tmp_path: str, suffix: str, acc: str, user: str, skip_duplicates: bool, auto_route: bool, fix_aspect_ratio: bool, fix_grammar: bool, filename: str, current_user: dict
@@ -1472,11 +1518,45 @@ async def _submit_wa_batch(
         }
 
     for idx, s in enumerate(subs):
-        name_key = s.template_name.strip().lower()
-        if not name_key:
-            to_submit.append((idx, s))
+        # Strict Aspect Ratio Validation Gate for WhatsApp header images
+        wa_blocked = getattr(s, "aspect_ratio_blocked", False)
+        wa_blocked_err = getattr(s, "aspect_ratio_error", None)
+        if not wa_blocked and getattr(s, "components", None):
+            from submission_client import check_whatsapp_image_aspect_ratio
+            for comp in s.components:
+                if getattr(comp, "type", None) == "HEADER" and str(getattr(comp, "format", "")).upper() == "IMAGE":
+                    img_data = getattr(comp, "image_bytes", None)
+                    if not img_data and getattr(comp, "media_file", None) and Path(comp.media_file).exists():
+                        img_data = Path(comp.media_file).read_bytes()
+                    if img_data:
+                        is_v, err_m, (w, h), r = check_whatsapp_image_aspect_ratio(img_data)
+                        if not is_v:
+                            wa_blocked = True
+                            wa_blocked_err = err_m
+                            s.aspect_ratio_blocked = True
+                            s.aspect_ratio_error = err_m
+                            break
+
+        if wa_blocked:
+            block_res = SubmissionResult(
+                source_ref=s.source_ref,
+                template_name=s.template_name,
+                status=SubmissionStatus.BLOCKED_ASPECT_RATIO,
+                provider_ref_id="",
+                error=f"BLOCKED (Invalid Aspect Ratio): {wa_blocked_err or 'Header image does not match 16:9 or 1:1 aspect ratio. Auto-resizing has been removed.'}",
+                provider_response=None,
+                approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
+                client=acc,
+                channel="whatsapp",
+                submitted_by=user,
+                source_file=filename,
+            )
+            log_result(block_res, LOG_PATH)
+            entry_dict = asdict(block_res)
+            results_by_index[idx] = entry_dict
             continue
 
+        name_key = s.template_name.strip().lower()
         if skip_duplicates and name_key in live_map:
             live_obj = live_map[name_key]
             status_str = str(live_obj.get("template_create_status") or live_obj.get("status", "APPROVED")).upper()
@@ -1622,14 +1702,18 @@ async def _submit_wa_batch(
         },
         status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
     )
+    blocked_count = len([e for e in cleaned_entries if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"])
     return {
         "job_id": job_id,
         "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
         "total": len(subs),
         "submitted": len(to_submit),
         "skipped_duplicates": len(duplicate_entries),
+        "blocked_aspect_ratio": blocked_count,
         "results": [_json_safe(e) for e in cleaned_entries],
     }
+
+
 async def _submit_sms_batch(
     tmp_path: str,
     suffix: str,

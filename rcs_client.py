@@ -366,6 +366,20 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
     Submit one RCS template to the official Karix RCS Bot Builder Template API.
     """
     c = (client or getattr(payload, "client", None) or "tata").lower()
+
+    # Strict Aspect Ratio Validation Gate: Block submission if non-compliant
+    if getattr(payload, "aspect_ratio_blocked", False):
+        logger.warning("Blocking submission of RCS template %s due to invalid aspect ratio", payload.template_name)
+        return RcsSubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=RcsSubmissionStatus.BLOCKED_ASPECT_RATIO,
+            approval_status="blocked_aspect_ratio",
+            error=f"BLOCKED (Invalid Aspect Ratio): {getattr(payload, 'aspect_ratio_error', None) or 'Image is not in recommended aspect ratio (16:9, 1:1, or 3:4). Auto-resizing has been removed.'}",
+            client=c,
+            channel="rcs",
+        )
+
     data_payload = _build_rcs_save_payload(payload, client=c)
     last_result: RcsSubmissionResult | None = None
 

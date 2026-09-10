@@ -545,99 +545,64 @@ def _spec_for_carousel(sub: RcsTemplateSubmission) -> dict:
         CAROUSEL_IMAGE_SPECS[("MEDIUM", "MEDIUM")],
     )
 
-
-def _fit_rcs_image(img_bytes: bytes, spec: dict, crop_to_aspect: bool = True) -> bytes:
+def check_rcs_image_aspect_ratio(
+    media_data: bytes, template_type: str = "carousel"
+) -> tuple[bool, str, tuple[int, int], float]:
     """
-    Fit image to the official spec ratio, resize to optimal resolution, and compress
-    below the max file size using progressive JPEG quality reduction.
-    """
-    try:
-        import io
-
-        from PIL import Image
-
-        img = Image.open(io.BytesIO(img_bytes))
-        if img.mode in ("RGBA", "LA", "P"):
-            bg = Image.new("RGB", img.size, (255, 255, 255))
-            if img.mode == "P":
-                img = img.convert("RGBA")
-            bg.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
-            img = bg
-        elif img.mode != "RGB":
-            img = img.convert("RGB")
-
-        current_w, current_h = img.size
-        ratio_w, ratio_h = spec["ratio"]
-        target_aspect = ratio_w / ratio_h
-        current_aspect = current_w / current_h
-
-        # Center-crop to the required aspect ratio only if approved
-        if crop_to_aspect and abs(current_aspect - target_aspect) > 0.02:
-            if current_aspect > target_aspect:
-                new_w = int(current_h * target_aspect)
-                left = (current_w - new_w) // 2
-                img = img.crop((left, 0, left + new_w, current_h))
-            else:
-                new_h = int(current_w / target_aspect)
-                top = (current_h - new_h) // 2
-                img = img.crop((0, top, current_w, top + new_h))
-        # Resize down to optimal resolution if larger
-        opt_w, opt_h = spec["optimal"]
-        if img.width > opt_w or img.height > opt_h:
-            img.thumbnail((opt_w, opt_h), Image.Resampling.LANCZOS)
-
-        max_bytes = spec["max_bytes"]
-        # Progressive quality reduction until under max file size
-        quality = 92
-        while quality >= 45:
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=quality, optimize=True)
-            data = buf.getvalue()
-            if len(data) <= max_bytes:
-                return data
-            quality -= 10
-        return data
-    except Exception:
-        return img_bytes
-
-
-def _ensure_aspect_ratio(img_bytes: bytes, target_ratio: tuple = (16, 9)) -> bytes:
-    """
-    Auto-fit image bytes to the REQUESTED target ratio (e.g. 2:1 for standalone rich cards,
-    3:4 for carousel cards). Preserves the image only if it already matches the target.
+    Validate that an image strictly adheres to official Karix aspect ratio specifications.
+    NO auto-resizing, auto-cropping, or canvas padding is performed.
+    Returns: (is_valid, error_reason_if_invalid, (width, height), ratio)
     """
     try:
         import io
-
         from PIL import Image
 
-        img = Image.open(io.BytesIO(img_bytes))
-        current_w, current_h = img.size
-        current_aspect = current_w / current_h
+        img = Image.open(io.BytesIO(media_data))
+        w, h = img.size
+        if w <= 0 or h <= 0:
+            return False, "Invalid image dimensions (0x0)", (w, h), 0.0
+        ratio = w / h
 
-        target_w, target_h = target_ratio
-        target_aspect = target_w / target_h
+        if template_type in ("carousel", "carousal"):
+            # Official Karix Carousel allowed ratios:
+            # - 16:9 (~1.78:1, e.g. 1280x720) for Medium width
+            # - 1:1 (1.0:1, e.g. 770x720) for Small width
+            # - 3:4 (0.75:1, e.g. 768x1024) for Portrait
+            is_16_9 = abs(ratio - (16 / 9)) < 0.08
+            is_1_1 = abs(ratio - 1.0) < 0.08
+            is_3_4 = abs(ratio - 0.75) < 0.08
 
-        # Only preserve if the image already matches the requested target ratio
-        if abs(current_aspect - target_aspect) < 0.08:
-            return img_bytes
-
-        # Crop to the requested target ratio (center crop)
-        if current_aspect > target_aspect:
-            new_w = int(current_h * target_aspect)
-            left = (current_w - new_w) // 2
-            img = img.crop((left, 0, left + new_w, current_h))
+            if is_16_9 or is_1_1 or is_3_4:
+                return True, "", (w, h), ratio
+            return (
+                False,
+                f"Image {w}x{h} ({ratio:.2f}:1) is not in allowed Carousel aspect ratio: 16:9 (1280x720), 1:1 (770x720), or 3:4 (768x1024).",
+                (w, h),
+                ratio,
+            )
         else:
-            new_h = int(current_w / target_aspect)
-            top = (current_h - new_h) // 2
-            img = img.crop((0, top, current_w, top + new_h))
+            # Official Karix Rich Card allowed ratios:
+            # - 2:1 (2.0:1, e.g. 1440x720 / 1200x600)
+            # - 16:9 (~1.78:1, e.g. 1280x720)
+            # - 3:4 (0.75:1, e.g. 768x1024)
+            # - 3:1 (3.0:1, e.g. 1440x480)
+            is_2_1 = abs(ratio - 2.0) < 0.08
+            is_16_9 = abs(ratio - (16 / 9)) < 0.08
+            is_3_4 = abs(ratio - 0.75) < 0.08
+            is_3_1 = abs(ratio - 3.0) < 0.10
 
-        buf = io.BytesIO()
-        fmt = "PNG" if img.format == "PNG" else "JPEG"
-        img.save(buf, format=fmt, quality=95)
-        return buf.getvalue()
-    except Exception:
-        return img_bytes
+            if is_2_1 or is_16_9 or is_3_4 or is_3_1:
+                return True, "", (w, h), ratio
+            return (
+                False,
+                f"Image {w}x{h} ({ratio:.2f}:1) is not in allowed Rich Card aspect ratio: 2:1 (1440x720), 16:9 (1280x720), or 3:4 (768x1024).",
+                (w, h),
+                ratio,
+            )
+    except Exception as exc:
+        logger.warning("Failed to inspect image aspect ratio: %s", exc)
+        return True, "", (0, 0), 1.0
+
 
 
 def _extract_images_spatially(path: str) -> dict[int, list[tuple[str, bytes]]]:
@@ -743,22 +708,22 @@ def _upload_and_bind_rcs_images(
                     fname, media_data = target_img
                     unique_fn = f"{client}_{safe_tname}_rich.png"
                     ext = Path(fname).suffix.lower()
-                    fitted = (
-                        media_data
-                        if ext in ACCEPTED_VIDEO_FORMATS
-                        else _fit_rcs_image(media_data, _spec_for_richcard(sub), crop_to_aspect=fix_aspect_ratio)
-                    )
-                    # Cache the user's actual image so our public server can serve it to Karix
+                    # Preserve original raw bytes - zero auto-resizing or cropping
                     cache_p = media_cache_dir / unique_fn
-                    cache_p.write_bytes(fitted)
+                    cache_p.write_bytes(media_data)
                     sub.media_url = f"{public_base}/api/media/{unique_fn}"
+                    sub.image_bytes = media_data
+                    sub.file_name = unique_fn
 
-                    if not upload_now:
-                        sub.image_bytes = fitted
-                        sub.file_name = unique_fn
-                    else:
+                    # Strict aspect ratio validation gate
+                    is_valid, err_msg, (w, h), ratio = check_rcs_image_aspect_ratio(media_data, template_type="richcard")
+                    if not is_valid:
+                        sub.aspect_ratio_blocked = True
+                        sub.aspect_ratio_error = err_msg
+                        logger.warning("Rich card %s blocked: %s", safe_tname, err_msg)
+                    elif upload_now:
                         try:
-                            k_name = upload_rcs_media(fitted, filename=unique_fn, client=client)
+                            k_name = upload_rcs_media(media_data, filename=unique_fn, client=client)
                             sub.file_name = k_name
                             logger.info("Bound user pasted rich card media %s -> Karix %s", unique_fn, k_name)
                         except Exception as up_ex:
@@ -788,22 +753,25 @@ def _upload_and_bind_rcs_images(
                         fname, media_data = target_img
                         unique_fn = f"{client}_{safe_tname}_card_{c_idx + 1}.png"
                         ext = Path(fname).suffix.lower()
-                        fitted = (
-                            media_data
-                            if ext in ACCEPTED_VIDEO_FORMATS
-                            else _fit_rcs_image(media_data, spec, crop_to_aspect=fix_aspect_ratio)
-                        )
-                        # Cache the user's actual image so our public server serves it to Karix
+                        # Preserve original raw bytes - zero auto-resizing or cropping
                         cache_p = media_cache_dir / unique_fn
-                        cache_p.write_bytes(fitted)
+                        cache_p.write_bytes(media_data)
                         card["mediaUrl"] = f"{public_base}/api/media/{unique_fn}"
+                        card["image_bytes"] = media_data
+                        card["fileName"] = unique_fn
 
-                        if not upload_now:
-                            card["image_bytes"] = fitted
-                            card["fileName"] = unique_fn
-                        else:
+                        # Strict aspect ratio validation gate
+                        is_valid, err_msg, (w, h), ratio = check_rcs_image_aspect_ratio(media_data, template_type="carousel")
+                        if not is_valid:
+                            card["aspect_ratio_blocked"] = True
+                            card["aspect_ratio_error"] = err_msg
+                            sub.aspect_ratio_blocked = True
+                            if not sub.aspect_ratio_error:
+                                sub.aspect_ratio_error = f"Card {c_idx + 1}: {err_msg}"
+                            logger.warning("Carousel card %d in %s blocked: %s", c_idx + 1, safe_tname, err_msg)
+                        elif upload_now:
                             try:
-                                k_name = upload_rcs_media(fitted, filename=unique_fn, client=client)
+                                k_name = upload_rcs_media(media_data, filename=unique_fn, client=client)
                                 card["fileName"] = k_name
                                 logger.info("Bound user pasted carousel card %d media -> Karix %s", c_idx + 1, k_name)
                             except Exception as up_ex:

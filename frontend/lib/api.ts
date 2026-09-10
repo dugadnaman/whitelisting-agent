@@ -35,9 +35,9 @@ export type UserItem = {
 export type Template = {
   source_ref: string;
   template_name: string;
-  status: "submitted" | "failed" | "duplicate";
+  status: "submitted" | "failed" | "duplicate" | "blocked_aspect_ratio" | "blocked";
   provider_ref_id?: string | null;
-  approval_status?: "pending" | "approved" | "rejected" | "unknown";
+  approval_status?: "pending" | "approved" | "rejected" | "unknown" | "blocked" | "blocked_aspect_ratio";
   approval_reason?: string | null;
   error?: string | null;
   retry_count: number;
@@ -101,6 +101,8 @@ export type AspectRatioWarning = {
   current_ratio: string;
   recommended_ratio: string;
   action: string;
+  error?: string;
+  blocked?: boolean;
 };
 
 export type GrammarWarning = {
@@ -134,6 +136,8 @@ export type TemplatePreview = {
   waba_id?: string;
   source_ref?: string;
   aspect_ratio_warnings?: AspectRatioWarning[];
+  aspect_ratio_blocked?: boolean;
+  aspect_ratio_block_reason?: string;
   grammar_warnings?: GrammarWarning[];
   compliance_warnings?: ComplianceWarning[];
   already_exists_on_waba?: boolean;

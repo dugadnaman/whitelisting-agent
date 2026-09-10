@@ -160,6 +160,24 @@ def run(
     def _submit_single(submission):
         submission.client = client
         submission.waba_id = get_waba_id(client)
+        if getattr(submission, "aspect_ratio_blocked", False):
+            result = SubmissionResult(
+                source_ref=submission.source_ref,
+                template_name=submission.template_name,
+                status=SubmissionStatus.BLOCKED_ASPECT_RATIO,
+                provider_ref_id="",
+                error=f"BLOCKED (Invalid Aspect Ratio): {getattr(submission, 'aspect_ratio_error', None) or 'Image is not in recommended aspect ratio (16:9 or 1:1). Auto-resizing has been removed.'}",
+                provider_response=None,
+                approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
+                client=client,
+                channel="whatsapp",
+                submitted_by=user,
+                source_file=source_file,
+            )
+            log_result(result, log_path)
+            print(f"  {result.template_name}: BLOCKED (Invalid Aspect Ratio)")
+            return result
+
         if pacing > 0:
             time.sleep(pacing)
         result = submit_template(

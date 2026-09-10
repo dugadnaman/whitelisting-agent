@@ -422,22 +422,16 @@ def _ensure_default_sample_pdf() -> str:
         logger.info("Created default sample document at %s", default_path.resolve())
 
 
-def normalize_image_16_9(
+def check_whatsapp_image_aspect_ratio(
     input_path_or_bytes: str | bytes | None,
-    target_width: int = 1280,
-    target_height: int = 720,
-) -> tuple[str, str]:
+) -> tuple[bool, str, tuple[int, int], float]:
     """
-    Ensure any image conforms to Meta's required 16:9 aspect ratio (1280x720).
-    If the image is square (1:1), portrait (9:16), or has non-standard dimensions,
-    it is fitted cleanly onto a 16:9 canvas with matching neutral background padding
-    so NO text, logo, or critical branding is cropped out by Meta.
-    Returns (normalized_file_path, mime_type).
+    Validate that a WhatsApp header image strictly adheres to Meta aspect ratio guidelines.
+    NO auto-resizing, auto-cropping, or canvas padding is performed.
+    Returns: (is_valid, error_reason_if_invalid, (width, height), ratio)
     """
     if not input_path_or_bytes:
-        return _ensure_default_sample_image(), "image/png"
-    import tempfile
-
+        return True, "", (0, 0), 1.0
     try:
         from PIL import Image
 
@@ -445,62 +439,47 @@ def normalize_image_16_9(
             img = Image.open(io.BytesIO(input_path_or_bytes))
         else:
             img = Image.open(str(input_path_or_bytes))
-        if img.mode in ("RGBA", "LA", "P"):
-            bg = Image.new("RGB", img.size, (255, 255, 255))
-            if img.mode == "P":
-                img = img.convert("RGBA")
-            bg.paste(img, mask=img.split()[-1] if img.mode == "RGBA" else None)
-            img = bg
-        elif img.mode != "RGB":
-            img = img.convert("RGB")
-
         w, h = img.size
-        current_ratio = w / h
-        target_ratio = target_width / target_height
+        if w <= 0 or h <= 0:
+            return False, "Invalid image dimensions (0x0)", (w, h), 0.0
+        ratio = w / h
 
-        # Sample corner pixel to blend background naturally
-        edge_color = (255, 255, 255)
-        try:
-            corner = img.getpixel((0, 0))
-            if isinstance(corner, tuple) and len(corner) >= 3:
-                edge_color = corner[:3]
-        except Exception:
-            pass
+        # Allowed: 16:9 (~1.78:1) or 1:1 (1.0:1) or 2:1 (2.0:1)
+        is_16_9 = abs(ratio - (16 / 9)) < 0.08
+        is_1_1 = abs(ratio - 1.0) < 0.08
+        is_2_1 = abs(ratio - 2.0) < 0.08
 
-        # If already approximately 16:9 (within 5% tolerance)
-        if abs(current_ratio - target_ratio) < 0.05:
-            if w > 1920:
-                img.thumbnail((1920, 1080), Image.Resampling.LANCZOS)
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                img.save(tmp, format="JPEG", quality=92, optimize=True)
-                return tmp.name, "image/jpeg"
-
-        # Fit inside 16:9 canvas (1280x720) without cropping or stretching
-        canvas = Image.new("RGB", (target_width, target_height), edge_color)
-        img_fit = img.copy()
-        img_fit.thumbnail((target_width, target_height), Image.Resampling.LANCZOS)
-
-        offset_x = (target_width - img_fit.width) // 2
-        offset_y = (target_height - img_fit.height) // 2
-        canvas.paste(img_fit, (offset_x, offset_y))
-
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            canvas.save(tmp, format="JPEG", quality=92, optimize=True)
-            logger.info(
-                "Image normalized from %dx%d (ratio %.2f) to 16:9 (1280x720) for Meta compliance.",
-                w,
-                h,
-                current_ratio,
-            )
-            return tmp.name, "image/jpeg"
+        if is_16_9 or is_1_1 or is_2_1:
+            return True, "", (w, h), ratio
+        return (
+            False,
+            f"Header image dimension {w}x{h} ({ratio:.2f}:1) does not match required WhatsApp aspect ratio: 16:9 (1280x720) or 1:1 (Square).",
+            (w, h),
+            ratio,
+        )
     except Exception as exc:
-        logger.warning("Image 16:9 normalization skipped: %s", exc)
-        if isinstance(input_path_or_bytes, bytes):
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                tmp.write(input_path_or_bytes)
-                return tmp.name, "image/png"
-        return str(input_path_or_bytes), "image/png"
+        logger.warning("Failed to inspect WhatsApp image aspect ratio: %s", exc)
+        return True, "", (0, 0), 1.0
 
+
+def normalize_image_16_9(
+    input_path_or_bytes: str | bytes | None,
+    target_width: int = 1280,
+    target_height: int = 720,
+) -> tuple[str, str]:
+    """
+    Preserve raw image bytes without any auto-resizing, auto-cropping, or canvas padding.
+    Returns (raw_file_path, mime_type).
+    """
+    if not input_path_or_bytes:
+        return _ensure_default_sample_image(), "image/png"
+    import tempfile
+
+    if isinstance(input_path_or_bytes, bytes):
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+            tmp.write(input_path_or_bytes)
+            return tmp.name, "image/png"
+    return str(input_path_or_bytes), "image/png"
 
 def _prepare_local_media_bytes(
     cformat: str, image_bytes: bytes | None, media_file: str | None, media_url: str | None, fix_aspect_ratio: bool
@@ -1375,6 +1354,18 @@ def submit_template(
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
 
+    # Strict Aspect Ratio Validation Gate: Block submission if non-compliant
+    if getattr(payload, "aspect_ratio_blocked", False):
+        logger.warning("Blocking submission of WhatsApp template %s due to invalid aspect ratio", payload.template_name)
+        return SubmissionResult(
+            source_ref=payload.source_ref,
+            template_name=payload.template_name,
+            status=SubmissionStatus.FAILED,
+            approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
+            error=f"BLOCKED (Invalid Aspect Ratio): {getattr(payload, 'aspect_ratio_error', None) or 'Header image is not in recommended aspect ratio (16:9 or 1:1). Auto-resizing has been removed.'}",
+            client=c,
+            channel="whatsapp",
+        )
     # 1. Primary for accounts with Portal Session: Portal API
     try:
         get_portal_auth_headers(c)
