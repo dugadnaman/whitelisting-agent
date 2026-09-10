@@ -422,5 +422,43 @@
     "preventative_action": "Imported RcsSubmissionStatus and configured logger in rcs_runner.py; verified via ruff check.",
     "auto_fixable": true,
     "confidence": 1.0
+  },
+  {
+    "id": "pattern_policyviolation__unsplash_fall",
+    "name": "Error: PolicyViolation: Unsplash fallback image...",
+    "signature": "PolicyViolation:\\ Unsplash\\ fallback\\ image",
+    "category": "DYNAMIC_LEARNING",
+    "frequency": 1,
+    "first_seen": "2026-09-10T10:09:31.257891+00:00",
+    "last_seen": "2026-09-10T10:09:31.257891+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "PolicyViolation: Unsplash fallback image injected into template when media was absent in sheet",
+    "preventative_action": "Logged by self-learning engine. Will monitor and recommend automated rule.",
+    "auto_fixable": false,
+    "confidence": 0.8
+  },
+  {
+    "id": "rcs_fallback_image_injection",
+    "name": "Unsplash Fallback Image Injected in Templates Lacking Media",
+    "signature": "(unsplash|fallback_media|fallback_card_img|fallback image)",
+    "category": "CREATIVE_SPEC",
+    "frequency": 2,
+    "first_seen": "2026-09-10T07:00:00Z",
+    "last_seen": "2026-09-10T10:09:31.256917+00:00",
+    "channels_affected": [
+      "rcs"
+    ],
+    "accounts_affected": [
+      "all"
+    ],
+    "root_cause": "Loader and client injected Unsplash fallback image URLs when cards had no mediaUrl or embedded images.",
+    "preventative_action": "Strictly use only media explicitly provided in the user spreadsheet; never inject default or fallback images.",
+    "auto_fixable": true,
+    "confidence": 1.0
   }
 ]

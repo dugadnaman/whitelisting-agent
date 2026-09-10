@@ -170,3 +170,11 @@ Below is the record of key error patterns faced and resolved in this project:
 * **Symptoms**: Card titles like `{name}, Explore Our Offers` had brackets stripped instead of being numbered.
 * **Root Cause**: `_build_rcs_carousel_vi_template` only ran variable numbering on `cardDescription`, leaving card titles unnumbered.
 * **Remediation**: Sequentially process card titles through `_extract_and_number_rcs_variables` and include them in `templateParamNames`.
+
+---
+
+### Incident 14: `Unsplash Fallback Image Injected When Template Lacked Media in Sheet`
+* **Category**: `CREATIVE_SPEC`
+* **Symptoms**: Templates created on Karix Bot Builder had an unexpected Unsplash finance image header (`https://images.unsplash.com/photo-1554224155-6726b3ff858f?w=1200&h=600&fit=crop`).
+* **Root Cause**: `rcs_loader.py` and `rcs_client.py` contained fallback assignments that injected an Unsplash stock image whenever `media_url` was empty or absent.
+* **Remediation**: Completely removed all fallback image URLs and fallback card padding from `rcs_loader.py` and `rcs_client.py`. Templates now strictly and solely use the image bytes or URL provided by the user in the sheet.
