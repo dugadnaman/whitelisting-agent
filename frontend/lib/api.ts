@@ -969,3 +969,21 @@ export async function submitJiraBrief(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+export async function syncRcsTemplateToMoEngage(params: {
+  template_name: string;
+  template_id: string;
+  card_title: string;
+  card_description: string;
+  media_url?: string | null;
+  cta_text?: string;
+  cta_url?: string;
+  sender_id?: string;
+}): Promise<{ ok: boolean; name: string; template_id: string; moengage_id: string }> {
+  const res = await fetchWithRetry(getApiUrl("/api/moengage/rcs/sync"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}

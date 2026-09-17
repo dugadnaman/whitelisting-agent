@@ -3382,3 +3382,69 @@ async def submit_jira_brief_endpoint(
         "rcs_submitted": submitted_rcs,
         "jira_comment": jira_comment_res,
     })
+# ---------------------------------------------------------------------------
+# MoEngage RCS Template Management Sync Endpoints
+# ---------------------------------------------------------------------------
+
+
+class MoEngageRcsSyncRequest(BaseModel):
+    template_name: str
+    template_id: str
+    card_title: str
+    card_description: str
+    media_url: str | None = None
+    cta_text: str = "Explore Now"
+    cta_url: str = "https://www.tatacapital.com"
+    sender_id: str = "68888420892e852255fca466"
+
+
+@app.post("/api/moengage/rcs/sync")
+async def sync_moengage_rcs_endpoint(
+    req: MoEngageRcsSyncRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Register an approved RCS template into MoEngage Settings -> RCS Template Management."""
+    from moengage_sync import create_moengage_rcs_template
+
+    try:
+        res = await asyncio.to_thread(
+            create_moengage_rcs_template,
+            template_name=req.template_name,
+            template_id=req.template_id,
+            card_title=req.card_title,
+            card_description=req.card_description,
+            media_url=req.media_url,
+            cta_text=req.cta_text,
+            cta_url=req.cta_url,
+            sender_id=req.sender_id,
+        )
+
+        log_activity(
+            user=current_user.get("name", "Operator"),
+            action="MOENGAGE_RCS_SYNC",
+            account="tata",
+            channel="rcs",
+            details={
+                "template_name": req.template_name,
+                "template_id": req.template_id,
+                "moengage_id": res.get("moengage_id"),
+            },
+            status="success",
+        )
+        return _json_safe(res)
+    except Exception as exc:
+        logger.exception("Failed to sync RCS template %s to MoEngage: %s", req.template_name, exc)
+        raise HTTPException(status_code=500, detail=f"MoEngage sync error: {exc!s}") from exc
+
+
+@app.get("/api/moengage/rcs/templates")
+async def get_moengage_rcs_templates_endpoint(current_user: dict = Depends(get_current_user)):
+    """List registered RCS templates from MoEngage."""
+    from moengage_sync import list_moengage_rcs_templates
+
+    try:
+        templates = await asyncio.to_thread(list_moengage_rcs_templates)
+        return _json_safe({"ok": True, "count": len(templates), "templates": templates})
+    except Exception as exc:
+        logger.exception("Failed to list MoEngage RCS templates: %s", exc)
+        raise HTTPException(status_code=500, detail=f"MoEngage API error: {exc!s}") from exc

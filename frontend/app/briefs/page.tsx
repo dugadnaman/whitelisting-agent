@@ -6,6 +6,7 @@ import {
   fetchJiraIssues,
   fetchJiraBrief,
   submitJiraBrief,
+  syncRcsTemplateToMoEngage,
   type JiraIssueItem,
   type JiraBriefData,
   type JiraWhatsAppDraft,
@@ -30,6 +31,8 @@ export default function JiraBriefsPage() {
   const [rcsTemplates, setRcsTemplates] = useState<JiraRcsDraft[]>([]);
   const [selectedWa, setSelectedWa] = useState<Set<string>>(new Set());
   const [selectedRcs, setSelectedRcs] = useState<Set<string>>(new Set());
+  const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
+  const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
 
   const loadIssues = useCallback(async () => {
@@ -182,6 +185,28 @@ export default function JiraBriefsPage() {
 
   const selectAllRcs = (select: boolean) => {
     setSelectedRcs(select ? new Set(rcsTemplates.map((r) => r.template_name)) : new Set());
+  };
+  const handleSyncRcsToMoEngage = async (rcs: JiraRcsDraft) => {
+    try {
+      setSyncingRcs((prev) => ({ ...prev, [rcs.template_name]: true }));
+      const res = await syncRcsTemplateToMoEngage({
+        template_name: rcs.template_name,
+        template_id: rcs.template_name,
+        card_title: rcs.card_title || brief?.summary || 'Tata Capital Offer',
+        card_description: rcs.body,
+        cta_text: rcs.action_label || 'Explore Now',
+        cta_url: rcs.action_url || 'https://www.tatacapital.com',
+      });
+      setSyncedRcs((prev) => ({ ...prev, [rcs.template_name]: res.moengage_id }));
+      setFeedback({
+        message: `Template '${rcs.template_name}' successfully created in MoEngage Settings (MoEngage ID: ${res.moengage_id}). It is now available in MoEngage RCS campaigns.`,
+        type: 'success',
+      });
+    } catch (err) {
+      setFeedback({ message: `MoEngage Sync failed: ${formatError(err)}`, type: 'error' });
+    } finally {
+      setSyncingRcs((prev) => ({ ...prev, [rcs.template_name]: false }));
+    }
   };
 
   const filteredIssues = issues.filter(
@@ -710,16 +735,35 @@ export default function JiraBriefsPage() {
                                   </span>
                                 </div>
 
-                                <button
-                                  onClick={() => toggleEditCard(rcs.template_name)}
-                                  className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
-                                    isEditing
-                                      ? 'bg-blue-50 text-blue-700 border-blue-300'
-                                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
-                                  }`}
-                                >
-                                  {isEditing ? '✓ Done Editing' : '✏️ Edit'}
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => handleSyncRcsToMoEngage(rcs)}
+                                    disabled={syncingRcs[rcs.template_name]}
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition flex items-center gap-1.5 ${
+                                      syncedRcs[rcs.template_name]
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                        : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                                    }`}
+                                    title="Register this RCS template directly into MoEngage Settings -> RCS template management"
+                                  >
+                                    {syncingRcs[rcs.template_name]
+                                      ? 'Syncing...'
+                                      : syncedRcs[rcs.template_name]
+                                      ? '✓ In MoEngage'
+                                      : '🔄 Sync to MoEngage'}
+                                  </button>
+
+                                  <button
+                                    onClick={() => toggleEditCard(rcs.template_name)}
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
+                                      isEditing
+                                        ? 'bg-blue-50 text-blue-700 border-blue-300'
+                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {isEditing ? '✓ Done Editing' : '✏️ Edit'}
+                                  </button>
+                                </div>
                               </div>
 
                               {rcs.media_filename && (
