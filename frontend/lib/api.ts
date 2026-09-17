@@ -987,3 +987,47 @@ export async function syncRcsTemplateToMoEngage(params: {
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export type MoEngageCredentials = {
+  ok: boolean;
+  has_token: boolean;
+  has_cookie: boolean;
+  bearer_token: string;
+  cookie: string;
+  expired?: boolean;
+  expires_at?: number | null;
+  remaining_min?: number | null;
+};
+
+export async function fetchMoEngageCredentials(): Promise<MoEngageCredentials> {
+  const res = await fetchWithRetry(getApiUrl("/api/moengage/credentials"));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function saveMoEngageCredentials(
+  bearerToken: string,
+  cookie: string
+): Promise<{ ok: boolean; updated_keys: string[]; expired?: boolean; remaining_min?: number | null }> {
+  const res = await fetchWithRetry(getApiUrl("/api/moengage/credentials"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bearer_token: bearerToken, cookie }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function testMoEngageConnection(): Promise<{
+  ok: boolean;
+  error?: string;
+  template_count?: number;
+  expired?: boolean;
+  remaining_min?: number | null;
+}> {
+  const res = await fetchWithRetry(getApiUrl("/api/moengage/test"), {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}

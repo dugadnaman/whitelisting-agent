@@ -3448,3 +3448,112 @@ async def get_moengage_rcs_templates_endpoint(current_user: dict = Depends(get_c
     except Exception as exc:
         logger.exception("Failed to list MoEngage RCS templates: %s", exc)
         raise HTTPException(status_code=500, detail=f"MoEngage API error: {exc!s}") from exc
+
+
+class MoEngageCredentialUpdate(BaseModel):
+    bearer_token: str | None = None
+    cookie: str | None = None
+
+
+@app.get("/api/moengage/credentials")
+def get_moengage_credentials_endpoint(current_user: dict = Depends(get_current_user)):
+    """Return MoEngage credential state (token, cookie, expiry) without leaking the full cookie."""
+    from moengage_sync import get_moengage_credentials
+
+    creds = get_moengage_credentials()
+    return _json_safe({
+        "ok": True,
+        "has_token": creds.get("has_token", False),
+        "has_cookie": creds.get("has_cookie", False),
+        "bearer_token": creds.get("bearer_token", ""),
+        "cookie": creds.get("cookie", ""),
+        "expired": creds.get("expired"),
+        "expires_at": creds.get("expires_at"),
+        "remaining_min": creds.get("remaining_min"),
+    })
+
+
+@app.put("/api/moengage/credentials")
+def update_moengage_credentials_endpoint(
+    req: MoEngageCredentialUpdate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Persist MoEngage Bearer token and cookie to .env and credentials.json."""
+    mapping: dict[str, str] = {}
+    if req.bearer_token and req.bearer_token.strip():
+        mapping["MOENGAGE_BEARER_TOKEN"] = req.bearer_token.strip()
+    if req.cookie and req.cookie.strip():
+        mapping["MOENGAGE_COOKIE"] = req.cookie.strip()
+
+    if not mapping:
+        return {"ok": True, "updated_keys": []}
+
+    # 1. Update .env file
+    try:
+        env_path = Path(".env")
+        lines: list[str] = []
+        seen: set[str] = set()
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "=" in stripped:
+                    k = stripped.split("=", 1)[0].strip()
+                    if k in mapping:
+                        lines.append(f"{k}={mapping[k]}")
+                        seen.add(k)
+                    else:
+                        lines.append(line)
+                else:
+                    lines.append(line)
+        for k, v in mapping.items():
+            if k not in seen:
+                lines.append(f"{k}={v}")
+        env_path.write_text("\n".join(lines) + "\n")
+    except Exception as exc:
+        logger.warning("Could not update .env with MoEngage creds: %s", exc)
+
+    # 2. Update persistent credentials.json
+    try:
+        cred_json_path = Path("credentials.json")
+        saved_creds = {}
+        if cred_json_path.exists():
+            try:
+                saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
+            except Exception:
+                saved_creds = {}
+        saved_creds.update(mapping)
+        cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Could not write MoEngage creds to credentials.json: %s", exc)
+
+    # Reflect into live environment immediately
+    for k, v in mapping.items():
+        os.environ[k] = v
+
+    from moengage_sync import decode_moengage_token_expiry
+    expiry = decode_moengage_token_expiry(mapping.get("MOENGAGE_BEARER_TOKEN"))
+
+    log_activity(
+        user=current_user.get("name", "Operator"),
+        action="CREDENTIALS_UPDATE",
+        account="tata",
+        channel="moengage",
+        details={"keys_updated": list(mapping.keys())},
+        status="success",
+    )
+
+    return _json_safe({
+        "ok": True,
+        "updated_keys": list(mapping.keys()),
+        "expired": expiry.get("expired"),
+        "remaining_min": expiry.get("remaining_min"),
+    })
+
+
+@app.post("/api/moengage/test")
+def test_moengage_connection_endpoint(current_user: dict = Depends(get_current_user)):
+    """Test MoEngage token validity by listing RCS templates."""
+    from moengage_sync import test_moengage_connection
+
+    result = test_moengage_connection()
+    return _json_safe(result)

@@ -6,9 +6,12 @@ Registers Karix approved RCS templates with provider='karix', sender, card title
 body, media URL, and open URL suggestions.
 """
 
+import base64
+import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import requests
@@ -19,6 +22,79 @@ MOENGAGE_API_BASE = "https://dashboard-03.moengage.com"
 
 # Default sender ID for TCFSL Promotional in MoEngage
 DEFAULT_TCFSL_PROMO_SENDER_ID = "68888420892e852255fca466"
+
+
+def decode_moengage_token_expiry(token: str | None) -> dict[str, Any]:
+    """Decode MoEngage JWT exp/iat claims into a human-readable expiry summary."""
+    clean = (token or "").strip()
+    if not clean:
+        return {"present": False, "expired": True, "expires_at": None, "remaining_sec": 0}
+    if clean.lower().startswith("bearer "):
+        clean = clean[7:].strip()
+
+    try:
+        payload_b64 = clean.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        exp = int(payload.get("exp", 0))
+        now = int(time.time())
+        return {
+            "present": True,
+            "expired": now >= exp,
+            "expires_at": exp,
+            "iat": int(payload.get("iat", 0)),
+            "remaining_sec": max(0, exp - now),
+            "remaining_min": round(max(0, exp - now) / 60, 1),
+        }
+    except Exception:
+        # Token not in standard JWT form — treat as present but unknown expiry
+        return {"present": True, "expired": False, "expires_at": None, "remaining_sec": None, "remaining_min": None}
+
+
+def get_moengage_credentials() -> dict[str, Any]:
+    """Return the current MoEngage credential state including token expiry."""
+    _load_env_file()
+    token = (os.environ.get("MOENGAGE_BEARER_TOKEN") or os.environ.get("MOE_AUTH_TOKEN") or "").strip()
+    cookie = os.environ.get("MOENGAGE_COOKIE") or ""
+    expiry = decode_moengage_token_expiry(token)
+    return {
+        "bearer_token": token,
+        "cookie": cookie,
+        "has_token": bool(token),
+        "has_cookie": bool(cookie),
+        **expiry,
+    }
+
+
+def test_moengage_connection() -> dict[str, Any]:
+    """Verify MoEngage token validity by listing RCS templates and return expiry."""
+    creds = get_moengage_credentials()
+    if creds.get("expired") is True:
+        return {
+            "ok": False,
+            "error": "MoEngage Bearer token expired. Paste a fresh token from DevTools (Settings -> MoEngage).",
+            **creds,
+        }
+    if not creds.get("has_token"):
+        return {
+            "ok": False,
+            "error": "Missing MoEngage Bearer token. Configure it in Settings -> MoEngage.",
+            **creds,
+        }
+
+    try:
+        templates = list_moengage_rcs_templates()
+        return {
+            "ok": True,
+            "template_count": len(templates),
+            **creds,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": str(exc),
+            **creds,
+        }
 
 
 def get_moengage_auth_headers() -> dict[str, str]:
@@ -33,7 +109,13 @@ def get_moengage_auth_headers() -> dict[str, str]:
 
     if not token:
         raise OSError(
-            "Missing MoEngage Bearer token. Configure MOENGAGE_BEARER_TOKEN in Settings or .env."
+            "Missing MoEngage Bearer token. Configure MOENGAGE_BEARER_TOKEN in Settings -> MoEngage."
+        )
+
+    expiry = decode_moengage_token_expiry(token)
+    if expiry.get("expired") is True:
+        raise OSError(
+            "MoEngage Bearer token has expired. Paste a fresh token from DevTools (Settings -> MoEngage)."
         )
 
     auth_val = token if token.lower().startswith("bearer ") else f"Bearer {token}"

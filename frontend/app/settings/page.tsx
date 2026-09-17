@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague } from '@/lib/api';
+import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection } from '@/lib/api';
 import type { Account, Channel, AccountItem, AuthUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
@@ -53,6 +53,32 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
+
+  // MoEngage form state
+  const [showMoEngage, setShowMoEngage] = useState(false);
+  const [moeBearerToken, setMoeBearerToken] = useState('');
+  const [moeCookie, setMoeCookie] = useState('');
+  const [moeExpiry, setMoeExpiry] = useState<{ expired?: boolean; remaining_min?: number | null }>({});
+  const [moeLoaded, setMoeLoaded] = useState(false);
+
+  // Load MoEngage credentials on mount
+  useEffect(() => {
+    let ignore = false;
+    async function loadMoEngage() {
+      try {
+        const creds = await fetchMoEngageCredentials();
+        if (ignore) return;
+        setMoeBearerToken(creds.bearer_token || '');
+        setMoeCookie(creds.cookie || '');
+        setMoeExpiry({ expired: creds.expired, remaining_min: creds.remaining_min });
+        setMoeLoaded(true);
+      } catch {
+        setMoeLoaded(true);
+      }
+    }
+    loadMoEngage();
+    return () => { ignore = true; };
+  }, []);
 
   // Team Directory state
   const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
@@ -291,6 +317,56 @@ export default function SettingsPage() {
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveMoEngage() {
+    setSaving(true);
+    setBanner(null);
+    try {
+      const res = await saveMoEngageCredentials(
+        moeBearerToken.trim(),
+        moeCookie.trim()
+      );
+      setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
+      setBanner({
+        type: 'success',
+        message: `MoEngage credentials saved${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
+      });
+    } catch (err) {
+      setBanner({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Failed to save MoEngage credentials',
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTestMoEngage() {
+    setTesting(true);
+    setBanner(null);
+    try {
+      const res = await testMoEngageConnection();
+      if (res.ok) {
+        setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
+        setBanner({
+          type: 'success',
+          message: `MoEngage connection verified — ${res.template_count ?? 0} RCS templates visible in Settings.`,
+        });
+      } else {
+        setBanner({
+          type: 'error',
+          message: res.error || 'MoEngage connection test failed.',
+        });
+      }
+    } catch (err) {
+      setBanner({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'MoEngage connection test failed',
+      });
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -572,6 +648,7 @@ export default function SettingsPage() {
           <button
             onClick={() => {
               setSelectedChannel('whatsapp');
+              setShowMoEngage(false);
               setBanner(null);
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
@@ -588,6 +665,7 @@ export default function SettingsPage() {
           <button
             onClick={() => {
               setSelectedChannel('rcs');
+              setShowMoEngage(false);
               setBanner(null);
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
@@ -604,16 +682,33 @@ export default function SettingsPage() {
           <button
             onClick={() => {
               setSelectedChannel('sms');
+              setShowMoEngage(false);
               setBanner(null);
             }}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedChannel === 'sms'
+              selectedChannel === 'sms' && !showMoEngage
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
             <span className="w-2 h-2 rounded-full bg-purple-400" />
             SMS
+          </button>
+
+          {/* MoEngage Tab */}
+          <button
+            onClick={() => {
+              setShowMoEngage(true);
+              setBanner(null);
+            }}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
+              showMoEngage
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-amber-400" />
+            MoEngage
           </button>
         </div>
       </div>
@@ -622,14 +717,16 @@ export default function SettingsPage() {
       <div className="flex items-center justify-between p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase">
-            {accountTitle.slice(0, 2)}
+            {showMoEngage ? 'MO' : accountTitle.slice(0, 2)}
           </div>
           <div>
             <div className="text-xs font-bold text-gray-900">
-              Configuring: {accountTitle} &bull; {channelTitle}
+              {showMoEngage ? 'Configuring: MoEngage' : `Configuring: ${accountTitle} • ${channelTitle}`}
             </div>
             <div className="text-[11px] text-gray-500">
-              {isWhatsApp
+              {showMoEngage
+                ? 'MoEngage dashboard session used to sync approved Karix RCS templates into MoEngage Settings'
+                : isWhatsApp
                 ? 'Official WhatsApp Template REST API via static Bearer Token'
                 : isSms
                 ? 'Karix Send SMS JSON API with AES-256 PII encryption & DLR callbacks'
@@ -638,23 +735,117 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <button
-          onClick={() => {
-            setActiveAccount(selectedAccount);
-            setActiveChannel(selectedChannel);
-            setBanner({
-              type: 'success',
-              message: `Active Context switched to ${accountTitle} • ${channelTitle}.`,
-            });
-          }}
-          className="px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-xs"
-        >
-          Set as Active Context
-        </button>
+        {!showMoEngage && (
+          <button
+            onClick={() => {
+              setActiveAccount(selectedAccount);
+              setActiveChannel(selectedChannel);
+              setBanner({
+                type: 'success',
+                message: `Active Context switched to ${accountTitle} • ${channelTitle}.`,
+              });
+            }}
+            className="px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-xs"
+          >
+            Set as Active Context
+          </button>
+        )}
       </div>
 
       {/* Credential Form Card */}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-6 space-y-5">
+        {showMoEngage ? (
+          <>
+            {moeExpiry.expired !== undefined && (
+              <div className={`p-3 rounded-lg text-xs font-semibold flex items-center gap-2 border ${
+                moeExpiry.expired
+                  ? 'bg-red-50 text-red-700 border-red-200'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              }`}>
+                <span>{moeExpiry.expired ? '⚠️' : '✅'}</span>
+                <span>
+                  {moeExpiry.expired
+                    ? 'MoEngage token expired. Paste a fresh token below.'
+                    : moeExpiry.remaining_min != null
+                    ? `MoEngage token valid for ~${moeExpiry.remaining_min} more minutes.`
+                    : 'MoEngage token present.'}
+                </span>
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="moe_bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                MoEngage Bearer Token (MOENGAGE_BEARER_TOKEN)
+              </label>
+              <input
+                id="moe_bearer_token"
+                type="password"
+                value={moeBearerToken}
+                onChange={(e) => setMoeBearerToken(e.target.value)}
+                placeholder="Paste the Authorization: Bearer <JWT> header from MoEngage DevTools..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                MoEngage dashboard JWT. <strong className="text-amber-600">Expires ~2 hours</strong> after login — refresh from DevTools → Network → any request → <code>authorization</code> header.
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="moe_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                MoEngage Session Cookie (MOENGAGE_COOKIE)
+              </label>
+              <input
+                id="moe_cookie"
+                type="password"
+                value={moeCookie}
+                onChange={(e) => setMoeCookie(e.target.value)}
+                placeholder="Copy the full cookie header from DevTools (optional but recommended)..."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Session cookies (<code>moe_uuid</code>, <code>moe_i_m</code>, <code>AWSALBTG</code>, etc.) that keep the dashboard session alive.
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
+              <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                <span>🔑</span> How to grab a fresh token (60 seconds)
+              </div>
+              <ol className="space-y-1 text-[11px] text-amber-800 list-decimal list-inside">
+                <li>Open MoEngage dashboard in Chrome (logged in)</li>
+                <li>Press F12 → Network tab → reload the page</li>
+                <li>Click any request to <code>dashboard-03.moengage.com</code></li>
+                <li>Headers → copy the full <code>authorization: Bearer …</code> value</li>
+                <li>Paste it above and click Save</li>
+              </ol>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
+              <div className="text-[11px] text-gray-400">
+                Enables the <span className="font-semibold text-gray-600">🔄 Sync to MoEngage</span> button on RCS template cards in Jira Briefs.
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleTestMoEngage}
+                  disabled={testing || saving}
+                  className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {testing ? 'Testing...' : 'Test Connection'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveMoEngage}
+                  disabled={saving || testing}
+                  className="flex-1 sm:flex-none px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {saving ? 'Saving...' : 'Save MoEngage Credentials'}
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
         {isWhatsApp ? (
           <>
             {/* WABA Auth Token */}
@@ -968,6 +1159,8 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+          </>
+        )}
       </div>
 
       {/* Banner */}
