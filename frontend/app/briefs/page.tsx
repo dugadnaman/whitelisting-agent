@@ -49,6 +49,15 @@ export default function JiraBriefsPage() {
       setFeedback(null);
       const data = await fetchJiraBrief(key);
       setBrief(data);
+      if (data.whatsapp_templates?.length > 0) {
+        setActiveTab('whatsapp');
+      } else if (data.rcs_templates?.length > 0) {
+        setActiveTab('rcs');
+      } else if (data.sms_templates?.length > 0) {
+        setActiveTab('sms');
+      } else {
+        setActiveTab('moengage');
+      }
     } catch (err) {
       setFeedback({ message: `Failed to load brief for ${key}: ${formatError(err)}`, type: 'error' });
     } finally {
@@ -259,6 +268,39 @@ export default function JiraBriefsPage() {
                   </div>
                 )}
               </div>
+              {/* Email Campaign Banner if applicable */}
+              {brief.is_email_campaign && (
+                <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">📧</span>
+                    <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider">
+                      Email Mailer Campaign Detected
+                    </h3>
+                    <span className="text-[10px] bg-purple-100 text-purple-800 font-semibold px-2 py-0.5 rounded">
+                      No Karix Whitelisting Required
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-800 leading-relaxed">
+                    <strong>{brief.summary}</strong> is an email newsletter brief containing HTML mailer zip packages and preheaders/subject lines. Email mailers are deployed directly through MoEngage Email or your ESP, and do not require Meta / Karix WhatsApp or RCS approval.
+                  </p>
+                  {brief.attachments_mapped.some(a => a.filename.endsWith('.zip') || a.filename.endsWith('.docx')) && (
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span className="text-[11px] text-purple-700 font-medium">Mailer Files:</span>
+                      {brief.attachments_mapped
+                        .filter(a => a.filename.endsWith('.zip') || a.filename.endsWith('.docx'))
+                        .map(a => (
+                          <span
+                            key={a.filename}
+                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-white border border-purple-200 text-[11px] font-mono font-semibold text-purple-800 shadow-2xs"
+                          >
+                            <span>📦</span>
+                            <span>{a.filename}</span>
+                          </span>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Multi-Channel Content Tabs */}
               <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs overflow-hidden">

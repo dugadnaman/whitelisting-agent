@@ -892,6 +892,8 @@ export type JiraBriefData = {
   assignee: string;
   reporter: string;
   duedate?: string | null;
+  is_email_campaign?: boolean;
+  campaign_type_label?: string;
   whatsapp_templates: JiraWhatsAppDraft[];
   rcs_templates: JiraRcsDraft[];
   sms_templates: JiraSmsDraft[];
