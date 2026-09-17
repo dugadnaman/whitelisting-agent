@@ -8,6 +8,8 @@ import {
   submitJiraBrief,
   type JiraIssueItem,
   type JiraBriefData,
+  type JiraWhatsAppDraft,
+  type JiraRcsDraft,
 } from '@/lib/api';
 import { formatError, formatDate } from '@/lib/format';
 
@@ -22,6 +24,13 @@ export default function JiraBriefsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Editable template drafts and selection sets
+  const [waTemplates, setWaTemplates] = useState<JiraWhatsAppDraft[]>([]);
+  const [rcsTemplates, setRcsTemplates] = useState<JiraRcsDraft[]>([]);
+  const [selectedWa, setSelectedWa] = useState<Set<string>>(new Set());
+  const [selectedRcs, setSelectedRcs] = useState<Set<string>>(new Set());
+  const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
 
   const loadIssues = useCallback(async () => {
     try {
@@ -49,9 +58,17 @@ export default function JiraBriefsPage() {
       setFeedback(null);
       const data = await fetchJiraBrief(key);
       setBrief(data);
-      if (data.whatsapp_templates?.length > 0) {
+      const waList = data.whatsapp_templates || [];
+      const rcsList = data.rcs_templates || [];
+      setWaTemplates(waList);
+      setRcsTemplates(rcsList);
+      setSelectedWa(new Set(waList.map((w) => w.template_name)));
+      setSelectedRcs(new Set(rcsList.map((r) => r.template_name)));
+      setEditingCard({});
+
+      if (waList.length > 0) {
         setActiveTab('whatsapp');
-      } else if (data.rcs_templates?.length > 0) {
+      } else if (rcsList.length > 0) {
         setActiveTab('rcs');
       } else if (data.sms_templates?.length > 0) {
         setActiveTab('sms');
@@ -71,19 +88,47 @@ export default function JiraBriefsPage() {
     }
   }, [selectedKey, loadBrief]);
 
-  const handleSubmitToKarix = async () => {
+  // Submission handler with selective channel filtering
+  const handleSubmitChannel = async (channelMode: 'all' | 'whatsapp' | 'rcs') => {
     if (!brief) return;
     try {
       setSubmitting(true);
       setFeedback(null);
-      const res = await submitJiraBrief(brief.issue_key, ['whatsapp', 'rcs'], user || 'Briefing Operator');
+
+      const submitChannels: string[] = [];
+      let waToSubmit: JiraWhatsAppDraft[] = [];
+      let rcsToSubmit: JiraRcsDraft[] = [];
+
+      if (channelMode === 'all' || channelMode === 'whatsapp') {
+        waToSubmit = waTemplates.filter((w) => selectedWa.has(w.template_name));
+        if (waToSubmit.length > 0) submitChannels.push('whatsapp');
+      }
+
+      if (channelMode === 'all' || channelMode === 'rcs') {
+        rcsToSubmit = rcsTemplates.filter((r) => selectedRcs.has(r.template_name));
+        if (rcsToSubmit.length > 0) submitChannels.push('rcs');
+      }
+
+      if (submitChannels.length === 0) {
+        setFeedback({ message: 'Please select at least one template to whitelist.', type: 'error' });
+        setSubmitting(false);
+        return;
+      }
+
+      const res = await submitJiraBrief(
+        brief.issue_key,
+        submitChannels,
+        user || 'Briefing Operator',
+        waToSubmit,
+        rcsToSubmit
+      );
+
       const waCount = res.whatsapp_submitted?.length || 0;
       const rcsCount = res.rcs_submitted?.length || 0;
       setFeedback({
         message: `Successfully submitted ${waCount} WhatsApp and ${rcsCount} RCS templates for ${brief.issue_key}. Jira ticket comment posted.`,
         type: 'success',
       });
-      // Refresh brief to update live WABA flags
       loadBrief(brief.issue_key);
     } catch (err) {
       setFeedback({ message: formatError(err), type: 'error' });
@@ -92,12 +137,61 @@ export default function JiraBriefsPage() {
     }
   };
 
+  // Editing helpers
+  const toggleEditCard = (cardId: string) => {
+    setEditingCard((prev) => ({ ...prev, [cardId]: !prev[cardId] }));
+  };
+
+  const updateWaField = <K extends keyof JiraWhatsAppDraft>(idx: number, field: K, val: JiraWhatsAppDraft[K]) => {
+    setWaTemplates((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: val };
+      return next;
+    });
+  };
+
+  const updateRcsField = <K extends keyof JiraRcsDraft>(idx: number, field: K, val: JiraRcsDraft[K]) => {
+    setRcsTemplates((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: val };
+      return next;
+    });
+  };
+
+  const toggleSelectWa = (name: string) => {
+    setSelectedWa((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const toggleSelectRcs = (name: string) => {
+    setSelectedRcs((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const selectAllWa = (select: boolean) => {
+    setSelectedWa(select ? new Set(waTemplates.map((w) => w.template_name)) : new Set());
+  };
+
+  const selectAllRcs = (select: boolean) => {
+    setSelectedRcs(select ? new Set(rcsTemplates.map((r) => r.template_name)) : new Set());
+  };
+
   const filteredIssues = issues.filter(
     (i) =>
       i.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
       i.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (i.assignee || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const totalSelectedCount = selectedWa.size + selectedRcs.size;
 
   return (
     <div className="space-y-6">
@@ -112,7 +206,7 @@ export default function JiraBriefsPage() {
             </span>
           </div>
           <p className="text-sm text-gray-500 mt-1">
-            Automated multi-channel intake: extracts WhatsApp, RCS, and SMS copy directly from client Jira tickets.
+            Automated multi-channel intake: review, manually edit, and selectively submit WhatsApp or RCS templates to Karix.
           </p>
         </div>
 
@@ -213,7 +307,7 @@ export default function JiraBriefsPage() {
           ) : (
             <div className="space-y-4">
               {/* Ticket Overview Card */}
-              <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs p-5 space-y-3">
+              <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -230,25 +324,58 @@ export default function JiraBriefsPage() {
                     </div>
                   </div>
 
-                  <button
-                    onClick={handleSubmitToKarix}
-                    disabled={submitting || (brief.whatsapp_templates.length === 0 && brief.rcs_templates.length === 0)}
-                    className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
-                  >
-                    {submitting ? (
-                      <>
-                        <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
-                        <span>Submitting to Karix...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>🚀 Whitelist on Karix</span>
-                        <span className="bg-blue-500/80 px-1.5 py-0.2 rounded text-[10px]">
-                          {brief.whatsapp_templates.length + brief.rcs_templates.length} templates
+                  {/* Selective Submission Action Controls */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Channel-Specific Submit Buttons */}
+                    {waTemplates.length > 0 && (
+                      <button
+                        onClick={() => handleSubmitChannel('whatsapp')}
+                        disabled={submitting || selectedWa.size === 0}
+                        className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
+                        title="Submit only the checked WhatsApp templates"
+                      >
+                        <span>🟢 Whitelist WhatsApp Only</span>
+                        <span className="bg-emerald-500 px-1.5 py-0.2 rounded text-[10px]">
+                          {selectedWa.size}
                         </span>
-                      </>
+                      </button>
                     )}
-                  </button>
+
+                    {rcsTemplates.length > 0 && (
+                      <button
+                        onClick={() => handleSubmitChannel('rcs')}
+                        disabled={submitting || selectedRcs.size === 0}
+                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
+                        title="Submit only the checked RCS templates"
+                      >
+                        <span>🔵 Whitelist RCS Only</span>
+                        <span className="bg-blue-500 px-1.5 py-0.2 rounded text-[10px]">
+                          {selectedRcs.size}
+                        </span>
+                      </button>
+                    )}
+
+                    {/* Master Submit All Button */}
+                    <button
+                      onClick={() => handleSubmitChannel('all')}
+                      disabled={submitting || totalSelectedCount === 0}
+                      className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
+                    >
+                      {submitting ? (
+                        <>
+                          <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
+                          <span>Submitting...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🚀 Whitelist All Selected</span>
+                          <span className="bg-gray-800 px-1.5 py-0.2 rounded text-[10px]">
+                            {totalSelectedCount}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Creatives Attachment Strip */}
@@ -268,6 +395,7 @@ export default function JiraBriefsPage() {
                   </div>
                 )}
               </div>
+
               {/* Email Campaign Banner if applicable */}
               {brief.is_email_campaign && (
                 <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl space-y-2.5">
@@ -283,12 +411,12 @@ export default function JiraBriefsPage() {
                   <p className="text-xs text-purple-800 leading-relaxed">
                     <strong>{brief.summary}</strong> is an email newsletter brief containing HTML mailer zip packages and preheaders/subject lines. Email mailers are deployed directly through MoEngage Email or your ESP, and do not require Meta / Karix WhatsApp or RCS approval.
                   </p>
-                  {brief.attachments_mapped.some(a => a.filename.endsWith('.zip') || a.filename.endsWith('.docx')) && (
+                  {brief.attachments_mapped.some((a) => a.filename.endsWith('.zip') || a.filename.endsWith('.docx')) && (
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       <span className="text-[11px] text-purple-700 font-medium">Mailer Files:</span>
                       {brief.attachments_mapped
-                        .filter(a => a.filename.endsWith('.zip') || a.filename.endsWith('.docx'))
-                        .map(a => (
+                        .filter((a) => a.filename.endsWith('.zip') || a.filename.endsWith('.docx'))
+                        .map((a) => (
                           <span
                             key={a.filename}
                             className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-white border border-purple-200 text-[11px] font-mono font-semibold text-purple-800 shadow-2xs"
@@ -315,7 +443,7 @@ export default function JiraBriefsPage() {
                   >
                     <span>🟢 WhatsApp</span>
                     <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                      {brief.whatsapp_templates.length}
+                      {selectedWa.size}/{waTemplates.length}
                     </span>
                   </button>
 
@@ -329,7 +457,7 @@ export default function JiraBriefsPage() {
                   >
                     <span>🔵 RCS (DLT)</span>
                     <span className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                      {brief.rcs_templates.length}
+                      {selectedRcs.size}/{rcsTemplates.length}
                     </span>
                   </button>
 
@@ -367,55 +495,155 @@ export default function JiraBriefsPage() {
                   {/* WhatsApp Panel */}
                   {activeTab === 'whatsapp' && (
                     <div className="space-y-4">
-                      {brief.whatsapp_templates.length === 0 ? (
+                      {waTemplates.length > 0 && (
+                        <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
+                          <div className="flex items-center gap-3">
+                            <span className="font-semibold text-gray-700">
+                              Selected: {selectedWa.size} of {waTemplates.length}
+                            </span>
+                            <button
+                              onClick={() => selectAllWa(selectedWa.size < waTemplates.length)}
+                              className="text-blue-600 hover:underline font-medium"
+                            >
+                              {selectedWa.size < waTemplates.length ? 'Select All' : 'Deselect All'}
+                            </button>
+                          </div>
+                          <span className="text-gray-400 text-[11px]">
+                            💡 Click <strong>✏️ Edit</strong> to tweak copy, variables, or CTA buttons before whitelisting.
+                          </span>
+                        </div>
+                      )}
+
+                      {waTemplates.length === 0 ? (
                         <p className="py-8 text-center text-xs text-gray-400">No WhatsApp templates detected in this brief.</p>
                       ) : (
-                        brief.whatsapp_templates.map((wa, idx) => (
-                          <div key={wa.template_name} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-bold text-xs text-gray-900">{wa.template_name}</span>
-                                <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-semibold uppercase">
-                                  {wa.category}
-                                </span>
+                        waTemplates.map((wa, idx) => {
+                          const isSelected = selectedWa.has(wa.template_name);
+                          const isEditing = editingCard[wa.template_name] || false;
+
+                          return (
+                            <div
+                              key={wa.template_name}
+                              className={`p-4 rounded-xl border transition space-y-3 ${
+                                isSelected ? 'bg-white border-emerald-300 shadow-xs' : 'bg-gray-50/70 border-gray-200 opacity-60'
+                              }`}
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectWa(wa.template_name)}
+                                    className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
+                                  />
+                                  {isEditing ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <label className="text-[10px] uppercase font-bold text-gray-400">Name:</label>
+                                      <input
+                                        type="text"
+                                        value={wa.template_name}
+                                        onChange={(e) => updateWaField(idx, 'template_name', e.target.value)}
+                                        className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="font-mono font-bold text-xs text-gray-900">{wa.template_name}</span>
+                                  )}
+                                  <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-semibold uppercase">
+                                    {wa.category}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  {wa.exists_on_waba ? (
+                                    <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      ✓ Live on WABA ({wa.live_status})
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
+                                      ⚡ Ready to Whitelist
+                                    </span>
+                                  )}
+
+                                  <button
+                                    onClick={() => toggleEditCard(wa.template_name)}
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
+                                      isEditing
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {isEditing ? '✓ Done Editing' : '✏️ Edit'}
+                                  </button>
+                                </div>
                               </div>
-                              {wa.exists_on_waba ? (
-                                <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  ✓ Live on WABA ({wa.live_status})
-                                </span>
+
+                              {wa.header_type === 'IMAGE' && wa.media_filename && (
+                                <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-600 flex items-center justify-between">
+                                  <span className="flex items-center gap-1.5 font-medium">
+                                    <span>🖼️ Header Creative:</span>
+                                    <strong className="text-gray-900">{wa.media_filename}</strong>
+                                  </span>
+                                  <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.2 rounded">
+                                    Aspect Ratio Verified (16:9)
+                                  </span>
+                                </div>
+                              )}
+
+                              {isEditing ? (
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between text-[11px] text-gray-500">
+                                    <span>Template Body (use {'{{1}}'}, {'{{2}}'} for variables):</span>
+                                    <span>{wa.body.length} chars</span>
+                                  </div>
+                                  <textarea
+                                    value={wa.body}
+                                    onChange={(e) => updateWaField(idx, 'body', e.target.value)}
+                                    rows={5}
+                                    className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                                  />
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                                    <div>
+                                      <label className="block text-[11px] text-gray-500 mb-1">CTA Button Text:</label>
+                                      <input
+                                        type="text"
+                                        value={wa.button_text || ''}
+                                        onChange={(e) => updateWaField(idx, 'button_text', e.target.value)}
+                                        placeholder="e.g. Check Offer"
+                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[11px] text-gray-500 mb-1">CTA Button URL:</label>
+                                      <input
+                                        type="text"
+                                        value={wa.button_url || ''}
+                                        onChange={(e) => updateWaField(idx, 'button_url', e.target.value)}
+                                        placeholder="https://www.tatacapital.com"
+                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
                               ) : (
-                                <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
-                                  ⚡ Ready to Whitelist
-                                </span>
+                                <>
+                                  <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                    {wa.body}
+                                  </div>
+
+                                  {wa.button_type === 'URL' && (
+                                    <div className="flex items-center gap-2 text-xs">
+                                      <span className="text-gray-400">CTA Button:</span>
+                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
+                                        🔗 {wa.button_text || 'Check Offer'} ({wa.button_url || 'https://www.tatacapital.com'})
+                                      </span>
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
-
-                            {wa.header_type === 'IMAGE' && wa.media_filename && (
-                              <div className="p-2 bg-white rounded-lg border border-gray-200/80 text-[11px] text-gray-600 flex items-center justify-between">
-                                <span className="flex items-center gap-1.5 font-medium">
-                                  <span>🖼️ Header Creative:</span>
-                                  <strong className="text-gray-900">{wa.media_filename}</strong>
-                                </span>
-                                <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.2 rounded">
-                                  Aspect Ratio Verified (16:9)
-                                </span>
-                              </div>
-                            )}
-
-                            <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                              {wa.body}
-                            </div>
-
-                            {wa.button_type === 'URL' && (
-                              <div className="flex items-center gap-2 text-xs">
-                                <span className="text-gray-400">CTA Button:</span>
-                                <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
-                                  🔗 {wa.button_text || 'Check Offer'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   )}
@@ -423,32 +651,118 @@ export default function JiraBriefsPage() {
                   {/* RCS Panel */}
                   {activeTab === 'rcs' && (
                     <div className="space-y-4">
-                      {brief.rcs_templates.length === 0 ? (
+                      {rcsTemplates.length > 0 && (
+                        <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
+                          <div className="flex items-center gap-3">
+                            <span className="font-semibold text-gray-700">
+                              Selected: {selectedRcs.size} of {rcsTemplates.length}
+                            </span>
+                            <button
+                              onClick={() => selectAllRcs(selectedRcs.size < rcsTemplates.length)}
+                              className="text-blue-600 hover:underline font-medium"
+                            >
+                              {selectedRcs.size < rcsTemplates.length ? 'Select All' : 'Deselect All'}
+                            </button>
+                          </div>
+                          <span className="text-gray-400 text-[11px]">
+                            💡 Click <strong>✏️ Edit</strong> to tweak card title, body copy, or CTA action.
+                          </span>
+                        </div>
+                      )}
+
+                      {rcsTemplates.length === 0 ? (
                         <p className="py-8 text-center text-xs text-gray-400">No RCS templates detected in this brief.</p>
                       ) : (
-                        brief.rcs_templates.map((rcs) => (
-                          <div key={rcs.template_name} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <span className="font-mono font-bold text-xs text-gray-900">{rcs.template_name}</span>
-                              <span className="text-[10px] px-2 py-0.2 rounded-full bg-blue-100 text-blue-800 font-semibold uppercase">
-                                Standalone Card
-                              </span>
-                            </div>
+                        rcsTemplates.map((rcs, idx) => {
+                          const isSelected = selectedRcs.has(rcs.template_name);
+                          const isEditing = editingCard[rcs.template_name] || false;
 
-                            {rcs.media_filename && (
-                              <div className="p-2 bg-white rounded-lg border border-gray-200/80 text-[11px] text-gray-600 flex items-center justify-between">
-                                <span className="flex items-center gap-1.5 font-medium">
-                                  <span>🖼️ Card Creative:</span>
-                                  <strong className="text-gray-900">{rcs.media_filename}</strong>
-                                </span>
+                          return (
+                            <div
+                              key={rcs.template_name}
+                              className={`p-4 rounded-xl border transition space-y-3 ${
+                                isSelected ? 'bg-white border-blue-300 shadow-xs' : 'bg-gray-50/70 border-gray-200 opacity-60'
+                              }`}
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectRcs(rcs.template_name)}
+                                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                  {isEditing ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <label className="text-[10px] uppercase font-bold text-gray-400">Name:</label>
+                                      <input
+                                        type="text"
+                                        value={rcs.template_name}
+                                        onChange={(e) => updateRcsField(idx, 'template_name', e.target.value)}
+                                        className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <span className="font-mono font-bold text-xs text-gray-900">{rcs.template_name}</span>
+                                  )}
+                                  <span className="text-[10px] px-2 py-0.2 rounded-full bg-blue-100 text-blue-800 font-semibold uppercase">
+                                    Standalone Card
+                                  </span>
+                                </div>
+
+                                <button
+                                  onClick={() => toggleEditCard(rcs.template_name)}
+                                  className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
+                                    isEditing
+                                      ? 'bg-blue-50 text-blue-700 border-blue-300'
+                                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  {isEditing ? '✓ Done Editing' : '✏️ Edit'}
+                                </button>
                               </div>
-                            )}
 
-                            <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                              {rcs.body}
+                              {rcs.media_filename && (
+                                <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-600 flex items-center justify-between">
+                                  <span className="flex items-center gap-1.5 font-medium">
+                                    <span>🖼️ Card Creative:</span>
+                                    <strong className="text-gray-900">{rcs.media_filename}</strong>
+                                  </span>
+                                </div>
+                              )}
+
+                              {isEditing ? (
+                                <div className="space-y-2">
+                                  <div>
+                                    <label className="block text-[11px] text-gray-500 mb-1">Card Title:</label>
+                                    <input
+                                      type="text"
+                                      value={rcs.card_title}
+                                      onChange={(e) => updateRcsField(idx, 'card_title', e.target.value)}
+                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] text-gray-500 mb-1">Card Body Copy:</label>
+                                    <textarea
+                                      value={rcs.body}
+                                      onChange={(e) => updateRcsField(idx, 'body', e.target.value)}
+                                      rows={4}
+                                      className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded bg-white"
+                                    />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 space-y-1">
+                                  <h4 className="font-bold text-xs text-gray-900">{rcs.card_title}</h4>
+                                  <p className="font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                    {rcs.body}
+                                  </p>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   )}

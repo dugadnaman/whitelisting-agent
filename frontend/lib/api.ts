@@ -945,7 +945,9 @@ export async function fetchJiraBrief(issueKey: string): Promise<JiraBriefData> {
 export async function submitJiraBrief(
   issueKey: string,
   channels: string[] = ["whatsapp", "rcs"],
-  user: string = "Briefing Operator"
+  user: string = "Briefing Operator",
+  whatsappTemplates?: JiraWhatsAppDraft[],
+  rcsTemplates?: JiraRcsDraft[]
 ): Promise<{
   ok: boolean;
   issue_key: string;
@@ -957,7 +959,12 @@ export async function submitJiraBrief(
   const res = await fetchWithRetry(getApiUrl(`/api/jira/submit/${cleanKey}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ channels, user }),
+    body: JSON.stringify({
+      channels,
+      user,
+      whatsapp_templates: whatsappTemplates || null,
+      rcs_templates: rcsTemplates || null,
+    }),
   }, 0, 800, 300000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

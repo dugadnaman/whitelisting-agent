@@ -3222,6 +3222,8 @@ def get_jira_brief_endpoint(
 class JiraSubmitRequest(BaseModel):
     channels: list[str] = ["whatsapp", "rcs"]
     user: str = "Briefing Operator"
+    whatsapp_templates: list[dict] | None = None
+    rcs_templates: list[dict] | None = None
 
 
 @app.post("/api/jira/submit/{issue_key}")
@@ -3253,7 +3255,8 @@ async def submit_jira_brief_endpoint(
 
     # 1. Submit WhatsApp templates
     if "whatsapp" in req.channels:
-        for wa in parsed.whatsapp_templates:
+        wa_sources = req.whatsapp_templates if req.whatsapp_templates is not None else parsed.whatsapp_templates
+        for wa in wa_sources:
             comps = [
                 TemplateComponent(
                     type="BODY",
@@ -3308,7 +3311,8 @@ async def submit_jira_brief_endpoint(
 
     # 2. Submit RCS templates
     if "rcs" in req.channels:
-        for rcs in parsed.rcs_templates:
+        rcs_sources = req.rcs_templates if req.rcs_templates is not None else parsed.rcs_templates
+        for rcs in rcs_sources:
             content_msg = {
                 "text": rcs["body"],
                 "cardTitle": rcs.get("card_title") or parsed.summary[:32],
