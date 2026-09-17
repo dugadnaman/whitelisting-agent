@@ -213,6 +213,15 @@ def get_public_media(filename: str):
 ACCOUNTS_FILE = Path("accounts.json")
 DEFAULT_ACCOUNTS = [
     {
+        "id": "bajaj",
+        "name": "Bajaj Finserv",
+        "entity": "Bajaj Finserv",
+        "type": "WhatsApp",
+        "is_builtin": True,
+        "group": "Bajaj",
+        "headers": [],
+    },
+    {
         "id": "tcl_promo",
         "name": "Tata Capital Limited (Promotional)",
         "entity": "Tata Capital Limited",
@@ -3133,3 +3142,239 @@ def get_system_errors(
         "summary": get_error_summary(),
         "errors": [_json_safe(e) for e in load_errors(account=account, channel=channel, limit=limit)],
     }
+# ---------------------------------------------------------------------------
+# Jira Briefing Agent Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/jira/issues")
+def get_jira_issues_endpoint(
+    project: str = Query("TCN"),
+    status: str | None = Query(None),
+    search: str | None = Query(None),
+    limit: int = Query(25),
+    current_user: dict = Depends(get_current_user),
+):
+    """List campaign brief issues from Jira."""
+    try:
+        from jira_client import list_jira_issues
+
+        issues = list_jira_issues(project=project, status=status, search=search, limit=limit)
+        return _json_safe({"ok": True, "count": len(issues), "issues": issues})
+    except Exception as exc:
+        logger.exception("Failed to list Jira issues: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Jira API error: {exc!s}") from exc
+
+
+@app.get("/api/jira/brief/{issue_key}")
+def get_jira_brief_endpoint(
+    issue_key: str,
+    download_creatives: bool = Query(True),
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch and parse a Jira campaign brief into multi-channel template drafts."""
+    try:
+        from briefing_parser import parse_jira_brief
+        from jira_client import fetch_jira_issue
+
+        issue_data = fetch_jira_issue(issue_key)
+        parsed = parse_jira_brief(issue_data, download_creatives=download_creatives)
+
+        # Cross-reference parsed WhatsApp templates against live WABA catalog
+        from submission_client import _match_template, fetch_template_list
+
+        live_templates, _ = fetch_template_list(client=parsed.account)
+        wa_with_live = []
+        for wa in parsed.whatsapp_templates:
+            wa_copy = dict(wa)
+            matched = _match_template(live_templates, wa["template_name"])
+            if matched:
+                wa_copy["exists_on_waba"] = True
+                wa_copy["live_status"] = str(matched.get("template_create_status") or matched.get("status", "UNKNOWN")).lower()
+                wa_copy["live_ref_id"] = str(matched.get("fb_template_id") or matched.get("sno") or "")
+            else:
+                wa_copy["exists_on_waba"] = False
+                wa_copy["live_status"] = "not_submitted"
+                wa_copy["live_ref_id"] = None
+            wa_with_live.append(wa_copy)
+
+        parsed_dict = {
+            "issue_key": parsed.issue_key,
+            "summary": parsed.summary,
+            "account": parsed.account,
+            "status": parsed.status,
+            "assignee": parsed.assignee,
+            "reporter": parsed.reporter,
+            "duedate": parsed.duedate,
+            "whatsapp_templates": wa_with_live,
+            "rcs_templates": parsed.rcs_templates,
+            "sms_templates": parsed.sms_templates,
+            "moengage_campaign": parsed.moengage_campaign,
+            "attachments_mapped": parsed.attachments_mapped,
+        }
+
+        return _json_safe({"ok": True, "brief": parsed_dict})
+    except Exception as exc:
+        logger.exception("Failed to parse Jira brief for %s: %s", issue_key, exc)
+        raise HTTPException(status_code=500, detail=f"Failed to parse brief {issue_key}: {exc!s}") from exc
+
+
+class JiraSubmitRequest(BaseModel):
+    channels: list[str] = ["whatsapp", "rcs"]
+    user: str = "Briefing Operator"
+
+
+@app.post("/api/jira/submit/{issue_key}")
+async def submit_jira_brief_endpoint(
+    issue_key: str,
+    req: JiraSubmitRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Submit extracted WhatsApp and/or RCS templates from a Jira brief directly to Karix,
+    record results in database queue, and post automated comment back to Jira ticket.
+    """
+    from briefing_parser import parse_jira_brief
+    from jira_client import add_jira_comment, fetch_jira_issue
+    from models import TemplateComponent, TemplateSubmission
+    from rcs_client import submit_rcs_template
+    from rcs_models import RcsTemplateSubmission
+    from rcs_tracker import log_rcs_result
+    from submission_client import submit_template
+    from tracker import log_result
+
+    issue_data = await asyncio.to_thread(fetch_jira_issue, issue_key)
+    parsed = await asyncio.to_thread(parse_jira_brief, issue_data, download_creatives=True)
+    acc = parsed.account
+    user_name = req.user or current_user.get("name", "Briefing Operator")
+
+    submitted_wa = []
+    submitted_rcs = []
+
+    # 1. Submit WhatsApp templates
+    if "whatsapp" in req.channels:
+        for wa in parsed.whatsapp_templates:
+            comps = [
+                TemplateComponent(
+                    type="BODY",
+                    text=wa["body"],
+                    variables=wa.get("variables") or [],
+                )
+            ]
+            if wa.get("header_type") == "IMAGE" and wa.get("media_file"):
+                comps.insert(
+                    0,
+                    TemplateComponent(
+                        type="HEADER",
+                        format="IMAGE",
+                        media_file=wa["media_file"],
+                    ),
+                )
+            if wa.get("button_type") == "URL" and wa.get("button_url"):
+                comps.append(
+                    TemplateComponent(
+                        type="BUTTONS",
+                        buttons=[
+                            {
+                                "type": "URL",
+                                "text": wa.get("button_text") or "Check Offer",
+                                "url": wa["button_url"],
+                            }
+                        ],
+                    )
+                )
+
+            submission = TemplateSubmission(
+                client=acc,
+                channel="whatsapp",
+                template_name=wa["template_name"],
+                language=wa.get("language", "en"),
+                category=wa.get("category", "MARKETING"),
+                components=comps,
+                source_ref=f"{issue_key}_{wa['template_name']}",
+                source_file=f"Jira: {issue_key}",
+            )
+
+            res = await asyncio.to_thread(submit_template, submission, client=acc)
+            res.submitted_by = user_name
+            res.source_file = f"Jira: {issue_key}"
+            log_result(res, LOG_PATH)
+            submitted_wa.append({
+                "template_name": res.template_name,
+                "status": res.status.value,
+                "approval_status": res.approval_status.value,
+                "error": res.error,
+            })
+
+    # 2. Submit RCS templates
+    if "rcs" in req.channels:
+        for rcs in parsed.rcs_templates:
+            content_msg = {
+                "text": rcs["body"],
+                "cardTitle": rcs.get("card_title") or parsed.summary[:32],
+            }
+            if rcs.get("media_file"):
+                content_msg["mediaUrl"] = rcs["media_file"]
+
+            rcs_sub = RcsTemplateSubmission(
+                client=acc,
+                template_name=rcs["template_name"],
+                template_type="RICH_CARD_STANDALONE",
+                source_ref=f"{issue_key}_{rcs['template_name']}",
+                content_message=content_msg,
+            )
+
+            rcs_res = await asyncio.to_thread(submit_rcs_template, rcs_sub, client=acc)
+            rcs_res.submitted_by = user_name
+            rcs_res.source_file = f"Jira: {issue_key}"
+            log_rcs_result(rcs_res, RCS_LOG_PATH)
+            submitted_rcs.append({
+                "template_name": rcs_res.template_name,
+                "status": rcs_res.status.value,
+                "template_id": rcs_res.template_id,
+                "error": rcs_res.error,
+            })
+
+    # 3. Post automated status comment back to Jira
+    wa_summary = f"{len(submitted_wa)} WhatsApp templates" if submitted_wa else ""
+    rcs_summary = f"{len(submitted_rcs)} RCS templates" if submitted_rcs else ""
+    submitted_channels = " and ".join(filter(None, [wa_summary, rcs_summary])) or "content"
+
+    comment_body = (
+        f"🤖 [Karix Briefing Agent]\n"
+        f"Successfully submitted {submitted_channels} for whitelisting under account {acc.upper()}.\n\n"
+    )
+    if submitted_wa:
+        comment_body += "WhatsApp Templates:\n"
+        for w in submitted_wa:
+            comment_body += f"• {w['template_name']}: {w['status'].upper()} (Approval: {w['approval_status'].upper()})\n"
+        comment_body += "\n"
+    if submitted_rcs:
+        comment_body += "RCS Templates:\n"
+        for r in submitted_rcs:
+            comment_body += f"• {r['template_name']}: {r['status'].upper()} (ID: {r.get('template_id') or 'N/A'})\n"
+
+    jira_comment_res = await asyncio.to_thread(add_jira_comment, issue_key, comment_body)
+
+    log_activity(
+        user=user_name,
+        action="JIRA_BRIEF_SUBMISSION",
+        account=acc,
+        channel="all",
+        details={
+            "issue_key": issue_key,
+            "whatsapp_count": len(submitted_wa),
+            "rcs_count": len(submitted_rcs),
+            "jira_comment_posted": jira_comment_res.get("ok", False),
+        },
+        status="success",
+    )
+
+    return _json_safe({
+        "ok": True,
+        "issue_key": issue_key,
+        "account": acc,
+        "whatsapp_submitted": submitted_wa,
+        "rcs_submitted": submitted_rcs,
+        "jira_comment": jira_comment_res,
+    })

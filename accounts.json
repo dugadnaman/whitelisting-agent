@@ -1,5 +1,14 @@
 [
   {
+    "id": "bajaj",
+    "name": "Bajaj Finserv",
+    "entity": "Bajaj Finserv",
+    "type": "WhatsApp",
+    "is_builtin": true,
+    "group": "Bajaj",
+    "headers": []
+  },
+  {
     "id": "tcl_promo",
     "name": "Tata Capital Limited (Promotional)",
     "entity": "Tata Capital Limited",

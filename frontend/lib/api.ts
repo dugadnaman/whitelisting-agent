@@ -819,3 +819,144 @@ export async function deleteTemplatesFromFile(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+// ---------------------------------------------------------------------------
+// Jira Briefing Agent Client APIs
+// ---------------------------------------------------------------------------
+
+export type JiraIssueItem = {
+  key: string;
+  id: string;
+  summary: string;
+  status: string;
+  assignee: string;
+  reporter: string;
+  duedate?: string | null;
+  attachment_count: number;
+  attachments: Array<{
+    id: string;
+    filename: string;
+    size: number;
+    mimeType: string;
+  }>;
+  labels?: string[];
+  created?: string;
+  updated?: string;
+};
+
+export type JiraWhatsAppDraft = {
+  template_name: string;
+  category: string;
+  body: string;
+  language: string;
+  header_type: string;
+  header_text?: string | null;
+  media_file?: string | null;
+  media_filename?: string | null;
+  button_type: string;
+  button_text?: string | null;
+  button_url?: string | null;
+  variables: string[];
+  raw_source: string;
+  exists_on_waba?: boolean;
+  live_status?: string;
+  live_ref_id?: string | null;
+};
+
+export type JiraRcsDraft = {
+  template_name: string;
+  card_title: string;
+  body: string;
+  media_file?: string | null;
+  media_filename?: string | null;
+  action_type: string;
+  action_label: string;
+  action_url: string;
+  variables: string[];
+  raw_source: string;
+};
+
+export type JiraSmsDraft = {
+  template_name: string;
+  text: string;
+  char_count: number;
+  variant: string;
+  variables: string[];
+  raw_source: string;
+};
+
+export type JiraBriefData = {
+  issue_key: string;
+  summary: string;
+  account: string;
+  status: string;
+  assignee: string;
+  reporter: string;
+  duedate?: string | null;
+  whatsapp_templates: JiraWhatsAppDraft[];
+  rcs_templates: JiraRcsDraft[];
+  sms_templates: JiraSmsDraft[];
+  moengage_campaign: {
+    campaign_name: string;
+    target_account: string;
+    scheduled_date?: string | null;
+    whatsapp_template?: string | null;
+    sms_content?: string | null;
+    push_title?: string;
+    push_body?: string;
+    status: string;
+  };
+  attachments_mapped: Array<{
+    id: string;
+    filename: string;
+    local_path?: string | null;
+    mime: string;
+    target_channel: string;
+  }>;
+};
+
+export async function fetchJiraIssues(params?: {
+  project?: string;
+  status?: string;
+  search?: string;
+  limit?: number;
+}): Promise<JiraIssueItem[]> {
+  const qs = new URLSearchParams();
+  if (params?.project) qs.set("project", params.project);
+  if (params?.status) qs.set("status", params.status);
+  if (params?.search) qs.set("search", params.search);
+  if (params?.limit) qs.set("limit", String(params.limit));
+
+  const res = await fetchWithRetry(getApiUrl(`/api/jira/issues?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data = await res.json();
+  return data.issues || [];
+}
+
+export async function fetchJiraBrief(issueKey: string): Promise<JiraBriefData> {
+  const cleanKey = encodeURIComponent(issueKey.trim().toUpperCase());
+  const res = await fetchWithRetry(getApiUrl(`/api/jira/brief/${cleanKey}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data = await res.json();
+  return data.brief;
+}
+
+export async function submitJiraBrief(
+  issueKey: string,
+  channels: string[] = ["whatsapp", "rcs"],
+  user: string = "Briefing Operator"
+): Promise<{
+  ok: boolean;
+  issue_key: string;
+  account: string;
+  whatsapp_submitted: Array<{ template_name: string; status: string; approval_status: string; error?: string }>;
+  rcs_submitted: Array<{ template_name: string; status: string; template_id?: string; error?: string }>;
+}> {
+  const cleanKey = encodeURIComponent(issueKey.trim().toUpperCase());
+  const res = await fetchWithRetry(getApiUrl(`/api/jira/submit/${cleanKey}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ channels, user }),
+  }, 0, 800, 300000);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}

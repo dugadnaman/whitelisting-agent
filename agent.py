@@ -663,6 +663,7 @@ class WhitelistingAgent:
             return isolation_err
 
         handlers = [
+            lambda: _handle_agent_jira_inquiry(text, account, user),
             lambda: _handle_agent_learning_inquiry(text, account, channel),
             lambda: _handle_agent_error_inquiry(text, account, channel),
             lambda: _handle_agent_team_inquiry(text, account),
@@ -678,7 +679,6 @@ class WhitelistingAgent:
             res = handler()
             if res is not None:
                 return res
-
         return _handle_agent_fallback_guidance(account, channel)
     handle_message = execute_instruction
 
@@ -697,6 +697,130 @@ def _check_agent_tenant_isolation(text: str, user_profile: dict | None, account:
                     }, account
             account = user_tenant
     return None, account
+
+def _handle_agent_jira_inquiry(text: str, account: str, user: str) -> dict | None:
+    t_lower = text.lower().strip()
+
+    # 1. Match specific issue keys like TCN-524 or brief TCN-523
+    key_match = re.search(r"\b(TCN[-_]\d+)\b", text, re.IGNORECASE)
+    is_jira_query = any(w in t_lower for w in ["jira", "brief", "briefing", "ticket", "tcn"])
+
+    if not (key_match or is_jira_query):
+        return None
+
+    from briefing_parser import parse_jira_brief
+    from jira_client import fetch_jira_issue, list_jira_issues
+
+    # If user specifies a ticket key
+    if key_match:
+        raw_key = key_match.group(1).upper().replace("_", "-")
+        try:
+            issue_data = fetch_jira_issue(raw_key)
+            parsed = parse_jira_brief(issue_data, download_creatives=True)
+
+            wa_cnt = len(parsed.whatsapp_templates)
+            rcs_cnt = len(parsed.rcs_templates)
+            sms_cnt = len(parsed.sms_templates)
+
+            reply = (
+                f"### 📋 Jira Campaign Brief: **{parsed.issue_key}**\n\n"
+                f"**Summary:** {parsed.summary}\n"
+                f"**Sub-Account Assigned:** `{parsed.account.upper()}`\n"
+                f"**Due Date:** `{parsed.duedate or 'Immediate / TBD'}` | **Status:** `{parsed.status}`\n"
+                f"**Reporter:** {parsed.reporter} | **Assignee:** {parsed.assignee}\n\n"
+                f"#### 📊 Multi-Channel Breakdown:\n"
+                f"• 🟢 **WhatsApp:** **{wa_cnt}** templates extracted\n"
+                f"• 🔵 **RCS (DLT):** **{rcs_cnt}** templates extracted\n"
+                f"• 🟣 **SMS (DLT):** **{sms_cnt}** variants extracted (Non-clicker & Retargeting)\n"
+            )
+
+            if parsed.whatsapp_templates:
+                first_wa = parsed.whatsapp_templates[0]
+                media_str = f"Creative: `{first_wa.get('media_filename')}`" if first_wa.get("media_filename") else "Text Header"
+                reply += (
+                    f"\n**WhatsApp Preview (`{first_wa['template_name']}`):**\n"
+                    f"*Header ({media_str})*\n"
+                    f"```\n{first_wa['body'][:220]}...\n```\n"
+                )
+
+            if parsed.moengage_campaign:
+                reply += (
+                    f"\n#### 🎯 MoEngage Staging Ready:\n"
+                    f"• **Campaign Name:** `{parsed.moengage_campaign.get('campaign_name')}`\n"
+                    f"• **Target Account:** `{parsed.moengage_campaign.get('target_account', '').upper()}`\n"
+                    f"• **Status:** `DRAFT`\n"
+                )
+
+            reply += f"\n💡 *Would you like me to submit these {wa_cnt + rcs_cnt} templates to Karix for whitelisting?*"
+
+            suggested = [
+                f"Submit {parsed.issue_key} to Karix",
+                f"Show {parsed.issue_key} SMS copy",
+                "List Jira briefs",
+            ]
+
+            return {
+                "reply": reply,
+                "actions_taken": [{"tool": "parse_jira_brief", "target": raw_key, "account": parsed.account}],
+                "suggested_actions": suggested,
+                "data": {
+                    "issue_key": parsed.issue_key,
+                    "account": parsed.account,
+                    "whatsapp_count": wa_cnt,
+                    "rcs_count": rcs_cnt,
+                    "sms_count": sms_cnt,
+                },
+            }
+        except Exception as exc:
+            logger.exception("Error briefing %s: %s", raw_key, exc)
+            return {
+                "reply": f"⚠️ Could not fetch Jira ticket **{raw_key}**: {exc!s}\n\n*Check that the ticket key exists in Jira project TCN.*",
+                "actions_taken": [],
+                "suggested_actions": ["List Jira briefs", "Help"],
+            }
+
+    # If user wants a list of recent Jira tickets/briefs
+    if any(w in t_lower for w in ["list", "show", "recent", "open", "queue", "tickets", "briefs", "all"]):
+        try:
+            issues = list_jira_issues(project="TCN", limit=6)
+            if not issues:
+                return {
+                    "reply": "No recent tickets found in Jira project **TCN**.",
+                    "actions_taken": [],
+                    "suggested_actions": ["Help"],
+                }
+
+            lines = []
+            for i in issues:
+                due = f" (Due: {i['duedate']})" if i.get("duedate") else ""
+                lines.append(
+                    f"• **`{i['key']}`** — {i['summary']}\n"
+                    f"  Status: `{i['status']}` | Assignee: {i['assignee']}{due} | Attachments: {i['attachment_count']}"
+                )
+
+            reply = (
+                f"### 📋 Active Jira Campaign Briefs (Project: TCN)\n\n"
+                + "\n\n".join(lines)
+                + "\n\n*Tip: Ask me to **\"Brief TCN-524\"** to automatically extract templates and creatives.*"
+            )
+
+            first_key = issues[0]["key"] if issues else "TCN-524"
+            suggested = [f"Brief {first_key}", "Poll approval status", "Help"]
+
+            return {
+                "reply": reply,
+                "actions_taken": [{"tool": "list_jira_issues", "count": len(issues)}],
+                "suggested_actions": suggested,
+                "data": {"issues": issues},
+            }
+        except Exception as exc:
+            return {
+                "reply": f"⚠️ Error querying Jira API: {exc!s}",
+                "actions_taken": [],
+                "suggested_actions": ["Help"],
+            }
+
+    return None
 
 def _handle_agent_learning_inquiry(text: str, account: str, channel: str) -> dict | None:
     t_lower = text.lower()

@@ -60,7 +60,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshAccounts = useCallback(async () => {
     try {
       const data = await fetchAccounts();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         setAccounts(data);
       }
     } catch {
@@ -160,7 +160,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [router, refreshAccounts]);
 
   const setAccount = (newAccount: Account) => {
-    if (accounts.length > 0 && !accounts.some((a) => a.id.toLowerCase() === newAccount.toLowerCase())) {
+    const cleanAccount = newAccount.toLowerCase();
+    const canViewAll = currentUser?.tenant_id === 'all' || currentUser?.role === 'superadmin';
+    if (cleanAccount === 'all' && !canViewAll) {
+      alert('Access denied: All Accounts is available only to platform administrators.');
+      return;
+    }
+    if (cleanAccount !== 'all' && accounts.length > 0 && !accounts.some((a) => a.id.toLowerCase() === cleanAccount)) {
       alert(`Access Denied: You do not have permission to access ${newAccount.toUpperCase()}.`);
       return;
     }
@@ -186,6 +192,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (accId?: string): string => {
       const target = (accId || account || '').toLowerCase().trim();
       if (!target) return 'Account';
+      if (target === 'all') return 'All Accounts';
       if (target === 'bajaj') return 'Bajaj Finserv';
       if (target === 'tata') return 'Tata Capital';
       const found = accounts.find((a) => a.id.toLowerCase() === target);

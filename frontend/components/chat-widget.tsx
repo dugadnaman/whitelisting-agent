@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/lib/context';
 import { sendAgentMessage } from '@/lib/api';
+import { formatChannel } from '@/lib/format';
 import type { AgentChatAction, AgentChatResponse } from '@/lib/api';
 type ChatMessage = {
   id: string;
@@ -16,9 +17,9 @@ type ChatMessage = {
 };
 
 const DEFAULT_SUGGESTED_PROMPTS = [
-  'How do I submit templates?',
-  'Create a marketing template named festive_offer with body: Hello {{1}}, get 20% off at bajajfinserv.in',
-  'Check why template emic_check_wa_07aug was rejected and fix it',
+  'Brief TCN-524 (LAP GST Content)',
+  'Brief TCN-523 (Ganesh Chaturthi)',
+  'Show recent Jira briefs',
   'List all rejected templates for this account',
   'Poll live approval status from Meta',
 ];
@@ -128,26 +129,30 @@ export default function ChatWidget() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
-  if (pathname === '/login' || pathname === '/signup') {
-    return null;
-  }
+  const welcomeMessage =
+    `### 👋 Karix AI Whitelisting Copilot\n\n` +
+    `I am your autonomous template assistant for **${getAccountLabel(account)} (${formatChannel(channel)})**.\n\n` +
+    `**What I can do for you:**\n` +
+    `• 🚀 **Submit Templates**: Type *"Create a template named X with body Y"* or ask *"How do I submit templates?"*\n` +
+    `• 🔧 **Fix Rejections**: Type *"Check why template X was rejected, fix it, and resubmit"*\n` +
+    `• 📋 **Inspect Catalogs**: Ask *"List rejected templates"* or *"Show pending approvals"*\n` +
+    `• 🔄 **Sync Statuses**: Ask *"Poll live approval status from Meta"*\n` +
+    `• ✍️ **Lint Copy**: Paste any copy with variables/URLs to fix typos and compliance.`;
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: 'init-1',
       role: 'assistant',
-      content:
-        `### 👋 Karix AI Whitelisting Copilot\n\n` +
-        `I am your autonomous template assistant for **${getAccountLabel(account)} (${channel.toUpperCase()})**.\n\n` +
-        `**What I can do for you:**\n` +
-        `• 🚀 **Submit Templates**: Type *"Create a template named X with body Y"* or ask *"How do I submit templates?"*\n` +
-        `• 🔧 **Fix Rejections**: Type *"Check why template X was rejected, fix it, and resubmit"*\n` +
-        `• 📋 **Inspect Catalogs**: Ask *"List rejected templates"* or *"Show pending approvals"*\n` +
-        `• 🔄 **Sync Statuses**: Ask *"Poll live approval status from Meta"*\n` +
-        `• ✍️ **Lint Copy**: Paste any copy with variables/URLs to fix typos and compliance.`,
+      content: welcomeMessage,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       suggested_actions: DEFAULT_SUGGESTED_PROMPTS,
     },
   ]);
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length !== 1 || prev[0].id !== 'init-1') return prev;
+      return [{ ...prev[0], content: welcomeMessage }];
+    });
+  }, [welcomeMessage]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -255,13 +260,16 @@ export default function ChatWidget() {
       {
         id: `init-${Date.now()}`,
         role: 'assistant',
-        content: `### 🔄 Session Cleared\n\nReady for new instructions on **${getAccountLabel(account)} (${channel.toUpperCase()})**.`,
+        content: `### 🔄 Session Cleared\n\nReady for new instructions on **${getAccountLabel(account)} (${formatChannel(channel)})**.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         suggested_actions: DEFAULT_SUGGESTED_PROMPTS,
       },
     ]);
   };
 
+  if (pathname === '/login' || pathname === '/signup') {
+    return null;
+  }
   return (
     <>
       {/* Floating Copilot Launcher Button */}

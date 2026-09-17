@@ -39,6 +39,17 @@ const links = [
     ),
   },
   {
+    href: '/briefs',
+    label: 'Jira Briefs',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 4h12v12H4z" />
+        <path d="M4 9h12" />
+        <path d="M9 4v12" />
+      </svg>
+    ),
+  },
+  {
     href: '/settings',
     label: 'Settings',
     icon: (
@@ -64,6 +75,10 @@ export default function Nav() {
     isTenantLocked,
     logout,
   } = useApp();
+  const canViewAll = currentUser?.tenant_id === 'all' || currentUser?.role === 'superadmin';
+  const accountOptions = canViewAll
+    ? [{ id: 'all', name: 'All Accounts', is_builtin: true }, ...accounts]
+    : accounts;
 
   if (pathname === '/login' || pathname === '/signup') {
     return null;
@@ -95,7 +110,7 @@ export default function Nav() {
               </span>
             )}
           </label>
-          {accounts.length <= 1 ? (
+          {accountOptions.length <= 1 ? (
             <div className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-900 shadow-2xs flex items-center justify-between">
               <span className="truncate">{getAccountLabel(account)}</span>
               <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
@@ -107,7 +122,7 @@ export default function Nav() {
                 onChange={(e) => setAccount(e.target.value as Account)}
                 className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors"
               >
-                {accounts.map((acc) => (
+                {accountOptions.map((acc) => (
                   <option key={acc.id} value={acc.id}>
                     {acc.name}
                   </option>

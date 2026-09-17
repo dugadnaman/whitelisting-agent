@@ -42,6 +42,20 @@ export function formatError(err: unknown): string {
   }
   return String(err);
 }
+export function formatChannel(channel: string | null | undefined): string {
+  switch ((channel || '').toLowerCase()) {
+    case 'whatsapp':
+      return 'WhatsApp';
+    case 'rcs':
+      return 'RCS (DLT)';
+    case 'sms':
+      return 'SMS (Karix)';
+    case 'all':
+      return 'All Channels';
+    default:
+      return channel || 'Channel';
+  }
+}
 
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—';

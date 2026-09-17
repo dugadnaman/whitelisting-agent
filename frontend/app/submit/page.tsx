@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob } from '@/lib/api';
 import type { TemplatePreview, Template, JobTask } from '@/lib/api';
 import { useApp } from '@/lib/context';
-import { formatError } from '@/lib/format';
+import { formatChannel, formatError } from '@/lib/format';
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     pending: 'bg-amber-100 text-amber-800 border border-amber-200',
@@ -68,20 +68,27 @@ export default function SubmitPage() {
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const pollJobFallback = useCallback(async (jobId: string) => {
+  const pollJobFallback = useCallback((jobId: string) => {
+    clearInterval(pollTimerRef.current as NodeJS.Timeout);
     let attempts = 0;
+    let inFlight = false;
     const interval = setInterval(async () => {
+      if (inFlight) return;
       attempts++;
       if (attempts > 60) {
         clearInterval(interval);
+        pollTimerRef.current = null;
         setState((prev) => (prev.step === 'submitted' ? { ...prev, isStreaming: false } : prev));
         return;
       }
+      inFlight = true;
       try {
         const data = await fetchJob(jobId);
         if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.job.status)) {
           clearInterval(interval);
+          pollTimerRef.current = null;
           setState((prev) => {
             if (prev.step !== 'submitted') return prev;
             const taskMap: Record<string, JobTask> = {};
@@ -108,8 +115,12 @@ export default function SubmitPage() {
         }
       } catch {
         clearInterval(interval);
+        pollTimerRef.current = null;
+      } finally {
+        inFlight = false;
       }
     }, 2500);
+    pollTimerRef.current = interval;
   }, []);
 
   const setupJobStream = useCallback((jobId: string) => {
@@ -117,7 +128,10 @@ export default function SubmitPage() {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
-
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
     const es = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream`);
     eventSourceRef.current = es;
 
@@ -184,6 +198,8 @@ export default function SubmitPage() {
   }, [pollJobFallback]);
 
   useEffect(() => {
+    clearInterval(pollTimerRef.current as NodeJS.Timeout);
+    pollTimerRef.current = null;
     return () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
@@ -191,6 +207,12 @@ export default function SubmitPage() {
     };
   }, []);
   useEffect(() => {
+    clearInterval(pollTimerRef.current as NodeJS.Timeout);
+    pollTimerRef.current = null;
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
     setState({ step: 'idle' });
     setFile(null);
   }, [account, channel]);
@@ -303,7 +325,7 @@ export default function SubmitPage() {
   }, [handleClear]);
 
   const accountLabel = getAccountLabel(account);
-  const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : 'RCS (DLT)';
+  const channelLabel = formatChannel(channel);
 
   return (
     <div className="space-y-6">

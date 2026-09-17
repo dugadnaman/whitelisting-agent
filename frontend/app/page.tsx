@@ -12,7 +12,7 @@ import {
 } from '@/lib/api';
 import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
-import { formatDate, formatError, relativeTime, truncate } from '@/lib/format';
+import { formatChannel, formatDate, formatError, relativeTime, truncate } from '@/lib/format';
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -92,6 +92,7 @@ export default function DashboardPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const requestVersionRef = useRef(0);
   const [selectedTemplates, setSelectedTemplates] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -109,6 +110,7 @@ export default function DashboardPage() {
 
   // Reset filters when switching account or channel
   useEffect(() => {
+    requestVersionRef.current += 1;
     setStatusFilter('');
     setOperatorFilter('all');
     setSearch('');
@@ -119,45 +121,55 @@ export default function DashboardPage() {
 
   const loadStats = useCallback(async () => {
     if (!mounted) return;
+    const requestVersion = requestVersionRef.current;
     try {
       setStatsLoading(true);
       const data = await fetchStats(account, channel);
+      if (requestVersion !== requestVersionRef.current) return;
       setStats(data);
       setLastSynced(new Date().toISOString());
       if (data.error) {
         setError(`Karix sync degraded: ${formatError(data.error)}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch stats');
+      if (requestVersion === requestVersionRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch stats');
+      }
     } finally {
-      setStatsLoading(false);
+      if (requestVersion === requestVersionRef.current) setStatsLoading(false);
     }
   }, [account, channel, mounted]);
 
   const loadTemplates = useCallback(async () => {
     if (!mounted) return;
+    const requestVersion = requestVersionRef.current;
     try {
       setTemplatesLoading(true);
       const params: { status?: string; search?: string } = {};
       if (statusFilter) params.status = statusFilter;
       if (debouncedSearch) params.search = debouncedSearch;
       const data = await fetchTemplates({ account, channel, ...params });
+      if (requestVersion !== requestVersionRef.current) return;
       setTemplates(data);
       if (data.length > 0 || !debouncedSearch) setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch templates');
+      if (requestVersion === requestVersionRef.current) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch templates');
+      }
     } finally {
-      setTemplatesLoading(false);
+      if (requestVersion === requestVersionRef.current) setTemplatesLoading(false);
     }
   }, [account, channel, statusFilter, debouncedSearch, mounted]);
 
   const loadActivity = useCallback(async () => {
     if (!mounted) return;
+    const requestVersion = requestVersionRef.current;
     try {
       const [logs, activitySummary] = await Promise.all([
         fetchActivityLogs({ limit: 6 }),
         fetchActivityStats(),
       ]);
+      if (requestVersion !== requestVersionRef.current) return;
       setActivities(logs);
       setActivityStats(activitySummary);
     } catch {
@@ -290,7 +302,7 @@ export default function DashboardPage() {
   };
 
   const accountLabel = getAccountLabel(account);
-  const channelLabel = channel === 'whatsapp' ? 'WhatsApp' : 'RCS (DLT)';
+  const channelLabel = formatChannel(channel);
 
   // Client-side operator filter (server filters status/search only)
   const operators = Array.from(
@@ -539,7 +551,7 @@ export default function DashboardPage() {
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder={channel === 'whatsapp' ? 'Search templates or ref IDs...' : 'Search by name, DLT ID, or sender...'}
+                placeholder={channel === 'whatsapp' ? 'Search templates or ref IDs...' : channel === 'rcs' ? 'Search by name, DLT ID, or sender...' : 'Search by sender, ACK ID, or destination...'}
                   className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50/50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
                 />
               </div>
@@ -971,7 +983,7 @@ export default function DashboardPage() {
                         {a.action === 'CREDENTIALS_TEST' && <>tested credentials</>}
                       </p>
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {a.account === 'tata' ? 'Tata Capital' : 'Bajaj'} • {a.channel === 'whatsapp' ? 'WhatsApp' : 'RCS'} • {relativeTime(a.timestamp)}
+                        {getAccountLabel(a.account)} • {formatChannel(a.channel)} • {relativeTime(a.timestamp)}
                       </p>
                     </div>
                     <span className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${a.status === 'success' ? 'bg-emerald-500' : 'bg-red-500'}`} />

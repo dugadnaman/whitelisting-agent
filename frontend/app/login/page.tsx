@@ -35,7 +35,7 @@ export default function LoginPage() {
 
       // Pre-select the appropriate account in localStorage
       const tenant = (res.user.tenant_id || 'bajaj').toLowerCase();
-      const targetAccount = tenant === 'tata' ? 'tchfl' : tenant === 'all' ? 'bajaj' : tenant;
+      const targetAccount = tenant === 'tata' ? 'tchfl' : tenant === 'all' ? 'all' : tenant;
       setAccount(targetAccount);
       try {
         localStorage.setItem('karix_account', targetAccount);
@@ -81,6 +81,7 @@ export default function LoginPage() {
             </label>
             <input
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -96,7 +97,7 @@ export default function LoginPage() {
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
-                required
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"

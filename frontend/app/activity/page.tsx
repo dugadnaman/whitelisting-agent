@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchActivityLogs, fetchActivityStats } from '@/lib/api';
 import type { ActivityLog, ActivityStats, Account, Channel } from '@/lib/api';
 import { useApp } from '@/lib/context';
+import { formatChannel } from '@/lib/format';
 
 function formatTimestamp(iso: string): { relative: string; exact: string } {
   if (!iso) return { relative: '—', exact: '—' };
@@ -365,6 +366,7 @@ export default function ActivityLogsPage() {
               <option value="all">All Channels</option>
               <option value="whatsapp">WhatsApp</option>
               <option value="rcs">RCS (DLT)</option>
+              <option value="sms">SMS (Karix)</option>
             </select>
 
             {/* Auto-refresh toggle */}
@@ -437,8 +439,8 @@ export default function ActivityLogsPage() {
                 logs.map((log) => {
                   const { relative, exact } = formatTimestamp(log.timestamp);
                   const isCurrent = (log.user || '').toLowerCase() === (currentAppUser || '').toLowerCase();
-                  const targetAccount = log.account === 'tata' ? 'Tata Capital' : 'Bajaj';
-                  const targetChannel = log.channel === 'whatsapp' ? 'WhatsApp' : 'RCS';
+                  const targetAccount = getAccountLabel(log.account);
+                  const targetChannel = formatChannel(log.channel);
 
                   return (
                     <tr
@@ -467,12 +469,14 @@ export default function ActivityLogsPage() {
                           className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold ${
                             log.channel === 'whatsapp'
                               ? 'bg-emerald-50 text-emerald-800 border border-emerald-200/60'
-                              : 'bg-blue-50 text-blue-800 border border-blue-200/60'
+                              : log.channel === 'sms'
+                              ? 'bg-purple-50 text-purple-800 border-purple-200/60'
+                              : 'bg-blue-50 text-blue-800 border-blue-200/60'
                           }`}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              log.channel === 'whatsapp' ? 'bg-emerald-500' : 'bg-blue-500'
+                              log.channel === 'whatsapp' ? 'bg-emerald-500' : log.channel === 'sms' ? 'bg-purple-500' : 'bg-blue-500'
                             }`}
                           />
                           {targetAccount} &bull; {targetChannel}

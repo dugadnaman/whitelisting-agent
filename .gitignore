@@ -29,6 +29,8 @@ sms_dlr_log.jsonl
 sms_click_log.jsonl
 
 karix_store.db*
+queue.db*
+media_cache/jira_*
 # Scratch/Local configs
 scratch/
 .DS_Store
