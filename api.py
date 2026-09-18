@@ -222,6 +222,15 @@ DEFAULT_ACCOUNTS = [
         "headers": [],
     },
     {
+        "id": "apparel",
+        "name": "Apparel Brand",
+        "entity": "Apparel",
+        "type": "Promo&trans",
+        "is_builtin": True,
+        "group": "Apparel",
+        "headers": [],
+    },
+    {
         "id": "tcl_promo",
         "name": "Tata Capital Limited (Promotional)",
         "entity": "Tata Capital Limited",
@@ -3451,18 +3460,49 @@ async def get_moengage_rcs_templates_endpoint(current_user: dict = Depends(get_c
 
 
 class MoEngageCredentialUpdate(BaseModel):
+    account: str = "tata"
+    base_url: str | None = None
     bearer_token: str | None = None
     cookie: str | None = None
+    sender_id: str | None = None
+
+
+_TATA_MOENGAGE_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
+
+
+def _moengage_credential_keys(account: str) -> dict[str, str]:
+    """Map account to its MoEngage env keys. Tata sub-accounts share the global workspace."""
+    acc = account.lower().strip()
+    if acc in _TATA_MOENGAGE_ACCOUNTS:
+        return {
+            "base_url": "MOENGAGE_BASE_URL",
+            "bearer_token": "MOENGAGE_BEARER_TOKEN",
+            "cookie": "MOENGAGE_COOKIE",
+            "sender_id": "MOENGAGE_SENDER_ID",
+        }
+    prefix = _account_prefix(acc)
+    return {
+        "base_url": f"{prefix}_MOENGAGE_BASE_URL",
+        "bearer_token": f"{prefix}_MOENGAGE_BEARER_TOKEN",
+        "cookie": f"{prefix}_MOENGAGE_COOKIE",
+        "sender_id": f"{prefix}_MOENGAGE_SENDER_ID",
+    }
 
 
 @app.get("/api/moengage/credentials")
-def get_moengage_credentials_endpoint(current_user: dict = Depends(get_current_user)):
-    """Return MoEngage credential state (token, cookie, expiry) without leaking the full cookie."""
+def get_moengage_credentials_endpoint(
+    account: str = Query("tata"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return MoEngage credential state (token, cookie, expiry) for an account."""
     from moengage_sync import get_moengage_credentials
 
-    creds = get_moengage_credentials()
+    creds = get_moengage_credentials(account)
     return _json_safe({
         "ok": True,
+        "account": account,
+        "base_url": creds.get("base_url"),
+        "sender_id": creds.get("sender_id"),
         "has_token": creds.get("has_token", False),
         "has_cookie": creds.get("has_cookie", False),
         "bearer_token": creds.get("bearer_token", ""),
@@ -3478,12 +3518,17 @@ def update_moengage_credentials_endpoint(
     req: MoEngageCredentialUpdate,
     current_user: dict = Depends(get_current_user),
 ):
-    """Persist MoEngage Bearer token and cookie to .env and credentials.json."""
+    """Persist an account's MoEngage workspace credentials to .env and credentials.json."""
+    keys = _moengage_credential_keys(req.account)
     mapping: dict[str, str] = {}
+    if req.base_url and req.base_url.strip():
+        mapping[keys["base_url"]] = req.base_url.strip().rstrip("/")
     if req.bearer_token and req.bearer_token.strip():
-        mapping["MOENGAGE_BEARER_TOKEN"] = req.bearer_token.strip()
+        mapping[keys["bearer_token"]] = req.bearer_token.strip()
     if req.cookie and req.cookie.strip():
-        mapping["MOENGAGE_COOKIE"] = req.cookie.strip()
+        mapping[keys["cookie"]] = req.cookie.strip()
+    if req.sender_id and req.sender_id.strip():
+        mapping[keys["sender_id"]] = req.sender_id.strip()
 
     if not mapping:
         return {"ok": True, "updated_keys": []}
@@ -3531,12 +3576,12 @@ def update_moengage_credentials_endpoint(
         os.environ[k] = v
 
     from moengage_sync import decode_moengage_token_expiry
-    expiry = decode_moengage_token_expiry(mapping.get("MOENGAGE_BEARER_TOKEN"))
+    expiry = decode_moengage_token_expiry(mapping.get(keys["bearer_token"]))
 
     log_activity(
         user=current_user.get("name", "Operator"),
         action="CREDENTIALS_UPDATE",
-        account="tata",
+        account=req.account,
         channel="moengage",
         details={"keys_updated": list(mapping.keys())},
         status="success",
@@ -3544,6 +3589,7 @@ def update_moengage_credentials_endpoint(
 
     return _json_safe({
         "ok": True,
+        "account": req.account,
         "updated_keys": list(mapping.keys()),
         "expired": expiry.get("expired"),
         "remaining_min": expiry.get("remaining_min"),
@@ -3551,9 +3597,40 @@ def update_moengage_credentials_endpoint(
 
 
 @app.post("/api/moengage/test")
-def test_moengage_connection_endpoint(current_user: dict = Depends(get_current_user)):
-    """Test MoEngage token validity by listing RCS templates."""
+def test_moengage_connection_endpoint(
+    account: str = Query("tata"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Test an account's MoEngage token validity by listing RCS templates."""
     from moengage_sync import test_moengage_connection
 
-    result = test_moengage_connection()
+    result = test_moengage_connection(account)
+    return _json_safe(result)
+
+
+@app.post("/api/moengage/rcs/sync-karix")
+def sync_karix_rcs_to_moengage_endpoint(
+    account: str = Query("tata"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Pull approved RCS templates from Karix and register them in an account's MoEngage workspace."""
+    require_tenant_access(account, current_user)
+    from moengage_sync import sync_karix_rcs_to_moengage
+
+    result = sync_karix_rcs_to_moengage(account)
+
+    log_activity(
+        user=current_user.get("name", "Operator"),
+        action="MOENGAGE_RCS_SYNC_KARIX",
+        account=account,
+        channel="rcs",
+        details={
+            "karix_total": result.get("karix_total"),
+            "created_count": result.get("created_count"),
+            "skipped_count": result.get("skipped_count"),
+            "error_count": result.get("error_count"),
+        },
+        status="success" if result.get("ok") else "failed",
+    )
+
     return _json_safe(result)

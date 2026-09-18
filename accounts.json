@@ -9,6 +9,15 @@
     "headers": []
   },
   {
+    "id": "apparel",
+    "name": "Apparel Brand",
+    "entity": "Apparel",
+    "type": "Promo&trans",
+    "is_builtin": true,
+    "group": "Apparel",
+    "headers": []
+  },
+  {
     "id": "tcl_promo",
     "name": "Tata Capital Limited (Promotional)",
     "entity": "Tata Capital Limited",

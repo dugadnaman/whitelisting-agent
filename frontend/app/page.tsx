@@ -9,6 +9,7 @@ import {
   fetchActivityStats,
   deleteTemplates,
   deleteTemplatesFromFile,
+  syncKarixRcsToMoEngage,
 } from '@/lib/api';
 import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -99,6 +100,31 @@ export default function DashboardPage() {
   const [showFileDeleteModal, setShowFileDeleteModal] = useState(false);
   const [deleteFile, setDeleteFile] = useState<File | null>(null);
   const [fileDeleting, setFileDeleting] = useState(false);
+  const [syncingRcs, setSyncingRcs] = useState(false);
+  const [syncRcsFeedback, setSyncRcsFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const handleSyncRcsToMoEngage = async () => {
+    try {
+      setSyncingRcs(true);
+      setSyncRcsFeedback(null);
+      const res = await syncKarixRcsToMoEngage(account);
+      if (!res.ok) {
+        setSyncRcsFeedback({ message: res.error || 'Sync failed', type: 'error' });
+        return;
+      }
+      setSyncRcsFeedback({
+        message: `Synced ${res.created_count} RCS template(s) to MoEngage · ${res.skipped_count} skipped (already present/not approved)${res.error_count ? ` · ${res.error_count} failed` : ''}.`,
+        type: 'success',
+      });
+    } catch (err) {
+      setSyncRcsFeedback({
+        message: err instanceof Error ? err.message : 'Failed to sync RCS templates to MoEngage',
+        type: 'error',
+      });
+    } finally {
+      setSyncingRcs(false);
+    }
+  };
 
 
 
@@ -428,6 +454,27 @@ export default function DashboardPage() {
             </button>
           )}
 
+          {channel === 'rcs' && (
+            <button
+              onClick={handleSyncRcsToMoEngage}
+              disabled={syncingRcs}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition-colors disabled:opacity-50"
+              title="Pull approved RCS templates from Karix and register them in MoEngage Settings"
+            >
+              {syncingRcs ? (
+                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+              ) : (
+                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              )}
+              {syncingRcs ? 'Syncing to MoEngage…' : 'Sync to MoEngage'}
+            </button>
+          )}
+
           <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
             <input
               type="checkbox"
@@ -448,6 +495,19 @@ export default function DashboardPage() {
           </svg>
           <div className="flex-1">{formatError(error)}</div>
           <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">&times;</button>
+        </div>
+      )}
+
+      {/* RCS -> MoEngage sync feedback */}
+      {syncRcsFeedback && (
+        <div className={`p-4 rounded-xl border flex items-start gap-3 text-sm ${
+          syncRcsFeedback.type === 'success'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+            : 'bg-red-50 border-red-200 text-red-700'
+        }`}>
+          <span className="text-base shrink-0 mt-0.5">{syncRcsFeedback.type === 'success' ? '✅' : '⚠️'}</span>
+          <div className="flex-1">{syncRcsFeedback.message}</div>
+          <button onClick={() => setSyncRcsFeedback(null)} className="text-gray-400 hover:text-gray-600" aria-label="Dismiss">&times;</button>
         </div>
       )}
 

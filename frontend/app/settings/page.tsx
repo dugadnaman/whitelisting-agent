@@ -58,18 +58,22 @@ export default function SettingsPage() {
   const [showMoEngage, setShowMoEngage] = useState(false);
   const [moeBearerToken, setMoeBearerToken] = useState('');
   const [moeCookie, setMoeCookie] = useState('');
+  const [moeBaseUrl, setMoeBaseUrl] = useState('');
+  const [moeSenderId, setMoeSenderId] = useState('');
   const [moeExpiry, setMoeExpiry] = useState<{ expired?: boolean; remaining_min?: number | null }>({});
   const [moeLoaded, setMoeLoaded] = useState(false);
 
-  // Load MoEngage credentials on mount
+  // Load MoEngage credentials for the selected account
   useEffect(() => {
     let ignore = false;
     async function loadMoEngage() {
       try {
-        const creds = await fetchMoEngageCredentials();
+        const creds = await fetchMoEngageCredentials(selectedAccount);
         if (ignore) return;
         setMoeBearerToken(creds.bearer_token || '');
         setMoeCookie(creds.cookie || '');
+        setMoeBaseUrl(creds.base_url || '');
+        setMoeSenderId(creds.sender_id || '');
         setMoeExpiry({ expired: creds.expired, remaining_min: creds.remaining_min });
         setMoeLoaded(true);
       } catch {
@@ -78,7 +82,7 @@ export default function SettingsPage() {
     }
     loadMoEngage();
     return () => { ignore = true; };
-  }, []);
+  }, [selectedAccount]);
 
   // Team Directory state
   const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
@@ -325,13 +329,16 @@ export default function SettingsPage() {
     setBanner(null);
     try {
       const res = await saveMoEngageCredentials(
+        selectedAccount,
         moeBearerToken.trim(),
-        moeCookie.trim()
+        moeCookie.trim(),
+        moeBaseUrl.trim(),
+        moeSenderId.trim()
       );
       setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
       setBanner({
         type: 'success',
-        message: `MoEngage credentials saved${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
+        message: `MoEngage credentials saved for ${selectedAccount}${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
       });
     } catch (err) {
       setBanner({
@@ -347,12 +354,12 @@ export default function SettingsPage() {
     setTesting(true);
     setBanner(null);
     try {
-      const res = await testMoEngageConnection();
+      const res = await testMoEngageConnection(selectedAccount);
       if (res.ok) {
         setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
         setBanner({
           type: 'success',
-          message: `MoEngage connection verified — ${res.template_count ?? 0} RCS templates visible in Settings.`,
+          message: `MoEngage connection verified for ${selectedAccount} — ${res.template_count ?? 0} RCS templates visible in Settings.`,
         });
       } else {
         setBanner({
@@ -773,9 +780,44 @@ export default function SettingsPage() {
               </div>
             )}
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="moe_base_url" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  MoEngage Dashboard URL
+                </label>
+                <input
+                  id="moe_base_url"
+                  type="text"
+                  value={moeBaseUrl}
+                  onChange={(e) => setMoeBaseUrl(e.target.value)}
+                  placeholder="https://dashboard-XX.moengage.com"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  The dashboard domain shown in the browser URL bar for this brand's MoEngage workspace.
+                </p>
+              </div>
+              <div>
+                <label htmlFor="moe_sender_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  MoEngage Sender Profile ID
+                </label>
+                <input
+                  id="moe_sender_id"
+                  type="text"
+                  value={moeSenderId}
+                  onChange={(e) => setMoeSenderId(e.target.value)}
+                  placeholder="24-char sender ID from MoEngage Sender configuration"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  The <code>sender_ids</code> value from MoEngage → Settings → SMS & RCS → Sender configuration.
+                </p>
+              </div>
+            </div>
+
             <div>
               <label htmlFor="moe_bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                MoEngage Bearer Token (MOENGAGE_BEARER_TOKEN)
+                MoEngage Bearer Token
               </label>
               <input
                 id="moe_bearer_token"
@@ -792,7 +834,7 @@ export default function SettingsPage() {
 
             <div>
               <label htmlFor="moe_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                MoEngage Session Cookie (MOENGAGE_COOKIE)
+                MoEngage Session Cookie
               </label>
               <input
                 id="moe_cookie"
