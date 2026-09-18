@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
-from jira_client import download_jira_attachment
+from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,8 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
     s = re.sub(r"₹\s*(?:<[^>]+>|\{[^}]+\})", _replace_money, s)
     s = re.sub(r"(?:<x+>|<X+>|\{x+\}|\{X+\})", _replace_money, s)
     s = re.sub(r"(?:<name>|\{name\}|<customer_name>)", _replace_name, s, flags=re.IGNORECASE)
+    # Square-bracket placeholders used by SWCM briefs: [Client Name], [Name], [First Name]
+    s = re.sub(r"\[(?:client\s+name|customer\s+name|first\s+name|name)\]", _replace_name, s, flags=re.IGNORECASE)
     s = re.sub(r"<[a-zA-Z\-_]+>", _replace_generic, s)
 
     s = re.sub(r"[ \t]+", " ", s)
@@ -191,6 +193,11 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
             raw_rows.append(cells)
 
         if not raw_rows:
+            continue
+
+        # Skip SWCM key-value campaign tables (handled by _parse_swcm_campaign_tables)
+        first_cell_lower = (raw_rows[0][0].strip().lower() if raw_rows and raw_rows[0] else "")
+        if "campaign execution format" in first_cell_lower:
             continue
 
         # Check Pattern B (Row-based channel tags)
@@ -407,6 +414,134 @@ def extract_templates_from_excel_file(filepath: Path) -> list[dict[str, str]]:
     return []
 
 
+def _extract_images_from_zip(zip_path: Path) -> list[str]:
+    """Extract top-level image creatives from a ZIP attachment. Returns local paths.
+
+    Nested ZIPs are emailer packages (HTML + banner/whatsapp icon assets) and are
+    intentionally skipped — WhatsApp template creatives live at the ZIP's top level.
+    """
+    import zipfile
+
+    image_exts = (".jpg", ".jpeg", ".png", ".webp")
+    images: list[str] = []
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            for name in z.namelist():
+                lower = name.lower()
+                base = Path(name).name
+                if lower.endswith(image_exts) and "/" not in name:
+                    out_path = MEDIA_CACHE_DIR / f"jira_{zip_path.stem}_{base}"
+                    out_path.write_bytes(z.read(name))
+                    images.append(str(out_path))
+    except Exception as exc:
+        logger.warning("Could not extract ZIP %s: %s", zip_path, exc)
+    return images
+
+
+def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None) -> list[dict[str, str]]:
+    """
+    Parse SWCM 'Campaign execution format N | WA N' key-value tables into WhatsApp campaigns.
+    Each table has rows: [Campaign execution format N, WA N], [Campaign Name, ...],
+    [WA Content, ...], [CTA / LINK, ...], [Date & Time of execution, ...], etc.
+    """
+    if not adf_doc:
+        return []
+
+    tables = _find_adf_tables(adf_doc)
+    campaigns: list[dict[str, str]] = []
+
+    for tbl in tables:
+        rows = tbl.get("content", [])
+        if not rows:
+            continue
+
+        header = [_extract_text_from_adf_node(c).strip() for c in rows[0].get("content", [])]
+        # Detect WhatsApp campaign table: first col "Campaign execution format N", second col "WA N"
+        if len(header) < 2:
+            continue
+        if "campaign execution format" not in header[0].lower():
+            continue
+        if not header[1].strip().upper().startswith("WA"):
+            continue
+
+        fields: dict[str, str] = {}
+        for r in rows[1:]:
+            cells = [_extract_text_from_adf_node(c).strip() for c in r.get("content", [])]
+            if len(cells) >= 2 and cells[0].strip():
+                fields[cells[0].strip()] = cells[1].strip()
+
+        if fields.get("WA Content"):
+            campaigns.append({
+                "wa_label": header[1].strip(),
+                "campaign_name": fields.get("Campaign Name", ""),
+                "body": fields.get("WA Content", ""),
+                "cta": fields.get("CTA / LINK", ""),
+                "schedule": fields.get("Date & Time of execution", ""),
+            })
+
+    return campaigns
+
+
+def _parse_swcm_cta(cta_raw: str) -> tuple[str, str]:
+    """Parse 'CTA: Explore Now!\\nGodrej Majesty-NCR' into (button_text, button_url)."""
+    lines = [l.strip() for l in cta_raw.split("\n") if l.strip()]
+    button_text = "Explore Now"
+    button_url = "https://www.tatacapital.com"
+
+    for line in lines:
+        if line.lower().startswith("cta:") and ":" in line:
+            candidate = line.split(":", 1)[1].strip()
+            if candidate:
+                button_text = candidate
+
+    link_lines = [l for l in lines if not l.lower().startswith("cta:")]
+    if link_lines:
+        button_url = link_lines[-1]
+
+    return button_text, button_url
+
+
+_LOCATION_KEYWORDS = {
+    "noida": "noida",
+    "greater": "noida",
+    "whitefield": "whitefield",
+    "bengaluru": "whitefield",
+    "bangalore": "whitefield",
+    "orbis": "orbis",
+    "ghansoli": "orbis",
+    "hiranandani": "hiranandani",
+    "sands": "hiranandani",
+    "alibaug": "hiranandani",
+}
+
+
+def _match_creative_to_campaign(campaign_name: str, images: list[str]) -> str | None:
+    """Match a WhatsApp campaign to its creative image by location keyword in filename.
+
+    Prefers filenames containing 'whatsapp'/'whatsap' (the actual WhatsApp creatives),
+    falling back to generic images (e.g. emailer banner1.png inside nested ZIPs) only
+    when no WhatsApp-named creative matches.
+    """
+    cname_lower = campaign_name.lower()
+    target_keywords = {
+        v for k, v in _LOCATION_KEYWORDS.items() if k in cname_lower
+    }
+    if not target_keywords:
+        return None
+
+    wa_named = [
+        i for i in images
+        if "whatsapp" in Path(i).name.lower() or "whatsap" in Path(i).name.lower()
+    ]
+    other = [i for i in images if i not in wa_named]
+
+    for img in wa_named + other:
+        img_lower = Path(img).name.lower()
+        if any(kw in img_lower for kw in target_keywords):
+            return img
+    return None
+
+
 def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True) -> ParsedJiraBrief:
     """
     Parse a complete Jira ticket dictionary:
@@ -429,6 +564,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     # 1. Download and categorize attachments
     mapped_attachments: list[dict[str, Any]] = []
     excel_attachment_paths: list[Path] = []
+    zip_creative_paths: list[str] = []
 
     for att in raw_attachments:
         fn = att.get("filename", "")
@@ -441,6 +577,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 local_path = str(p)
                 if fn.lower().endswith((".xlsx", ".xls", ".csv")):
                     excel_attachment_paths.append(p)
+                elif fn.lower().endswith(".zip"):
+                    zip_creative_paths.extend(_extract_images_from_zip(p))
             except Exception as e:
                 logger.warning("Could not download attachment %s for %s: %s", att_id, key, e)
 
@@ -498,6 +636,32 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 "variant": "General",
                 "source": "jira_pipe",
             })
+
+    # 3b. SWCM WhatsApp campaign tables ("Campaign execution format N | WA N")
+    swcm_campaigns = _parse_swcm_campaign_tables(desc_raw)
+    for idx, campaign in enumerate(swcm_campaigns, start=1):
+        norm_text, variables = normalize_placeholders(campaign["body"])
+        cta_text, cta_url = _parse_swcm_cta(campaign["cta"])
+        media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
+        if media is None and zip_creative_paths:
+            media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
+        tname = _clean_template_name(base_name, "wa", idx)
+        wa_drafts.append(
+            WhatsAppTemplateDraft(
+                template_name=tname,
+                category="MARKETING",
+                body=norm_text,
+                header_type="IMAGE" if media else "TEXT",
+                media_file=media,
+                media_filename=Path(media).name if media else None,
+                button_type="URL",
+                button_text=cta_text,
+                button_url=cta_url,
+                variables=variables,
+                raw_source=campaign["body"],
+                source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
+            )
+        )
 
     # 4. Assemble template drafts
     wa_counter = 1

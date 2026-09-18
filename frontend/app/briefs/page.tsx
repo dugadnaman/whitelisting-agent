@@ -18,6 +18,7 @@ export default function JiraBriefsPage() {
   const { user } = useApp();
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(true);
+  const [project, setProject] = useState<string>('TCN');
   const [selectedKey, setSelectedKey] = useState<string>('TCN-524');
   const [brief, setBrief] = useState<JiraBriefData | null>(null);
   const [loadingBrief, setLoadingBrief] = useState(false);
@@ -38,7 +39,7 @@ export default function JiraBriefsPage() {
   const loadIssues = useCallback(async () => {
     try {
       setLoadingIssues(true);
-      const list = await fetchJiraIssues({ project: 'TCN', limit: 20 });
+      const list = await fetchJiraIssues({ project, limit: 20 });
       setIssues(list);
       if (list.length > 0 && !list.some((i) => i.key === selectedKey)) {
         setSelectedKey(list[0].key);
@@ -48,7 +49,7 @@ export default function JiraBriefsPage() {
     } finally {
       setLoadingIssues(false);
     }
-  }, [selectedKey]);
+  }, [project, selectedKey]);
 
   useEffect(() => {
     loadIssues();
@@ -225,9 +226,18 @@ export default function JiraBriefsPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-gray-900">Jira Campaign Briefing Agent</h1>
+            <select
+              value={project}
+              onChange={(e) => { setProject(e.target.value); setSelectedKey(''); }}
+              className="text-xs font-semibold bg-white border border-blue-200 text-blue-700 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              aria-label="Jira project"
+            >
+              <option value="TCN">TCN — Tata Capital New</option>
+              <option value="SWCM">SWCM — Service & Wealth Campaign Manager</option>
+            </select>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-              tatacapital-team.atlassian.net (TCN)
+              tatacapital-team.atlassian.net
             </span>
           </div>
           <p className="text-sm text-gray-500 mt-1">
