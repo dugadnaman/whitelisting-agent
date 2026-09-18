@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import urllib.parse
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,24 @@ from typing import Any
 import openpyxl
 from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
 
+logger = logging.getLogger(__name__)
+
+
+def clean_safelink(url: str | None) -> str:
+    """Unwrap Outlook Safelink tracking URLs to extract the actual destination URL."""
+    if not url:
+        return ""
+    clean = str(url).strip()
+    if "safelinks.protection.outlook.com" in clean and "url=" in clean:
+        try:
+            parsed = urllib.parse.urlparse(clean)
+            params = urllib.parse.parse_qs(parsed.query)
+            target = params.get("url", [""])[0]
+            if target:
+                return urllib.parse.unquote(target)
+        except Exception:
+            pass
+    return clean
 logger = logging.getLogger(__name__)
 
 
@@ -152,18 +171,47 @@ def _clean_template_name(base: str, channel: str, idx: int) -> str:
     return f"{short}_{channel.lower()}_{idx}"
 
 
-def _extract_text_from_adf_node(node: dict[str, Any] | None) -> str:
+def _extract_text_from_adf_node(node: dict[str, Any] | None, preserve_formatting: bool = True) -> str:
     if not node or not isinstance(node, dict):
         return ""
-    if node.get("type") == "text":
-        return node.get("text", "")
-    if node.get("type") == "hardBreak":
+    ntype = node.get("type")
+    if ntype == "text":
+        t = str(node.get("text", ""))
+        if not t or not preserve_formatting:
+            return t
+        marks = node.get("marks") or []
+        m_types = {m.get("type") for m in marks if isinstance(m, dict)}
+        if "strong" in m_types and t.strip():
+            stripped = t.strip()
+            t = t.replace(stripped, f"*{stripped}*")
+        elif "em" in m_types and t.strip():
+            stripped = t.strip()
+            t = t.replace(stripped, f"_{stripped}_")
+        return t
+    if ntype == "hardBreak":
         return "\n"
     if "content" in node and isinstance(node["content"], list):
-        sep = "\n" if node.get("type") == "paragraph" else ""
-        return "".join(_extract_text_from_adf_node(c) for c in node["content"]) + sep
+        sep = "\n" if ntype == "paragraph" else ""
+        return "".join(_extract_text_from_adf_node(c, preserve_formatting) for c in node["content"]) + sep
     return ""
 
+
+def _extract_links_from_adf_node(node: dict[str, Any] | None) -> list[str]:
+    """Recursively discover and extract all destination URLs from link marks."""
+    links: list[str] = []
+    if not node or not isinstance(node, dict):
+        return links
+    if node.get("type") == "text":
+        for m in (node.get("marks") or []):
+            if isinstance(m, dict) and m.get("type") == "link":
+                href = m.get("attrs", {}).get("href")
+                if href and not href.startswith("mailto:"):
+                    clean = clean_safelink(href)
+                    if clean and clean not in links:
+                        links.append(clean)
+    for c in node.get("content", []):
+        links.extend(_extract_links_from_adf_node(c))
+    return links
 
 def _find_adf_tables(node: Any) -> list[dict[str, Any]]:
     tables = []
@@ -438,25 +486,24 @@ def _extract_images_from_zip(zip_path: Path) -> list[str]:
     return images
 
 
-def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None) -> list[dict[str, str]]:
+def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
     """
     Parse SWCM 'Campaign execution format N | WA N' key-value tables into WhatsApp campaigns.
-    Each table has rows: [Campaign execution format N, WA N], [Campaign Name, ...],
-    [WA Content, ...], [CTA / LINK, ...], [Date & Time of execution, ...], etc.
+    Preserves bold markdown (*bold*), variable placeholders, and extracts real destination URLs
+    from hyperlinked CTA text.
     """
     if not adf_doc:
         return []
 
     tables = _find_adf_tables(adf_doc)
-    campaigns: list[dict[str, str]] = []
+    campaigns: list[dict[str, Any]] = []
 
     for tbl in tables:
         rows = tbl.get("content", [])
         if not rows:
             continue
 
-        header = [_extract_text_from_adf_node(c).strip() for c in rows[0].get("content", [])]
-        # Detect WhatsApp campaign table: first col "Campaign execution format N", second col "WA N"
+        header = [_extract_text_from_adf_node(c, preserve_formatting=False).strip() for c in rows[0].get("content", [])]
         if len(header) < 2:
             continue
         if "campaign execution format" not in header[0].lower():
@@ -464,42 +511,61 @@ def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None) -> list[dict[str
         if not header[1].strip().upper().startswith("WA"):
             continue
 
-        fields: dict[str, str] = {}
+        fields: dict[str, dict[str, Any]] = {}
         for r in rows[1:]:
-            cells = [_extract_text_from_adf_node(c).strip() for c in r.get("content", [])]
-            if len(cells) >= 2 and cells[0].strip():
-                fields[cells[0].strip()] = cells[1].strip()
+            cells = r.get("content", [])
+            if len(cells) >= 2:
+                raw_label = _extract_text_from_adf_node(cells[0], preserve_formatting=False).strip().replace("*", "")
+                val_text = _extract_text_from_adf_node(cells[1], preserve_formatting=True).strip()
+                val_links = _extract_links_from_adf_node(cells[1])
+                fields[raw_label] = {"text": val_text, "links": val_links}
 
-        if fields.get("WA Content"):
+        wa_content = fields.get("WA Content", {}).get("text", "")
+        if wa_content:
+            cta_info = fields.get("CTA / LINK", {})
             campaigns.append({
                 "wa_label": header[1].strip(),
-                "campaign_name": fields.get("Campaign Name", ""),
-                "body": fields.get("WA Content", ""),
-                "cta": fields.get("CTA / LINK", ""),
-                "schedule": fields.get("Date & Time of execution", ""),
+                "campaign_name": fields.get("Campaign Name", {}).get("text", ""),
+                "body": wa_content,
+                "cta_text": cta_info.get("text", ""),
+                "cta_links": cta_info.get("links", []),
+                "schedule": fields.get("Date & Time of execution", {}).get("text", ""),
             })
 
     return campaigns
 
 
-def _parse_swcm_cta(cta_raw: str) -> tuple[str, str]:
-    """Parse 'CTA: Explore Now!\\nGodrej Majesty-NCR' into (button_text, button_url)."""
-    lines = [l.strip() for l in cta_raw.split("\n") if l.strip()]
+def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[str, str]:
+    """
+    Parse CTA label and real destination URL from cell text and extracted hyperlink marks.
+    Example: 'CTA: Explore Now!\\nGodrej Majesty-NCR' -> ('Explore Now!', 'https://forms.cloud.microsoft/...')
+    """
     button_text = "Explore Now"
     button_url = "https://www.tatacapital.com"
 
+    # 1. Use real decoded destination URL if hyperlink mark exists
+    if cta_links and len(cta_links) > 0:
+        valid_links = [l for l in cta_links if l.startswith("http")]
+        if valid_links:
+            button_url = valid_links[0]
+
+    # 2. Extract button text from CTA label
+    lines = [l.strip() for l in cta_raw.split("\n") if l.strip()]
     for line in lines:
         if line.lower().startswith("cta:") and ":" in line:
             candidate = line.split(":", 1)[1].strip()
             if candidate:
                 button_text = candidate
+                break
 
-    link_lines = [l for l in lines if not l.lower().startswith("cta:")]
-    if link_lines:
-        button_url = link_lines[-1]
+    # If no hyperlink mark was attached, fallback to URL in text if any
+    if not cta_links:
+        for line in lines:
+            if line.startswith("http://") or line.startswith("https://"):
+                button_url = line
+                break
 
     return button_text, button_url
-
 
 _LOCATION_KEYWORDS = {
     "noida": "noida",
@@ -641,7 +707,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     swcm_campaigns = _parse_swcm_campaign_tables(desc_raw)
     for idx, campaign in enumerate(swcm_campaigns, start=1):
         norm_text, variables = normalize_placeholders(campaign["body"])
-        cta_text, cta_url = _parse_swcm_cta(campaign["cta"])
+        cta_text, cta_url = _parse_swcm_cta(campaign.get("cta_text", ""), campaign.get("cta_links", []))
         media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
         if media is None and zip_creative_paths:
             media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]

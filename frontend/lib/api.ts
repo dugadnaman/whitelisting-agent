@@ -947,7 +947,8 @@ export async function submitJiraBrief(
   channels: string[] = ["whatsapp", "rcs"],
   user: string = "Briefing Operator",
   whatsappTemplates?: JiraWhatsAppDraft[],
-  rcsTemplates?: JiraRcsDraft[]
+  rcsTemplates?: JiraRcsDraft[],
+  account?: string
 ): Promise<{
   ok: boolean;
   issue_key: string;
@@ -960,6 +961,7 @@ export async function submitJiraBrief(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      account,
       channels,
       user,
       whatsapp_templates: whatsappTemplates || null,

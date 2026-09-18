@@ -15,7 +15,7 @@ import {
 import { formatError, formatDate } from '@/lib/format';
 
 export default function JiraBriefsPage() {
-  const { user } = useApp();
+  const { user, accounts, getAccountLabel } = useApp();
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(true);
   const [project, setProject] = useState<string>('TCN');
@@ -35,6 +35,7 @@ export default function JiraBriefsPage() {
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
+  const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
 
   const loadIssues = useCallback(async () => {
     try {
@@ -69,7 +70,8 @@ export default function JiraBriefsPage() {
       setSelectedWa(new Set(waList.map((w) => w.template_name)));
       setSelectedRcs(new Set(rcsList.map((r) => r.template_name)));
       setEditingCard({});
-
+      const initialAcc = data.account === 'wealth' ? 'tcl_promo' : (data.account || 'tcl_promo');
+      setTargetAccount(initialAcc);
       if (waList.length > 0) {
         setActiveTab('whatsapp');
       } else if (rcsList.length > 0) {
@@ -124,7 +126,8 @@ export default function JiraBriefsPage() {
         submitChannels,
         user || 'Briefing Operator',
         waToSubmit,
-        rcsToSubmit
+        rcsToSubmit,
+        targetAccount
       );
 
       const waCount = res.whatsapp_submitted?.length || 0;
@@ -358,6 +361,25 @@ export default function JiraBriefsPage() {
                       {brief.duedate && <span>📅 Due Date: <strong>{formatDate(brief.duedate)}</strong></span>}
                     </div>
                   </div>
+                    {/* Target Account Selector */}
+                    <div className="flex flex-wrap items-center gap-2 pt-1.5">
+                      <span className="text-xs font-bold text-gray-700">🏢 Whitelist Under Account:</span>
+                      <select
+                        value={targetAccount}
+                        onChange={(e) => setTargetAccount(e.target.value)}
+                        className="text-xs font-bold bg-white border border-blue-300 text-blue-900 rounded-lg px-2.5 py-1 shadow-2xs focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                        aria-label="Target Account for Karix Whitelisting"
+                      >
+                        {accounts.map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.name} ({acc.id.toUpperCase()})
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-[11px] text-gray-400">
+                        (Templates & WABA approvals will be registered on Karix under this account)
+                      </span>
+                    </div>
 
                   {/* Selective Submission Action Controls */}
                   <div className="flex flex-wrap items-center gap-2">

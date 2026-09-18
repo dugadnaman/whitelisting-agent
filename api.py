@@ -3229,6 +3229,7 @@ def get_jira_brief_endpoint(
 
 
 class JiraSubmitRequest(BaseModel):
+    account: str | None = None
     channels: list[str] = ["whatsapp", "rcs"]
     user: str = "Briefing Operator"
     whatsapp_templates: list[dict] | None = None
@@ -3256,9 +3257,24 @@ async def submit_jira_brief_endpoint(
 
     issue_data = await asyncio.to_thread(fetch_jira_issue, issue_key)
     parsed = await asyncio.to_thread(parse_jira_brief, issue_data, download_creatives=True)
-    acc = parsed.account
-    user_name = req.user or current_user.get("name", "Briefing Operator")
+    acc = (req.account or parsed.account or "tcl_promo").lower().strip()
+    require_tenant_access(acc, current_user)
 
+    # Validate target account credentials before remote submission to avoid 500 errors
+    if "whatsapp" in req.channels and (req.whatsapp_templates or parsed.whatsapp_templates):
+        try:
+            from config import get_waba_id
+            _ = get_waba_id(acc)
+        except Exception as waba_err:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Account '{acc.upper()}' does not have WhatsApp WABA credentials configured ({waba_err!s}). "
+                    f"Please select 'Tata Capital Limited (Promotional)' (TCL_PROMO) in the Target Account dropdown."
+                ),
+            ) from waba_err
+
+    user_name = req.user or current_user.get("name", "Briefing Operator")
     submitted_wa = []
     submitted_rcs = []
 
