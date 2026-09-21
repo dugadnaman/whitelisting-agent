@@ -3747,3 +3747,110 @@ def resolve_moengage_attributes_endpoint(
 
     res = resolve_moengage_attributes(body.template_text, allow_ai=body.allow_ai)
     return _json_safe(res.to_dict())
+
+
+class MoEngageWorkspaceUpdateRequest(BaseModel):
+    workspace_name: str
+    vertical: str
+    workspace_id: str
+    api_key: str
+    data_center: str = "03"
+    is_active: bool = True
+
+
+@app.get("/api/moengage/ops/dashboard")
+def get_moengage_ops_dashboard(
+    mode: str = Query("last_week"),
+    custom_start: str | None = Query(None),
+    custom_end: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get aggregated MoEngage Operations KPI metrics, channel breakdowns,
+    and vertical delivery summaries matching MoEngage_Ops_Dashboard.xlsx.
+    """
+    from moengage_ops_client import compute_ops_dashboard_metrics, load_cached_ops_records
+
+    records = load_cached_ops_records()
+    metrics = compute_ops_dashboard_metrics(records, mode=mode, custom_start=custom_start, custom_end=custom_end)
+    return _json_safe(metrics)
+
+
+@app.post("/api/moengage/ops/sync")
+async def sync_moengage_ops_endpoint(
+    current_user: dict = Depends(get_current_user),
+):
+    """Trigger live sync of campaigns and flows across all registered MoEngage workspaces."""
+    from moengage_ops_client import compute_ops_dashboard_metrics, sync_all_moengage_ops
+
+    records = await asyncio.to_thread(sync_all_moengage_ops)
+    metrics = compute_ops_dashboard_metrics(records, mode="last_week")
+    return _json_safe({
+        "ok": True,
+        "total_records": len(records),
+        "metrics": metrics,
+    })
+
+
+@app.get("/api/moengage/ops/export-excel")
+def export_moengage_ops_excel_endpoint(
+    current_user: dict = Depends(get_current_user),
+):
+    """Export live synced MoEngage ops data into MoEngage_Ops_Dashboard_Live.xlsx."""
+    from moengage_ops_client import export_ops_dashboard_excel
+
+    out_path = export_ops_dashboard_excel()
+    return FileResponse(
+        out_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="MoEngage_Ops_Dashboard_Live.xlsx",
+    )
+
+
+@app.get("/api/moengage/ops/workspaces")
+def get_moengage_ops_workspaces(
+    current_user: dict = Depends(get_current_user),
+):
+    """List registered MoEngage workspaces for ops reporting."""
+    from dataclasses import asdict
+    from moengage_ops_client import load_workspace_configs
+
+    configs = load_workspace_configs()
+    return [asdict(c) for c in configs]
+
+
+@app.post("/api/moengage/ops/workspaces")
+def update_moengage_ops_workspace(
+    body: MoEngageWorkspaceUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Add or update a MoEngage workspace configuration."""
+    from moengage_ops_client import MoEngageWorkspaceConfig, load_workspace_configs, save_workspace_configs
+
+    configs = load_workspace_configs()
+    found = False
+    for i, c in enumerate(configs):
+        if c.vertical.lower() == body.vertical.lower() or c.workspace_name.lower() == body.workspace_name.lower():
+            configs[i] = MoEngageWorkspaceConfig(
+                workspace_name=body.workspace_name,
+                vertical=body.vertical,
+                workspace_id=body.workspace_id,
+                api_key=body.api_key,
+                data_center=body.data_center,
+                is_active=body.is_active,
+            )
+            found = True
+            break
+    if not found:
+        configs.append(
+            MoEngageWorkspaceConfig(
+                workspace_name=body.workspace_name,
+                vertical=body.vertical,
+                workspace_id=body.workspace_id,
+                api_key=body.api_key,
+                data_center=body.data_center,
+                is_active=body.is_active,
+            )
+        )
+    save_workspace_configs(configs)
+    return {"ok": True, "workspace": body.dict()}

@@ -1065,3 +1065,43 @@ export async function syncKarixRcsToMoEngage(account: string = "tata"): Promise<
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export async function fetchMoEngageOpsDashboard(mode: string = "last_week", customStart?: string, customEnd?: string) {
+  const qs = new URLSearchParams({ mode });
+  if (customStart) qs.set("custom_start", customStart);
+  if (customEnd) qs.set("custom_end", customEnd);
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/dashboard?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function syncMoEngageOps() {
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/sync`), {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchMoEngageWorkspaces() {
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/workspaces`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function updateMoEngageWorkspace(data: {
+  workspace_name: string;
+  vertical: string;
+  workspace_id: string;
+  api_key: string;
+  data_center?: string;
+  is_active?: boolean;
+}) {
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/workspaces`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
