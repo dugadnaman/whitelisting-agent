@@ -35,7 +35,10 @@ type DashboardData = {
     total_campaigns: number;
     total_flows: number;
     total_flow_nodes: number;
+    total_touchpoints: number;
     channel_breakdown: ChannelCounts;
+    campaigns_channel_breakdown: ChannelCounts;
+    nodes_channel_breakdown: ChannelCounts;
   };
   vertical_breakdown: Record<string, VerticalData>;
   total_records_ingested: number;
@@ -270,25 +273,27 @@ export default function MoEngageOpsPage() {
             <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
               Account Overview ({data.account_overview.title})
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Card 1: Total Campaigns */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Campaigns</span>
-                  <span className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-                    </svg>
-                  </span>
+              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Standalone Campaigns</span>
+                    <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+                      </svg>
+                    </span>
+                  </div>
+                  <div className="text-3xl font-extrabold text-gray-900 mt-2">
+                    {data.account_overview.total_campaigns}
+                  </div>
                 </div>
-                <div className="text-3xl font-extrabold text-gray-900 mt-2">
-                  {data.account_overview.total_campaigns}
-                </div>
-                <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-1.5">
-                  {Object.entries(data.account_overview.channel_breakdown).map(([ch, count]) => (
+                <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-1">
+                  {Object.entries(data.account_overview.campaigns_channel_breakdown || {}).map(([ch, count]) => (
                     <span
                       key={ch}
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
                         channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                       }`}
                     >
@@ -299,39 +304,81 @@ export default function MoEngageOpsPage() {
               </div>
 
               {/* Card 2: Total Flows */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Flows</span>
-                  <span className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  </span>
+              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Active Flows</span>
+                    <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </span>
+                  </div>
+                  <div className="text-3xl font-extrabold text-gray-900 mt-2">
+                    {data.account_overview.total_flows}
+                  </div>
                 </div>
-                <div className="text-3xl font-extrabold text-gray-900 mt-2">
-                  {data.account_overview.total_flows}
-                </div>
-                <p className="text-xs text-gray-500 mt-4 pt-4 border-t border-gray-100">
-                  Multi-channel journeys (SMS, RCS, WhatsApp, Email, Push)
+                <p className="text-[11px] text-gray-500 mt-3 pt-3 border-t border-gray-100">
+                  Multi-step customer journeys & automations
                 </p>
               </div>
 
-              {/* Card 3: Total Flow Nodes */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Flow Nodes</span>
-                  <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
-                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
-                  </span>
+              {/* Card 3: Total Flow Nodes (WhatsApp & RCS) */}
+              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Flow Action Nodes</span>
+                    <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                      </svg>
+                    </span>
+                  </div>
+                  <div className="text-3xl font-extrabold text-gray-900 mt-2">
+                    {data.account_overview.total_flow_nodes}
+                  </div>
                 </div>
-                <div className="text-3xl font-extrabold text-gray-900 mt-2">
-                  {data.account_overview.total_flow_nodes}
+                <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-1">
+                  {Object.entries(data.account_overview.nodes_channel_breakdown || {}).map(([ch, count]) => (
+                    <span
+                      key={ch}
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                        channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
+                      }`}
+                    >
+                      {ch}: {count}
+                    </span>
+                  ))}
                 </div>
-                <p className="text-xs text-gray-500 mt-4 pt-4 border-t border-gray-100">
-                  Discrete channel steps executed inside active flows
-                </p>
+              </div>
+
+              {/* Card 4: Total Omnichannel Delivery */}
+              <div className="bg-white border border-blue-200 rounded-xl p-4 shadow-sm bg-gradient-to-br from-blue-50/50 to-white flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-700 uppercase tracking-wider">Total Touchpoints</span>
+                    <span className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
+                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </span>
+                  </div>
+                  <div className="text-3xl font-extrabold text-blue-900 mt-2">
+                    {data.account_overview.total_touchpoints || (data.account_overview.total_campaigns + data.account_overview.total_flow_nodes)}
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-blue-100 flex flex-wrap gap-1">
+                  {Object.entries(data.account_overview.channel_breakdown || {}).map(([ch, count]) => (
+                    <span
+                      key={ch}
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                        channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
+                      }`}
+                    >
+                      {ch}: {count}
+                    </span>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

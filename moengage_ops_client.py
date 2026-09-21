@@ -153,23 +153,22 @@ def _compute_week_start(d: date) -> str:
     return monday.isoformat()
 
 
-def _normalize_channel_name(channel_raw: str | None) -> str:
-    """Map MoEngage channel strings to standard dashboard channels."""
-    if not channel_raw:
+def _normalize_channel_name(channel_raw: str | None, label: str | None = None) -> str:
+    """Map MoEngage channel strings and node labels to standard dashboard channels."""
+    text = f"{channel_raw or ''} {label or ''}".strip().upper()
+    if not text:
         return "Push"
-    c = channel_raw.strip().upper()
-    if "PUSH" in c:
-        return "Push"
-    if "EMAIL" in c or "MAIL" in c:
-        return "Email"
-    if "WHATSAPP" in c or "WA" in c:
+    if "WHATSAPP" in text or "WA" in text:
         return "WhatsApp"
-    if "RCS" in c:
+    if "RCS" in text:
         return "RCS"
-    if "SMS" in c:
+    if "SMS" in text:
         return "SMS"
+    if "EMAIL" in text or "MAIL" in text:
+        return "Email"
+    if "PUSH" in text or "PN" in text:
+        return "Push"
     return "Push"
-
 
 def _infer_vertical_from_name(name: str, default_vertical: str) -> str:
     """Infer vertical from campaign naming patterns matching Excel formulas."""
@@ -317,6 +316,45 @@ def fetch_workspace_flows(
                     )
                 )
 
+                # Extract Action Nodes inside the flow (WhatsApp, RCS, SMS, Email, Push)
+                flow_id = f.get("flow_id")
+                if flow_id:
+                    try:
+                        detail_resp = requests.get(f"{config.get_base_url()}/v5/flows/{flow_id}", headers=headers, timeout=12)
+                        if detail_resp.ok:
+                            detail_data = detail_resp.json().get("data", {})
+                            nodes = detail_data.get("structure", {}).get("nodes", [])
+                            for node in nodes:
+                                if node.get("type") == "ACTION":
+                                    cfg = node.get("config", {})
+                                    node_sub = str(node.get("sub_type") or cfg.get("channel") or "")
+                                    node_label = str(node.get("label") or "")
+                                    node_chan = _normalize_channel_name(node_sub, label=node_label)
+                                    node_name = cfg.get("campaign_name") or node.get("label") or f"{name}_{node_chan}_node"
+                                    node_test = _is_test_campaign(node_name) or is_test
+                                    node_in_scope = (is_attributics or not node_test) if config.vertical == "Collections" else (in_scope and not node_test)
+
+                                    records.append(
+                                        NormalizedOpsRecord(
+                                            vertical=vertical,
+                                            type="Node",
+                                            channel=node_chan,
+                                            date=dt.isoformat(),
+                                            week_start=_compute_week_start(dt),
+                                            month=dt.strftime("%Y-%m"),
+                                            in_scope=node_in_scope,
+                                            is_test=node_test,
+                                            name=node_name,
+                                            created_by=c_by,
+                                            source=f"{config.vertical} / Node",
+                                            status=status,
+                                            flow_name=name,
+                                            flow_id=flow_id,
+                                        )
+                                    )
+                    except Exception as err:
+                        logger.debug("Could not fetch structure for flow %s: %s", flow_id, err)
+
     except Exception as exc:
         logger.error("Error fetching flows for %s: %s", config.workspace_name, exc)
 
@@ -426,7 +464,18 @@ def compute_ops_dashboard_metrics(
     ]
 
     overview_channel_breakdown = {ch: 0 for ch in channels}
+    campaigns_channel_breakdown = {ch: 0 for ch in channels}
+    nodes_channel_breakdown = {ch: 0 for ch in channels}
+
     for r in overview_camps:
+        if r.channel in campaigns_channel_breakdown:
+            campaigns_channel_breakdown[r.channel] += 1
+        if r.channel in overview_channel_breakdown:
+            overview_channel_breakdown[r.channel] += 1
+
+    for r in overview_nodes:
+        if r.channel in nodes_channel_breakdown:
+            nodes_channel_breakdown[r.channel] += 1
         if r.channel in overview_channel_breakdown:
             overview_channel_breakdown[r.channel] += 1
 
@@ -446,7 +495,18 @@ def compute_ops_dashboard_metrics(
         ]
 
         ch_split = {ch: 0 for ch in channels}
+        camps_ch = {ch: 0 for ch in channels}
+        nodes_ch = {ch: 0 for ch in channels}
+
         for r in v_camps:
+            if r.channel in camps_ch:
+                camps_ch[r.channel] += 1
+            if r.channel in ch_split:
+                ch_split[r.channel] += 1
+
+        for r in v_nodes:
+            if r.channel in nodes_ch:
+                nodes_ch[r.channel] += 1
             if r.channel in ch_split:
                 ch_split[r.channel] += 1
 
@@ -455,9 +515,10 @@ def compute_ops_dashboard_metrics(
             "flows_total": len(v_flows),
             "flow_nodes_total": len(v_nodes),
             "channels": ch_split,
+            "campaigns_channels": camps_ch,
+            "nodes_channels": nodes_ch,
             "in_account_total": v in account_overview_verticals,
         }
-
     return {
         "date_filter": {
             "mode": mode,
@@ -469,6 +530,9 @@ def compute_ops_dashboard_metrics(
             "total_campaigns": len(overview_camps),
             "total_flows": len(overview_flows),
             "total_flow_nodes": len(overview_nodes),
+            "total_touchpoints": len(overview_camps) + len(overview_nodes),
+            "campaigns_channel_breakdown": campaigns_channel_breakdown,
+            "nodes_channel_breakdown": nodes_channel_breakdown,
             "channel_breakdown": overview_channel_breakdown,
         },
         "vertical_breakdown": vertical_breakdown,
