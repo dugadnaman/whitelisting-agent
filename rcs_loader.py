@@ -379,7 +379,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     ).strip()
 
     bot_id = str(row.get("bot_id") or row.get("sender_id") or get_rcs_bot_id(c)).strip()
-
+    esme_addr = str(row.get("esme_addr") or row.get("esmeaddr") or "").strip() or None
     raw_type = str(row.get("template_type") or row.get("type") or "").strip().lower()
     header_type = str(row.get("header_type") or "").strip().lower()
     media_url = str(row.get("media_url") or row.get("image_url") or row.get("image") or "").strip() or None
@@ -437,6 +437,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     return RcsTemplateSubmission(
         template_name=template_name,
         bot_id=bot_id,
+        esme_addr=esme_addr,
         template_type=template_type,
         text_message=message,
         card_title=card_title,

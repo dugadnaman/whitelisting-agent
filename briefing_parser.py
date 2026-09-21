@@ -55,7 +55,9 @@ class WhatsAppTemplateDraft:
     button_type: str = "NONE"
     button_text: str | None = None
     button_url: str | None = None
+    footer_text: str | None = None
     variables: list[str] = field(default_factory=list)
+    sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
     source_origin: str = "jira"  # "jira_adf" | "excel_sheet" | "excel_grid"
 
@@ -71,6 +73,7 @@ class RcsTemplateDraft:
     action_label: str = "Check Offer"
     action_url: str = "https://www.tatacapital.com"
     variables: list[str] = field(default_factory=list)
+    sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
     source_origin: str = "jira"
 
@@ -82,6 +85,7 @@ class SmsTemplateDraft:
     char_count: int
     variant: str = "General"
     variables: list[str] = field(default_factory=list)
+    sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
     source_origin: str = "jira"
 
@@ -703,6 +707,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 "source": "jira_pipe",
             })
 
+
     # 3b. SWCM WhatsApp campaign tables ("Campaign execution format N | WA N")
     swcm_campaigns = _parse_swcm_campaign_tables(desc_raw)
     for idx, campaign in enumerate(swcm_campaigns, start=1):
@@ -729,6 +734,37 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             )
         )
 
+    # 3c. TypeSafe AI Semantic Extraction fallback for free-form Jira descriptions
+    if not extracted_items and not swcm_campaigns and desc_text.strip():
+        try:
+            from jira_extractor import extract_template_from_jira_text
+
+            semantic_res = extract_template_from_jira_text(desc_text, summary=summary, allow_ai=True)
+            t_comp = semantic_res.template
+            if t_comp.body_text:
+                chan_decision = semantic_res.routing.target_channel
+                channels_to_emit = (
+                    ["WA", "RCS", "SMS"]
+                    if chan_decision == "MULTI_CHANNEL"
+                    else (["WA"] if chan_decision == "WHATSAPP" else [chan_decision])
+                )
+                for c_tag in channels_to_emit:
+                    extracted_items.append({
+                        "channel": c_tag,
+                        "text": t_comp.body_text,
+                        "header": t_comp.header_text,
+                        "footer": t_comp.footer_text,
+                        "button_text": t_comp.button_text,
+                        "button_url": t_comp.button_url,
+                        "button_type": t_comp.button_type,
+                        "variant": semantic_res.routing.campaign_purpose,
+                        "source": "jira_typesafe_extractor",
+                        "variables": semantic_res.variables,
+                        "sample_values": semantic_res.sample_values,
+                    })
+        except Exception as ex:
+            logger.warning("TypeSafe semantic Jira extraction skipped: %s", ex)
+
     # 4. Assemble template drafts
     wa_counter = 1
     rcs_counter = 1
@@ -750,13 +786,16 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     template_name=tname,
                     category="MARKETING",
                     body=norm_text,
-                    header_type="IMAGE" if img else "TEXT",
+                    header_type="IMAGE" if img else ("TEXT" if item.get("header") else "TEXT"),
+                    header_text=item.get("header"),
+                    footer_text=item.get("footer"),
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
-                    button_type="URL",
-                    button_text="Check Offer",
-                    button_url="https://www.tatacapital.com",
-                    variables=variables,
+                    button_type=item.get("button_type") or ("URL" if item.get("button_url") else "URL"),
+                    button_text=item.get("button_text") or "Check Offer",
+                    button_url=item.get("button_url") or "https://www.tatacapital.com",
+                    variables=item.get("variables") or variables,
+                    sample_values=item.get("sample_values") or [],
                     raw_source=clean_content,
                     source_origin=source_origin,
                 )
@@ -773,10 +812,11 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     body=norm_text,
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
-                    action_type="URL",
-                    action_label="Explore Now",
-                    action_url="https://www.tatacapital.com",
-                    variables=variables,
+                    action_type=item.get("button_type") or "URL",
+                    action_label=item.get("button_text") or "Explore Now",
+                    action_url=item.get("button_url") or "https://www.tatacapital.com",
+                    variables=item.get("variables") or variables,
+                    sample_values=item.get("sample_values") or [],
                     raw_source=clean_content,
                     source_origin=source_origin,
                 )

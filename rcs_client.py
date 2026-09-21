@@ -19,6 +19,7 @@ from rcs_config import (
     _account_prefix,
     get_rcs_auth_headers,
     get_rcs_bot_id,
+    get_rcs_esmeaddr,
 )
 from rcs_models import (
     RcsSubmissionResult,
@@ -305,7 +306,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
     """
     c = client.lower()
     bot_id = payload.bot_id or get_rcs_bot_id(c)
-    esme_addr_raw = get_esmeaddr(c)
+    esme_addr_raw = getattr(payload, "esme_addr", None) or get_rcs_esmeaddr(c)
 
     try:
         esme_addr = int(esme_addr_raw)
@@ -446,12 +447,46 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
 
         # Non-200 responses
         if not resp.ok:
-            error_msg = data.get("errorMessage") or data.get("error") or data.get("reason") or resp.text[:300]
-            status_enum = (
-                RcsSubmissionStatus.DUPLICATE
-                if "already exist" in str(error_msg).lower()
-                else RcsSubmissionStatus.FAILED
-            )
+            raw_err = str(data.get("errorMessage") or data.get("error") or data.get("reason") or resp.text[:300])
+            if "botid(s) not found" in raw_err.lower() and "grbm" in raw_err.lower():
+                error_msg = (
+                    f"RCS Bot Gateway Unmapped (Karix Error 1002): Bot ID [{data_payload.get('viTemplate', {}).get('botId')}] "
+                    f"is not provisioned on Google RBM (gRBM) for this ESME. Switch Channel to 'WhatsApp' for live production whitelisting."
+                )
+                status_enum = RcsSubmissionStatus.FAILED
+            elif "already exist" in raw_err.lower():
+                status_enum = RcsSubmissionStatus.DUPLICATE
+                error_msg = "RCS template already active on Karix Bot — skipped duplicate submission."
+                matched_id = None
+                approval_st = "approved"
+                try:
+                    live_templates = fetch_rcs_templates(client=c)
+                    safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", payload.template_name)[:25].strip("_").lower()
+                    for lt in live_templates:
+                        vi = lt.get("viTemplate") or {}
+                        lt_name = str(vi.get("name") or lt.get("template_name") or lt.get("templateId") or "").strip().lower()
+                        if lt_name and (lt_name == payload.template_name.lower() or lt_name == safe_name):
+                            matched_id = str(lt.get("templateId") or lt.get("id") or "")
+                            approval_st = str(lt.get("status") or "approved").lower()
+                            break
+                except Exception:
+                    pass
+
+                return RcsSubmissionResult(
+                    source_ref=payload.source_ref,
+                    template_name=payload.template_name,
+                    template_id=matched_id,
+                    provider_ref_id=matched_id,
+                    status=status_enum,
+                    approval_status=approval_st,
+                    error=error_msg,
+                    provider_response=data,
+                    client=c,
+                    retry_count=attempt,
+                )
+            else:
+                error_msg = raw_err
+                status_enum = RcsSubmissionStatus.FAILED
             return RcsSubmissionResult(
                 source_ref=payload.source_ref,
                 template_name=payload.template_name,

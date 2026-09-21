@@ -384,6 +384,19 @@ class CredentialUpdate(BaseModel):
     sms_encryption_key: str | None = None
     sms_sender_id: str | None = None
     sms_dlr_auth_token: str | None = None
+    rcs_bot_id: str | None = None
+    rcs_auth_token: str | None = None
+    rcs_esmeaddr: str | None = None
+
+class TemplateValidationRequest(BaseModel):
+    body_text: str
+    declared_category: str = "MARKETING"
+    header_text: str | None = None
+    footer_text: str | None = None
+    buttons: list[dict] | list[str] | None = None
+    header_format: str | None = None
+    account: str = "bajaj"
+    use_ai: bool = True
 
 # ---------------------------------------------------------------------------
 def _clean_error_message(err) -> str | None:
@@ -968,7 +981,12 @@ def _inspect_image_aspect_ratio(comp: dict, aspect_warnings: list[dict]) -> None
 
 
 def _inspect_single_submission(
-    s, live_names: set[str], account_detection: dict, account: str, channel: str
+    s,
+    live_names: set[str],
+    account_detection: dict,
+    account: str,
+    channel: str,
+    use_ai: bool = False,
 ) -> dict:
     item = asdict(s) if not isinstance(s, dict) else dict(s)
     tname = (item.get("template_name") or "").strip()
@@ -1108,12 +1126,15 @@ def _inspect_single_submission(
         footer_text=footer_text,
         buttons=buttons_list,
         header_format=header_comp.get("format") if header_comp else None,
+        declared_category=item.get("category", "MARKETING"),
+        use_ai=use_ai,
+        client=account,
     )
     return item
 
 
 def _inspect_template_quality_and_warnings(
-    submissions: list, channel: str = "whatsapp", account: str = "bajaj"
+    submissions: list, channel: str = "whatsapp", account: str = "bajaj", use_ai: bool = False
 ) -> list[dict]:
     """
     Inspect image dimensions, text grammar/spelling, and cross-reference with live WABA list.
@@ -1131,7 +1152,7 @@ def _inspect_template_quality_and_warnings(
         if lt.get("template_name") or lt.get("viTemplate", {}).get("name")
     }
     return [
-        _json_safe(_inspect_single_submission(s, live_names, account_detection, account, channel))
+        _json_safe(_inspect_single_submission(s, live_names, account_detection, account, channel, use_ai=use_ai))
         for s in submissions
     ]
 
@@ -1142,6 +1163,7 @@ async def preview_file(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
     user: str = Query("Anonymous Operator"),
+    use_ai: bool = Query(False),
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
@@ -1268,7 +1290,7 @@ async def preview_file(
         )
         for s in submissions:
             s.client = account
-        return _inspect_template_quality_and_warnings(submissions, channel="whatsapp", account=account)
+        return _inspect_template_quality_and_warnings(submissions, channel="whatsapp", account=account, use_ai=use_ai)
     except HTTPException:
         raise
     except Exception as exc:
@@ -2062,6 +2084,30 @@ def delete_templates_endpoint(
     return _json_safe(result)
 
 
+
+@app.post("/api/templates/validate")
+def validate_template_endpoint(
+    body: TemplateValidationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Validate template grammar, Meta compliance, and TypeSafe AI semantic quality.
+    Classifies into UTILITY/MARKETING/AUTHENTICATION and scores Meta rejection risk.
+    """
+    from grammar_checker import validate_template_pre_submission
+
+    result = validate_template_pre_submission(
+        body_text=body.body_text,
+        declared_category=body.declared_category,
+        header_text=body.header_text,
+        footer_text=body.footer_text,
+        buttons=body.buttons,
+        header_format=body.header_format,
+        use_ai=body.use_ai,
+        client=body.account,
+    )
+    return _json_safe(result)
+
 @app.post("/api/templates/delete-file")
 async def delete_templates_from_file(
     file: UploadFile = File(...),
@@ -2301,9 +2347,13 @@ def get_credentials(
         is_configured = bool(sms_key or sms_username)
     elif chan == "whatsapp":
         is_configured = bool(waba_id and waba_auth_token)
+    elif chan == "rcs":
+        rcs_bot_id = os.environ.get(f"{prefix}_RCS_BOT_ID") or get_rcs_bot_id(acc)
+        rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or ""
+        rcs_esmeaddr = os.environ.get(f"{prefix}_RCS_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR") or get_esmeaddr(acc)
+        is_configured = bool(rcs_bot_id and rcs_auth_token)
     else:
         is_configured = bool(entity_id)
-
     return {
         "account": acc,
         "channel": chan,
@@ -2322,6 +2372,9 @@ def get_credentials(
         "sms_encryption_key": sms_encryption_key or "",
         "sms_sender_id": sms_sender_id or "",
         "sms_dlr_auth_token": sms_dlr_auth_token or "",
+        "rcs_bot_id": os.environ.get(f"{prefix}_RCS_BOT_ID") or get_rcs_bot_id(acc) or "",
+        "rcs_auth_token": os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or "",
+        "rcs_esmeaddr": os.environ.get(f"{prefix}_RCS_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR") or get_esmeaddr(acc) or "",
         "is_configured": is_configured,
     }
 
@@ -2363,6 +2416,22 @@ def _build_sms_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict
     return mapping
 
 
+def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict:
+    mapping = {}
+    fields = [
+        (creds.rcs_bot_id, f"{prefix}_RCS_BOT_ID"),
+        (creds.rcs_auth_token, f"{prefix}_RCS_AUTH_TOKEN"),
+        (creds.rcs_esmeaddr, f"{prefix}_RCS_ESMEADDR"),
+        (creds.entity_id, f"{prefix}_ENTITY_ID"),
+    ]
+    for val, key in fields:
+        if val is not None and val.strip():
+            v = val.strip()
+            mapping[key] = v
+            os.environ[key] = v
+    return mapping
+
+
 
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get_current_user)):
@@ -2378,6 +2447,8 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
         mapping = _build_sms_credentials_mapping(creds, prefix)
     elif chan == "whatsapp":
         mapping = _build_wa_credentials_mapping(creds, prefix, is_tata, is_bajaj)
+    elif chan == "rcs":
+        mapping = _build_rcs_credentials_mapping(creds, prefix)
     else:
         mapping = {}
     if not mapping:
@@ -3627,13 +3698,19 @@ def test_moengage_connection_endpoint(
 @app.post("/api/moengage/rcs/sync-karix")
 def sync_karix_rcs_to_moengage_endpoint(
     account: str = Query("tata"),
+    semantic_dedup: bool = Query(True),
+    resolve_attributes: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
     """Pull approved RCS templates from Karix and register them in an account's MoEngage workspace."""
     require_tenant_access(account, current_user)
     from moengage_sync import sync_karix_rcs_to_moengage
 
-    result = sync_karix_rcs_to_moengage(account)
+    result = sync_karix_rcs_to_moengage(
+        account=account,
+        semantic_dedup=semantic_dedup,
+        resolve_attributes=resolve_attributes,
+    )
 
     log_activity(
         user=current_user.get("name", "Operator"),
@@ -3650,3 +3727,23 @@ def sync_karix_rcs_to_moengage_endpoint(
     )
 
     return _json_safe(result)
+
+
+class MoEngageAttributeResolveRequest(BaseModel):
+    template_text: str
+    allow_ai: bool = True
+
+
+@app.post("/api/moengage/templates/resolve-attributes")
+def resolve_moengage_attributes_endpoint(
+    body: MoEngageAttributeResolveRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Map positional template variables ({{1}}, {{2}}) to MoEngage personalization tags
+    (e.g. {{UserAttribute['first_name']}}, {{UserAttribute['emi_amount']}}).
+    """
+    from moengage_resolver import resolve_moengage_attributes
+
+    res = resolve_moengage_attributes(body.template_text, allow_ai=body.allow_ai)
+    return _json_safe(res.to_dict())

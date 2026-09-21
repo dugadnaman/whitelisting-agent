@@ -1346,6 +1346,7 @@ def submit_template(
     client: str = "bajaj",
     fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
+    validate_ai: bool = False,
 ) -> SubmissionResult:
     """
     Submit one template to Karix and return the result.
@@ -1366,6 +1367,46 @@ def submit_template(
             client=c,
             channel="whatsapp",
         )
+    # Optional TypeSafe AI Pre-Flight Gate
+    if validate_ai:
+        try:
+            from template_validator import validate_template_semantic_quality
+
+            body_text = ""
+            for comp in payload.components:
+                if isinstance(comp, dict) and comp.get("type") == "BODY":
+                    body_text = str(comp.get("text", ""))
+                    break
+                elif getattr(comp, "type", None) == "BODY":
+                    body_text = str(getattr(comp, "text", "") or "")
+                    break
+
+            if body_text:
+                ai_rep = validate_template_semantic_quality(
+                    body_text=body_text,
+                    declared_category=payload.category,
+                    client=c,
+                    allow_ai=True,
+                )
+                if ai_rep.ai_checked and not ai_rep.is_safe_to_submit:
+                    critical_errors = [w["issue"] for w in ai_rep.warnings if w.get("severity") == "error"]
+                    if critical_errors:
+                        logger.warning(
+                            "Blocking submission of WhatsApp template '%s' due to TypeSafe AI semantic error: %s",
+                            payload.template_name,
+                            critical_errors,
+                        )
+                        return SubmissionResult(
+                            source_ref=payload.source_ref,
+                            template_name=payload.template_name,
+                            status=SubmissionStatus.FAILED,
+                            approval_status=ApprovalStatus.REJECTED,
+                            error=f"BLOCKED (AI Pre-Submission Compliance): {'; '.join(critical_errors)}",
+                            client=c,
+                            channel="whatsapp",
+                        )
+        except Exception as ex:
+            logger.debug("AI pre-flight inspection bypassed due to exception: %s", ex)
     # 1. Primary for accounts with Portal Session: Portal API
     try:
         get_portal_auth_headers(c)

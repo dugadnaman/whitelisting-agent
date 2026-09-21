@@ -8,3 +8,4 @@ Pillow
 pyjwt
 bcrypt
 cryptography>=42.0.0
+typesafe-sdk>=0.7.0

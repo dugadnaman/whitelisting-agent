@@ -288,11 +288,17 @@ def _extract_rcs_media_url(vi_template: dict[str, Any]) -> str | None:
     return None
 
 
-def sync_karix_rcs_to_moengage(account: str = "tata") -> dict[str, Any]:
+def sync_karix_rcs_to_moengage(
+    account: str = "tata",
+    semantic_dedup: bool = True,
+    resolve_attributes: bool = True,
+) -> dict[str, Any]:
     """
     Pull already-approved RCS templates from Karix for an account and register
-    them in that account's MoEngage workspace. Skips templates already present
-    in MoEngage (matched by name or template_id).
+    them in that account's MoEngage workspace.
+    Features:
+    - Semantic Duplicate Detection: Skips templates already in MoEngage even if name differs slightly.
+    - MoEngage Attribute Resolver: Maps positional {{1}}, {{2}} to verified MoEngage personalization tags.
     """
     from rcs_client import fetch_rcs_templates
 
@@ -337,7 +343,7 @@ def sync_karix_rcs_to_moengage(account: str = "tata") -> dict[str, Any]:
             skipped.append(f"{name} ({status})")
             continue
 
-        # Skip if already present in MoEngage
+        # 1. Skip if exact name/ID already present in MoEngage
         if name.lower() in existing_names or (template_id and template_id.lower() in existing_ids):
             skipped.append(name)
             continue
@@ -350,6 +356,40 @@ def sync_karix_rcs_to_moengage(account: str = "tata") -> dict[str, Any]:
         card_title = card.get("cardTitle") or vi.get("textMessage", "")[:100] or name
         card_description = card.get("cardDescription") or vi.get("textMessage", "") or ""
         media_url = _extract_rcs_media_url(vi)
+
+        # 2. Semantic Duplicate Detection via TypeSafe Noul
+        if semantic_dedup and existing:
+            try:
+                from moengage_resolver import find_semantic_duplicate
+
+                dup_res = find_semantic_duplicate(
+                    candidate_name=name,
+                    candidate_body=card_description,
+                    existing_templates=existing,
+                    threshold=0.85,
+                    allow_ai=True,
+                )
+                if dup_res.is_duplicate:
+                    logger.info(
+                        "Skipping RCS template '%s' - semantic duplicate of MoEngage template '%s' (prob: %.2f)",
+                        name,
+                        dup_res.matched_template_name,
+                        dup_res.probability,
+                    )
+                    skipped.append(f"{name} (Duplicate of '{dup_res.matched_template_name}')")
+                    continue
+            except Exception as ex:
+                logger.debug("Semantic duplicate check bypassed: %s", ex)
+
+        # 3. MoEngage Attribute Personalization Tag Resolver via TypeSafe Choice
+        if resolve_attributes and re.search(r"\{\{\d+\}\}", card_description):
+            try:
+                from moengage_resolver import resolve_moengage_attributes
+
+                trans = resolve_moengage_attributes(card_description, allow_ai=True)
+                card_description = trans.translated_text
+            except Exception as ex:
+                logger.debug("MoEngage attribute resolution bypassed: %s", ex)
 
         # CTA from first suggestion if present
         suggestions = card.get("suggestions", []) or []
@@ -368,7 +408,12 @@ def sync_karix_rcs_to_moengage(account: str = "tata") -> dict[str, Any]:
                 cta_url=cta_url,
                 account=account,
             )
-            created.append({"template_name": name, "template_id": template_id, "moengage_id": res.get("moengage_id")})
+            created.append({
+                "template_name": name,
+                "template_id": template_id,
+                "moengage_id": res.get("moengage_id"),
+                "resolved_description": card_description,
+            })
         except Exception as exc:
             logger.warning("Failed to sync RCS template %s to MoEngage: %s", name, exc)
             errors.append({"template_name": name, "error": str(exc)})

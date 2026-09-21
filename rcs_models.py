@@ -46,6 +46,7 @@ class RcsTemplateSubmission:
 
     template_name: str
     bot_id: str = ""
+    esme_addr: str | None = None
     template_type: str = "text"  # "text" | "richcard" | "carousel" | "Transactional" | "Promotional"
     text_message: str = ""
     card_title: str | None = None

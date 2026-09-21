@@ -280,3 +280,27 @@ def add_jira_comment(issue_key: str, comment_text: str) -> dict[str, Any]:
         return {"ok": False, "error": resp.text[:200]}
 
     return {"ok": True, "comment_id": resp.json().get("id")}
+
+
+def extract_issue_templates(
+    issue_key: str,
+    download_creatives: bool = False,
+) -> dict[str, Any]:
+    """
+    Fetch a Jira ticket and semantically extract template drafts, channel routing,
+    and Meta-compliant sample values.
+    """
+    from dataclasses import asdict
+    from briefing_parser import parse_jira_brief
+
+    issue_data = fetch_jira_issue(issue_key)
+    brief = parse_jira_brief(issue_data, download_creatives=download_creatives)
+    return {
+        "issue_key": brief.issue_key,
+        "summary": brief.summary,
+        "whatsapp_drafts": brief.whatsapp_templates,
+        "rcs_drafts": brief.rcs_templates,
+        "sms_drafts": brief.sms_templates,
+        "total_templates": len(brief.whatsapp_templates) + len(brief.rcs_templates) + len(brief.sms_templates),
+        "attachments": brief.attachments_mapped,
+    }

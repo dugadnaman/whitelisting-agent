@@ -222,6 +222,9 @@ def validate_meta_technical_compliance(
     footer_text: str | None = None,
     buttons: list | None = None,
     header_format: str | None = None,
+    declared_category: str | None = None,
+    use_ai: bool = False,
+    client: str = "bajaj",
 ) -> list[dict]:
     """
     Validate technical Meta WhatsApp and RCS compliance rules (Semantic Memory).
@@ -232,6 +235,7 @@ def validate_meta_technical_compliance(
     4. Header text length (max 60)
     5. Footer text length (max 60)
     6. Button text length (max 25) and URL validation
+    7. TypeSafe AI semantic category & policy compliance (optional when use_ai=True)
     """
     compliance_warnings = []
 
@@ -334,4 +338,103 @@ def validate_meta_technical_compliance(
                     }
                 )
 
+    # 7. TypeSafe AI Semantic Validation (Category mismatch, rejection risk, floating variables)
+    if use_ai and body_text and body_text.strip():
+        try:
+            from template_validator import validate_template_semantic_quality
+
+            ai_rep = validate_template_semantic_quality(
+                body_text=body_text,
+                declared_category=declared_category or "MARKETING",
+                header_text=header_text,
+                footer_text=footer_text,
+                buttons=buttons,
+                client=client,
+                allow_ai=True,
+            )
+            if ai_rep.ai_checked and ai_rep.warnings:
+                compliance_warnings.extend(ai_rep.warnings)
+        except Exception as err:
+            # Gracefully ignore AI errors to avoid failing rule-based compliance
+            pass
+
     return compliance_warnings
+
+
+def validate_template_pre_submission(
+    body_text: str = "",
+    declared_category: str = "MARKETING",
+    header_text: str | None = None,
+    footer_text: str | None = None,
+    buttons: list | None = None,
+    header_format: str | None = None,
+    use_ai: bool = True,
+    client: str = "bajaj",
+) -> dict:
+    """
+    Complete pre-submission audit combining:
+    1. Grammar & spelling linter with auto-corrections
+    2. Technical rule-based Meta compliance
+    3. TypeSafe AI category classification, rejection risk scoring, and policy checks
+    """
+    cleaned_body, grammar_warnings = lint_and_fix_body(body_text) if body_text else ("", [])
+
+    tech_warnings = validate_meta_technical_compliance(
+        body_text=cleaned_body or body_text,
+        header_text=header_text,
+        footer_text=footer_text,
+        buttons=buttons,
+        header_format=header_format,
+        declared_category=declared_category,
+        use_ai=False,  # Checked separately below for full report visibility
+        client=client,
+    )
+
+    ai_report_dict = None
+    ai_warnings: list[dict] = []
+    category_mismatch = False
+    predicted_cat = (declared_category or "MARKETING").strip().upper()
+    rejection_risk_lvl = "SAFE"
+
+    if use_ai and (cleaned_body or body_text):
+        try:
+            from template_validator import validate_template_semantic_quality
+
+            ai_rep = validate_template_semantic_quality(
+                body_text=cleaned_body or body_text,
+                declared_category=declared_category,
+                header_text=header_text,
+                footer_text=footer_text,
+                buttons=buttons,
+                client=client,
+                allow_ai=True,
+            )
+            ai_report_dict = ai_rep.to_dict()
+            ai_warnings = ai_rep.warnings
+            category_mismatch = ai_rep.category_mismatch
+            predicted_cat = ai_rep.predicted_category
+            rejection_risk_lvl = ai_rep.rejection_risk_level
+        except Exception:
+            pass
+
+    # Ensure all grammar warnings have a severity for uniform consumption
+    for gw in grammar_warnings:
+        if "severity" not in gw:
+            gw["severity"] = "warning"
+
+    all_warnings = grammar_warnings + tech_warnings + ai_warnings
+    is_safe = not any(w.get("severity") == "error" for w in all_warnings)
+    return {
+        "original_body": body_text,
+        "cleaned_body": cleaned_body,
+        "declared_category": (declared_category or "MARKETING").strip().upper(),
+        "predicted_category": predicted_cat,
+        "category_mismatch": category_mismatch,
+        "rejection_risk_level": rejection_risk_lvl,
+        "grammar_warnings": grammar_warnings,
+        "technical_warnings": tech_warnings,
+        "ai_warnings": ai_warnings,
+        "all_warnings": all_warnings,
+        "is_safe_to_submit": is_safe,
+        "ai_report": ai_report_dict,
+    }

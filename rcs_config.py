@@ -119,6 +119,21 @@ def get_rcs_entity_id(client: str = "tata") -> str:
     return os.environ.get(f"{prefix}_ENTITY_ID") or os.environ.get("ENTITY_ID") or ""
 
 
+def get_rcs_esmeaddr(client: str = "tata") -> str:
+    """Return the ESME address specifically configured for RCS for the given client."""
+    _load_env_file()
+    c = (client or "tata").lower().strip()
+    prefix = _account_prefix(c)
+    esme = (
+        os.environ.get(f"{prefix}_RCS_ESMEADDR")
+        or os.environ.get(f"{prefix}_ESMEADDR")
+        or (os.environ.get("TATA_ESMEADDR") if c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy") else None)
+    )
+    if not esme:
+        from config import get_esmeaddr
+        return get_esmeaddr(c)
+    return str(esme).strip()
+
 def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
     """
     Build the HTTP headers required for official Karix RCS Bot Builder requests.
