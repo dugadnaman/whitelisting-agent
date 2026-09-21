@@ -45,12 +45,12 @@ DEFAULT_WORKSPACES: list[dict[str, Any]] = [
         "is_active": True,
     },
     {
-        "workspace_name": "TCL",
+        "workspace_name": "Tata Capital (TCL)",
         "vertical": "TCL",
-        "workspace_id": os.environ.get("MOENGAGE_TCL_WORKSPACE_ID", ""),
-        "api_key": os.environ.get("MOENGAGE_TCL_API_KEY", ""),
+        "workspace_id": os.environ.get("MOENGAGE_TCL_WORKSPACE_ID") or "0KYUNUW5WODKX5ZFVAGPVL0U",
+        "api_key": os.environ.get("MOENGAGE_TCL_API_KEY") or "D9FCC06FDE8947429FDB1928",
         "data_center": "03",
-        "is_active": bool(os.environ.get("MOENGAGE_TCL_WORKSPACE_ID")),
+        "is_active": True,
     },
     {
         "workspace_name": "Services",
