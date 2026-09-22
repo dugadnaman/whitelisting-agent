@@ -74,7 +74,11 @@ def test_assignable_users_and_capacity_tracking():
     assert "Mrunalini Gawande" in names
     assert "Dnyanesh Khawas" in names
     assert "Neel Shah" in names
-
+    assert "Soham Das" in names
+    assert "Aadya" in names
+    assert "Akshay Balasaheb Mhaske" not in names
+    assert "Anish Nagpal" not in names
+    assert "Apurva Mohite" not in names
     mrunalini = next(u for u in users if u.name == "Mrunalini Gawande")
     assert mrunalini.role == "Core Operator"
     assert mrunalini.account_id.startswith("712020:")

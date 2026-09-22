@@ -29,18 +29,44 @@ logger = logging.getLogger(__name__)
 
 _load_env_file()
 
-# Known team member roles on Tata Capital Jira project
-TEAM_MEMBER_ROLES: dict[str, str] = {
-    "Mrunalini Gawande": "Core Operator",
-    "Dnyanesh Khawas": "Core Operator",
-    "Neel Shah": "Core Operator",
-    "Akshay Balasaheb Mhaske": "Intern / Associate",
-    "Anish Nagpal": "Intern / Associate",
-    "Apurva Mohite": "Intern / Associate",
-    "Parth Modi": "Tata Stakeholder",
-    "Muskan Bang": "Tata Stakeholder",
-    "nidhi.saraswat@tatacapital.com": "Tata Stakeholder",
+# Primary team members specifically requested for work management
+TEAM_MEMBERS_WHITELIST: dict[str, dict[str, str]] = {
+    "Mrunalini Gawande": {
+        "name": "Mrunalini Gawande",
+        "account_id": "712020:ff55c67a-a1eb-4d5c-90cc-451d7d59b4bd",
+        "role": "Core Operator",
+        "email": "mrunalini.gawande@attributics.com",
+    },
+    "Dnyanesh Khawas": {
+        "name": "Dnyanesh Khawas",
+        "account_id": "712020:c9156214-6850-4f0b-9647-145f7a3d15b9",
+        "role": "Core Operator",
+        "email": "dnyanesh.khawas@attributics.com",
+    },
+    "Neel Shah": {
+        "name": "Neel Shah",
+        "account_id": "712020:fae946f9-8472-455a-9d27-6d773ecfb48d",
+        "role": "Core Operator",
+        "email": "neel.shah@attributics.com",
+    },
+    "Soham Das": {
+        "name": "Soham Das",
+        "account_id": "712020:c8914cff-1299-4ad7-989b-e38859cbcdbf",
+        "role": "Core Operator",
+        "email": "soham.das@attributics.com",
+    },
+    "Aadya": {
+        "name": "Aadya",
+        "account_id": "712020:50e16c11-d517-4909-8d30-b92693808eaa",
+        "role": "Associate / Intern",
+        "email": "aadya@attributics.com",
+    },
 }
+
+TEAM_MEMBER_ROLES: dict[str, str] = {
+    info["name"]: info["role"] for info in TEAM_MEMBERS_WHITELIST.values()
+}
+TEAM_MEMBER_ROLES["Aalya Mulla"] = "Associate / Intern"
 
 
 @dataclass
@@ -153,38 +179,18 @@ def infer_channel_from_summary(summary: str) -> str:
 
 
 def fetch_assignable_jira_users(project: str = "TCN") -> list[JiraUser]:
-    """Fetch assignable users for the Jira project with account IDs."""
-    base_url, _, _ = get_jira_credentials()
-    headers = get_jira_auth_headers()
-    url = f"{base_url}/rest/api/3/user/assignable/search?project={project}"
-
-    try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        if not resp.ok:
-            logger.warning("Could not fetch assignable Jira users: HTTP %d", resp.status_code)
-            return []
-
-        users_data = resp.json()
-        users_list: list[JiraUser] = []
-
-        for u in users_data:
-            if not u.get("active", True):
-                continue
-            name = str(u.get("displayName") or "Unknown").strip()
-            role = TEAM_MEMBER_ROLES.get(name, "Team Member")
-            users_list.append(
-                JiraUser(
-                    account_id=str(u.get("accountId")),
-                    name=name,
-                    email=str(u.get("emailAddress") or ""),
-                    role=role,
-                )
+    """Fetch assignable users strictly scoped to the active team members."""
+    users_list: list[JiraUser] = []
+    for info in TEAM_MEMBERS_WHITELIST.values():
+        users_list.append(
+            JiraUser(
+                account_id=info["account_id"],
+                name=info["name"],
+                email=info["email"],
+                role=info["role"],
             )
-
-        return users_list
-    except Exception as exc:
-        logger.error("Error fetching assignable Jira users: %s", exc)
-        return []
+        )
+    return users_list
 
 
 def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dict[str, Any]:
@@ -198,6 +204,10 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
     raw_issues = list_jira_issues(project=project, limit=limit)
     assignable_users = fetch_assignable_jira_users(project=project)
     user_by_name = {u.name.lower(): u for u in assignable_users}
+    if "aadya" in user_by_name:
+        user_by_name["aalya mulla"] = user_by_name["aadya"]
+    if "soham das" in user_by_name:
+        user_by_name["soham"] = user_by_name["soham das"]
 
     work_items: list[WorkItem] = []
 
@@ -239,6 +249,10 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
         channel_counts[chan] = channel_counts.get(chan, 0) + 1
 
         assignee_name = str(item.get("assignee") or "Unassigned")
+        if assignee_name.lower() in ("aalya mulla", "aadya"):
+            assignee_name = "Aadya"
+        elif assignee_name.lower() in ("soham", "soham das"):
+            assignee_name = "Soham Das"
         assignee_u = user_by_name.get(assignee_name.lower())
         assignee_id = assignee_u.account_id if assignee_u else None
         role = TEAM_MEMBER_ROLES.get(assignee_name, "Team Member")
@@ -395,8 +409,8 @@ def ai_rebalance_workload(
                         "target_group": Choice(
                             instructions="Who should receive the rebalanced tickets?",
                             criteria={
-                                "INTERNS": "Interns / Associates (Akshay, Anish, Apurva)",
-                                "PEERS": "Other core operators (Mrunalini, Neel, Dnyanesh)",
+                                "INTERNS": "Interns / Associates (Aadya)",
+                                "PEERS": "Other core operators (Mrunalini, Neel, Dnyanesh, Soham)",
                                 "ALL_AVAILABLE": "Any available member with low workload",
                             },
                         ),
