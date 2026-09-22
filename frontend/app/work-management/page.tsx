@@ -158,6 +158,7 @@ export default function WorkManagementPage() {
   const [aiReasoning, setAiReasoning] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [autoExecute, setAutoExecute] = useState<boolean>(false);
+  const [showAiDrawer, setShowAiDrawer] = useState<boolean>(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -216,6 +217,7 @@ export default function WorkManagementPage() {
     try {
       setAiLoading(true);
       setError(null);
+      setShowAiDrawer(true);
       const res = await aiRebalanceWorkload(aiPrompt, selectedProject, autoExecute);
       setAiProposals(res.proposals || []);
       setAiReasoning(res.reasoning || null);
@@ -605,276 +607,405 @@ export default function WorkManagementPage() {
         </div>
       )}
 
-      {/* Assignee Capacity & Workload Cards */}
-      {data && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
-              Team Member Capacity & Active Queues
-            </h2>
-            <span className="text-xs text-gray-400">Click any card to filter tickets</span>
-          </div>
+      {/* 1. Unified Operator Throughput & Capacity Module */}
+      {data && (() => {
+        const overloadedCount = data.assignees.filter((u) => u.open_tickets_count >= 8).length;
+        const availableCount = data.assignees.filter((u) => u.open_tickets_count < 4).length;
+        const maxLoadedUser = [...data.assignees].sort((a, b) => b.open_tickets_count - a.open_tickets_count)[0];
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {data.assignees
-              .filter((u) => u.open_tickets_count > 0 || u.role === 'Core Operator' || u.role.includes('Intern'))
-              .map((u) => {
-                const isSelected = selectedAssignee.toLowerCase() === u.name.toLowerCase();
-                const isOverloaded = u.open_tickets_count >= 8;
-                const isModerate = u.open_tickets_count >= 4 && u.open_tickets_count < 8;
+        const getInitials = (name: string) => {
+          const parts = name.trim().split(' ');
+          if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+          return (name.slice(0, 2) || 'OP').toUpperCase();
+        };
 
-                return (
-                  <div
-                    key={u.account_id}
-                    onClick={() => setSelectedAssignee(isSelected ? 'ALL' : u.name)}
-                    className={`bg-white border rounded-xl p-4 cursor-pointer transition-all shadow-sm flex flex-col justify-between ${
-                      isSelected
-                        ? 'border-blue-600 ring-2 ring-blue-100 bg-blue-50/20'
-                        : 'border-gray-200 hover:border-gray-300 hover:shadow-md'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span
-                          className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                            u.role === 'Core Operator'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-purple-50 text-purple-700 border border-purple-200'
-                          }`}
-                        >
-                          {u.role}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            isOverloaded
-                              ? 'bg-red-50 text-red-700 border border-red-200'
-                              : isModerate
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}
-                        >
-                          {isOverloaded ? 'Overloaded' : isModerate ? 'Moderate' : 'Available'}
-                        </span>
-                      </div>
-
-                      <h3 className="text-sm font-bold text-gray-900 truncate">{u.name}</h3>
-
-                      <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-                        <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-                          ✓ {u.completed_tickets_count} Done
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
-                          {u.open_tickets_count} Pending
-                        </span>
-                        {u.blocked_tickets_count > 0 && (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-800 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md">
-                            {u.blocked_tickets_count} Blocked
-                          </span>
-                        )}
-                      </div>
-
-                      {u.total_handled_count > 0 && (
-                        <div className="mt-2.5 space-y-1">
-                          <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
-                            <span>Completion Rate</span>
-                            <span className="font-extrabold text-gray-800">{u.completion_rate}%</span>
-                          </div>
-                          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                            <div
-                              className="bg-emerald-500 h-1.5 rounded-full transition-all"
-                              style={{ width: `${Math.min(100, u.completion_rate)}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-gray-100 grid grid-cols-4 gap-1 text-center text-[10px]">
-                      <div className="bg-emerald-50/70 p-1 rounded">
-                        <span className="text-emerald-700 block font-bold">Done</span>
-                        <span className="font-extrabold text-emerald-900">{u.completed_tickets_count}</span>
-                      </div>
-                      <div className="bg-gray-50 p-1 rounded">
-                        <span className="text-gray-400 block font-semibold">Today</span>
-                        <span className="font-bold text-gray-900">{u.due_today_count}</span>
-                      </div>
-                      <div className="bg-gray-50 p-1 rounded">
-                        <span className="text-gray-400 block font-semibold">Tmrw</span>
-                        <span className="font-bold text-gray-900">{u.due_tomorrow_count}</span>
-                      </div>
-                      <div className="bg-red-50 p-1 rounded">
-                        <span className="text-red-500 block font-semibold">Overdue</span>
-                        <span className="font-bold text-red-700">{u.overdue_count}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-
-          {/* Team Delivery Scorecard Table */}
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mt-4">
-            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-              <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">
-                  Team Member Delivery Scorecard ({selectedProject})
-                </h3>
-                <p className="text-xs text-gray-500">Summary of total tickets completed (Done) vs currently active by each operator.</p>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100">
-                  <tr>
-                    <th className="py-2.5 px-4">Operator</th>
-                    <th className="py-2.5 px-3">Role</th>
-                    <th className="py-2.5 px-3 text-emerald-700">Completed (Done)</th>
-                    <th className="py-2.5 px-3 text-amber-700">Pending</th>
-                    <th className="py-2.5 px-3 text-purple-700">Blocked</th>
-                    <th className="py-2.5 px-3 text-red-600">Overdue</th>
-                    <th className="py-2.5 px-3">Total Handled</th>
-                    <th className="py-2.5 px-4 text-right">Completion %</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {data.assignees.map((u) => (
-                    <tr key={u.account_id} className="hover:bg-gray-50/50">
-                      <td className="py-2.5 px-4 font-bold text-gray-900">{u.name}</td>
-                      <td className="py-2.5 px-3 text-gray-500">{u.role}</td>
-                      <td className="py-2.5 px-3">
-                        <span className="inline-flex items-center gap-1 font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                          ✓ {u.completed_tickets_count}
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-3 font-bold text-amber-700">{u.open_tickets_count}</td>
-                      <td className="py-2.5 px-3 font-bold text-purple-700">{u.blocked_tickets_count}</td>
-                      <td className="py-2.5 px-3 font-bold text-red-600">{u.overdue_count}</td>
-                      <td className="py-2.5 px-3 font-extrabold text-gray-900">{u.total_handled_count}</td>
-                      <td className="py-2.5 px-4 text-right font-extrabold text-gray-900">
-                        {u.total_handled_count > 0 ? (
-                          <span className="inline-flex items-center gap-1">
-                            <span>{u.completion_rate}%</span>
-                            <span className="w-12 bg-gray-100 rounded-full h-1.5 overflow-hidden ml-1.5 inline-block">
-                              <span
-                                className="bg-emerald-500 h-1.5 rounded-full block"
-                                style={{ width: `${Math.min(100, u.completion_rate)}%` }}
-                              />
-                            </span>
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Autonomous AI Workload Balancing Assistant */}
-      <div className="bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 border border-indigo-200 rounded-2xl p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-          <div className="flex items-center gap-3">
-            <span className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md">
-              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            </span>
-            <div>
-              <h2 className="text-base font-bold text-gray-900">Autonomous AI Workload Balancing Agent</h2>
-              <p className="text-xs text-gray-500">
-                Provide natural language context to redistribute tickets across Dnyanesh, Mrunalini, Neel, and interns.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoExecute}
-                onChange={(e) => setAutoExecute(e.target.checked)}
-                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-              />
-              Auto-Execute Reassignments in Jira
-            </label>
-
-            <button
-              onClick={handleRunAiRebalance}
-              disabled={aiLoading || !aiPrompt.trim()}
-              className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition-all ${
-                aiLoading || !aiPrompt.trim()
-                  ? 'bg-indigo-300 cursor-not-allowed'
-                  : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
-              }`}
-            >
-              {aiLoading ? 'Analyzing Workload...' : 'Run AI Rebalance'}
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <input
-            type="text"
-            value={aiPrompt}
-            onChange={(e) => setAiPrompt(e.target.value)}
-            placeholder="e.g. 'Mrunalini is overloaded with tickets due this week, transfer 3 to available interns' or 'Dnyanesh is on leave, rebalance to Neel'"
-            className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-3 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold text-gray-400 uppercase">Quick Prompts:</span>
-            {[
-              'Relieve Mrunalini to available interns (Akshay, Anish, Apurva)',
-              'Rebalance tickets due tomorrow evenly across team',
-              'Transfer overdue tickets from Dnyanesh to Neel',
-            ].map((qp) => (
-              <button
-                key={qp}
-                onClick={() => setAiPrompt(qp)}
-                className="text-[11px] font-medium bg-white/80 hover:bg-white text-indigo-700 px-2.5 py-1 rounded-lg border border-indigo-100 shadow-2xs transition-all"
-              >
-                {qp}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* AI Output Box */}
-        {aiReasoning && (
-          <div className="mt-5 p-4 bg-white rounded-xl border border-indigo-100 shadow-sm space-y-3">
-            <div className="flex items-center gap-2 text-xs font-bold text-indigo-900">
-              <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              AI Dispatch Plan ({aiProposals.length} Rebalancing Actions)
-            </div>
-            <p className="text-xs text-gray-600">{aiReasoning}</p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
-              {aiProposals.map((p) => (
-                <div key={p.issue_key} className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs space-y-1.5">
-                  <div className="flex items-center justify-between font-bold">
-                    <span className="text-indigo-600">{p.issue_key}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${p.executed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
-                      {p.executed ? 'Reassigned in Jira ✓' : 'Proposed'}
+        return (
+          <div className="space-y-4">
+            {/* Unified Operator Capacity & Throughput Table */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gradient-to-r from-gray-50/80 to-white">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                      Team Member Capacity & Delivery Throughput
+                    </h2>
+                    <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                      {selectedProject}
                     </span>
                   </div>
-                  <p className="text-gray-700 truncate font-medium">{p.summary}</p>
-                  <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
-                    <span>{p.current_assignee}</span>
-                    <span>→</span>
-                    <span className="font-bold text-gray-900">{p.target_assignee}</span>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Consolidated view of active queues, load capacity limits, SLA delivery, and completion rates. Click any row to filter tickets.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="px-2.5 py-1 rounded-lg bg-gray-100 font-semibold text-gray-700">
+                    Total Operators: <strong>{data.assignees.length}</strong>
+                  </span>
+                  <span className={`px-2.5 py-1 rounded-lg font-semibold ${overloadedCount > 0 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-600'}`}>
+                    Overloaded (≥8): <strong>{overloadedCount}</strong>
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
+                    Available (&lt;4): <strong>{availableCount}</strong>
+                  </span>
+                  {selectedAssignee !== 'ALL' && (
+                    <button
+                      onClick={() => setSelectedAssignee('ALL')}
+                      className="px-2.5 py-1 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition-all flex items-center gap-1 shadow-2xs"
+                    >
+                      Filtered: {selectedAssignee} ✕
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-gray-50/80 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100">
+                    <tr>
+                      <th className="py-2.5 px-4">Operator & Role</th>
+                      <th className="py-2.5 px-3">Workload Status</th>
+                      <th className="py-2.5 px-3 text-amber-700">Pending</th>
+                      <th className="py-2.5 px-3 text-purple-700">Blocked</th>
+                      <th className="py-2.5 px-3 text-red-600">Overdue SLA</th>
+                      <th className="py-2.5 px-3">Today / Tmrw</th>
+                      <th className="py-2.5 px-3 text-emerald-700">Completed</th>
+                      <th className="py-2.5 px-3">Handled</th>
+                      <th className="py-2.5 px-4">Completion %</th>
+                      <th className="py-2.5 px-4 text-right">Quick Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {data.assignees.map((u) => {
+                      const isSelected = selectedAssignee.toLowerCase() === u.name.toLowerCase();
+                      const isOverloaded = u.open_tickets_count >= 8;
+                      const isModerate = u.open_tickets_count >= 4 && u.open_tickets_count < 8;
+                      const hasUrgentOverdue = u.overdue_count > 0;
+
+                      return (
+                        <tr
+                          key={u.account_id}
+                          onClick={() => setSelectedAssignee(isSelected ? 'ALL' : u.name)}
+                          className={`cursor-pointer transition-colors ${
+                            isSelected
+                              ? 'bg-blue-50/50 font-medium'
+                              : 'hover:bg-gray-50/70'
+                          }`}
+                        >
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2.5">
+                              <div
+                                className={`w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-extrabold text-white shadow-xs ${
+                                  isOverloaded
+                                    ? 'bg-red-600'
+                                    : isModerate
+                                    ? 'bg-amber-600'
+                                    : 'bg-indigo-600'
+                                }`}
+                              >
+                                {getInitials(u.name)}
+                              </div>
+                              <div>
+                                <div className="font-bold text-gray-900 flex items-center gap-1.5">
+                                  <span>{u.name}</span>
+                                  {isSelected && (
+                                    <span className="text-[10px] text-blue-600 bg-blue-100 px-1.5 py-0.2 rounded font-bold">
+                                      Active Filter
+                                    </span>
+                                  )}
+                                </div>
+                                <span
+                                  className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full inline-block mt-0.5 ${
+                                    u.role === 'Core Operator'
+                                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                      : 'bg-purple-50 text-purple-700 border border-purple-200'
+                                  }`}
+                                >
+                                  {u.role}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3">
+                            <div className="space-y-1">
+                              <span
+                                className={`inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                                  isOverloaded
+                                    ? 'bg-red-50 text-red-700 border-red-200'
+                                    : isModerate
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    isOverloaded
+                                    ? 'bg-red-500 animate-pulse'
+                                    : isModerate
+                                    ? 'bg-amber-500'
+                                    : 'bg-emerald-500'
+                                  }`}
+                                />
+                                {isOverloaded ? 'Overloaded' : isModerate ? 'Moderate' : 'Available'} ({u.open_tickets_count})
+                              </span>
+                              <div className="w-24 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className={`h-1.5 rounded-full transition-all ${
+                                    isOverloaded
+                                      ? 'bg-red-500'
+                                      : isModerate
+                                      ? 'bg-amber-500'
+                                      : 'bg-emerald-500'
+                                  }`}
+                                  style={{ width: `${Math.min(100, (u.open_tickets_count / 15) * 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="py-3 px-3 font-bold text-amber-800">{u.open_tickets_count}</td>
+                          <td className="py-3 px-3 font-bold text-purple-800">
+                            {u.blocked_tickets_count > 0 ? (
+                              <span className="bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded font-bold">
+                                {u.blocked_tickets_count}
+                              </span>
+                            ) : (
+                              '0'
+                            )}
+                          </td>
+                          <td className="py-3 px-3">
+                            {hasUrgentOverdue ? (
+                              <span className="inline-flex items-center gap-1 font-extrabold text-red-700 bg-red-100/80 px-2 py-0.5 rounded border border-red-300 animate-pulse">
+                                🚨 {u.overdue_count}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400 font-medium">0</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 text-gray-700 font-medium">
+                            <span className="text-gray-500">{u.due_today_count} today</span>
+                            <span className="mx-1 text-gray-300">/</span>
+                            <span className="font-semibold text-gray-800">{u.due_tomorrow_count} tmrw</span>
+                          </td>
+                          <td className="py-3 px-3">
+                            <span className="inline-flex items-center gap-1 font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              ✓ {u.completed_tickets_count}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 font-extrabold text-gray-900">{u.total_handled_count}</td>
+                          <td className="py-3 px-4">
+                            {u.total_handled_count > 0 ? (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
+                                  <span className="font-extrabold text-gray-800">{u.completion_rate}%</span>
+                                </div>
+                                <div className="w-20 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                                  <div
+                                    className="bg-emerald-500 h-1.5 rounded-full transition-all"
+                                    style={{ width: `${Math.min(100, u.completion_rate)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => setSelectedAssignee(isSelected ? 'ALL' : u.name)}
+                                className={`px-2 py-1 rounded text-[11px] font-bold transition-all ${
+                                  isSelected
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                                }`}
+                                title="Filter ticket list to this assignee"
+                              >
+                                {isSelected ? 'Clear' : 'Filter'}
+                              </button>
+                              {isOverloaded && (
+                                <button
+                                  onClick={() => {
+                                    setAiPrompt(`Relieve ${u.name} by reassigning tickets to available peers and interns`);
+                                    setShowAiDrawer(true);
+                                  }}
+                                  className="px-2 py-1 rounded text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all flex items-center gap-1"
+                                  title="Open AI rebalancing for this operator"
+                                >
+                                  <span>⚡</span> Rebalance
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 2. Autonomous AI Workload Balancing Agent - Smart Contextual Banner & Drawer */}
+            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 sm:p-5 shadow-md text-white">
+              {/* Header Row / Quick Alert */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div className="flex items-start gap-3.5">
+                  <div className="p-2.5 bg-indigo-600/80 rounded-xl text-white shadow-inner shrink-0 mt-0.5">
+                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold tracking-tight text-white">
+                        Autonomous AI Workload Balancing Agent
+                      </h3>
+                      <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-300 border border-indigo-400/20">
+                        Zero-Click Dispatcher
+                      </span>
+                    </div>
+                    <p className="text-xs text-indigo-200/90 mt-1">
+                      {maxLoadedUser && maxLoadedUser.open_tickets_count >= 8 ? (
+                        <span>
+                          <strong className="text-amber-300">⚠️ Workload Imbalance Detected:</strong>{' '}
+                          {maxLoadedUser.name} holds {maxLoadedUser.open_tickets_count} tickets ({maxLoadedUser.overdue_count} overdue).{' '}
+                          {availableCount} available team members ready for delegation.
+                        </span>
+                      ) : (
+                        <span>
+                          Queue is currently balanced. Use AI Dispatcher to redistribute tickets for tomorrow&apos;s upcoming campaign deadlines.
+                        </span>
+                      )}
+                    </p>
                   </div>
                 </div>
-              ))}
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {maxLoadedUser && maxLoadedUser.open_tickets_count >= 8 && (
+                    <button
+                      onClick={() => {
+                        setAiPrompt(`Relieve ${maxLoadedUser.name} of active tickets to available team members`);
+                        setShowAiDrawer(true);
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all flex items-center gap-1.5 shadow-sm"
+                    >
+                      <span>⚡</span> Quick Rebalance ({maxLoadedUser.name})
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowAiDrawer(!showAiDrawer)}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-all flex items-center gap-1.5"
+                  >
+                    <span>{showAiDrawer ? '▲ Collapse AI Drawer' : '✨ Custom Prompt & Dispatch ▾'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Expandable AI Prompt & Actions Drawer */}
+              {showAiDrawer && (
+                <div className="mt-5 pt-4 border-t border-indigo-800/60 space-y-4 animate-in fade-in duration-200">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-indigo-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={autoExecute}
+                        onChange={(e) => setAutoExecute(e.target.checked)}
+                        className="rounded border-indigo-400 text-indigo-600 focus:ring-indigo-400 bg-indigo-950"
+                      />
+                      Auto-Execute Reassignments in Jira Cloud
+                    </label>
+
+                    <button
+                      onClick={handleRunAiRebalance}
+                      disabled={aiLoading || !aiPrompt.trim()}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition-all flex items-center gap-2 ${
+                        aiLoading || !aiPrompt.trim()
+                          ? 'bg-indigo-700/50 text-indigo-300 cursor-not-allowed'
+                          : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/30'
+                      }`}
+                    >
+                      {aiLoading ? (
+                        <>
+                          <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span>Analyzing Workloads...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>⚡</span>
+                          <span>Run AI Rebalance</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <input
+                      type="text"
+                      value={aiPrompt}
+                      onChange={(e) => setAiPrompt(e.target.value)}
+                      placeholder="e.g. 'Mrunalini is overloaded with tickets due this week, transfer 3 to available interns' or 'Dnyanesh is on leave, rebalance to Neel'"
+                      className="w-full bg-slate-950/80 border border-indigo-500/40 rounded-xl px-4 py-3 text-xs text-white placeholder-indigo-300/50 focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-inner"
+                    />
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] font-semibold text-indigo-300/70 uppercase">Quick Suggestions:</span>
+                      {[
+                        `Relieve ${maxLoadedUser?.name || 'top operator'} to available peers & interns`,
+                        'Rebalance tickets due tomorrow evenly across team',
+                        'Transfer overdue tickets to available core operators',
+                      ].map((qp) => (
+                        <button
+                          key={qp}
+                          onClick={() => setAiPrompt(qp)}
+                          className="text-[11px] font-medium bg-white/10 hover:bg-white/20 text-indigo-200 px-2.5 py-1 rounded-lg border border-white/10 transition-all"
+                        >
+                          {qp}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* AI Output Box */}
+                  {aiReasoning && (
+                    <div className="mt-4 p-4 bg-slate-950/90 rounded-xl border border-indigo-500/40 shadow-inner space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+                        <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>AI Dispatch Plan ({aiProposals.length} Rebalancing Proposals)</span>
+                      </div>
+                      <p className="text-xs text-gray-300">{aiReasoning}</p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+                        {aiProposals.map((p) => (
+                          <div key={p.issue_key} className="p-3 bg-white/5 border border-white/10 rounded-lg text-xs space-y-1.5">
+                            <div className="flex items-center justify-between font-bold">
+                              <span className="text-indigo-400">{p.issue_key}</span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${p.executed ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
+                                {p.executed ? 'Reassigned in Jira ✓' : 'Proposed'}
+                              </span>
+                            </div>
+                            <p className="text-gray-300 truncate font-medium">{p.summary}</p>
+                            <div className="text-[11px] text-gray-400 flex items-center gap-1.5">
+                              <span>{p.current_assignee}</span>
+                              <span>→</span>
+                              <span className="font-bold text-white">{p.target_assignee}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Filter Ribbons */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
