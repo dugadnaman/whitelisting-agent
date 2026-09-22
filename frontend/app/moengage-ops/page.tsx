@@ -335,7 +335,7 @@ export default function MoEngageOpsPage() {
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-1">
-                  {Object.entries(data.account_overview.campaigns_channel_breakdown || {}).map(([ch, count]) => (
+                  {Object.entries(data.account_overview.campaigns_channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
                       className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
@@ -384,7 +384,7 @@ export default function MoEngageOpsPage() {
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-1">
-                  {Object.entries(data.account_overview.nodes_channel_breakdown || {}).map(([ch, count]) => (
+                  {Object.entries(data.account_overview.nodes_channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
                       className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
@@ -413,7 +413,7 @@ export default function MoEngageOpsPage() {
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-blue-100 flex flex-wrap gap-1">
-                  {Object.entries(data.account_overview.channel_breakdown || {}).map(([ch, count]) => (
+                  {Object.entries(data.account_overview.channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
                       className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
@@ -472,7 +472,7 @@ export default function MoEngageOpsPage() {
                   <div>
                     <div className="text-[11px] font-semibold text-gray-400 mb-1.5 uppercase">Channel Breakdown:</div>
                     <div className="flex flex-wrap gap-1.5">
-                      {Object.entries(vdata.channels).map(([ch, count]) => (
+                      {Object.entries(vdata.channels).filter(([_, count]) => count > 0).map(([ch, count]) => (
                         <span
                           key={ch}
                           className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
