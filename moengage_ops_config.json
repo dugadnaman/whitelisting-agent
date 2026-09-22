@@ -1,0 +1,42 @@
+[
+  {
+    "workspace_name": "Moneyfy",
+    "vertical": "Moneyfy",
+    "workspace_id": "PLBRDCVUS0YE8ME3E8XSHV5D",
+    "api_key": "F9ED1AC8BB3449E8B6D94E5C",
+    "data_center": "03",
+    "is_active": true
+  },
+  {
+    "workspace_name": "Tata Capital (TCL)",
+    "vertical": "TCL",
+    "workspace_id": "0KYUNUW5WODKX5ZFVAGPVL0U",
+    "api_key": "D9FCC06FDE8947429FDB1928",
+    "data_center": "03",
+    "is_active": true
+  },
+  {
+    "workspace_name": "Services",
+    "vertical": "Services",
+    "workspace_id": "YYPOH2RMX16ENTH66KE9LJ9O",
+    "api_key": "D54B2350E267488FABAE4C87",
+    "data_center": "03",
+    "is_active": true
+  },
+  {
+    "workspace_name": "Wealth",
+    "vertical": "Wealth",
+    "workspace_id": "9U9YTAXGRLCMVXK04EGTNLKP",
+    "api_key": "1433F368EE9845F99F0A642E",
+    "data_center": "03",
+    "is_active": true
+  },
+  {
+    "workspace_name": "Collections",
+    "vertical": "Collections",
+    "workspace_id": "",
+    "api_key": "",
+    "data_center": "03",
+    "is_active": false
+  }
+]
