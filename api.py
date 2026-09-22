@@ -3763,6 +3763,7 @@ def get_moengage_ops_dashboard(
     mode: str = Query("last_week"),
     custom_start: str | None = Query(None),
     custom_end: str | None = Query(None),
+    workspace: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -3772,7 +3773,13 @@ def get_moengage_ops_dashboard(
     from moengage_ops_client import compute_ops_dashboard_metrics, load_cached_ops_records
 
     records = load_cached_ops_records()
-    metrics = compute_ops_dashboard_metrics(records, mode=mode, custom_start=custom_start, custom_end=custom_end)
+    metrics = compute_ops_dashboard_metrics(
+        records,
+        mode=mode,
+        custom_start=custom_start,
+        custom_end=custom_end,
+        workspace_filter=workspace,
+    )
     return _json_safe(metrics)
 
 

@@ -1066,10 +1066,11 @@ export async function syncKarixRcsToMoEngage(account: string = "tata"): Promise<
   return res.json();
 }
 
-export async function fetchMoEngageOpsDashboard(mode: string = "last_week", customStart?: string, customEnd?: string) {
+export async function fetchMoEngageOpsDashboard(mode: string = "last_week", customStart?: string, customEnd?: string, workspace?: string) {
   const qs = new URLSearchParams({ mode });
   if (customStart) qs.set("custom_start", customStart);
   if (customEnd) qs.set("custom_end", customEnd);
+  if (workspace && workspace !== "all") qs.set("workspace", workspace);
   const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/dashboard?${qs.toString()}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

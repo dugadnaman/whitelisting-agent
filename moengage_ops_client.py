@@ -450,6 +450,7 @@ def compute_ops_dashboard_metrics(
     mode: str = "last_week",
     custom_start: str | None = None,
     custom_end: str | None = None,
+    workspace_filter: str | None = None,
 ) -> dict[str, Any]:
     """
     Compute executive overview, channel breakdown, and vertical breakdowns
@@ -469,9 +470,14 @@ def compute_ops_dashboard_metrics(
         if r.in_scope and (start_str <= r.date <= end_str or (r.vertical == "Collections" and r.type == "Flow"))
     ]
 
-    # Account Overview includes: TCL + Services + Wealth (and Moneyfy). TCHFL and Collections reported separately.
-    account_overview_verticals = {"TCL", "Services", "Wealth", "Moneyfy"}
-
+    # Account Overview includes: TCL + Services + Wealth (and Moneyfy), or specific filtered vertical
+    if workspace_filter and workspace_filter.strip().lower() not in ("all", "all accounts", "all workspaces", ""):
+        wf_clean = workspace_filter.strip()
+        account_overview_verticals = {wf_clean}
+        title = f"{wf_clean} Workspace Isolated"
+    else:
+        account_overview_verticals = {"TCL", "Services", "Wealth", "Moneyfy"}
+        title = "TCL + Services + Wealth + Moneyfy Combined"
     overview_camps = [
         r for r in date_filtered_records
         if r.type == "Campaign" and r.vertical in account_overview_verticals and (start_str <= r.date <= end_str)
@@ -548,7 +554,7 @@ def compute_ops_dashboard_metrics(
             "end_date": end_str,
         },
         "account_overview": {
-            "title": "TCL + Services + Wealth + Moneyfy Combined",
+            "title": title,
             "total_campaigns": len(overview_camps),
             "total_flows": len(overview_flows),
             "total_flow_nodes": len(overview_nodes),

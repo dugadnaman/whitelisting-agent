@@ -61,6 +61,7 @@ export default function MoEngageOpsPage() {
   const [mode, setMode] = useState<'last_week' | 'last_month' | 'custom'>('last_week');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+  const [workspaceFilter, setWorkspaceFilter] = useState('all');
   const [showWorkspacesModal, setShowWorkspacesModal] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([]);
   const [selectedWs, setSelectedWs] = useState<WorkspaceItem | null>(null);
@@ -96,15 +97,14 @@ export default function MoEngageOpsPage() {
   const loadDashboard = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
-      const res = await fetchMoEngageOpsDashboard(mode, customStart, customEnd);
+      const res = await fetchMoEngageOpsDashboard(mode, customStart, customEnd, workspaceFilter);
       setData(res);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard');
     } finally {
       setLoading(false);
     }
-  }, [mode, customStart, customEnd]);
+  }, [mode, customStart, customEnd, workspaceFilter]);
 
   useEffect(() => {
     loadDashboard();
@@ -271,6 +271,22 @@ export default function MoEngageOpsPage() {
               {m.replace('_', ' ')}
             </button>
           ))}
+          <div className="flex items-center gap-2 border-l border-gray-200 pl-3 ml-1">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Workspace:</span>
+            <select
+              value={workspaceFilter}
+              onChange={(e) => setWorkspaceFilter(e.target.value)}
+              className="border border-gray-300 rounded-lg px-2.5 py-1 text-xs font-semibold bg-gray-50 text-gray-800"
+            >
+              <option value="all">All Combined</option>
+              <option value="TCL">Tata Capital (TCL)</option>
+              <option value="Services">Services</option>
+              <option value="Wealth">Wealth</option>
+              <option value="Moneyfy">Moneyfy</option>
+              <option value="TCHFL">TCHFL</option>
+              <option value="Collections">Collections</option>
+            </select>
+          </div>
         </div>
 
         {mode === 'custom' && (
