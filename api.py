@@ -3893,3 +3893,90 @@ async def upload_moengage_export_endpoint(
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+class TicketTransferRequest(BaseModel):
+    issue_key: str
+    to_account_id: str
+    handover_note: str = ""
+    transferred_by: str | None = None
+
+
+class AiRebalanceRequest(BaseModel):
+    prompt: str
+    project: str = "TCN"
+    auto_execute: bool = False
+
+
+@app.get("/api/work-management/dashboard")
+def get_work_management_dashboard_endpoint(
+    project: str = Query("TCN"),
+    limit: int = Query(100),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get real-time work management dashboard connected to Jira Cloud:
+    - Status breakdown (Pending, Blocked, Done)
+    - Due Date Timeline (Overdue, Today, Tomorrow, Day After, Later)
+    - Assignee Capacity metrics (Dnyanesh, Mrunalini, Neel, interns)
+    - Filterable work tickets list
+    """
+    from work_manager import get_work_management_dashboard
+
+    data = get_work_management_dashboard(project=project, limit=limit)
+    return _json_safe(data)
+
+
+@app.get("/api/work-management/assignees")
+def get_work_management_assignees_endpoint(
+    project: str = Query("TCN"),
+    current_user: dict = Depends(get_current_user),
+):
+    """List assignable Jira team members with their active capacity metrics."""
+    from work_manager import fetch_assignable_jira_users
+
+    users = fetch_assignable_jira_users(project=project)
+    return _json_safe([u.to_dict() for u in users])
+
+
+@app.post("/api/work-management/transfer")
+def transfer_jira_ticket_endpoint(
+    body: TicketTransferRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Transfer/reassign a Jira ticket to another team member or intern.
+    Syncs directly to Jira Cloud API and logs a handover audit comment.
+    """
+    from work_manager import transfer_jira_ticket
+
+    operator = body.transferred_by or current_user.get("name") or "Work Management Operator"
+    result = transfer_jira_ticket(
+        issue_key=body.issue_key,
+        to_account_id=body.to_account_id,
+        handover_note=body.handover_note,
+        transferred_by=operator,
+    )
+    return _json_safe(result)
+
+
+@app.post("/api/work-management/ai-rebalance")
+def ai_rebalance_workload_endpoint(
+    body: AiRebalanceRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Autonomous AI Workload Balancing Agent.
+    Evaluates operator workloads and user context (e.g. 'Dnyanesh is overloaded'),
+    proposing and optionally executing reassignments to interns/peers.
+    """
+    from work_manager import ai_rebalance_workload
+
+    operator = current_user.get("name") or "AI Workload Agent"
+    result = ai_rebalance_workload(
+        context_prompt=body.prompt,
+        project=body.project,
+        auto_execute=body.auto_execute,
+        operator_name=operator,
+    )
+    return _json_safe(result)

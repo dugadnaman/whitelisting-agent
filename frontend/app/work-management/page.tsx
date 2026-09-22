@@ -1,0 +1,675 @@
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import {
+  fetchWorkManagementDashboard,
+  transferJiraTicket,
+  aiRebalanceWorkload,
+} from '@/lib/api';
+
+type JiraUserItem = {
+  account_id: string;
+  name: string;
+  email: string;
+  role: string;
+  open_tickets_count: number;
+  due_today_count: number;
+  due_tomorrow_count: number;
+  due_day_after_count: number;
+  overdue_count: number;
+};
+
+type WorkItem = {
+  key: string;
+  id: string;
+  summary: string;
+  status: string;
+  status_category: 'PENDING' | 'BLOCKED' | 'DONE';
+  assignee_name: string;
+  assignee_account_id: string | null;
+  assignee_role: string;
+  reporter: string;
+  duedate: string | null;
+  timeline_bucket: 'OVERDUE' | 'TODAY' | 'TOMORROW' | 'DAY_AFTER' | 'LATER' | 'NO_DATE';
+  days_relative: number | null;
+  channel: string;
+  attachment_count: number;
+  created: string;
+  updated: string;
+  labels: string[];
+};
+
+type TransferProposal = {
+  issue_key: string;
+  summary: string;
+  current_assignee: string;
+  target_assignee: string;
+  target_account_id: string;
+  reason: string;
+  executed: boolean;
+};
+
+type WorkManagementData = {
+  project: string;
+  total_tickets: number;
+  status_counts: {
+    PENDING: number;
+    BLOCKED: number;
+    DONE: number;
+  };
+  timeline_counts: {
+    OVERDUE: number;
+    TODAY: number;
+    TOMORROW: number;
+    DAY_AFTER: number;
+    LATER: number;
+    NO_DATE: number;
+  };
+  channel_counts: Record<string, number>;
+  assignees: JiraUserItem[];
+  work_items: WorkItem[];
+  last_synced_at: string;
+};
+
+export default function WorkManagementPage() {
+  const [data, setData] = useState<WorkManagementData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Filters
+  const [selectedTimeline, setSelectedTimeline] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+  const [selectedAssignee, setSelectedAssignee] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Transfer Modal
+  const [transferItem, setTransferItem] = useState<WorkItem | null>(null);
+  const [transferTargetId, setTransferTargetId] = useState<string>('');
+  const [handoverNote, setHandoverNote] = useState<string>('');
+  const [transferring, setTransferring] = useState<boolean>(false);
+
+  // AI Rebalance
+  const [aiPrompt, setAiPrompt] = useState<string>('');
+  const [aiProposals, setAiProposals] = useState<TransferProposal[]>([]);
+  const [aiReasoning, setAiReasoning] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState<boolean>(false);
+  const [autoExecute, setAutoExecute] = useState<boolean>(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetchWorkManagementDashboard('TCN', 100);
+      setData(res);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load Jira work management');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const handleRefresh = async () => {
+    try {
+      setRefreshing(true);
+      setError(null);
+      const res = await fetchWorkManagementDashboard('TCN', 100);
+      setData(res);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleExecuteTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferItem || !transferTargetId) return;
+
+    try {
+      setTransferring(true);
+      await transferJiraTicket(transferItem.key, transferTargetId, handoverNote);
+      setTransferItem(null);
+      setHandoverNote('');
+      await handleRefresh();
+      alert(`Ticket ${transferItem.key} successfully transferred in Jira!`);
+    } catch (err: unknown) {
+      alert(`Transfer failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const handleRunAiRebalance = async () => {
+    if (!aiPrompt.trim()) return;
+    try {
+      setAiLoading(true);
+      setError(null);
+      const res = await aiRebalanceWorkload(aiPrompt, 'TCN', autoExecute);
+      setAiProposals(res.proposals || []);
+      setAiReasoning(res.reasoning || null);
+      if (autoExecute) {
+        await handleRefresh();
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'AI Rebalance failed');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const channelBadges: Record<string, string> = {
+    WhatsApp: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    RCS: 'bg-purple-50 text-purple-700 border-purple-200',
+    SMS: 'bg-amber-50 text-amber-700 border-amber-200',
+    Email: 'bg-blue-50 text-blue-700 border-blue-200',
+    General: 'bg-gray-100 text-gray-700 border-gray-200',
+  };
+
+  // Filtered tickets
+  const filteredItems = (data?.work_items || []).filter((w) => {
+    if (selectedTimeline !== 'ALL' && w.timeline_bucket !== selectedTimeline) return false;
+    if (selectedStatus !== 'ALL' && w.status_category !== selectedStatus) return false;
+    if (selectedAssignee !== 'ALL' && w.assignee_name.toLowerCase() !== selectedAssignee.toLowerCase()) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchKey = w.key.toLowerCase().includes(q);
+      const matchSum = w.summary.toLowerCase().includes(q);
+      const matchChan = w.channel.toLowerCase().includes(q);
+      if (!matchKey && !matchSum && !matchChan) return false;
+    }
+    return true;
+  });
+
+  return (
+    <div className="space-y-8 max-w-7xl mx-auto pb-16">
+      {/* Page Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 pb-6">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-gray-900">Jira Work Management & Dispatcher</h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Jira Connected (TCN)
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mt-1">
+            Track pending tickets by assignee, timeline deadlines, and rebalance campaign workloads across team members and interns.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-all"
+          >
+            <svg
+              className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+            {refreshing ? 'Syncing Jira...' : 'Refresh from Jira'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-3">
+          <svg className="w-5 h-5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <div className="flex-1">{error}</div>
+        </div>
+      )}
+
+      {/* Assignee Capacity & Workload Cards */}
+      {data && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+              Team Member Capacity & Active Queues
+            </h2>
+            <span className="text-xs text-gray-400">Click any card to filter tickets</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {data.assignees
+              .filter((u) => u.open_tickets_count > 0 || u.role === 'Core Operator' || u.role.includes('Intern'))
+              .map((u) => {
+                const isSelected = selectedAssignee.toLowerCase() === u.name.toLowerCase();
+                const isOverloaded = u.open_tickets_count >= 8;
+                const isModerate = u.open_tickets_count >= 4 && u.open_tickets_count < 8;
+
+                return (
+                  <div
+                    key={u.account_id}
+                    onClick={() => setSelectedAssignee(isSelected ? 'ALL' : u.name)}
+                    className={`bg-white border rounded-xl p-4 cursor-pointer transition-all shadow-sm flex flex-col justify-between ${
+                      isSelected
+                        ? 'border-blue-600 ring-2 ring-blue-100 bg-blue-50/20'
+                        : 'border-gray-200 hover:border-gray-300 hover:shadow-md'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span
+                          className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                            u.role === 'Core Operator'
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : 'bg-purple-50 text-purple-700 border border-purple-200'
+                          }`}
+                        >
+                          {u.role}
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            isOverloaded
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : isModerate
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          }`}
+                        >
+                          {isOverloaded ? 'Overloaded' : isModerate ? 'Moderate' : 'Available'}
+                        </span>
+                      </div>
+
+                      <h3 className="text-sm font-bold text-gray-900 truncate">{u.name}</h3>
+
+                      <div className="text-2xl font-extrabold text-gray-900 mt-2">
+                        {u.open_tickets_count}{' '}
+                        <span className="text-xs font-normal text-gray-500">active tickets</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-gray-100 grid grid-cols-3 gap-1 text-center text-[10px]">
+                      <div className="bg-gray-50 p-1.5 rounded">
+                        <span className="text-gray-400 block font-semibold">Today</span>
+                        <span className="font-bold text-gray-900">{u.due_today_count}</span>
+                      </div>
+                      <div className="bg-gray-50 p-1.5 rounded">
+                        <span className="text-gray-400 block font-semibold">Tmrw</span>
+                        <span className="font-bold text-gray-900">{u.due_tomorrow_count}</span>
+                      </div>
+                      <div className="bg-red-50 p-1.5 rounded">
+                        <span className="text-red-500 block font-semibold">Overdue</span>
+                        <span className="font-bold text-red-700">{u.overdue_count}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
+      {/* Autonomous AI Workload Balancing Assistant */}
+      <div className="bg-gradient-to-br from-indigo-50/70 via-white to-purple-50/50 border border-indigo-200 rounded-2xl p-6 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-3">
+            <span className="p-2.5 bg-indigo-600 text-white rounded-xl shadow-md">
+              <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            </span>
+            <div>
+              <h2 className="text-base font-bold text-gray-900">Autonomous AI Workload Balancing Agent</h2>
+              <p className="text-xs text-gray-500">
+                Provide natural language context to redistribute tickets across Dnyanesh, Mrunalini, Neel, and interns.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoExecute}
+                onChange={(e) => setAutoExecute(e.target.checked)}
+                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              Auto-Execute Reassignments in Jira
+            </label>
+
+            <button
+              onClick={handleRunAiRebalance}
+              disabled={aiLoading || !aiPrompt.trim()}
+              className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition-all ${
+                aiLoading || !aiPrompt.trim()
+                  ? 'bg-indigo-300 cursor-not-allowed'
+                  : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+              }`}
+            >
+              {aiLoading ? 'Analyzing Workload...' : 'Run AI Rebalance'}
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <input
+            type="text"
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            placeholder="e.g. 'Mrunalini is overloaded with tickets due this week, transfer 3 to available interns' or 'Dnyanesh is on leave, rebalance to Neel'"
+            className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-3 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+          />
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold text-gray-400 uppercase">Quick Prompts:</span>
+            {[
+              'Relieve Mrunalini to available interns (Akshay, Anish, Apurva)',
+              'Rebalance tickets due tomorrow evenly across team',
+              'Transfer overdue tickets from Dnyanesh to Neel',
+            ].map((qp) => (
+              <button
+                key={qp}
+                onClick={() => setAiPrompt(qp)}
+                className="text-[11px] font-medium bg-white/80 hover:bg-white text-indigo-700 px-2.5 py-1 rounded-lg border border-indigo-100 shadow-2xs transition-all"
+              >
+                {qp}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* AI Output Box */}
+        {aiReasoning && (
+          <div className="mt-5 p-4 bg-white rounded-xl border border-indigo-100 shadow-sm space-y-3">
+            <div className="flex items-center gap-2 text-xs font-bold text-indigo-900">
+              <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              AI Dispatch Plan ({aiProposals.length} Rebalancing Actions)
+            </div>
+            <p className="text-xs text-gray-600">{aiReasoning}</p>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+              {aiProposals.map((p) => (
+                <div key={p.issue_key} className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-xs space-y-1.5">
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="text-indigo-600">{p.issue_key}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${p.executed ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                      {p.executed ? 'Reassigned in Jira ✓' : 'Proposed'}
+                    </span>
+                  </div>
+                  <p className="text-gray-700 truncate font-medium">{p.summary}</p>
+                  <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
+                    <span>{p.current_assignee}</span>
+                    <span>→</span>
+                    <span className="font-bold text-gray-900">{p.target_assignee}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Filter Ribbons */}
+      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3">
+        {/* Timeline Tabs */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-bold uppercase tracking-wider text-gray-400 mr-2">Timeline:</span>
+            {[
+              { id: 'ALL', label: 'All Active' },
+              { id: 'TODAY', label: `Today (${data?.timeline_counts.TODAY || 0})` },
+              { id: 'TOMORROW', label: `Tomorrow (${data?.timeline_counts.TOMORROW || 0})` },
+              { id: 'DAY_AFTER', label: `Day After (${data?.timeline_counts.DAY_AFTER || 0})` },
+              { id: 'LATER', label: `Later (${data?.timeline_counts.LATER || 0})` },
+              { id: 'OVERDUE', label: `Overdue (${data?.timeline_counts.OVERDUE || 0})`, isAlert: true },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setSelectedTimeline(tab.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  selectedTimeline === tab.id
+                    ? tab.isAlert
+                      ? 'bg-red-600 text-white shadow-sm'
+                      : 'bg-blue-600 text-white shadow-sm'
+                    : tab.isAlert
+                    ? 'bg-red-50 text-red-700 hover:bg-red-100'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Search Box */}
+          <div className="w-full md:w-64">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search key, title, channel..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800"
+            />
+          </div>
+        </div>
+
+        {/* Status Category Tabs */}
+        <div className="flex items-center gap-2 pt-2 border-t border-gray-100">
+          <span className="text-xs font-bold uppercase tracking-wider text-gray-400 mr-2">Status:</span>
+          {[
+            { id: 'ALL', label: `All (${data?.total_tickets || 0})` },
+            { id: 'PENDING', label: `Pending (${data?.status_counts.PENDING || 0})`, color: 'text-amber-700' },
+            { id: 'BLOCKED', label: `Blocked (${data?.status_counts.BLOCKED || 0})`, color: 'text-red-700' },
+            { id: 'DONE', label: `Done (${data?.status_counts.DONE || 0})`, color: 'text-emerald-700' },
+          ].map((st) => (
+            <button
+              key={st.id}
+              onClick={() => setSelectedStatus(st.id)}
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+                selectedStatus === st.id
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              {st.label}
+            </button>
+          ))}
+
+          {selectedAssignee !== 'ALL' && (
+            <span className="ml-auto inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold px-2.5 py-1 rounded-md">
+              Assignee: {selectedAssignee}
+              <button onClick={() => setSelectedAssignee('ALL')} className="hover:text-blue-900 font-bold ml-1">
+                ✕
+              </button>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Tickets List */}
+      <div>
+        <div className="flex items-center justify-between mb-3 text-xs text-gray-500 font-medium">
+          <span>Showing {filteredItems.length} matching Jira tickets</span>
+        </div>
+
+        {filteredItems.length === 0 ? (
+          <div className="p-12 text-center bg-white border border-gray-200 rounded-xl text-gray-400 text-xs">
+            No tickets match the selected timeline and status filters.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredItems.map((item) => {
+              const isOverdue = item.timeline_bucket === 'OVERDUE';
+              const isToday = item.timeline_bucket === 'TODAY';
+              const isTomorrow = item.timeline_bucket === 'TOMORROW';
+
+              return (
+                <div
+                  key={item.key}
+                  className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <a
+                        href={`https://tatacapital-team.atlassian.net/browse/${item.key}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
+                      >
+                        {item.key}
+                        <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                      </a>
+
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                          channelBadges[item.channel] || channelBadges.General
+                        }`}
+                      >
+                        {item.channel}
+                      </span>
+                    </div>
+
+                    <h3 className="text-xs font-bold text-gray-900 line-clamp-2 leading-relaxed">
+                      {item.summary}
+                    </h3>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-gray-100 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-gray-200 text-[10px] font-bold text-gray-700 flex items-center justify-center">
+                          {item.assignee_name.charAt(0)}
+                        </span>
+                        <span className="font-medium text-gray-800 truncate max-w-[120px]">
+                          {item.assignee_name}
+                        </span>
+                      </div>
+
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                          isOverdue
+                            ? 'bg-red-50 text-red-700 border border-red-200'
+                            : isToday
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : isTomorrow
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-gray-50 text-gray-600 border border-gray-200'
+                        }`}
+                      >
+                        {isOverdue
+                          ? `Overdue (${Math.abs(item.days_relative || 0)}d)`
+                          : isToday
+                          ? 'Due Today'
+                          : isTomorrow
+                          ? 'Due Tomorrow'
+                          : item.duedate || 'No Due Date'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase">
+                        Status: <strong className="text-gray-700">{item.status}</strong>
+                      </span>
+
+                      <button
+                        onClick={() => {
+                          setTransferItem(item);
+                          setTransferTargetId(data?.assignees[0]?.account_id || '');
+                        }}
+                        className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-md transition-all"
+                      >
+                        Transfer / Handover →
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Ticket Transfer Modal */}
+      {transferItem && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900">Transfer Ticket {transferItem.key}</h3>
+                <p className="text-xs text-gray-500">Reassign in Jira Cloud and log a handover comment.</p>
+              </div>
+              <button onClick={() => setTransferItem(null)} className="text-gray-400 hover:text-gray-600">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteTransfer} className="space-y-4">
+              <div>
+                <span className="text-xs font-semibold text-gray-500">Summary:</span>
+                <p className="text-xs font-medium text-gray-800 mt-0.5">{transferItem.summary}</p>
+              </div>
+
+              <div>
+                <span className="text-xs font-semibold text-gray-500">Current Assignee:</span>
+                <p className="text-xs font-bold text-gray-900">{transferItem.assignee_name}</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Target Assignee</label>
+                <select
+                  value={transferTargetId}
+                  onChange={(e) => setTransferTargetId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-medium bg-gray-50"
+                  required
+                >
+                  {data?.assignees.map((a) => (
+                    <option key={a.account_id} value={a.account_id}>
+                      {a.name} ({a.role}) — {a.open_tickets_count} open tickets
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Handover Note (Optional)</label>
+                <textarea
+                  value={handoverNote}
+                  onChange={(e) => setHandoverNote(e.target.value)}
+                  placeholder="e.g. 'Handing over WhatsApp campaign brief. Creative images approved, needs template creation.'"
+                  rows={3}
+                  className="w-full border border-gray-300 rounded-lg p-2.5 text-xs text-gray-800 placeholder-gray-400"
+                />
+              </div>
+
+              <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTransferItem(null)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={transferring}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 shadow-sm"
+                >
+                  {transferring ? 'Transferring in Jira...' : 'Confirm Transfer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

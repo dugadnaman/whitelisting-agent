@@ -1106,3 +1106,37 @@ export async function updateMoEngageWorkspace(data: {
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export async function fetchWorkManagementDashboard(project: string = "TCN", limit: number = 100) {
+  const qs = new URLSearchParams({ project, limit: limit.toString() });
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/dashboard?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchWorkManagementAssignees(project: string = "TCN") {
+  const qs = new URLSearchParams({ project });
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/assignees?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function transferJiraTicket(issue_key: string, to_account_id: string, handover_note?: string, transferred_by?: string) {
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/transfer`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ issue_key, to_account_id, handover_note: handover_note || "", transferred_by }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function aiRebalanceWorkload(prompt: string, project: string = "TCN", auto_execute: boolean = false) {
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/ai-rebalance`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, project, auto_execute }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
