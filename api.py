@@ -3854,3 +3854,35 @@ def update_moengage_ops_workspace(
         )
     save_workspace_configs(configs)
     return {"ok": True, "workspace": body.dict()}
+
+
+@app.post("/api/moengage/ops/upload-export")
+async def upload_moengage_export_endpoint(
+    file: UploadFile = File(...),
+    vertical: str = Query("TCL"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Upload and ingest a raw campaign export file (CSV/XLSX) downloaded directly
+    from the MoEngage Dashboard (Export button). Instantly updates the ops metrics.
+    """
+    from moengage_ops_client import compute_ops_dashboard_metrics, ingest_moengage_export_file, load_cached_ops_records
+
+    suffix = Path(file.filename or "export.csv").suffix.lower()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        res = ingest_moengage_export_file(tmp_path, default_vertical=vertical)
+        records = load_cached_ops_records()
+        metrics = compute_ops_dashboard_metrics(records, mode="last_week")
+        return _json_safe({
+            "ok": True,
+            "filename": file.filename,
+            "result": res,
+            "metrics": metrics,
+        })
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)

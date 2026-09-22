@@ -170,6 +170,28 @@ def _normalize_channel_name(channel_raw: str | None, label: str | None = None) -
         return "Push"
     return "Push"
 
+
+def infer_channel_from_name_or_raw(channel_raw: str | None = None, name: str | None = None, label: str | None = None) -> str:
+    """
+    Map channel using both MoEngage raw channel tag and standard campaign name suffixes
+    (_WA -> WhatsApp, _RCS -> RCS, _SMS -> SMS, _PN -> Push, _Email -> Email).
+    """
+    n = (name or "").lower()
+    lbl = (label or "").lower()
+    c = (channel_raw or "").strip().lower()
+
+    if "whatsapp" in c or "_wa" in n or "whatsapp" in n or "_wa" in lbl:
+        return "WhatsApp"
+    if "rcs" in c or "_rcs" in n or "rcs" in n or "_rcs" in lbl:
+        return "RCS"
+    if "sms" in c or "_sms" in n or "_sms" in lbl:
+        return "SMS"
+    if "email" in c or "mail" in c or "_email" in n:
+        return "Email"
+    if "push" in c or "_pn" in n or "pn" in n:
+        return "Push"
+
+    return _normalize_channel_name(channel_raw, label=label)
 def _infer_vertical_from_name(name: str, default_vertical: str) -> str:
     """Infer vertical from campaign naming patterns matching Excel formulas."""
     n_lower = name.lower()
@@ -220,7 +242,7 @@ def fetch_workspace_campaigns(
             for c in data:
                 name = c.get("basic_details", {}).get("name") or "Unnamed Campaign"
                 c_by = str(c.get("created_by") or "").strip()
-                chan = _normalize_channel_name(c.get("channel"))
+                chan = infer_channel_from_name_or_raw(c.get("channel"), name=name)
                 created_at_raw = c.get("created_at") or datetime.now(UTC).isoformat()
 
                 try:
@@ -585,3 +607,127 @@ def export_ops_dashboard_excel(
     wb.save(output_path)
     logger.info("Exported %d live records to %s", len(records), output_path)
     return output_path
+
+
+def parse_moengage_export_file(file_path: Path | str, default_vertical: str = "TCL") -> list[NormalizedOpsRecord]:
+    """
+    Parse a CSV or XLSX campaign export file downloaded directly from the MoEngage UI.
+    Automatically infers channels (SMS, RCS, WhatsApp, Email, Push) and Attributics scope.
+    """
+    import csv
+    import openpyxl
+
+    path = Path(file_path)
+    records: list[NormalizedOpsRecord] = []
+    rows_data = []
+
+    if path.suffix.lower() in (".xlsx", ".xls"):
+        wb = openpyxl.load_workbook(str(path), data_only=True)
+        ws = wb.active
+        headers = [str(ws.cell(1, c).value or "").strip() for c in range(1, ws.max_column + 1)]
+        for r in range(2, ws.max_row + 1):
+            row_dict = {headers[c - 1]: ws.cell(r, c).value for c in range(1, len(headers) + 1)}
+            if any(row_dict.values()):
+                rows_data.append(row_dict)
+    else:
+        with open(path, mode="r", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if any(row.values()):
+                    rows_data.append(row)
+
+    for row in rows_data:
+        name = str(
+            row.get("Campaign Name")
+            or row.get("Campaign name")
+            or row.get("campaign_name")
+            or row.get("Name")
+            or row.get("name")
+            or ""
+        ).strip()
+        if not name:
+            continue
+
+        raw_chan = str(row.get("Channel") or row.get("channel") or "").strip()
+        chan = infer_channel_from_name_or_raw(raw_chan, name=name)
+
+        c_by = str(
+            row.get("Created By")
+            or row.get("Created by")
+            or row.get("created_by")
+            or row.get("Author")
+            or ""
+        ).strip()
+
+        date_val = (
+            row.get("Date")
+            or row.get("Created")
+            or row.get("Created At")
+            or row.get("Created at")
+            or row.get("created_at")
+            or row.get("Sent Time")
+            or row.get("sent_time")
+        )
+
+        dt = datetime.now(UTC).date()
+        if isinstance(date_val, (datetime, date)):
+            dt = date_val.date() if isinstance(date_val, datetime) else date_val
+        elif isinstance(date_val, str) and date_val.strip():
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    dt = datetime.strptime(date_val.split(".")[0].strip(), fmt).date()
+                    break
+                except Exception:
+                    pass
+
+        is_test = _is_test_campaign(name)
+        is_attributics = "@attributics.com" in c_by.lower() if c_by else True
+        vertical = _infer_vertical_from_name(name, default_vertical)
+        in_scope = is_attributics and not is_test
+
+        records.append(
+            NormalizedOpsRecord(
+                vertical=vertical,
+                type="Campaign",
+                channel=chan,
+                date=dt.isoformat(),
+                week_start=_compute_week_start(dt),
+                month=dt.strftime("%Y-%m"),
+                in_scope=in_scope,
+                is_test=is_test,
+                name=name,
+                created_by=c_by,
+                source=f"{vertical} / Export",
+                status=str(row.get("Status") or row.get("status") or "Sent"),
+            )
+        )
+
+    return records
+
+
+def ingest_moengage_export_file(file_path: Path | str, default_vertical: str = "TCL") -> dict[str, Any]:
+    """Ingest a MoEngage export file, merge with cached records, update live Excel, and return metrics."""
+    new_records = parse_moengage_export_file(file_path, default_vertical=default_vertical)
+    cached = load_cached_ops_records()
+
+    # Deduplicate by (name, date, vertical, type)
+    seen_keys = {(r.name.lower(), r.date, r.vertical, r.type) for r in cached}
+    merged = list(cached)
+    added_count = 0
+    for nr in new_records:
+        k = (nr.name.lower(), nr.date, nr.vertical, nr.type)
+        if k not in seen_keys:
+            merged.append(nr)
+            seen_keys.add(k)
+            added_count += 1
+
+    # Save to cache
+    CACHE_DATA_PATH.write_text(json.dumps([r.to_dict() for r in merged], indent=2), encoding="utf-8")
+    export_ops_dashboard_excel(merged)
+
+    return {
+        "ok": True,
+        "new_records_parsed": len(new_records),
+        "new_records_added": added_count,
+        "total_records_now": len(merged),
+    }
