@@ -1140,3 +1140,9 @@ export async function aiRebalanceWorkload(prompt: string, project: string = "TCN
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export async function fetchWorkManagementProjects() {
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/projects`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}

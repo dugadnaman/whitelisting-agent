@@ -103,7 +103,14 @@ def list_jira_issues(
     url = f"{base_url}/rest/api/3/search/jql"
     headers = get_jira_auth_headers()
 
-    jql_parts = [f'project = "{project}"']
+    p_clean = (project or "TCN").strip()
+    if p_clean.upper() == "ALL":
+        jql_parts = ['project in ("TCN", "SWCM", "TM", "TAT", "MON", "COL")']
+    elif "," in p_clean:
+        keys_str = ", ".join([f'"{k.strip().upper()}"' for k in p_clean.split(",") if k.strip()])
+        jql_parts = [f"project in ({keys_str})"]
+    else:
+        jql_parts = [f'project = "{p_clean.upper()}"']
     if status and status.lower() != "all":
         jql_parts.append(f'status = "{status}"')
     if search:

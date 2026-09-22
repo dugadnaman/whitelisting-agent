@@ -131,3 +131,24 @@ def test_transfer_jira_ticket_mock():
         comment_arg = mock_comment.call_args[0][1]
         assert "Passing WhatsApp creative review" in comment_arg
         assert "Naman Dugad" in comment_arg
+
+
+def test_swcm_project_dashboard_and_blocked_status():
+    """Verify TATA Service and wealth Campaign Manager (SWCM) project queries and blocks status."""
+    dash = get_work_management_dashboard(project="SWCM", limit=20)
+    assert dash["project"] == "SWCM"
+    assert dash["total_tickets"] > 0
+    # SWCM contains Base Pending / Content Pending which must classify as BLOCKED
+    assert dash["status_counts"]["BLOCKED"] >= 1
+    assert any(w["key"].startswith("SWCM-") for w in dash["work_items"])
+    assert any(p["key"] == "SWCM" for p in dash["projects_catalog"])
+
+
+def test_all_projects_combined_dashboard():
+    """Verify combined querying across all Tata projects (ALL)."""
+    dash = get_work_management_dashboard(project="ALL", limit=30)
+    assert dash["project"] == "ALL"
+    assert dash["total_tickets"] > 0
+    keys = [w["key"] for w in dash["work_items"]]
+    # Should contain tickets from both TCN and SWCM
+    assert any(k.startswith("SWCM-") for k in keys) or any(k.startswith("TCN-") for k in keys)

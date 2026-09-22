@@ -69,6 +69,17 @@ TEAM_MEMBER_ROLES: dict[str, str] = {
 TEAM_MEMBER_ROLES["Aalya Mulla"] = "Associate / Intern"
 
 
+# Supported Tata Capital Jira projects for work management
+JIRA_PROJECTS_CATALOG: list[dict[str, str]] = [
+    {"key": "SWCM", "name": "TATA Service and wealth Campaign Manager"},
+    {"key": "TCN", "name": "Tata Capital New"},
+    {"key": "ALL", "name": "All Tata Projects Combined"},
+    {"key": "TM", "name": "TCHFL Marketing"},
+    {"key": "TAT", "name": "TataCapital"},
+    {"key": "MON", "name": "Moneyfy"},
+    {"key": "COL", "name": "Collections"},
+]
+
 @dataclass
 class JiraUser:
     """Team member profile and active capacity metrics."""
@@ -136,7 +147,7 @@ def categorize_status(status_raw: str | None) -> str:
     s = status_raw.lower().strip()
     if any(k in s for k in ("done", "closed", "resolved", "completed", "whitelisted", "approved")):
         return "DONE"
-    if any(k in s for k in ("blocked", "hold", "waiting", "client feedback", "asset pending", "pause")):
+    if any(k in s for k in ("base pending", "content pending", "asset pending", "blocked", "hold", "waiting", "client feedback", "pause")):
         return "BLOCKED"
     return "PENDING"
 
@@ -307,6 +318,7 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
         "assignees": [u.to_dict() for u in assignable_users],
         "work_items": [w.to_dict() for w in work_items],
         "last_synced_at": datetime.now(UTC).isoformat(),
+        "projects_catalog": JIRA_PROJECTS_CATALOG,
     }
 
 

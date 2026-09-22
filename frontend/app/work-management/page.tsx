@@ -76,6 +76,7 @@ export default function WorkManagementPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<string>('SWCM');
 
   // Filters
   const [selectedTimeline, setSelectedTimeline] = useState<string>('ALL');
@@ -100,14 +101,14 @@ export default function WorkManagementPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await fetchWorkManagementDashboard('TCN', 100);
+      const res = await fetchWorkManagementDashboard(selectedProject, 100);
       setData(res);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load Jira work management');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedProject]);
 
   useEffect(() => {
     loadData();
@@ -117,7 +118,7 @@ export default function WorkManagementPage() {
     try {
       setRefreshing(true);
       setError(null);
-      const res = await fetchWorkManagementDashboard('TCN', 100);
+      const res = await fetchWorkManagementDashboard(selectedProject, 100);
       setData(res);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Refresh failed');
@@ -149,7 +150,7 @@ export default function WorkManagementPage() {
     try {
       setAiLoading(true);
       setError(null);
-      const res = await aiRebalanceWorkload(aiPrompt, 'TCN', autoExecute);
+      const res = await aiRebalanceWorkload(aiPrompt, selectedProject, autoExecute);
       setAiProposals(res.proposals || []);
       setAiReasoning(res.reasoning || null);
       if (autoExecute) {
@@ -194,7 +195,7 @@ export default function WorkManagementPage() {
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Jira Work Management & Dispatcher</h1>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Jira Connected (TCN)
+              Jira Project: {selectedProject}
             </span>
           </div>
           <p className="text-sm text-gray-500 mt-1">
@@ -202,7 +203,23 @@ export default function WorkManagementPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Project:</label>
+            <select
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-xs font-bold bg-white text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="SWCM">TATA Service and wealth Campaign Manager (SWCM)</option>
+              <option value="TCN">Tata Capital New (TCN)</option>
+              <option value="ALL">All Tata Projects Combined</option>
+              <option value="TM">TCHFL Marketing (TM)</option>
+              <option value="TAT">TataCapital (TAT)</option>
+              <option value="MON">Moneyfy (MON)</option>
+              <option value="COL">Collections (COL)</option>
+            </select>
+          </div>
           <button
             onClick={handleRefresh}
             disabled={refreshing}

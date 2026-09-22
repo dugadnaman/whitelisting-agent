@@ -3927,6 +3927,16 @@ def get_work_management_dashboard_endpoint(
     return _json_safe(data)
 
 
+@app.get("/api/work-management/projects")
+def get_work_management_projects_endpoint(
+    current_user: dict = Depends(get_current_user),
+):
+    """List available Tata Capital Jira projects for work management."""
+    from work_manager import JIRA_PROJECTS_CATALOG
+
+    return _json_safe(JIRA_PROJECTS_CATALOG)
+
+
 @app.get("/api/work-management/assignees")
 def get_work_management_assignees_endpoint(
     project: str = Query("TCN"),
