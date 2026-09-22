@@ -89,6 +89,10 @@ class JiraUser:
     email: str = ""
     role: str = "Team Member"
     open_tickets_count: int = 0
+    completed_tickets_count: int = 0
+    blocked_tickets_count: int = 0
+    total_handled_count: int = 0
+    completion_rate: float = 0.0
     due_today_count: int = 0
     due_tomorrow_count: int = 0
     due_day_after_count: int = 0
@@ -268,18 +272,26 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
         assignee_id = assignee_u.account_id if assignee_u else None
         role = TEAM_MEMBER_ROLES.get(assignee_name, "Team Member")
 
-        # Update assignee capacity metrics for active tickets
-        if assignee_u and status_cat != "DONE":
-            assignee_u.open_tickets_count += 1
-            if t_bucket == "OVERDUE":
-                assignee_u.overdue_count += 1
-            elif t_bucket == "TODAY":
-                assignee_u.due_today_count += 1
-            elif t_bucket == "TOMORROW":
-                assignee_u.due_tomorrow_count += 1
-            elif t_bucket == "DAY_AFTER":
-                assignee_u.due_day_after_count += 1
+        # Update assignee capacity & completion metrics
+        if assignee_u:
+            assignee_u.total_handled_count += 1
+            if status_cat == "DONE":
+                assignee_u.completed_tickets_count += 1
+            elif status_cat == "BLOCKED":
+                assignee_u.blocked_tickets_count += 1
+                assignee_u.open_tickets_count += 1
+            else:
+                assignee_u.open_tickets_count += 1
 
+            if status_cat != "DONE":
+                if t_bucket == "OVERDUE":
+                    assignee_u.overdue_count += 1
+                elif t_bucket == "TODAY":
+                    assignee_u.due_today_count += 1
+                elif t_bucket == "TOMORROW":
+                    assignee_u.due_tomorrow_count += 1
+                elif t_bucket == "DAY_AFTER":
+                    assignee_u.due_day_after_count += 1
         work_items.append(
             WorkItem(
                 key=item["key"],
@@ -302,6 +314,11 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
             )
         )
 
+
+    # Calculate completion rates
+    for u in assignable_users:
+        if u.total_handled_count > 0:
+            u.completion_rate = round((u.completed_tickets_count / u.total_handled_count) * 100, 1)
     # Sort assignable users by core operators first, then open tickets count
     def _user_sort_key(u: JiraUser) -> tuple[int, int]:
         is_core = 0 if u.role == "Core Operator" else (1 if "Intern" in u.role else 2)

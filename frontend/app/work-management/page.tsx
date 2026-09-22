@@ -13,6 +13,10 @@ type JiraUserItem = {
   email: string;
   role: string;
   open_tickets_count: number;
+  completed_tickets_count: number;
+  blocked_tickets_count: number;
+  total_handled_count: number;
+  completion_rate: number;
   due_today_count: number;
   due_tomorrow_count: number;
   due_day_after_count: number;
@@ -304,22 +308,50 @@ export default function WorkManagementPage() {
 
                       <h3 className="text-sm font-bold text-gray-900 truncate">{u.name}</h3>
 
-                      <div className="text-2xl font-extrabold text-gray-900 mt-2">
-                        {u.open_tickets_count}{' '}
-                        <span className="text-xs font-normal text-gray-500">active tickets</span>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                          ✓ {u.completed_tickets_count} Done
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                          {u.open_tickets_count} Pending
+                        </span>
+                        {u.blocked_tickets_count > 0 && (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-800 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md">
+                            {u.blocked_tickets_count} Blocked
+                          </span>
+                        )}
                       </div>
+
+                      {u.total_handled_count > 0 && (
+                        <div className="mt-2.5 space-y-1">
+                          <div className="flex items-center justify-between text-[10px] text-gray-500 font-semibold">
+                            <span>Completion Rate</span>
+                            <span className="font-extrabold text-gray-800">{u.completion_rate}%</span>
+                          </div>
+                          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className="bg-emerald-500 h-1.5 rounded-full transition-all"
+                              style={{ width: `${Math.min(100, u.completion_rate)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="mt-4 pt-3 border-t border-gray-100 grid grid-cols-3 gap-1 text-center text-[10px]">
-                      <div className="bg-gray-50 p-1.5 rounded">
+                    <div className="mt-4 pt-3 border-t border-gray-100 grid grid-cols-4 gap-1 text-center text-[10px]">
+                      <div className="bg-emerald-50/70 p-1 rounded">
+                        <span className="text-emerald-700 block font-bold">Done</span>
+                        <span className="font-extrabold text-emerald-900">{u.completed_tickets_count}</span>
+                      </div>
+                      <div className="bg-gray-50 p-1 rounded">
                         <span className="text-gray-400 block font-semibold">Today</span>
                         <span className="font-bold text-gray-900">{u.due_today_count}</span>
                       </div>
-                      <div className="bg-gray-50 p-1.5 rounded">
+                      <div className="bg-gray-50 p-1 rounded">
                         <span className="text-gray-400 block font-semibold">Tmrw</span>
                         <span className="font-bold text-gray-900">{u.due_tomorrow_count}</span>
                       </div>
-                      <div className="bg-red-50 p-1.5 rounded">
+                      <div className="bg-red-50 p-1 rounded">
                         <span className="text-red-500 block font-semibold">Overdue</span>
                         <span className="font-bold text-red-700">{u.overdue_count}</span>
                       </div>
@@ -327,6 +359,66 @@ export default function WorkManagementPage() {
                   </div>
                 );
               })}
+          </div>
+
+          {/* Team Delivery Scorecard Table */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mt-4">
+            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                  Team Member Delivery Scorecard ({selectedProject})
+                </h3>
+                <p className="text-xs text-gray-500">Summary of total tickets completed (Done) vs currently active by each operator.</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100">
+                  <tr>
+                    <th className="py-2.5 px-4">Operator</th>
+                    <th className="py-2.5 px-3">Role</th>
+                    <th className="py-2.5 px-3 text-emerald-700">Completed (Done)</th>
+                    <th className="py-2.5 px-3 text-amber-700">Pending</th>
+                    <th className="py-2.5 px-3 text-purple-700">Blocked</th>
+                    <th className="py-2.5 px-3 text-red-600">Overdue</th>
+                    <th className="py-2.5 px-3">Total Handled</th>
+                    <th className="py-2.5 px-4 text-right">Completion %</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {data.assignees.map((u) => (
+                    <tr key={u.account_id} className="hover:bg-gray-50/50">
+                      <td className="py-2.5 px-4 font-bold text-gray-900">{u.name}</td>
+                      <td className="py-2.5 px-3 text-gray-500">{u.role}</td>
+                      <td className="py-2.5 px-3">
+                        <span className="inline-flex items-center gap-1 font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          ✓ {u.completed_tickets_count}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-bold text-amber-700">{u.open_tickets_count}</td>
+                      <td className="py-2.5 px-3 font-bold text-purple-700">{u.blocked_tickets_count}</td>
+                      <td className="py-2.5 px-3 font-bold text-red-600">{u.overdue_count}</td>
+                      <td className="py-2.5 px-3 font-extrabold text-gray-900">{u.total_handled_count}</td>
+                      <td className="py-2.5 px-4 text-right font-extrabold text-gray-900">
+                        {u.total_handled_count > 0 ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span>{u.completion_rate}%</span>
+                            <span className="w-12 bg-gray-100 rounded-full h-1.5 overflow-hidden ml-1.5 inline-block">
+                              <span
+                                className="bg-emerald-500 h-1.5 rounded-full block"
+                                style={{ width: `${Math.min(100, u.completion_rate)}%` }}
+                              />
+                            </span>
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
