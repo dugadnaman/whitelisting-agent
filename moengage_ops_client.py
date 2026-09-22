@@ -49,6 +49,7 @@ DEFAULT_WORKSPACES: list[dict[str, Any]] = [
         "vertical": "TCL",
         "workspace_id": os.environ.get("MOENGAGE_TCL_WORKSPACE_ID") or "0KYUNUW5WODKX5ZFVAGPVL0U",
         "api_key": os.environ.get("MOENGAGE_TCL_API_KEY") or "D9FCC06FDE8947429FDB1928",
+        "campaign_report_key": os.environ.get("TATA_MOENGAGE_CAMPAIGN_REPORT_KEY") or "DQCF55C6YIVC",
         "data_center": "03",
         "is_active": True,
     },
@@ -85,8 +86,19 @@ class MoEngageWorkspaceConfig:
     vertical: str
     workspace_id: str
     api_key: str
+    campaign_report_key: str | None = None
     data_center: str = "03"
     is_active: bool = True
+
+    def get_campaign_report_headers(self) -> dict[str, str]:
+        key = self.campaign_report_key or self.api_key
+        auth_str = f"{self.workspace_id}:{key}"
+        b64_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
+        return {
+            "Authorization": f"Basic {b64_auth}",
+            "MOE-APPKEY": self.workspace_id,
+            "Content-Type": "application/json",
+        }
 
     def get_base_url(self) -> str:
         return f"https://api-{self.data_center}.moengage.com"
@@ -222,6 +234,59 @@ def fetch_workspace_campaigns(
     headers = config.get_headers()
     url = f"{config.get_base_url()}/v5/campaigns/search"
     records: list[NormalizedOpsRecord] = []
+
+    # Prefer Campaign Meta API if campaign_report_key is configured (returns WhatsApp, RCS, SMS, Push, Email)
+    if config.campaign_report_key:
+        headers = config.get_campaign_report_headers()
+        url = f"{config.get_base_url()}/core-services/v1/campaigns/meta"
+        for page in range(1, max_pages + 1):
+            body = {
+                "request_id": f"meta_{config.workspace_name.lower()}_{page}_{int(datetime.now(UTC).timestamp())}",
+                "page": page,
+                "limit": 15,
+            }
+            try:
+                resp = requests.post(url, headers=headers, json=body, timeout=20)
+                if not resp.ok:
+                    break
+                camps = resp.json()
+                if not camps or not isinstance(camps, list):
+                    break
+                for c in camps:
+                    name = str(c.get("campaign_name") or "Unnamed Campaign").strip()
+                    c_by = str(c.get("created_by") or "").strip()
+                    raw_chan = str(c.get("channel") or "")
+                    chan = infer_channel_from_name_or_raw(raw_chan, name=name)
+                    start_time = c.get("campaign_start_time") or c.get("created_at") or datetime.now(UTC).isoformat()
+                    try:
+                        dt = datetime.fromisoformat(start_time.split(".")[0].replace("Z", "+00:00")).date()
+                    except Exception:
+                        dt = datetime.now(UTC).date()
+                    is_test = _is_test_campaign(name)
+                    is_attributics = "@attributics.com" in c_by.lower() if c_by else True
+                    vertical = _infer_vertical_from_name(name, config.vertical)
+                    in_scope = is_attributics and not is_test
+
+                    records.append(
+                        NormalizedOpsRecord(
+                            vertical=vertical,
+                            type="Campaign",
+                            channel=chan,
+                            date=dt.isoformat(),
+                            week_start=_compute_week_start(dt),
+                            month=dt.strftime("%Y-%m"),
+                            in_scope=in_scope,
+                            is_test=is_test,
+                            name=name,
+                            created_by=c_by,
+                            source=f"{config.vertical} / CampaignMeta",
+                            status=str(c.get("campaign_status") or "Active"),
+                        )
+                    )
+            except Exception as exc:
+                logger.error("Error fetching campaign meta for %s: %s", config.workspace_name, exc)
+                break
+        return records
 
     for page in range(1, max_pages + 1):
         body = {
