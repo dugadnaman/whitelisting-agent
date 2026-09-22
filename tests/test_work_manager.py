@@ -20,6 +20,7 @@ from work_manager import (
     categorize_status,
     compute_timeline_bucket,
     fetch_assignable_jira_users,
+    get_turnaround_and_bottleneck_analytics,
     get_work_management_dashboard,
     infer_channel_from_summary,
     transfer_jira_ticket,
@@ -152,3 +153,75 @@ def test_all_projects_combined_dashboard():
     keys = [w["key"] for w in dash["work_items"]]
     # Should contain tickets from both TCN and SWCM
     assert any(k.startswith("SWCM-") for k in keys) or any(k.startswith("TCN-") for k in keys)
+
+
+def test_turnaround_and_bottleneck_analytics():
+    """Verify cycle time calculations, operator turnaround velocity, and roadblock attribution."""
+    analytics = get_turnaround_and_bottleneck_analytics(project="SWCM", limit=50)
+
+    assert analytics["project"] == "SWCM"
+    assert analytics["total_tickets_analyzed"] > 0
+    assert analytics["completed_count"] > 0
+    assert analytics["team_avg_cycle_time_days"] > 0.0
+    assert analytics["team_avg_cycle_time_hours"] > 0.0
+
+    # Roadblock Attribution checks
+    attr = analytics["roadblock_attribution"]
+    assert "total_roadblocks" in attr
+    assert "tata_capital" in attr
+    assert "karix_meta" in attr
+    assert "attributics" in attr
+    assert attr["total_roadblocks"] == (
+        attr["tata_capital"]["count"]
+        + attr["karix_meta"]["count"]
+        + attr["attributics"]["count"]
+    )
+    if attr["total_roadblocks"] > 0:
+        total_pct = (
+            attr["tata_capital"]["percentage"]
+            + attr["karix_meta"]["percentage"]
+            + attr["attributics"]["percentage"]
+        )
+        assert round(total_pct) == 100
+
+    # Operator Velocities checks
+    ops = analytics["operator_velocities"]
+    assert len(ops) > 0
+    dnyanesh = next((o for o in ops if o["name"] == "Dnyanesh Khawas"), None)
+    assert dnyanesh is not None
+    assert dnyanesh["completed_count"] > 0
+    assert dnyanesh["avg_cycle_time_days"] > 0.0
+    assert dnyanesh["velocity_rating"] in ["EXCELLENT", "FAST", "STANDARD"]
+
+    # Blocked tickets diagnostic
+    blocked = analytics["blocked_tickets"]
+    assert len(blocked) == attr["total_roadblocks"]
+    for t in blocked:
+        assert t["roadblock_category"] in [
+            "Tata Capital (Client)",
+            "Karix / Meta (Gateway)",
+            "Attributics (Internal)",
+        ]
+        assert t["root_cause"] != ""
+        assert t["aging_days"] >= 0.0
+
+
+def test_api_turnaround_analytics_endpoint():
+    """Verify GET /api/work-management/turnaround-analytics returns expected analytics payload."""
+    from fastapi.testclient import TestClient
+    from api import app, get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {"email": "test@attributics.com", "name": "Test User"}
+    client = TestClient(app)
+
+    try:
+        resp = client.get("/api/work-management/turnaround-analytics?project=SWCM&limit=25")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["project"] == "SWCM"
+        assert "team_avg_cycle_time_days" in data
+        assert "roadblock_attribution" in data
+        assert "operator_velocities" in data
+        assert "blocked_tickets" in data
+    finally:
+        app.dependency_overrides.clear()

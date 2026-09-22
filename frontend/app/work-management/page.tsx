@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   fetchWorkManagementDashboard,
+  fetchTurnaroundAnalytics,
   transferJiraTicket,
   aiRebalanceWorkload,
 } from '@/lib/api';
@@ -21,6 +22,59 @@ type JiraUserItem = {
   due_tomorrow_count: number;
   due_day_after_count: number;
   overdue_count: number;
+};
+
+type OperatorVelocityItem = {
+  name: string;
+  role: string;
+  completed_count: number;
+  avg_cycle_time_days: number;
+  avg_cycle_time_hours: number;
+  fastest_hours: number;
+  slowest_days: number;
+  velocity_rating: string;
+};
+
+type RoadblockTicketItem = {
+  key: string;
+  summary: string;
+  assignee: string;
+  status: string;
+  roadblock_category: string;
+  root_cause: string;
+  aging_hours: number;
+  aging_days: number;
+  duedate: string | null;
+};
+
+type TurnaroundAnalyticsData = {
+  project: string;
+  total_tickets_analyzed: number;
+  completed_count: number;
+  active_roadblocks_count: number;
+  team_avg_cycle_time_days: number;
+  team_avg_cycle_time_hours: number;
+  operator_velocities: OperatorVelocityItem[];
+  roadblock_attribution: {
+    total_roadblocks: number;
+    tata_capital: {
+      count: number;
+      percentage: number;
+      label: string;
+    };
+    karix_meta: {
+      count: number;
+      percentage: number;
+      label: string;
+    };
+    attributics: {
+      count: number;
+      percentage: number;
+      label: string;
+    };
+    reasons_breakdown: Record<string, number>;
+  };
+  blocked_tickets: RoadblockTicketItem[];
 };
 
 type WorkItem = {
@@ -81,6 +135,10 @@ export default function WorkManagementPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<string>('SWCM');
+  // Tab Switcher
+  const [activeTab, setActiveTab] = useState<'OPERATIONS' | 'ANALYTICS'>('OPERATIONS');
+  const [analyticsData, setAnalyticsData] = useState<TurnaroundAnalyticsData | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState<boolean>(false);
 
   // Filters
   const [selectedTimeline, setSelectedTimeline] = useState<string>('ALL');
@@ -107,6 +165,8 @@ export default function WorkManagementPage() {
       setError(null);
       const res = await fetchWorkManagementDashboard(selectedProject, 100);
       setData(res);
+      const aRes = await fetchTurnaroundAnalytics(selectedProject, 100);
+      setAnalyticsData(aRes);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load Jira work management');
     } finally {
@@ -124,6 +184,8 @@ export default function WorkManagementPage() {
       setError(null);
       const res = await fetchWorkManagementDashboard(selectedProject, 100);
       setData(res);
+      const aRes = await fetchTurnaroundAnalytics(selectedProject, 100);
+      setAnalyticsData(aRes);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Refresh failed');
     } finally {
@@ -244,6 +306,295 @@ export default function WorkManagementPage() {
           </button>
         </div>
       </div>
+
+      {/* View Mode Switcher */}
+      <div className="flex items-center gap-2 border-b border-gray-200 pb-3">
+        <button
+          onClick={() => setActiveTab('OPERATIONS')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeTab === 'OPERATIONS'
+              ? 'bg-gray-900 text-white shadow-sm'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          <span>📋</span> Operational Queues & Dispatcher
+        </button>
+        <button
+          onClick={() => setActiveTab('ANALYTICS')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeTab === 'ANALYTICS'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          <span>📊</span> Management Turnaround & Bottleneck Matrix
+          <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-full font-semibold">
+            SLA View
+          </span>
+        </button>
+      </div>
+
+      {/* MANAGEMENT ANALYTICS VIEW */}
+      {activeTab === 'ANALYTICS' && analyticsData && (
+        <div className="space-y-6">
+          {/* Executive KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: Team Avg Turnaround */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Avg Turnaround Velocity</span>
+                <div className="text-3xl font-extrabold text-gray-900 mt-1">
+                  {analyticsData.team_avg_cycle_time_days} <span className="text-sm font-semibold text-gray-500">Days</span>
+                </div>
+                <p className="text-xs text-emerald-600 font-semibold mt-1">
+                  {analyticsData.team_avg_cycle_time_hours} hrs average brief-to-done
+                </p>
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-500">
+                Based on {analyticsData.completed_count} completed briefs
+              </div>
+            </div>
+
+            {/* Card 2: Roadblock Attribution Ratio */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Primary Bottleneck Driver</span>
+                <div className="text-2xl font-extrabold text-blue-900 mt-1">
+                  {analyticsData.roadblock_attribution.tata_capital.percentage}% Client-Side
+                </div>
+                <p className="text-xs text-blue-600 font-semibold mt-1">
+                  {analyticsData.roadblock_attribution.tata_capital.count} tickets waiting on Tata Capital
+                </p>
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-500">
+                Base & content dependencies
+              </div>
+            </div>
+
+            {/* Card 3: Gateway Review Gate */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Gateway Review Gate</span>
+                <div className="text-2xl font-extrabold text-purple-900 mt-1">
+                  {analyticsData.roadblock_attribution.karix_meta.count} Briefs
+                </div>
+                <p className="text-xs text-purple-600 font-semibold mt-1">
+                  {analyticsData.roadblock_attribution.karix_meta.percentage}% at Karix/Meta gate
+                </p>
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-500">
+                Awaiting carrier delivery & approvals
+              </div>
+            </div>
+
+            {/* Card 4: Internal Attributics Queue */}
+            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Attributics Ops Queue</span>
+                <div className="text-2xl font-extrabold text-amber-900 mt-1">
+                  {analyticsData.roadblock_attribution.attributics.count} Active
+                </div>
+                <p className="text-xs text-amber-600 font-semibold mt-1">
+                  {analyticsData.roadblock_attribution.attributics.percentage}% in internal drafting
+                </p>
+              </div>
+              <div className="mt-3 pt-3 border-t border-gray-100 text-[11px] text-gray-500">
+                Healthy operator throughput
+              </div>
+            </div>
+          </div>
+
+          {/* Bottleneck Responsibility Visual Bar */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                  Roadblock Attribution & Responsibility Split ({analyticsData.active_roadblocks_count} Stalled Tickets)
+                </h3>
+                <p className="text-xs text-gray-500">Where are campaigns getting stuck? Explains delays to executive management.</p>
+              </div>
+            </div>
+
+            {/* 3-Color Visual Stacked Bar */}
+            <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden flex shadow-inner">
+              <div
+                className="bg-blue-600 h-full transition-all"
+                style={{ width: `${analyticsData.roadblock_attribution.tata_capital.percentage}%` }}
+                title={`Tata Capital: ${analyticsData.roadblock_attribution.tata_capital.percentage}%`}
+              />
+              <div
+                className="bg-purple-500 h-full transition-all"
+                style={{ width: `${analyticsData.roadblock_attribution.karix_meta.percentage}%` }}
+                title={`Karix / Meta Gate: ${analyticsData.roadblock_attribution.karix_meta.percentage}%`}
+              />
+              <div
+                className="bg-amber-400 h-full transition-all"
+                style={{ width: `${analyticsData.roadblock_attribution.attributics.percentage}%` }}
+                title={`Attributics Queue: ${analyticsData.roadblock_attribution.attributics.percentage}%`}
+              />
+            </div>
+
+            {/* Legend */}
+            <div className="flex flex-wrap items-center gap-5 pt-1 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-blue-600" />
+                <span className="font-semibold text-gray-700">Tata Capital Dependencies ({analyticsData.roadblock_attribution.tata_capital.percentage}%)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-purple-500" />
+                <span className="font-semibold text-gray-700">Karix / Meta Gateway Gate ({analyticsData.roadblock_attribution.karix_meta.percentage}%)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full bg-amber-400" />
+                <span className="font-semibold text-gray-700">Attributics Ops Queue ({analyticsData.roadblock_attribution.attributics.percentage}%)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Operator Turnaround Leaderboard */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-gray-100">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                Operator Turnaround Velocity Leaderboard ({selectedProject})
+              </h3>
+              <p className="text-xs text-gray-500">Shows cycle times (hours and days) for each team member from brief creation to Done.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100">
+                  <tr>
+                    <th className="py-2.5 px-4">Operator</th>
+                    <th className="py-2.5 px-3">Role</th>
+                    <th className="py-2.5 px-3 text-emerald-700">Completed (Done)</th>
+                    <th className="py-2.5 px-3">Avg Turnaround (Days)</th>
+                    <th className="py-2.5 px-3">Avg Turnaround (Hours)</th>
+                    <th className="py-2.5 px-3">Fastest Record</th>
+                    <th className="py-2.5 px-3">Slowest Record</th>
+                    <th className="py-2.5 px-4 text-right">Velocity Rating</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {analyticsData.operator_velocities.map((op) => (
+                    <tr key={op.name} className="hover:bg-gray-50/50">
+                      <td className="py-2.5 px-4 font-bold text-gray-900">{op.name}</td>
+                      <td className="py-2.5 px-3 text-gray-500">{op.role}</td>
+                      <td className="py-2.5 px-3">
+                        <span className="inline-flex items-center gap-1 font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          ✓ {op.completed_count}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-extrabold text-gray-900">
+                        {op.completed_count > 0 ? `${op.avg_cycle_time_days}d` : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-gray-600 font-medium">
+                        {op.completed_count > 0 ? `${op.avg_cycle_time_hours}h` : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 font-medium text-emerald-600">
+                        {op.completed_count > 0 ? `${op.fastest_hours}h` : '—'}
+                      </td>
+                      <td className="py-2.5 px-3 font-medium text-gray-500">
+                        {op.completed_count > 0 ? `${op.slowest_days}d` : '—'}
+                      </td>
+                      <td className="py-2.5 px-4 text-right">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                            op.velocity_rating === 'EXCELLENT'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : op.velocity_rating === 'FAST'
+                              ? 'bg-blue-100 text-blue-800'
+                              : op.velocity_rating === 'STANDARD'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          {op.velocity_rating.replace('_', ' ')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Stalled Tickets Root Cause Diagnostics Table */}
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="p-4 border-b border-gray-100">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-900">
+                Active Roadblock Tickets Diagnostic ({analyticsData.blocked_tickets.length} Stalled Items)
+              </h3>
+              <p className="text-xs text-gray-500">Every stalled ticket classified by root cause and responsible entity.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-100">
+                  <tr>
+                    <th className="py-2.5 px-4">Ticket</th>
+                    <th className="py-2.5 px-3">Assignee</th>
+                    <th className="py-2.5 px-4">Roadblock Root Cause</th>
+                    <th className="py-2.5 px-3">Responsible Party</th>
+                    <th className="py-2.5 px-3">Aging Time</th>
+                    <th className="py-2.5 px-3 text-right">Due Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {analyticsData.blocked_tickets.map((t) => {
+                    const isHighAging = t.aging_days >= 1.0;
+                    const isTata = t.roadblock_category.includes('Tata');
+                    const isKarix = t.roadblock_category.includes('Karix');
+
+                    return (
+                      <tr key={t.key} className="hover:bg-gray-50/50">
+                        <td className="py-2.5 px-4 font-bold">
+                          <a
+                            href={`https://tatacapital-team.atlassian.net/browse/${t.key}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {t.key}
+                          </a>
+                        </td>
+                        <td className="py-2.5 px-3 font-medium text-gray-800">{t.assignee}</td>
+                        <td className="py-2.5 px-4 text-gray-700">{t.root_cause}</td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              isTata
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : isKarix
+                                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}
+                          >
+                            {t.roadblock_category}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${
+                              isHighAging ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {t.aging_days}d ({t.aging_hours}h)
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-gray-500 font-medium">
+                          {t.duedate || 'No Due Date'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OPERATIONAL VIEW CONTAINER */}
+      {activeTab === 'OPERATIONS' && (
+        <div className="space-y-8">
 
       {error && (
         <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-3">
@@ -706,7 +1057,8 @@ export default function WorkManagementPage() {
           </div>
         )}
       </div>
-
+      </div>
+      )}
       {/* Ticket Transfer Modal */}
       {transferItem && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">

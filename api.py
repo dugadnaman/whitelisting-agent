@@ -3990,3 +3990,21 @@ def ai_rebalance_workload_endpoint(
         operator_name=operator,
     )
     return _json_safe(result)
+
+
+@app.get("/api/work-management/turnaround-analytics")
+def get_turnaround_analytics_endpoint(
+    project: str = Query("SWCM"),
+    limit: int = Query(100),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get management turnaround analytics:
+    - Operator cycle time (turnaround velocity)
+    - Bottleneck & roadblock attribution (Tata Capital vs Karix vs Attributics)
+    - Stalled tickets with root cause and aging hours
+    """
+    from work_manager import get_turnaround_and_bottleneck_analytics
+
+    data = get_turnaround_and_bottleneck_analytics(project=project, limit=limit)
+    return _json_safe(data)

@@ -144,6 +144,41 @@ class TransferProposal:
         return asdict(self)
 
 
+@dataclass
+class OperatorVelocity:
+    """Operator turnaround speed and cycle time metrics."""
+
+    name: str
+    role: str
+    completed_count: int
+    avg_cycle_time_days: float
+    avg_cycle_time_hours: float
+    fastest_hours: float
+    slowest_days: float
+    velocity_rating: str  # "EXCELLENT" | "FAST" | "STANDARD" | "NEEDS_ATTENTION"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass
+class RoadblockTicket:
+    """Detailed diagnosis of a stalled or blocked ticket."""
+
+    key: str
+    summary: str
+    assignee: str
+    status: str
+    roadblock_category: str  # "Tata Capital (Client)" | "Karix / Meta (Gateway)" | "Attributics (Internal)"
+    root_cause: str
+    aging_hours: float
+    aging_days: float
+    duedate: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 def categorize_status(status_raw: str | None) -> str:
     """Classify arbitrary Jira status into PENDING, BLOCKED, or DONE."""
     if not status_raw:
@@ -579,4 +614,188 @@ def _rule_based_rebalance(
         "proposals_count": len(proposals),
         "proposals": [p.to_dict() for p in proposals],
         "reasoning": f"Rule-based rebalancing reallocated {len(proposals)} tickets from {src_user['name']}.",
+    }
+
+
+def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 100) -> dict[str, Any]:
+    """
+    Calculate operator cycle times (turnaround velocity) and diagnose roadblock
+    responsibility (Tata Capital client-side dependencies vs Karix vs Attributics).
+    """
+    raw_issues = list_jira_issues(project=project, limit=limit)
+    assignable_users = fetch_assignable_jira_users(project=project)
+
+    now = datetime.now(UTC)
+    done_times_by_user: dict[str, list[float]] = {}
+    blocked_tickets: list[RoadblockTicket] = []
+
+    roadblock_counts = {
+        "Tata Capital": 0,
+        "Karix / Meta": 0,
+        "Attributics": 0,
+    }
+    roadblock_reasons: dict[str, int] = {}
+    completed_count = 0
+    all_done_times: list[float] = []
+
+    for item in raw_issues:
+        summary = str(item.get("summary") or "")
+        status_raw = str(item.get("status") or "").strip()
+        st_lower = status_raw.lower()
+        assignee_raw = str(item.get("assignee") or "Unassigned").strip()
+
+        if assignee_raw.lower() in ("aalya mulla", "aadya"):
+            assignee = "Aadya"
+        elif assignee_raw.lower() in ("soham", "soham das"):
+            assignee = "Soham Das"
+        else:
+            assignee = assignee_raw
+
+        c_str = item.get("created")
+        u_str = item.get("updated")
+        duedate = item.get("duedate")
+
+        dt_c = None
+        dt_u = None
+        if c_str:
+            try:
+                dt_c = datetime.fromisoformat(c_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        if u_str:
+            try:
+                dt_u = datetime.fromisoformat(u_str.replace("Z", "+00:00"))
+            except Exception:
+                pass
+
+        # 1. Evaluate Cycle Time for Completed Tickets
+        if any(k in st_lower for k in ("done", "closed", "resolved", "whitelisted", "approved")):
+            completed_count += 1
+            if dt_c and dt_u:
+                hours = max(0.1, (dt_u - dt_c).total_seconds() / 3600)
+                all_done_times.append(hours)
+                done_times_by_user.setdefault(assignee, []).append(hours)
+            continue
+
+        # 2. Evaluate Roadblocks for Non-Completed Tickets
+        aging_hours = (now - dt_c).total_seconds() / 3600 if dt_c else 0.0
+        aging_days = round(aging_hours / 24, 1)
+
+        # Categorize roadblock responsibility
+        if any(k in st_lower for k in ("base pending", "audience", "datamart")):
+            category = "Tata Capital (Client)"
+            cause = "Base Pending (Customer Audience Mart File from Tata Capital)"
+        elif any(k in st_lower for k in ("content pending", "copy pending")):
+            category = "Tata Capital (Client)"
+            cause = "Content Pending (Copywriting / Brand Content from Tata Capital)"
+        elif any(k in st_lower for k in ("asset pending", "creative pending")):
+            category = "Tata Capital (Client)"
+            cause = "Asset Pending (Image / Banner / Video Creatives from Tata Capital)"
+        elif any(k in st_lower for k in ("client feedback", "waiting on client", "hold")):
+            category = "Tata Capital (Client)"
+            cause = "Client Sign-Off Pending (Waiting on Tata Capital Feedback)"
+        elif any(k in st_lower for k in ("test sent", "whitelisting", "carrier review", "karix")):
+            category = "Karix / Meta (Gateway)"
+            cause = "Gateway Review Gate (Awaiting Karix / Meta Whitelisting Approval)"
+        else:
+            category = "Attributics (Internal)"
+            cause = f"Attributics Ops Queue ({status_raw})"
+
+        resp_key = "Tata Capital" if "Tata" in category else ("Karix / Meta" if "Karix" in category else "Attributics")
+        roadblock_counts[resp_key] = roadblock_counts.get(resp_key, 0) + 1
+        roadblock_reasons[cause] = roadblock_reasons.get(cause, 0) + 1
+
+        blocked_tickets.append(
+            RoadblockTicket(
+                key=item["key"],
+                summary=summary,
+                assignee=assignee,
+                status=status_raw,
+                roadblock_category=category,
+                root_cause=cause,
+                aging_hours=round(aging_hours, 1),
+                aging_days=aging_days,
+                duedate=duedate,
+            )
+        )
+
+    # Sort blocked tickets by longest aging first
+    blocked_tickets.sort(key=lambda t: t.aging_hours, reverse=True)
+
+    # 3. Compute Per-Operator Turnaround Velocities
+    operator_velocities: list[OperatorVelocity] = []
+    for u in assignable_users:
+        times = done_times_by_user.get(u.name, [])
+        if times:
+            avg_h = sum(times) / len(times)
+            avg_d = avg_h / 24
+            fastest_h = min(times)
+            slowest_d = max(times) / 24
+            if avg_h <= 24:
+                rating = "EXCELLENT"
+            elif avg_h <= 48:
+                rating = "FAST"
+            elif avg_h <= 96:
+                rating = "STANDARD"
+            else:
+                rating = "NEEDS_ATTENTION"
+        else:
+            avg_h = 0.0
+            avg_d = 0.0
+            fastest_h = 0.0
+            slowest_d = 0.0
+            rating = "NO_COMPLETED"
+
+        operator_velocities.append(
+            OperatorVelocity(
+                name=u.name,
+                role=u.role,
+                completed_count=len(times),
+                avg_cycle_time_days=round(avg_d, 2),
+                avg_cycle_time_hours=round(avg_h, 1),
+                fastest_hours=round(fastest_h, 1),
+                slowest_days=round(slowest_d, 1),
+                velocity_rating=rating,
+            )
+        )
+
+    # Sort operator leaderboard by completed count desc, then avg cycle time
+    operator_velocities.sort(key=lambda o: (-o.completed_count, o.avg_cycle_time_hours if o.avg_cycle_time_hours > 0 else 999))
+
+    team_avg_hours = sum(all_done_times) / len(all_done_times) if all_done_times else 0.0
+    team_avg_days = round(team_avg_hours / 24, 2)
+
+    total_rb = len(blocked_tickets)
+    tc_count = roadblock_counts.get("Tata Capital", 0)
+    km_count = roadblock_counts.get("Karix / Meta", 0)
+    att_count = roadblock_counts.get("Attributics", 0)
+
+    return {
+        "project": project,
+        "total_tickets_analyzed": len(raw_issues),
+        "completed_count": completed_count,
+        "active_roadblocks_count": total_rb,
+        "team_avg_cycle_time_days": team_avg_days,
+        "team_avg_cycle_time_hours": round(team_avg_hours, 1),
+        "operator_velocities": [o.to_dict() for o in operator_velocities],
+        "roadblock_attribution": {
+            "total_roadblocks": total_rb,
+            "tata_capital": {
+                "count": tc_count,
+                "percentage": round((tc_count / total_rb) * 100, 1) if total_rb > 0 else 0.0,
+                "label": "Client Dependencies (Data Mart / Content / Sign-off)",
+            },
+            "karix_meta": {
+                "count": km_count,
+                "percentage": round((km_count / total_rb) * 100, 1) if total_rb > 0 else 0.0,
+                "label": "Gateway Review (Karix & Meta Whitelisting Gate)",
+            },
+            "attributics": {
+                "count": att_count,
+                "percentage": round((att_count / total_rb) * 100, 1) if total_rb > 0 else 0.0,
+                "label": "Attributics Ops Queue (Drafting & Formatting)",
+            },
+            "reasons_breakdown": roadblock_reasons,
+        },
+        "blocked_tickets": [t.to_dict() for t in blocked_tickets],
     }

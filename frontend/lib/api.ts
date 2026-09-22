@@ -1146,3 +1146,10 @@ export async function fetchWorkManagementProjects() {
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+
+export async function fetchTurnaroundAnalytics(project: string = "SWCM", limit: number = 100) {
+  const qs = new URLSearchParams({ project, limit: limit.toString() });
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/turnaround-analytics?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
