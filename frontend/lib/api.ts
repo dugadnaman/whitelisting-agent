@@ -1261,8 +1261,6 @@ export type AlertsDispatchResponse = {
   real_sent_count: number;
   simulated_count: number;
   failed_count: number;
-  jira_posted_count?: number;
-  jira_results?: Array<{ ticket_key: string; operator_name: string; posted: boolean; comment_id?: string; error?: string }>;
   google_chat_result?: { delivered?: boolean; simulated?: boolean; message?: string; error?: string };
   dry_run: boolean;
   dispatched_by: string;
@@ -1280,7 +1278,6 @@ export type AlertsDispatchOptions = {
   project?: string;
   stage?: string;
   dry_run?: boolean;
-  send_jira_mentions?: boolean;
   send_google_chat?: boolean;
   send_email?: boolean;
   google_chat_webhook_url?: string;

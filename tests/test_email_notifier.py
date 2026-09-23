@@ -19,7 +19,6 @@ from email_notifier import (
     dispatch_due_today_alerts,
     get_current_ist_time,
     group_tickets_by_operator,
-    post_all_jira_sla_comments,
     preview_due_today_alerts,
     send_email_smtp,
     send_google_chat_sla_alert,
@@ -141,36 +140,6 @@ def test_scheduler_state_deduplication():
     state.mark_sent(today_str, "MORNING", {"delivered_count": 3})
     assert state.is_already_sent_today(today_str, "MORNING") is True
     assert state.is_already_sent_today(today_str, "MIDDAY") is False
-
-
-
-def test_post_all_jira_sla_comments():
-    """Verify Jira SLA mention comments are formatted and called with correct account_ids."""
-    operators = [
-        OperatorTicketSummary(
-            operator_name="Dnyanesh Khawas",
-            operator_email="dnyanesh.khawas@attributics.com",
-            role="Core Operator",
-            pending_count=2,
-            tickets=[
-                {"key": "SWCM-10", "summary": "Task 1"},
-                {"key": "SWCM-11", "summary": "Task 2"},
-            ],
-        )
-    ]
-
-    with patch("jira_client.add_jira_sla_mention_comment") as mock_comment:
-        mock_comment.return_value = {"ok": True, "comment_id": "10099"}
-
-        results = post_all_jira_sla_comments(operators, "MORNING", dry_run=False)
-        assert len(results) == 2
-        assert results[0]["posted"] is True
-        assert results[0]["ticket_key"] == "SWCM-10"
-        assert mock_comment.call_count == 2
-
-        # Verify account_id was resolved from whitelist
-        called_account_id = mock_comment.call_args_list[0][1]["account_id"]
-        assert "712020:" in called_account_id
 
 
 def test_send_google_chat_sla_alert_simulation():

@@ -760,85 +760,18 @@ def send_google_chat_sla_alert(
         }
 
 
-def post_all_jira_sla_comments(
-    operators: list[OperatorTicketSummary],
-    stage: str,
-    dry_run: bool = False,
-) -> list[dict[str, Any]]:
-    """
-    Post an SLA reminder comment with an active @mention on every incomplete Jira ticket.
-    This triggers Atlassian's official email delivery directly to the assignee's inbox!
-    """
-    from jira_client import add_jira_sla_mention_comment
-
-    stage_msgs = {
-        "MORNING": "This campaign is scheduled for delivery today. Please review copy, creative assets, and carrier whitelist submission.",
-        "MIDDAY": "Midday SLA Checkpoint: This campaign is still pending completion. Please expedite approvals or flag roadblocks.",
-        "EOD": "URGENT SLA WARNING: This campaign due today remains incomplete and requires your immediate attention before EOD.",
-    }
-    msg = stage_msgs.get(stage, "SLA Alert: This campaign due today is pending resolution.")
-
-    results: list[dict[str, Any]] = []
-
-    for op in operators:
-        wl_info = TEAM_MEMBERS_WHITELIST.get(op.operator_name)
-        if not wl_info:
-            for k, val in TEAM_MEMBERS_WHITELIST.items():
-                if k.lower() in op.operator_name.lower() or op.operator_name.lower() in k.lower():
-                    wl_info = val
-                    break
-        account_id = wl_info["account_id"] if wl_info else ""
-
-        for ticket in op.tickets:
-            k = ticket.get("key", "")
-            if not k:
-                continue
-
-            if dry_run:
-                results.append({
-                    "ticket_key": k,
-                    "operator_name": op.operator_name,
-                    "account_id": account_id,
-                    "posted": True,
-                    "simulated": True,
-                    "message": "Dry run preview mode — Jira comment simulated.",
-                })
-            else:
-                c_res = add_jira_sla_mention_comment(
-                    issue_key=k,
-                    account_id=account_id,
-                    operator_name=op.operator_name,
-                    stage=stage,
-                    stage_message=msg,
-                )
-                results.append({
-                    "ticket_key": k,
-                    "operator_name": op.operator_name,
-                    "account_id": account_id,
-                    "posted": c_res.get("ok", False),
-                    "simulated": False,
-                    "comment_id": c_res.get("comment_id"),
-                    "error": c_res.get("error"),
-                })
-
-    return results
-
-
 def dispatch_due_today_alerts(
     project: str = "ALL",
     stage: str = "AUTO",
     dry_run: bool = False,
     operator_name: str = "Automated Dispatcher",
-    send_jira_mentions: bool = True,
     send_google_chat: bool = True,
     send_email: bool = True,
     google_chat_webhook_url: str | None = None,
 ) -> dict[str, Any]:
     """
-    Dispatch multi-channel SLA alerts:
-    1. Post Jira SLA Mention Comments (triggers official Atlassian emails to assignees).
-    2. Post Google Chat Space interactive card.
-    3. Dispatch Brevo / SMTP direct emails.
+    Dispatch SLA alerts strictly via Google Chat Space and/or Direct Email.
+    Jira remains strictly READ-ONLY (no comments or writes to Jira).
     """
     preview = preview_due_today_alerts(project=project, stage=stage)
     resolved_stage = preview["stage"]
@@ -847,19 +780,14 @@ def dispatch_due_today_alerts(
     operators = group_tickets_by_operator(tickets)
     today_str = date.today().isoformat()
 
-    # 1. Jira SLA Mention Comments & Emails
-    jira_results: list[dict[str, Any]] = []
-    if send_jira_mentions:
-        jira_results = post_all_jira_sla_comments(operators, resolved_stage, dry_run=dry_run)
-
-    # 2. Google Chat Space Broadcast
+    # 1. Google Chat Space Broadcast
     google_chat_res: dict[str, Any] = {}
     if send_google_chat:
         google_chat_res = send_google_chat_sla_alert(
             resolved_stage, operators, preview["ist_time"], webhook_url=google_chat_webhook_url
         )
 
-    # 3. Direct Email Dispatch
+    # 2. Direct Email Dispatch
     results: list[dict[str, Any]] = []
     delivered_count = 0
     failed_count = 0
@@ -887,7 +815,6 @@ def dispatch_due_today_alerts(
     sender_info = preview["sender_info"]
     real_sent_count = sum(1 for r in results if r.get("delivered") and not r.get("simulated"))
     simulated_count = sum(1 for r in results if r.get("simulated"))
-    jira_posted_count = sum(1 for j in jira_results if j.get("posted"))
 
     # Mark sent in scheduler state
     SCHEDULER_STATE.mark_sent(
@@ -898,7 +825,6 @@ def dispatch_due_today_alerts(
             "real_sent_count": real_sent_count,
             "simulated_count": simulated_count,
             "failed_count": failed_count,
-            "jira_posted_count": jira_posted_count,
             "google_chat_delivered": google_chat_res.get("delivered", False),
             "recipients": [d["recipient_email"] for d in draft_dicts],
             "operator_name": operator_name,
@@ -917,8 +843,6 @@ def dispatch_due_today_alerts(
         "real_sent_count": real_sent_count,
         "simulated_count": simulated_count,
         "failed_count": failed_count,
-        "jira_posted_count": jira_posted_count,
-        "jira_results": jira_results,
         "google_chat_result": google_chat_res,
         "dry_run": dry_run,
         "dispatched_by": operator_name,

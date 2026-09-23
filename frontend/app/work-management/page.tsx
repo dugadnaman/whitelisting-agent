@@ -261,11 +261,9 @@ export default function WorkManagementPage() {
   const [alertsDispatching, setAlertsDispatching] = useState<boolean>(false);
   const [schedulerStatus, setSchedulerStatus] = useState<AlertSchedulerStatusResponse | null>(null);
   const [activePreviewEmail, setActivePreviewEmail] = useState<AlertEmailDraft | null>(null);
-  const [sendJiraMentions, setSendJiraMentions] = useState<boolean>(true);
   const [sendGoogleChat, setSendGoogleChat] = useState<boolean>(true);
-  const [sendDirectEmail, setSendDirectEmail] = useState<boolean>(false);
+  const [sendDirectEmail, setSendDirectEmail] = useState<boolean>(true);
   const [googleChatWebhookUrl, setGoogleChatWebhookUrl] = useState<string>('');
-
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedGchat = localStorage.getItem('google_chat_webhook_url');
@@ -331,23 +329,19 @@ export default function WorkManagementPage() {
         project: selectedProject,
         stage: alertStage,
         dry_run: dryRun,
-        send_jira_mentions: sendJiraMentions,
         send_google_chat: sendGoogleChat,
         send_email: sendDirectEmail,
         google_chat_webhook_url: googleChatWebhookUrl || undefined,
       });
 
       let summary = `${dryRun ? 'Dry Run' : 'Dispatch'} Complete!\nStage: ${res.stage}\n\n`;
-      if (sendJiraMentions) {
-        summary += `• 🔔 Jira SLA Mention Comments: ${res.jira_posted_count || 0} posted on tickets (triggers official Atlassian email notifications to assignees!)\n`;
-      }
+      summary += `🔒 Jira is strictly read-only: zero comments or updates posted to Jira.\n`;
       if (sendGoogleChat) {
         summary += `• 💬 Google Chat: ${res.google_chat_result?.delivered ? 'Card posted to Google Chat Space' : res.google_chat_result?.simulated ? 'Simulated (paste Webhook URL to send live)' : res.google_chat_result?.error || 'Delivered'}\n`;
       }
       if (sendDirectEmail) {
         summary += `• ✉️ Direct Outbound Email: ${res.real_sent_count} sent, ${res.failed_count} failed\n`;
       }
-
       alert(summary);
       setShowAlertModal(false);
     } catch (err: unknown) {
@@ -2497,30 +2491,10 @@ export default function WorkManagementPage() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {/* Channel 1: Jira SLA Mentions */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Channel 1: Google Chat */}
                 <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-all ${
-                  sendJiraMentions ? 'bg-white border-indigo-500 ring-2 ring-indigo-50' : 'bg-gray-100/60 border-gray-200 opacity-60'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={sendJiraMentions}
-                    onChange={(e) => setSendJiraMentions(e.target.checked)}
-                    className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <div>
-                    <span className="font-bold text-gray-900 block flex items-center gap-1">
-                      <span>🔔</span> Jira Mention Emails
-                    </span>
-                    <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
-                      Tags operator in Jira. Triggers Atlassian's official email (100% DMARC pass).
-                    </span>
-                  </div>
-                </label>
-
-                {/* Channel 2: Google Chat */}
-                <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-all ${
-                  sendGoogleChat ? 'bg-white border-emerald-500 ring-2 ring-emerald-50' : 'bg-gray-100/60 border-gray-200 opacity-60'
+                  sendGoogleChat ? 'bg-white border-emerald-500 ring-2 ring-emerald-50 shadow-xs' : 'bg-gray-100/60 border-gray-200 opacity-60'
                 }`}>
                   <input
                     type="checkbox"
@@ -2530,17 +2504,17 @@ export default function WorkManagementPage() {
                   />
                   <div>
                     <span className="font-bold text-gray-900 block flex items-center gap-1">
-                      <span>💬</span> Google Chat Space
+                      <span>💬</span> Google Chat Space Broadcast
                     </span>
                     <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
-                      Posts rich card with ticket links into your team's Google Chat room.
+                      Posts rich interactive card with ticket links into your team's Google Chat room.
                     </span>
                   </div>
                 </label>
 
-                {/* Channel 3: Direct Outbound Email */}
+                {/* Channel 2: Direct Outbound Email */}
                 <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-all ${
-                  sendDirectEmail ? 'bg-white border-blue-500 ring-2 ring-blue-50' : 'bg-gray-100/60 border-gray-200 opacity-60'
+                  sendDirectEmail ? 'bg-white border-blue-500 ring-2 ring-blue-50 shadow-xs' : 'bg-gray-100/60 border-gray-200 opacity-60'
                 }`}>
                   <input
                     type="checkbox"
@@ -2550,13 +2524,18 @@ export default function WorkManagementPage() {
                   />
                   <div>
                     <span className="font-bold text-gray-900 block flex items-center gap-1">
-                      <span>✉️</span> Direct API Email
+                      <span>✉️</span> Direct Outbound Email
                     </span>
                     <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
-                      Sends via Brevo or SMTP directly from your configured mailbox.
+                      Sends via Brevo/SMTP directly to operators with automatic BCC to sender.
                     </span>
                   </div>
                 </label>
+              </div>
+
+              <div className="flex items-center gap-1.5 text-[10px] text-gray-500 bg-gray-100/70 p-2 rounded-lg">
+                <span>🔒</span>
+                <span><strong>Jira is strictly read-only:</strong> The alert system will never write comments, update tickets, or modify anything in Jira Cloud.</span>
               </div>
 
               {sendGoogleChat && (
