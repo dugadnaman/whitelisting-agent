@@ -4191,6 +4191,17 @@ def scheduler_toggle_endpoint(
     })
 
 
+@app.get("/api/work-management/alerts/delivery-logs")
+def get_delivery_logs_endpoint(
+    limit: int = Query(15),
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch live transactional delivery event logs from Brevo API."""
+    from email_notifier import get_brevo_event_logs
+
+    return _json_safe(get_brevo_event_logs(limit=limit))
+
+
 @app.on_event("startup")
 async def start_alert_scheduler_task():
     """Start the background scheduler task for 10am, 1pm, 4pm IST alert runs."""

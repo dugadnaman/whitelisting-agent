@@ -634,6 +634,31 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
 
     # Fallback to SMTP
     return send_email_smtp(draft)
+
+
+def get_brevo_event_logs(limit: int = 15) -> dict[str, Any]:
+    """Fetch live transactional delivery events from Brevo API."""
+    _load_env_file()
+    brevo_key = os.getenv("BREVO_API_KEY")
+    if not brevo_key:
+        return {"ok": False, "message": "BREVO_API_KEY not configured."}
+
+    clean_key = brevo_key.strip().strip("'").strip('"')
+    try:
+        import requests
+        resp = requests.get(
+            f"https://api.brevo.com/v3/smtp/statistics/events?limit={limit}&sort=desc",
+            headers={
+                "api-key": clean_key,
+                "accept": "application/json",
+            },
+            timeout=10,
+        )
+        if resp.ok:
+            return {"ok": True, "events": resp.json().get("events", [])}
+        return {"ok": False, "status": resp.status_code, "error": resp.text}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 def dispatch_due_today_alerts(
     project: str = "ALL",
     stage: str = "AUTO",
