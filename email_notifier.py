@@ -337,8 +337,17 @@ def get_smtp_sender_info() -> dict[str, Any]:
     smtp_port = int(os.getenv("SMTP_PORT") or "587")
     smtp_user = os.getenv("SMTP_USER")
     from_email = os.getenv("SMTP_FROM_EMAIL") or smtp_user or "alerts@attributics.com"
-
-    if resend_key:
+    brevo_key = os.getenv("BREVO_API_KEY")
+    if brevo_key:
+        return {
+            "is_configured": True,
+            "from_email": from_email,
+            "smtp_host": "api.brevo.com (Port 443 HTTPS)",
+            "smtp_port": 443,
+            "smtp_user": "brevo_api",
+            "mode": "LIVE_HTTPS_BREVO",
+        }
+    elif resend_key:
         return {
             "is_configured": True,
             "from_email": from_email,
@@ -473,6 +482,55 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
     resend_key = os.getenv("RESEND_API_KEY")
     sendgrid_key = os.getenv("SENDGRID_API_KEY")
     from_email = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USER") or "alerts@attributics.com"
+    brevo_key = os.getenv("BREVO_API_KEY")
+    if brevo_key:
+        try:
+            import requests
+            sender_name = os.getenv("SMTP_FROM_NAME") or "Naman Dugad"
+            resp = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "api-key": brevo_key.strip(),
+                    "Content-Type": "application/json",
+                    "accept": "application/json",
+                },
+                json={
+                    "sender": {"name": sender_name, "email": from_email},
+                    "to": [{"email": draft.recipient_email, "name": draft.recipient_name}],
+                    "subject": draft.subject,
+                    "htmlContent": draft.body_html,
+                    "textContent": draft.body_text,
+                },
+                timeout=15,
+            )
+            if resp.status_code in (200, 201, 202):
+                logger.info("Brevo HTTP API sent email to %s: %s", draft.recipient_email, draft.subject)
+                return {
+                    "delivered": True,
+                    "simulated": False,
+                    "recipient": draft.recipient_email,
+                    "subject": draft.subject,
+                    "message": "Email delivered via Brevo HTTP API (Port 443 HTTPS).",
+                }
+            else:
+                err_text = resp.text[:300]
+                logger.error("Brevo HTTP API error for %s: %s", draft.recipient_email, err_text)
+                return {
+                    "delivered": False,
+                    "simulated": False,
+                    "recipient": draft.recipient_email,
+                    "error": f"Brevo API error: {err_text}",
+                    "message": f"Brevo API returned status {resp.status_code}",
+                }
+        except Exception as exc:
+            logger.error("Brevo request failed for %s: %s", draft.recipient_email, exc)
+            return {
+                "delivered": False,
+                "simulated": False,
+                "recipient": draft.recipient_email,
+                "error": str(exc),
+                "message": f"Brevo dispatch error: {exc}",
+            }
 
     if resend_key:
         try:
