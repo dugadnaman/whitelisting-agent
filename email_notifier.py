@@ -484,13 +484,15 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
     from_email = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USER") or "alerts@attributics.com"
     brevo_key = os.getenv("BREVO_API_KEY")
     if brevo_key:
+        clean_brevo = brevo_key.strip().strip("'").strip('"')
+        masked_key = f"{clean_brevo[:9]}...{clean_brevo[-4:]}" if len(clean_brevo) > 13 else "INVALID_LENGTH"
         try:
             import requests
             sender_name = os.getenv("SMTP_FROM_NAME") or "Naman Dugad"
             resp = requests.post(
                 "https://api.brevo.com/v3/smtp/email",
                 headers={
-                    "api-key": brevo_key.strip(),
+                    "api-key": clean_brevo,
                     "Content-Type": "application/json",
                     "accept": "application/json",
                 },
@@ -514,12 +516,12 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
                 }
             else:
                 err_text = resp.text[:300]
-                logger.error("Brevo HTTP API error for %s: %s", draft.recipient_email, err_text)
+                logger.error("Brevo HTTP API error for %s with key %s: %s", draft.recipient_email, masked_key, err_text)
                 return {
                     "delivered": False,
                     "simulated": False,
                     "recipient": draft.recipient_email,
-                    "error": f"Brevo API error: {err_text}",
+                    "error": f"Brevo API error (Key: {masked_key}): {err_text}",
                     "message": f"Brevo API returned status {resp.status_code}",
                 }
         except Exception as exc:
