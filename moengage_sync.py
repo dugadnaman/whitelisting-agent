@@ -58,7 +58,7 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
     sender_id = (
         os.environ.get(f"{prefix}_MOENGAGE_SENDER_ID")
         or os.environ.get("MOENGAGE_SENDER_ID")
-        or DEFAULT_TCFSL_PROMO_SENDER_ID
+        or ("I3KVDLD7LKKVEKU4961P1CID" if account.lower() == "apparel" else DEFAULT_TCFSL_PROMO_SENDER_ID)
     )
 
     return {

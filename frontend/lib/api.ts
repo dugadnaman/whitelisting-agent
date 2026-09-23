@@ -482,6 +482,10 @@ export async function fetchCredentials(
   sms_encryption_key?: string;
   sms_sender_id?: string;
   sms_dlr_auth_token?: string;
+  rcs_bot_id?: string;
+  rcs_auth_token?: string;
+  esmeaddr?: string;
+  rcs_esmeaddr?: string;
   is_configured: boolean;
 }> {
   const qs = new URLSearchParams({ account, channel }).toString();
@@ -509,6 +513,10 @@ export async function updateCredentials(creds: {
   sms_encryption_key?: string;
   sms_sender_id?: string;
   sms_dlr_auth_token?: string;
+  rcs_bot_id?: string;
+  rcs_auth_token?: string;
+  esmeaddr?: string;
+  rcs_esmeaddr?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetchWithRetry(getApiUrl(`/api/credentials`), {
     method: "PUT",
@@ -539,6 +547,10 @@ export async function testCredentials(
   sms_encryption_key?: string;
   sms_sender_id?: string;
   sms_dlr_auth_token?: string;
+  rcs_bot_id?: string;
+  rcs_auth_token?: string;
+  esmeaddr?: string;
+  rcs_esmeaddr?: string;
   }
 ): Promise<{
   ok: boolean;

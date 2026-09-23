@@ -28,6 +28,7 @@ DEFAULT_RCS_BOT_IDS: dict[str, str] = {
     "wealth": "Wk22bU8IZqDRyIwQ",
     "moneyfy": "ouwJCTgIe0QDBPPI",
     "tata": "Uv9tdd0KNADbq3pX",
+    "apparel": "P7hzkqCcW3x96I6T",
 }
 
 DEFAULT_RCS_BOT_NAMES: dict[str, str] = {
@@ -37,6 +38,7 @@ DEFAULT_RCS_BOT_NAMES: dict[str, str] = {
     "wealth": "Tata Capital Wealth",
     "moneyfy": "Moneyfy by Tata Capital",
     "tata": "Tata Capital Limited",
+    "apparel": "Apparel Brand",
 }
 
 TATA_RCS_BOT_ID = "Uv9tdd0KNADbq3pX"
@@ -127,6 +129,7 @@ def get_rcs_esmeaddr(client: str = "tata") -> str:
     esme = (
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
         or os.environ.get(f"{prefix}_ESMEADDR")
+        or ("72148300000000" if c == "apparel" else None)
         or (os.environ.get("TATA_ESMEADDR") if c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy") else None)
     )
     if not esme:
@@ -159,6 +162,7 @@ def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
             or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
             or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
             or os.environ.get(f"{prefix}_AUTH_TOKEN")
+            or ("yzHtsfT8v5DZ6XV3stK4YQ==" if c == "apparel" else None)
         )
         session = os.environ.get(f"{prefix}_KARIX_SESSION")
         user = os.environ.get(f"{prefix}_KARIX_USER")

@@ -44,7 +44,9 @@ export default function SettingsPage() {
   const [templateNamespaceId, setTemplateNamespaceId] = useState('');
   const [entityId, setEntityId] = useState('');
   const [loungeCookie, setLoungeCookie] = useState('');
-  // SMS form fields
+  const [rcsBotId, setRcsBotId] = useState('');
+  const [rcsAuthToken, setRcsAuthToken] = useState('');
+  const [esmeaddr, setEsmeaddr] = useState('');
   const [smsKey, setSmsKey] = useState('');
   const [smsUsername, setSmsUsername] = useState('');
   const [smsEncryptionKey, setSmsEncryptionKey] = useState('');
@@ -120,6 +122,9 @@ export default function SettingsPage() {
           setLoungeCookie(creds.lounge_cookie || '');
           setPortalUsername(creds.portal_username || '');
           setPortalPassword(creds.portal_password || '');
+          setRcsBotId(creds.rcs_bot_id || (selectedAccount === 'apparel' ? 'P7hzkqCcW3x96I6T' : ''));
+          setRcsAuthToken(creds.rcs_auth_token || (selectedAccount === 'apparel' ? 'yzHtsfT8v5DZ6XV3stK4YQ==' : ''));
+          setEsmeaddr(creds.esmeaddr || creds.rcs_esmeaddr || (selectedAccount === 'apparel' ? '72148300000000' : ''));
         }
       } catch {
         if (ignore) return;
@@ -252,6 +257,9 @@ export default function SettingsPage() {
         sms_encryption_key: smsEncryptionKey.trim() || undefined,
         sms_sender_id: smsSenderId.trim() || undefined,
         sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
+        rcs_bot_id: rcsBotId.trim() || undefined,
+        rcs_auth_token: rcsAuthToken.trim() || undefined,
+        rcs_esmeaddr: esmeaddr.trim() || undefined,
         user_name: currentOperator,
       });
       if (res.ok) {
@@ -291,6 +299,9 @@ export default function SettingsPage() {
         sms_encryption_key: smsEncryptionKey.trim() || undefined,
         sms_sender_id: smsSenderId.trim() || undefined,
         sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
+        rcs_bot_id: rcsBotId.trim() || undefined,
+        rcs_auth_token: rcsAuthToken.trim() || undefined,
+        rcs_esmeaddr: esmeaddr.trim() || undefined,
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
@@ -651,23 +662,24 @@ export default function SettingsPage() {
       {/* Channel Tabs */}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-2">
         <div className="flex flex-wrap gap-2">
-          {/* WhatsApp Tab */}
-          <button
-            onClick={() => {
-              setSelectedChannel('whatsapp');
-              setShowMoEngage(false);
-              setBanner(null);
-            }}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedChannel === 'whatsapp'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            WhatsApp
-          </button>
-
+          {/* WhatsApp Tab (Hidden for Apparel) */}
+          {selectedAccount !== 'apparel' && (
+            <button
+              onClick={() => {
+                setSelectedChannel('whatsapp');
+                setShowMoEngage(false);
+                setBanner(null);
+              }}
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
+                selectedChannel === 'whatsapp'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              WhatsApp
+            </button>
+          )}
           {/* RCS Tab */}
           <button
             onClick={() => {
@@ -685,23 +697,24 @@ export default function SettingsPage() {
             RCS
           </button>
 
-          {/* SMS Tab */}
-          <button
-            onClick={() => {
-              setSelectedChannel('sms');
-              setShowMoEngage(false);
-              setBanner(null);
-            }}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedChannel === 'sms' && !showMoEngage
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-purple-400" />
-            SMS
-          </button>
-
+          {/* SMS Tab (Hidden for Apparel) */}
+          {selectedAccount !== 'apparel' && (
+            <button
+              onClick={() => {
+                setSelectedChannel('sms');
+                setShowMoEngage(false);
+                setBanner(null);
+              }}
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
+                selectedChannel === 'sms' && !showMoEngage
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-purple-400" />
+              SMS
+            </button>
+          )}
           {/* MoEngage Tab */}
           <button
             onClick={() => {
@@ -1117,6 +1130,60 @@ export default function SettingsPage() {
           </>
         ) : (
           <>
+            {/* Karix RCS Bot ID */}
+            <div>
+              <label htmlFor="rcs_bot_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                Karix RCS Bot ID ({envPrefix}_RCS_BOT_ID)
+              </label>
+              <input
+                id="rcs_bot_id"
+                type="text"
+                value={rcsBotId}
+                onChange={(e) => setRcsBotId(e.target.value)}
+                placeholder="e.g. P7hzkqCcW3x96I6T"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Your approved brand Bot ID / Sender ID in Karix RCS Bot Builder.
+              </p>
+            </div>
+
+            {/* Karix RCS Permanent API Token */}
+            <div>
+              <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                Karix RCS API Token ({envPrefix}_RCS_AUTH_TOKEN)
+              </label>
+              <input
+                id="rcs_auth_token"
+                type="password"
+                value={rcsAuthToken}
+                onChange={(e) => setRcsAuthToken(e.target.value)}
+                placeholder="e.g. yzHtsfT8v5DZ6XV3stK4YQ=="
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Permanent Karix RCS API token for fetching approved rich cards.
+              </p>
+            </div>
+
+            {/* Karix ESME Address */}
+            <div>
+              <label htmlFor="esmeaddr" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                Karix ESME Address ({envPrefix}_ESMEADDR)
+              </label>
+              <input
+                id="esmeaddr"
+                type="text"
+                value={esmeaddr}
+                onChange={(e) => setEsmeaddr(e.target.value)}
+                placeholder="e.g. 72148300000000"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Karix account ESME address used for routing RCS API requests.
+              </p>
+            </div>
+
             {/* RCS DLT Entity ID */}
             <div>
               <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
