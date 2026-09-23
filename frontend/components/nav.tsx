@@ -168,13 +168,20 @@ export default function Nav() {
           </label>
           <div className="relative">
             <select
-              value={channel}
+              value={account === 'apparel' ? 'rcs' : channel}
               onChange={(e) => setChannel(e.target.value as Channel)}
-              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors"
+              disabled={account === 'apparel'}
+              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors disabled:bg-purple-50/60 disabled:text-purple-900 disabled:border-purple-200"
             >
-              <option value="whatsapp">WhatsApp</option>
-              <option value="rcs">RCS (DLT)</option>
-              <option value="sms">SMS (Karix)</option>
+              {account === 'apparel' ? (
+                <option value="rcs">RCS Only (Karix ➔ MoEngage)</option>
+              ) : (
+                <>
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="rcs">RCS (DLT)</option>
+                  <option value="sms">SMS (Karix)</option>
+                </>
+              )}
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
               <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">

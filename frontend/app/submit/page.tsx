@@ -442,6 +442,34 @@ export default function SubmitPage() {
         </a>
       </div>
 
+
+      {/* APPAREL ACCOUNT: EXCLUSIVELY SYNC TO MOENGAGE */}
+      {account === 'apparel' ? (
+        <div className="bg-gradient-to-br from-purple-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-8 text-center space-y-4 border border-purple-800/50 max-w-2xl mx-auto my-8 shadow-xl">
+          <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center text-3xl mx-auto border border-white/20">
+            👗
+          </div>
+          <div className="space-y-1.5">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/30">
+              RCS Sync Only • Apparel Workspace
+            </div>
+            <h2 className="text-xl font-bold text-white">Apparel Brand — Karix RCS to MoEngage Sync</h2>
+            <p className="text-xs text-purple-200 max-w-md mx-auto leading-relaxed pt-1">
+              The Apparel account is configured strictly for pulling approved RCS templates from Karix and syncing them directly into your Apparel MoEngage workspace.
+              Manual spreadsheet submissions are disabled for this account.
+            </p>
+          </div>
+          <div className="pt-3 flex items-center justify-center gap-3">
+            <a
+              href="/"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white text-purple-900 font-bold text-xs hover:bg-purple-50 shadow-md transition-all active:scale-95 cursor-pointer"
+            >
+              <span>👉 Open Karix ➔ MoEngage Sync Studio</span>
+            </a>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Two-Phase Architecture Switcher */}
       <div className="flex items-center gap-2 border-b border-gray-200 pb-3">
         <button
@@ -1568,6 +1596,8 @@ export default function SubmitPage() {
         </div>
       )}
 
+        </>
+      )}
       {/* Aspect Ratio Adjustment Confirmation Modal */}
       {/* Aspect Ratio Block Confirmation Modal */}
       {showBlockedModal && currentPreviews && (

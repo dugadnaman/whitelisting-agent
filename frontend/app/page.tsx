@@ -487,7 +487,80 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Backend error banner */}
+      {/* APPAREL BRAND: DEDICATED KARIX RCS -> MOENGAGE SYNC STUDIO */}
+      {account === 'apparel' && (
+        <div className="bg-gradient-to-br from-purple-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-xl border border-purple-800/40 space-y-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">👗</span>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/30">
+                  RCS Sync Only • Apparel Workspace
+                </span>
+                <span className="text-xs text-purple-300 font-medium">
+                  Karix RCS Bot &rarr; MoEngage Apparel Workspace
+                </span>
+              </div>
+              <h2 className="text-xl font-bold text-white tracking-tight">
+                Apparel Brand — Karix RCS to MoEngage Sync Hub
+              </h2>
+              <p className="text-xs text-purple-200 max-w-2xl leading-relaxed">
+                This account is dedicated exclusively to pulling approved RCS rich cards from Karix and syncing them directly into your Apparel MoEngage workspace with automated attribute mapping and semantic duplicate detection.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 shrink-0">
+              <button
+                onClick={handleSyncRcsToMoEngage}
+                disabled={syncingRcs}
+                className="px-5 py-3 rounded-xl text-xs font-bold bg-white text-purple-900 hover:bg-purple-50 shadow-lg transition-all flex items-center gap-2 active:scale-95 disabled:opacity-60 cursor-pointer"
+              >
+                {syncingRcs ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-purple-900" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    <span>Syncing Templates to MoEngage...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 text-purple-900" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Sync Approved RCS to MoEngage</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Features active */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div className="bg-white/5 border border-white/10 p-3 rounded-xl flex items-center gap-2.5">
+              <span className="text-base">💎</span>
+              <div>
+                <span className="font-bold text-white block">RCS Only Channel</span>
+                <span className="text-[11px] text-purple-200">WhatsApp and SMS disabled for Apparel</span>
+              </div>
+            </div>
+            <div className="bg-white/5 border border-white/10 p-3 rounded-xl flex items-center gap-2.5">
+              <span className="text-base">🧠</span>
+              <div>
+                <span className="font-bold text-white block">Semantic Deduplication</span>
+                <span className="text-[11px] text-purple-200">Auto-skips templates already present</span>
+              </div>
+            </div>
+            <div className="bg-white/5 border border-white/10 p-3 rounded-xl flex items-center gap-2.5">
+              <span className="text-base">🏷️</span>
+              <div>
+                <span className="font-bold text-white block">Attribute Auto-Mapping</span>
+                <span className="text-[11px] text-purple-200">Maps dynamic placeholders to MoEngage user tags</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 text-sm text-red-700">
           <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">

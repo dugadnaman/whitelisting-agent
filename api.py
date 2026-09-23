@@ -223,12 +223,14 @@ DEFAULT_ACCOUNTS = [
     },
     {
         "id": "apparel",
-        "name": "Apparel Brand",
-        "entity": "Apparel",
-        "type": "Promo&trans",
+        "name": "Apparel Brand (RCS Sync Only)",
+        "entity": "Apparel Brand",
+        "type": "RCS Only",
         "is_builtin": True,
         "group": "Apparel",
+        "channels": ["rcs"],
         "headers": [],
+        "description": "Dedicated Karix RCS to MoEngage sync workspace",
     },
     {
         "id": "tcl_promo",
@@ -923,7 +925,7 @@ def get_templates(
 ):
     require_tenant_access(account, current_user)
     acc = account.lower()
-    chan = channel.lower()
+    chan = "rcs" if acc == "apparel" else channel.lower()
     try:
         if chan == "sms":
             entries = _merge_sms_templates(acc, status, search)
@@ -1167,6 +1169,12 @@ async def preview_file(
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
+    acc = account.lower()
+    if acc == "apparel":
+        raise HTTPException(
+            status_code=400,
+            detail="The Apparel account is strictly dedicated to RCS Karix-to-MoEngage sync only. Template creation spreadsheets are disabled for Apparel.",
+        )
     chan = channel.lower()
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -1821,6 +1829,12 @@ async def submit_file(
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
+    acc = account.lower()
+    if acc == "apparel":
+        raise HTTPException(
+            status_code=400,
+            detail="The Apparel account is strictly dedicated to RCS Karix-to-MoEngage sync only. Template creation spreadsheets are disabled for Apparel.",
+        )
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())

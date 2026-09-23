@@ -169,3 +169,53 @@ def test_sync_karix_rcs_to_moengage_dedup_and_attributes_integration():
         assert "{{UserAttribute['first_name']}}" in call_args["card_description"]
         assert "{{UserAttribute['emi_amount']}}" in call_args["card_description"]
         assert "{{1}}" not in call_args["card_description"]
+
+
+def test_apparel_account_rcs_only_sync():
+    """Verify sync_karix_rcs_to_moengage executes for apparel account."""
+    fake_templates = [
+        {
+            "templateId": "apparel_rcs_festive",
+            "status": "APPROVED",
+            "viTemplate": {
+                "name": "apparel_festive_collection",
+                "standaloneCard": {
+                    "cardTitle": "New Autumn Arrivals",
+                    "cardDescription": "Shop the latest festive apparel with exclusive discounts!",
+                },
+            },
+        }
+    ]
+
+    with patch("rcs_client.fetch_rcs_templates", return_value=fake_templates), \
+         patch("moengage_sync.list_moengage_rcs_templates", return_value=[]), \
+         patch("moengage_sync.create_moengage_rcs_template") as mock_create:
+        mock_create.return_value = {"ok": True, "moengage_id": "apparel_moe_1"}
+
+        res = sync_karix_rcs_to_moengage(account="apparel")
+        assert res["ok"] is True
+        assert res["account"] == "apparel"
+        assert len(res["created"]) == 1
+        assert res["created"][0]["template_name"] == "apparel_festive_collection"
+
+
+def test_apparel_account_blocks_spreadsheet_submission():
+    """Verify API blocks spreadsheet submission and preview for apparel account."""
+    import io
+    from fastapi.testclient import TestClient
+    from api import app, get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {"email": "admin@attributics.com", "role": "superadmin", "tenant_id": "all"}
+    client = TestClient(app)
+
+    fake_csv = io.BytesIO(b"template_name,body\ntpl_1,hello")
+
+    # Preview should reject apparel
+    resp_prev = client.post(
+        "/api/preview?account=apparel&channel=whatsapp",
+        files={"file": ("test.csv", fake_csv, "text/csv")},
+    )
+    assert resp_prev.status_code == 400
+    assert "RCS Karix-to-MoEngage sync only" in resp_prev.json()["detail"]
+
+    app.dependency_overrides.clear()

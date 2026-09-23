@@ -10,12 +10,14 @@
   },
   {
     "id": "apparel",
-    "name": "Apparel Brand",
+    "name": "Apparel Brand (RCS Sync Only)",
     "entity": "Apparel",
-    "type": "Promo&trans",
+    "type": "RCS Only",
     "is_builtin": true,
     "group": "Apparel",
-    "headers": []
+    "channels": ["rcs"],
+    "headers": [],
+    "description": "Dedicated Karix RCS to MoEngage sync workspace"
   },
   {
     "id": "tcl_promo",

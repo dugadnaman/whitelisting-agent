@@ -132,7 +132,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         const savedChannel = localStorage.getItem('karix_channel') as Channel;
-        if (savedChannel === 'whatsapp' || savedChannel === 'rcs' || savedChannel === 'sms') {
+        if (savedAccount === 'apparel') {
+          setChannelState('rcs');
+        } else if (savedChannel === 'whatsapp' || savedChannel === 'rcs' || savedChannel === 'sms') {
           setChannelState(savedChannel);
         }
 
@@ -174,9 +176,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem('karix_account', newAccount);
     } catch {}
+    if (cleanAccount === 'apparel') {
+      setChannelState('rcs');
+      try {
+        localStorage.setItem('karix_channel', 'rcs');
+      } catch {}
+    }
   };
 
   const setChannel = (newChannel: Channel) => {
+    if (account === 'apparel') {
+      setChannelState('rcs');
+      return;
+    }
     setChannelState(newChannel);
     try {
       localStorage.setItem('karix_channel', newChannel);
