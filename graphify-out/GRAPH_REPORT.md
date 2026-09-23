@@ -1,7 +1,7 @@
 # Graph Report - karix  (2026-09-07)
 
 ## Corpus Check
-- 127 files · ~210,571 words
+- 127 files · ~210,535 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `c6c4b991`
+- Built from commit: `d1362a13`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -51,10 +51,11 @@
 - tata_whatsapp_50_templates_7397df5c.md
 - whatsapp_templates_sample (2) (2)_6fa27684.md
 - test_production_smoke.py
+- ._process_job_tasks
 - Issue tracker: GitHub
 - test_enterprise_queue.py
-- ._process_job_tasks
-- .sse_event_stream
+- db_queue.py
+- test_agent_remediation.py
 - Triage
 - SubmissionResult
 - teach/SKILL.md
@@ -77,6 +78,7 @@
 - Steps
 - Scaffold Exercises
 - to-spec/SKILL.md
+- .sse_event_stream
 - Process
 - <Questionnaire title>
 - writing-shape/SKILL.md
@@ -92,9 +94,7 @@
 - block-dangerous-git.sh
 - implement-spec/SKILL.md
 - _row_to_rcs_submission
-- db_queue.py
 - _submit_official_template
-- test_agent_remediation.py
 - TemplateSubmission
 - rcs_models.py
 
@@ -235,6 +235,10 @@ Nodes (21): Upload a binary image or video to Karix RCS media storage (gRBM). Re
 Cohesion: 0.15
 Nodes (12): Production Deployment & Docker Configuration Smoke Tests. Validates: - Health…, Verify production webhook connectivity: - Rejects unauthorized calls without…, Verify production uptime monitor endpoints respond with 200 OK., - Multi-stage build (frontend-builder + Python runner) - Supervisord running…, Verify signup creates a user and login returns a usable JWT., Verify SQLite store runs in WAL mode with normal sync and 5000ms busy timeout,…, setup_module(), test_auth_signup_and_login_contract() (+4 more)
 
+### Community 39 - "._process_job_tasks"
+Cohesion: 0.14
+Nodes (12): Update high-level job lifecycle status (e.g. RUNNING, PAUSED_FOR_AUTH)., update_job_status(), Any, Check if tenant's circuit breaker is currently active (paused on 401)., Trip the circuit breaker on 401 Session Expired: - Halts tenant's queue - Flips…, Event-bus auto-resume trigger called when operator updates/tests credentials in…, Broadcast an SSE event payload to all active client listeners., Spawn asynchronous background task to execute all pending tasks in the job. (+4 more)
+
 ### Community 40 - "Issue tracker: GitHub"
 Cohesion: 0.06
 Nodes (30): Before exploring, read these, Domain Docs, File structure, Flag ADR conflicts, Use the glossary's vocabulary, Conventions, Issue tracker: GitHub, Pull requests as a triage surface (+22 more)
@@ -243,13 +247,13 @@ Nodes (30): Before exploring, read these, Domain Docs, File structure, Flag ADR 
 Cohesion: 0.19
 Nodes (15): create_job_with_tasks(), get_job_tasks(), Atomically creates an ingestion_job and enqueues all template tasks in one…, Fetch all tasks for a specific job., Monotonic approval state machine: Only advances state forward. Rejects…, update_template_approval_monotonic(), Tests for Enterprise Hardened Queue, Per-WABA Rate Limiter, Circuit Breaker,…, Verify POST /api/webhooks/karix/{tenant} - 401 on invalid/missing secret token… (+7 more)
 
-### Community 42 - "._process_job_tasks"
-Cohesion: 0.14
-Nodes (12): Update high-level job lifecycle status (e.g. RUNNING, PAUSED_FOR_AUTH)., update_job_status(), Any, Check if tenant's circuit breaker is currently active (paused on 401)., Trip the circuit breaker on 401 Session Expired: - Halts tenant's queue - Flips…, Event-bus auto-resume trigger called when operator updates/tests credentials in…, Broadcast an SSE event payload to all active client listeners., Spawn asynchronous background task to execute all pending tasks in the job. (+4 more)
+### Community 42 - "db_queue.py"
+Cohesion: 0.18
+Nodes (15): get_db(), get_job_task(), list_paused_jobs(), migrate_legacy_jsonl_if_needed(), Any, Connection, Database Queue and State Engine for Karix Template Ingestion. Manages…, Fetch a single task by ID. (+7 more)
 
-### Community 43 - ".sse_event_stream"
-Cohesion: 0.33
-Nodes (4): Queue, Subscribe an SSE connection to live job events., Remove an SSE connection subscriber., Yield Server-Sent Events for a job until it settles or client disconnects.
+### Community 43 - "test_agent_remediation.py"
+Cohesion: 0.18
+Nodes (12): get_job(), init_queue_db(), Fetch job summary by ID., Initialize jobs and tasks tables and run legacy JSONL migration., fixture, Tests for Autonomous AI Copilot Auto-Remediation Engine and Meta Policy…, Verify conversational chat interaction for rejection diagnosis and 1-click…, Verify full diagnose and auto-resubmit workflow: - Enqueues into ingestion_jobs… (+4 more)
 
 ### Community 44 - "Triage"
 Cohesion: 0.06
@@ -339,6 +343,10 @@ Nodes (8): Directory naming, Example: stubbing from a plan, Exercise variants, L
 Cohesion: 0.22
 Nodes (8): Further Notes, Implementation Decisions, Out of Scope, Problem Statement, Process, Solution, Testing Decisions, User Stories
 
+### Community 66 - ".sse_event_stream"
+Cohesion: 0.33
+Nodes (4): Queue, Subscribe an SSE connection to live job events., Remove an SSE connection subscriber., Yield Server-Sent Events for a job until it settles or client disconnects.
+
 ### Community 67 - "Process"
 Cohesion: 0.25
 Nodes (7): 1. Pin the fixed point, 2. Identify the spec source, 3. Identify the standards sources, 4. Spawn both sub-agents in parallel, 5. Aggregate, Process, Why two axes
@@ -391,17 +399,9 @@ Nodes (23): classify_template_category_sla(), get_pending_templates_sla_insights
 Cohesion: 0.33
 Nodes (6): _build_carousel_cards_from_row(), _build_suggestions_from_row(), Parse button columns into Karix RCS suggestion dictionaries., Parse multiple cards for carousel templates from pipe-separated columns or JSON., Convert a normalized dict to an RcsTemplateSubmission., _row_to_rcs_submission()
 
-### Community 92 - "db_queue.py"
-Cohesion: 0.18
-Nodes (15): get_db(), get_job_task(), list_paused_jobs(), migrate_legacy_jsonl_if_needed(), Any, Connection, Database Queue and State Engine for Karix Template Ingestion. Manages…, Fetch a single task by ID. (+7 more)
-
 ### Community 93 - "_submit_official_template"
 Cohesion: 0.17
 Nodes (13): Exception, Response, _evaluate_portal_create_response(), _is_duplicate_or_exists_error(), _is_retryable(), Submit a text-only template through the verified official Karix API., Check if an error string/dict from Karix or Meta indicates the template already…, When Karix or Meta indicates that a template already exists on the WABA, self-… (+5 more)
-
-### Community 97 - "test_agent_remediation.py"
-Cohesion: 0.18
-Nodes (12): get_job(), init_queue_db(), Fetch job summary by ID., Initialize jobs and tasks tables and run legacy JSONL migration., fixture, Tests for Autonomous AI Copilot Auto-Remediation Engine and Meta Policy…, Verify conversational chat interaction for rejection diagnosis and 1-click…, Verify full diagnose and auto-resubmit workflow: - Enqueues into ingestion_jobs… (+4 more)
 
 ### Community 98 - "TemplateSubmission"
 Cohesion: 0.09
@@ -423,7 +423,7 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.013) - this node is a cross-community bridge._
 - **Why does `TemplateSubmission` connect `TemplateSubmission` to `get_waba_id`, `test_integration.py`, `KarixHealthGovernor`, `submission_client.py`, `loader.py`, `ApprovalStatus`, `_submit_official_template`?**
   _High betweenness centrality (0.012) - this node is a cross-community bridge._
-- **Why does `SubmissionResult` connect `SubmissionResult` to `test_agent_remediation.py`, `TemplateSubmission`, `get_waba_id`, `get`, `test_integration.py`, `KarixHealthGovernor`, `submission_client.py`, `ApprovalStatus`, `api.py`, `_submit_official_template`?**
+- **Why does `SubmissionResult` connect `SubmissionResult` to `TemplateSubmission`, `get_waba_id`, `get`, `test_agent_remediation.py`, `test_integration.py`, `KarixHealthGovernor`, `submission_client.py`, `ApprovalStatus`, `api.py`, `_submit_official_template`?**
   _High betweenness centrality (0.010) - this node is a cross-community bridge._
 - **Are the 25 inferred relationships involving `Path` (e.g. with `_migrate_jsonl_to_sqlite()` and `_commit_credentials_to_github()`) actually correct?**
   _`Path` has 25 INFERRED edges - model-reasoned connections that need verification._

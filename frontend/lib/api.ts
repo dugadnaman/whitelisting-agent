@@ -1131,6 +1131,21 @@ export async function transferJiraTicket(issue_key: string, to_account_id: strin
   return res.json();
 }
 
+export async function bulkTransferJiraTickets(
+  issue_keys: string[],
+  to_account_id: string,
+  handover_note?: string,
+  transferred_by?: string
+) {
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/bulk-transfer`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ issue_keys, to_account_id, handover_note: handover_note || "", transferred_by }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
 export async function aiRebalanceWorkload(prompt: string, project: string = "TCN", auto_execute: boolean = false) {
   const res = await fetchWithRetry(getApiUrl(`/api/work-management/ai-rebalance`), {
     method: "POST",
@@ -1150,6 +1165,145 @@ export async function fetchWorkManagementProjects() {
 export async function fetchTurnaroundAnalytics(project: string = "SWCM", limit: number = 100) {
   const qs = new URLSearchParams({ project, limit: limit.toString() });
   const res = await fetchWithRetry(getApiUrl(`/api/work-management/turnaround-analytics?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export type TemplateDiscrepancyItem = {
+  template_name: string;
+  status: 'WHITELISTED' | 'NOT_WHITELISTED' | 'PENDING' | 'REJECTED' | 'CONTENT_DRIFT' | 'PAUSED' | string;
+  category: string;
+  language: string;
+  master_body: string;
+  live_body: string;
+  match_confidence: number;
+  match_method: string;
+  diff_summary: string;
+  live_fb_id?: string | null;
+  live_status_raw?: string | null;
+  action_required: 'SUBMIT' | 'REMEDIATE' | 'WAIT' | 'NONE';
+};
+
+export type IdentificationReport = {
+  account: string;
+  total_master: number;
+  whitelisted_count: number;
+  missing_count: number;
+  pending_count: number;
+  rejected_count: number;
+  drift_count: number;
+  summary_notes: string;
+  items: TemplateDiscrepancyItem[];
+  missing_templates: Array<Record<string, unknown>>;
+};
+
+export async function identifyTemplates(file: File, account: string = 'bajaj'): Promise<IdentificationReport> {
+  const form = new FormData();
+  form.append('file', file);
+  const qs = new URLSearchParams({ account });
+  const res = await fetchWithRetry(getApiUrl(`/api/templates/identify?${qs.toString()}`), {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function identifyTemplatesJson(templates: Array<Record<string, unknown>>, account: string = 'bajaj'): Promise<IdentificationReport> {
+  const res = await fetchWithRetry(getApiUrl('/api/templates/identify-json'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ templates, account }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export type AlertEmailDraft = {
+  stage: 'MORNING' | 'MIDDAY' | 'EOD' | string;
+  recipient_email: string;
+  recipient_name: string;
+  subject: string;
+  body_text: string;
+  body_html: string;
+  pending_count: number;
+  ticket_keys: string[];
+};
+
+export type AlertsPreviewResponse = {
+  ok: boolean;
+  project: string;
+  stage: string;
+  ist_time: string;
+  total_due_today_incomplete: number;
+  recipient_count: number;
+  drafts: AlertEmailDraft[];
+};
+
+export type AlertsDispatchResponse = {
+  ok: boolean;
+  stage: string;
+  date: string;
+  total_tickets: number;
+  recipients_count: number;
+  delivered_count: number;
+  failed_count: number;
+  dry_run: boolean;
+  dispatched_by: string;
+  results: Array<{
+    delivered: boolean;
+    simulated: boolean;
+    recipient: string;
+    subject: string;
+    message?: string;
+    error?: string;
+  }>;
+};
+
+export type AlertSchedulerStatusResponse = {
+  enabled: boolean;
+  ist_time: string;
+  current_stage: string;
+  last_sent: Record<string, string>;
+  history: Array<{
+    slot_key: string;
+    stage: string;
+    date: string;
+    dispatched_at: string;
+    delivered_count?: number;
+    failed_count?: number;
+  }>;
+};
+
+export async function fetchAlertsPreview(project: string = 'ALL', stage: string = 'AUTO'): Promise<AlertsPreviewResponse> {
+  const qs = new URLSearchParams({ project, stage });
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/alerts/preview?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function dispatchAlerts(project: string = 'ALL', stage: string = 'AUTO', dry_run: boolean = false): Promise<AlertsDispatchResponse> {
+  const res = await fetchWithRetry(getApiUrl('/api/work-management/alerts/dispatch'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project, stage, dry_run }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchAlertSchedulerStatus(): Promise<AlertSchedulerStatusResponse> {
+  const res = await fetchWithRetry(getApiUrl('/api/work-management/alerts/scheduler-status'));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function toggleAlertScheduler(enabled: boolean): Promise<AlertSchedulerStatusResponse> {
+  const res = await fetchWithRetry(getApiUrl('/api/work-management/alerts/scheduler-toggle'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

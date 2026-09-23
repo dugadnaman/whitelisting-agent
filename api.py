@@ -2177,6 +2177,70 @@ async def delete_templates_from_file(
             os.unlink(tmp_path)
 
 
+@app.post("/api/templates/identify")
+async def identify_templates_endpoint(
+    file: UploadFile = File(...),
+    account: str = Query("bajaj"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Phase 1: Identify and diff a master template catalog against live Karix WABA templates.
+    Classifies each template into WHITELISTED, NOT_WHITELISTED, PENDING, REJECTED, or CONTENT_DRIFT.
+    """
+    require_tenant_access(account, current_user)
+    acc = account.lower()
+
+    suffix = Path(file.filename or "master.csv").suffix.lower()
+    if suffix not in (".csv", ".xlsx", ".xls", ".json"):
+        raise HTTPException(status_code=400, detail="Only .csv, .xlsx, .xls, and .json files are supported.")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        from template_identifier import identify_from_file
+
+        report = await asyncio.to_thread(identify_from_file, tmp_path, client=acc)
+        log_activity(
+            action="TEMPLATE_IDENTIFICATION",
+            account=acc,
+            channel="whatsapp",
+            user=current_user.get("name", "Operator"),
+            details={
+                "filename": file.filename,
+                "total_master": report.total_master,
+                "whitelisted": report.whitelisted_count,
+                "missing": report.missing_count,
+                "pending": report.pending_count,
+                "rejected": report.rejected_count,
+                "drift": report.drift_count,
+            },
+            status="success",
+        )
+        return _json_safe(report.to_dict())
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+
+class IdentifyJsonRequest(BaseModel):
+    account: str = "bajaj"
+    templates: list[dict[str, Any]]
+
+
+@app.post("/api/templates/identify-json")
+def identify_templates_json_endpoint(
+    body: IdentifyJsonRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run Phase 1 Identification directly on a JSON list of master templates."""
+    require_tenant_access(body.account, current_user)
+    from template_identifier import identify_master_templates
+
+    report = identify_master_templates(body.templates, client=body.account)
+    return _json_safe(report.to_dict())
+
 @app.get("/api/accounts")
 def get_accounts(current_user: dict = Depends(get_current_user)):
     accs = load_accounts()
@@ -3902,6 +3966,13 @@ class TicketTransferRequest(BaseModel):
     transferred_by: str | None = None
 
 
+
+class BulkTicketTransferRequest(BaseModel):
+    issue_keys: list[str]
+    to_account_id: str
+    handover_note: str = ""
+    transferred_by: str | None = None
+
 class AiRebalanceRequest(BaseModel):
     prompt: str
     project: str = "TCN"
@@ -3970,6 +4041,27 @@ def transfer_jira_ticket_endpoint(
     return _json_safe(result)
 
 
+@app.post("/api/work-management/bulk-transfer")
+def bulk_transfer_jira_tickets_endpoint(
+    body: BulkTicketTransferRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Bulk transfer/reassign multiple Jira tickets to another team member or intern.
+    Syncs directly to Jira Cloud REST API and logs handover comments.
+    """
+    from work_manager import bulk_transfer_jira_tickets
+
+    operator = body.transferred_by or current_user.get("name") or "Work Management Operator"
+    result = bulk_transfer_jira_tickets(
+        issue_keys=body.issue_keys,
+        to_account_id=body.to_account_id,
+        handover_note=body.handover_note,
+        transferred_by=operator,
+    )
+    return _json_safe(result)
+
+
 @app.post("/api/work-management/ai-rebalance")
 def ai_rebalance_workload_endpoint(
     body: AiRebalanceRequest,
@@ -4008,3 +4100,101 @@ def get_turnaround_analytics_endpoint(
 
     data = get_turnaround_and_bottleneck_analytics(project=project, limit=limit)
     return _json_safe(data)
+
+
+class DispatchAlertsRequest(BaseModel):
+    project: str = "ALL"
+    stage: str = "AUTO"  # MORNING, MIDDAY, EOD, AUTO
+    dry_run: bool = False
+
+
+class SchedulerToggleRequest(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/work-management/alerts/preview")
+def preview_alerts_endpoint(
+    project: str = Query("ALL"),
+    stage: str = Query("AUTO"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Preview daily SLA alert emails for campaigns due today.
+    Stages:
+    - MORNING (10:00 AM IST): Kickoff stating total campaigns due today.
+    - MIDDAY (1:00 PM IST): Progress check stating remaining pending campaigns.
+    - EOD (4:00 PM IST): Urgent escalation warning for incomplete campaigns.
+    - AUTO: Infers stage from current IST time.
+    """
+    from email_notifier import preview_due_today_alerts
+
+    data = preview_due_today_alerts(project=project, stage=stage)
+    return _json_safe(data)
+
+
+@app.post("/api/work-management/alerts/dispatch")
+def dispatch_alerts_endpoint(
+    body: DispatchAlertsRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Dispatch daily SLA alert emails to operators with campaigns due today that are not done.
+    """
+    from email_notifier import dispatch_due_today_alerts
+
+    operator = current_user.get("name") or "Operator"
+    data = dispatch_due_today_alerts(
+        project=body.project,
+        stage=body.stage,
+        dry_run=body.dry_run,
+        operator_name=operator,
+    )
+    return _json_safe(data)
+
+
+@app.get("/api/work-management/alerts/scheduler-status")
+def scheduler_status_endpoint(
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get current state of the automated 10am/1pm/4pm IST alert scheduler.
+    """
+    from email_notifier import SCHEDULER_STATE, determine_current_stage, get_current_ist_time
+
+    ist_now = get_current_ist_time()
+    return _json_safe({
+        "enabled": SCHEDULER_STATE.enabled,
+        "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "current_stage": determine_current_stage(ist_now),
+        "last_sent": SCHEDULER_STATE.last_sent,
+        "history": SCHEDULER_STATE.history[-10:],
+    })
+
+
+@app.post("/api/work-management/alerts/scheduler-toggle")
+def scheduler_toggle_endpoint(
+    body: SchedulerToggleRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Enable or disable the automated daily alert scheduler.
+    """
+    from email_notifier import SCHEDULER_STATE, determine_current_stage, get_current_ist_time
+
+    SCHEDULER_STATE.enabled = body.enabled
+    ist_now = get_current_ist_time()
+    return _json_safe({
+        "enabled": SCHEDULER_STATE.enabled,
+        "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "current_stage": determine_current_stage(ist_now),
+        "message": f"Automated alert scheduler is now {'ENABLED' if body.enabled else 'DISABLED'}.",
+    })
+
+
+@app.on_event("startup")
+async def start_alert_scheduler_task():
+    """Start the background scheduler task for 10am, 1pm, 4pm IST alert runs."""
+    from email_notifier import SCHEDULER_STATE, run_scheduler_loop
+
+    if SCHEDULER_STATE.task is None or SCHEDULER_STATE.task.done():
+        SCHEDULER_STATE.task = asyncio.create_task(run_scheduler_loop())

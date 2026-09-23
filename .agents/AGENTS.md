@@ -10,16 +10,17 @@ automates that submission and status-tracking flow.
 
 ## Two-phase architecture
 
-- **Phase 1 — Identification:** compare a master list of templates that
-  *should* exist against what Karix currently has, classify each as
-  Whitelisted or Not Whitelisted. **Not built yet.** Will be added when
-  the "which templates need whitelisting" question needs automation
-  instead of a human-curated list.
+- **Phase 1 — Identification:** compare a master catalog of templates (CSV,
+  Excel, JSON) that *should* exist against what Karix currently has on
+  live WABA (`/getAllTemplates` or official API). Automatically classifies
+  each template as Whitelisted (Approved), Not Whitelisted (Missing),
+  Content Drift, Pending, or Rejected using fuzzy diffing and TypeSafe AI
+  semantic equivalence. Supports 1-click automated handoff to the
+  submission queue. **Built, integrated, and fully functional.**
 
 - **Phase 2 — Submission:** take a list of templates that need
   whitelisting, submit each via Karix's API, and track each outcome
-  (Pending → Approved/Rejected) over time. **This is what's built and
-  working right now.**
+  (Pending → Approved/Rejected) over time. **Built, integrated, and fully functional.**
 
 ## Bajaj vs Tata Capital — strict separation
 

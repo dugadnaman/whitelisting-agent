@@ -30,8 +30,8 @@
     "semantic_hash": ""
   },
   "api.py": {
-    "mtime": 1788765425.7096572,
-    "ast_hash": "f079ae9564e5c24286c272248671d751",
+    "mtime": 1788775503.9923215,
+    "ast_hash": "2a82d50b3a9a64496895f161cd669b82",
     "semantic_hash": ""
   },
   "frontend/app/layout.tsx": {
@@ -240,13 +240,13 @@
     "semantic_hash": ""
   },
   "frontend/app/login/page.tsx": {
-    "mtime": 1787739044.7947187,
-    "ast_hash": "be6dde5a6a2c70be943acf4c0735afad",
+    "mtime": 1788777275.9613006,
+    "ast_hash": "58daf023914e2bc41ad903c75f7c4d1d",
     "semantic_hash": ""
   },
   "frontend/app/signup/page.tsx": {
-    "mtime": 1787824471.4869685,
-    "ast_hash": "015297413b5c7d1128b0890ea364a654",
+    "mtime": 1788776137.0662148,
+    "ast_hash": "03b2b04f4209dd18da5083d2322576c4",
     "semantic_hash": ""
   },
   "frontend/components/app-shell.tsx": {

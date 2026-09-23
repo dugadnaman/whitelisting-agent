@@ -19,6 +19,8 @@ venv/
 
 # Graphify cache
 graphify-out/cache/
+graphify-out/converted/
+graphify-out/2026-*/
 
 # Logs & data (contain per-run data, not source)
 submission_log.jsonl
@@ -35,3 +37,8 @@ media_cache/jira_*
 scratch/
 .DS_Store
 omp-session-*.html
+*.xlsx
+*.xls
+moengage_ops_cache.json
+.claude/
+.agents/skills/

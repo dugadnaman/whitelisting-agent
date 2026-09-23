@@ -432,6 +432,52 @@ def transfer_jira_ticket(
     }
 
 
+def bulk_transfer_jira_tickets(
+    issue_keys: list[str],
+    to_account_id: str,
+    to_account_name: str = "",
+    handover_note: str = "",
+    transferred_by: str = "Work Management Operator",
+) -> dict[str, Any]:
+    """
+    Reassign multiple Jira tickets in batch and post audit handover notes.
+    """
+    transferred: list[str] = []
+    failed: list[dict[str, str]] = []
+
+    for k in issue_keys:
+        clean_key = k.strip().upper()
+        if not clean_key:
+            continue
+        try:
+            res = transfer_jira_ticket(
+                issue_key=clean_key,
+                to_account_id=to_account_id,
+                handover_note=handover_note,
+                transferred_by=transferred_by,
+            )
+            if isinstance(res, dict) and res.get("success") is False and res.get("error"):
+                failed.append({"issue_key": clean_key, "key": clean_key, "error": str(res.get("error"))})
+            else:
+                transferred.append(clean_key)
+        except Exception as exc:
+            logger.error("Bulk transfer failed for %s: %s", clean_key, exc)
+            failed.append({"issue_key": clean_key, "key": clean_key, "error": str(exc)})
+
+    return {
+        "ok": len(failed) == 0,
+        "success": len(failed) == 0,
+        "to_account_id": to_account_id,
+        "to_account_name": to_account_name,
+        "total_requested": len(issue_keys),
+        "transferred_count": len(transferred),
+        "failed_count": len(failed),
+        "transferred_keys": transferred,
+        "failed_keys": failed,
+        "failed_items": failed,
+    }
+
+
 def ai_rebalance_workload(
     context_prompt: str,
     project: str = "TCN",
@@ -764,11 +810,20 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
 
     team_avg_hours = sum(all_done_times) / len(all_done_times) if all_done_times else 0.0
     team_avg_days = round(team_avg_hours / 24, 2)
+    fastest_team_hours = round(min(all_done_times), 1) if all_done_times else 0.0
+    slowest_team_days = round(max(all_done_times) / 24, 1) if all_done_times else 0.0
 
     total_rb = len(blocked_tickets)
     tc_count = roadblock_counts.get("Tata Capital", 0)
     km_count = roadblock_counts.get("Karix / Meta", 0)
     att_count = roadblock_counts.get("Attributics", 0)
+
+    if tc_count >= km_count and tc_count >= att_count:
+        primary_bottleneck = "Tata Capital (Client)"
+    elif km_count >= att_count:
+        primary_bottleneck = "Karix / Meta (Gateway)"
+    else:
+        primary_bottleneck = "Attributics (Internal)"
 
     return {
         "project": project,
@@ -777,6 +832,9 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
         "active_roadblocks_count": total_rb,
         "team_avg_cycle_time_days": team_avg_days,
         "team_avg_cycle_time_hours": round(team_avg_hours, 1),
+        "team_fastest_hours": fastest_team_hours,
+        "team_slowest_days": slowest_team_days,
+        "primary_bottleneck_driver": primary_bottleneck,
         "operator_velocities": [o.to_dict() for o in operator_velocities],
         "roadblock_attribution": {
             "total_roadblocks": total_rb,

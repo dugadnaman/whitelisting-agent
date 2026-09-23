@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob } from '@/lib/api';
-import type { TemplatePreview, Template, JobTask } from '@/lib/api';
+import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates } from '@/lib/api';
+import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import { formatChannel, formatError } from '@/lib/format';
 function StatusBadge({ status }: { status: string }) {
@@ -70,6 +70,86 @@ export default function SubmitPage() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Phase 1 Identification Mode
+  const [activeTab, setActiveTab] = useState<'SUBMIT' | 'IDENTIFY'>('SUBMIT');
+  const [identifyFile, setIdentifyFile] = useState<File | null>(null);
+  const [identifying, setIdentifying] = useState<boolean>(false);
+  const [identifyReport, setIdentifyReport] = useState<IdentificationReport | null>(null);
+  const [identifyError, setIdentifyError] = useState<string | null>(null);
+  const [identifyFilter, setIdentifyFilter] = useState<'ALL' | 'MISSING' | 'WHITELISTED' | 'DRIFT' | 'PENDING' | 'REJECTED'>('ALL');
+  const [identifySearch, setIdentifySearch] = useState<string>('');
+  const identifyInputRef = useRef<HTMLInputElement>(null);
+
+  const handleIdentifyFileSelect = async (selected: File) => {
+    setIdentifyFile(selected);
+    setIdentifying(true);
+    setIdentifyError(null);
+    try {
+      const rep = await identifyTemplates(selected, account);
+      setIdentifyReport(rep);
+    } catch (err: unknown) {
+      setIdentifyError(err instanceof Error ? err.message : 'Identification failed');
+    } finally {
+      setIdentifying(false);
+    }
+  };
+
+  type RawTemplateComponent = {
+    type?: string;
+    text?: string;
+    buttons?: Array<{ text?: string; url?: string }>;
+  };
+  type RawTemplateRow = {
+    template_name?: string;
+    category?: string;
+    language?: string;
+    components?: RawTemplateComponent[];
+  };
+
+  const formatMissingRows = (templates: Array<Record<string, unknown>>) => [
+    ['template_name', 'category', 'language', 'body_text', 'header_text', 'cta_button_text', 'cta_button_url'],
+    ...templates.map((item) => {
+      const t = item as unknown as RawTemplateRow;
+      const comps = t.components || [];
+      const bodyComp = comps.find((c) => c.type === 'BODY');
+      const headerComp = comps.find((c) => c.type === 'HEADER');
+      const btnComp = comps.find((c) => c.type === 'BUTTONS');
+      const firstBtn = btnComp?.buttons?.[0];
+      return [
+        t.template_name || '',
+        t.category || 'MARKETING',
+        t.language || 'en',
+        bodyComp?.text || '',
+        headerComp?.text || '',
+        firstBtn?.text || '',
+        firstBtn?.url || '',
+      ];
+    }),
+  ];
+
+  const handleHandoffMissingToSubmit = () => {
+    if (!identifyReport || identifyReport.missing_templates.length === 0) return;
+    const rows = formatMissingRows(identifyReport.missing_templates);
+    const csvContent = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const missingFile = new File([blob], `Missing_${account}_Templates_${new Date().toISOString().slice(0, 10)}.csv`, { type: 'text/csv' });
+    setFile(missingFile);
+    setActiveTab('SUBMIT');
+    handleFile(missingFile);
+  };
+
+  const handleExportMissingCsv = () => {
+    if (!identifyReport || identifyReport.missing_templates.length === 0) return;
+    const rows = formatMissingRows(identifyReport.missing_templates);
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Missing_${account}_Templates_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
   const pollJobFallback = useCallback((jobId: string) => {
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
     let attempts = 0;
@@ -361,6 +441,36 @@ export default function SubmitPage() {
           Download Sample CSV ({channelLabel})
         </a>
       </div>
+
+      {/* Two-Phase Architecture Switcher */}
+      <div className="flex items-center gap-2 border-b border-gray-200 pb-3">
+        <button
+          onClick={() => setActiveTab('SUBMIT')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeTab === 'SUBMIT'
+              ? 'bg-gray-900 text-white shadow-sm'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          <span>🚀</span> Phase 2: Batch Whitelisting &amp; Submission
+        </button>
+        <button
+          onClick={() => setActiveTab('IDENTIFY')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            activeTab === 'IDENTIFY'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          <span>🔍</span> Phase 1: Identify &amp; Diff Master Catalog
+          <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded-full font-semibold">
+            WABA Reconciliation
+          </span>
+        </button>
+      </div>
+
+      {activeTab === 'SUBMIT' && (
+        <div className="space-y-6">
 
       {/* STEP 1: Upload Dropzone (Visible when idle, error, previewing, previewed) */}
       {state.step !== 'submitted' && (
@@ -1123,6 +1233,338 @@ export default function SubmitPage() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+        </div>
+      )}
+
+      {/* PHASE 1: MASTER CATALOG IDENTIFICATION & WABA RECONCILIATION */}
+      {activeTab === 'IDENTIFY' && (
+        <div className="space-y-6">
+          {/* Phase 1 Upload & Controller Card */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse" />
+                  <h2 className="text-base font-bold text-gray-900">
+                    Phase 1: Master Catalog Reconciliation &amp; Diffing
+                  </h2>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  Upload your master template catalog (CSV, XLSX, XLS, or JSON). Reconciles against live {accountLabel} Karix WABA templates to classify what is Whitelisted, what is Missing, and where copy has drifted.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  ref={identifyInputRef}
+                  type="file"
+                  accept=".csv,.xlsx,.xls,.json"
+                  onChange={(e) => {
+                    const sel = e.target.files?.[0];
+                    if (sel) handleIdentifyFileSelect(sel);
+                  }}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => identifyInputRef.current?.click()}
+                  disabled={identifying}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center gap-2"
+                >
+                  {identifying ? (
+                    <>
+                      <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                      </svg>
+                      <span>Reconciling with Karix WABA...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🔍</span>
+                      <span>Upload &amp; Identify Catalog</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {identifyFile && (
+              <div className="flex items-center justify-between text-xs bg-gray-50 p-3 rounded-xl border border-gray-200">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-700">Master Catalog File:</span>
+                  <span className="font-mono text-indigo-700 font-bold">{identifyFile.name}</span>
+                  <span className="text-gray-400">({formatBytes(identifyFile.size)})</span>
+                </div>
+                <button
+                  onClick={() => {
+                    setIdentifyFile(null);
+                    setIdentifyReport(null);
+                    setIdentifyError(null);
+                    if (identifyInputRef.current) identifyInputRef.current.value = '';
+                  }}
+                  className="text-gray-400 hover:text-gray-600 font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            {identifyError && (
+              <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2">
+                <span>⚠️</span>
+                <span>{identifyError}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Identification Report Results */}
+          {identifyReport && (() => {
+            const filteredItems = identifyReport.items.filter((item) => {
+              if (identifyFilter === 'MISSING' && item.status !== 'NOT_WHITELISTED') return false;
+              if (identifyFilter === 'WHITELISTED' && item.status !== 'WHITELISTED') return false;
+              if (identifyFilter === 'DRIFT' && item.status !== 'CONTENT_DRIFT') return false;
+              if (identifyFilter === 'PENDING' && item.status !== 'PENDING') return false;
+              if (identifyFilter === 'REJECTED' && item.status !== 'REJECTED') return false;
+              if (identifySearch.trim()) {
+                const q = identifySearch.toLowerCase();
+                const mName = item.template_name.toLowerCase().includes(q);
+                const mMaster = item.master_body.toLowerCase().includes(q);
+                const mLive = item.live_body.toLowerCase().includes(q);
+                const mDiff = item.diff_summary.toLowerCase().includes(q);
+                if (!mName && !mMaster && !mLive && !mDiff) return false;
+              }
+              return true;
+            });
+
+            return (
+              <div className="space-y-6">
+                {/* 1. Summary Cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">Total Master</span>
+                    <div className="text-2xl font-black text-gray-900 mt-1">{identifyReport.total_master}</div>
+                    <span className="text-[11px] text-gray-500 font-medium">Catalog Templates</span>
+                  </div>
+
+                  <div className="bg-white border border-emerald-200 rounded-xl p-3.5 shadow-xs bg-emerald-50/20">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block">✅ Whitelisted</span>
+                    <div className="text-2xl font-black text-emerald-700 mt-1">{identifyReport.whitelisted_count}</div>
+                    <span className="text-[11px] text-emerald-600 font-medium">Ready for Blasts</span>
+                  </div>
+
+                  <div className="bg-white border border-rose-300 rounded-xl p-3.5 shadow-xs bg-rose-50/30 ring-2 ring-rose-100">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 block">⚡ Missing</span>
+                    <div className="text-2xl font-black text-rose-700 mt-1">{identifyReport.missing_count}</div>
+                    <span className="text-[11px] text-rose-600 font-bold">Needs Submission</span>
+                  </div>
+
+                  <div className="bg-white border border-amber-200 rounded-xl p-3.5 shadow-xs bg-amber-50/20">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 block">⚠️ Content Drift</span>
+                    <div className="text-2xl font-black text-amber-800 mt-1">{identifyReport.drift_count}</div>
+                    <span className="text-[11px] text-amber-600 font-medium">Modified Copy</span>
+                  </div>
+
+                  <div className="bg-white border border-blue-200 rounded-xl p-3.5 shadow-xs bg-blue-50/20">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-700 block">⏳ Pending</span>
+                    <div className="text-2xl font-black text-blue-800 mt-1">{identifyReport.pending_count}</div>
+                    <span className="text-[11px] text-blue-600 font-medium">In Carrier Review</span>
+                  </div>
+
+                  <div className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 block">❌ Rejected</span>
+                    <div className="text-2xl font-black text-red-600 mt-1">{identifyReport.rejected_count}</div>
+                    <span className="text-[11px] text-red-500 font-medium">Failed Meta Review</span>
+                  </div>
+                </div>
+
+                {/* 2. Automated Action Bar */}
+                <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-4 rounded-2xl shadow-md flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-300">
+                      Phase 1 → Phase 2 Automated Handoff
+                    </h3>
+                    <p className="text-xs text-gray-200 mt-0.5">
+                      {identifyReport.missing_count + identifyReport.rejected_count} templates require submission to Karix Meta WABA.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleExportMissingCsv}
+                      disabled={identifyReport.missing_templates.length === 0}
+                      className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold border border-white/20 transition-all flex items-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span>Export Missing (CSV)</span>
+                    </button>
+                    <button
+                      onClick={handleHandoffMissingToSubmit}
+                      disabled={identifyReport.missing_templates.length === 0}
+                      className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+                    >
+                      <span>⚡</span>
+                      <span>Send {identifyReport.missing_count + identifyReport.rejected_count} Missing to Submission Queue &rarr;</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Filterable Discrepancy Table */}
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs space-y-3">
+                  <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    {/* Filter Pills */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider mr-1">Filter:</span>
+                      {[
+                        { id: 'ALL', label: `All (${identifyReport.items.length})` },
+                        { id: 'MISSING', label: `Missing (${identifyReport.missing_count})`, alert: true },
+                        { id: 'WHITELISTED', label: `Whitelisted (${identifyReport.whitelisted_count})` },
+                        { id: 'DRIFT', label: `Drift (${identifyReport.drift_count})` },
+                        { id: 'PENDING', label: `Pending (${identifyReport.pending_count})` },
+                        { id: 'REJECTED', label: `Rejected (${identifyReport.rejected_count})` },
+                      ].map((f) => (
+                        <button
+                          key={f.id}
+                          onClick={() => setIdentifyFilter(f.id as 'ALL' | 'MISSING' | 'WHITELISTED' | 'DRIFT' | 'PENDING' | 'REJECTED')}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                            identifyFilter === f.id
+                              ? f.alert
+                                ? 'bg-rose-600 text-white shadow-xs'
+                                : 'bg-gray-900 text-white shadow-xs'
+                              : f.alert
+                              ? 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Search */}
+                    <div className="w-full md:w-64">
+                      <input
+                        type="text"
+                        value={identifySearch}
+                        onChange={(e) => setIdentifySearch(e.target.value)}
+                        placeholder="Search template name, body copy..."
+                        className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-800"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-[10px] border-b border-gray-200">
+                        <tr>
+                          <th className="py-2.5 px-4">Template Name</th>
+                          <th className="py-2.5 px-3">Category</th>
+                          <th className="py-2.5 px-3">Whitelisting Status</th>
+                          <th className="py-2.5 px-3">Equivalence</th>
+                          <th className="py-2.5 px-4">Master Body vs Live WABA Body</th>
+                          <th className="py-2.5 px-4">Diagnosis / Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {filteredItems.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-gray-500">
+                              No templates match the selected filter.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredItems.map((item) => {
+                            const isMissing = item.status === 'NOT_WHITELISTED';
+                            const isWhitelisted = item.status === 'WHITELISTED';
+                            const isDrift = item.status === 'CONTENT_DRIFT';
+                            const isPending = item.status === 'PENDING';
+                            const isRejected = item.status === 'REJECTED';
+
+                            return (
+                              <tr key={item.template_name} className="hover:bg-gray-50/60 transition-colors">
+                                <td className="py-2.5 px-4 font-bold text-gray-900">
+                                  <div className="font-mono text-indigo-900">{item.template_name}</div>
+                                  <div className="text-[10px] text-gray-400 font-normal">{item.language}</div>
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-100 text-gray-700">
+                                    {item.category}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span
+                                    className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                      isWhitelisted
+                                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                        : isMissing
+                                        ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                        : isDrift
+                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                        : isPending
+                                        ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                        : isRejected
+                                        ? 'bg-red-100 text-red-800 border border-red-200'
+                                        : 'bg-gray-100 text-gray-700'
+                                    }`}
+                                  >
+                                    {isMissing ? 'NOT WHITELISTED' : item.status}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  {item.match_confidence > 0 ? (
+                                    <div className="space-y-0.5">
+                                      <span className="font-bold text-gray-900">
+                                        {Math.round(item.match_confidence * 100)}%
+                                      </span>
+                                      <span className="block text-[9px] text-gray-400 uppercase">
+                                        {item.match_method}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-gray-400">—</span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-4 max-w-md">
+                                  <div className="space-y-1">
+                                    <div>
+                                      <span className="text-[9px] font-bold text-gray-400 uppercase block">Master Brief:</span>
+                                      <p className="text-xs text-gray-800 line-clamp-2">{item.master_body || '—'}</p>
+                                    </div>
+                                    {item.live_body && (
+                                      <div>
+                                        <span className="text-[9px] font-bold text-emerald-600 uppercase block">Live WABA:</span>
+                                        <p className="text-xs text-gray-600 line-clamp-2">{item.live_body}</p>
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="py-2.5 px-4 text-xs text-gray-600">
+                                  <div>{item.diff_summary}</div>
+                                  <span className={`inline-block mt-1 px-1.5 py-0.2 rounded text-[10px] font-bold uppercase ${
+                                    item.action_required === 'SUBMIT'
+                                      ? 'bg-rose-50 text-rose-700'
+                                      : item.action_required === 'REMEDIATE'
+                                      ? 'bg-amber-50 text-amber-700'
+                                      : item.action_required === 'WAIT'
+                                      ? 'bg-blue-50 text-blue-700'
+                                      : 'bg-gray-50 text-gray-500'
+                                  }`}>
+                                    Action: {item.action_required}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

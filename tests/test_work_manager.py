@@ -223,5 +223,70 @@ def test_api_turnaround_analytics_endpoint():
         assert "roadblock_attribution" in data
         assert "operator_velocities" in data
         assert "blocked_tickets" in data
+        assert "team_fastest_hours" in data
+        assert "primary_bottleneck_driver" in data
     finally:
         app.dependency_overrides.clear()
+
+
+def test_bulk_transfer_jira_tickets():
+    """Verify bulk_transfer_jira_tickets iterates across issues, reassigns, and audits."""
+    from unittest.mock import MagicMock, patch
+    from work_manager import bulk_transfer_jira_tickets
+
+    with patch("work_manager.transfer_jira_ticket") as mock_transfer:
+        mock_transfer.side_effect = [
+            {"success": True, "issue_key": "SWCM-101", "error": None},
+            {"success": False, "issue_key": "SWCM-102", "error": "User inactive"},
+            {"success": True, "issue_key": "SWCM-103", "error": None},
+        ]
+
+        res = bulk_transfer_jira_tickets(
+            issue_keys=["SWCM-101", "SWCM-102", "SWCM-103"],
+            to_account_id="712020:test-intern-id",
+            to_account_name="Intern",
+            handover_note="Batch reassignment for campaign sprint.",
+            transferred_by="Dispatcher Lead",
+        )
+
+        assert res["total_requested"] == 3
+        assert res["transferred_count"] == 2
+        assert res["failed_count"] == 1
+        assert len(res["transferred_keys"]) == 2
+        assert "SWCM-101" in res["transferred_keys"]
+        assert "SWCM-103" in res["transferred_keys"]
+        assert len(res["failed_items"]) == 1
+        assert res["failed_items"][0]["issue_key"] == "SWCM-102"
+        assert res["failed_items"][0]["error"] == "User inactive"
+        assert mock_transfer.call_count == 3
+
+
+def test_api_bulk_transfer_endpoint():
+    """Verify POST /api/work-management/bulk-transfer accepts batch reassignments."""
+    from unittest.mock import patch
+    from fastapi.testclient import TestClient
+    from api import app, get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {"email": "lead@attributics.com", "name": "Team Lead"}
+    client = TestClient(app)
+
+    with patch("work_manager.transfer_jira_ticket") as mock_transfer:
+        mock_transfer.return_value = {"success": True, "issue_key": "SWCM-1", "error": None}
+
+        try:
+            resp = client.post(
+                "/api/work-management/bulk-transfer",
+                json={
+                    "issue_keys": ["SWCM-1", "SWCM-2"],
+                    "to_account_id": "712020:645c853f-intern",
+                    "handover_note": "Reassigning queue",
+                },
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["total_requested"] == 2
+            assert data["transferred_count"] == 2
+            assert data["failed_count"] == 0
+            assert data["to_account_id"] == "712020:645c853f-intern"
+        finally:
+            app.dependency_overrides.clear()
