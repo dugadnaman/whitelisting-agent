@@ -705,12 +705,9 @@ def send_google_chat_sla_alert(
     mentions_list = []
     for op in operators:
         keys = ", ".join(t.get("key", "") for t in op.tickets)
-        if op.operator_email and "@" in op.operator_email:
-            mention = f"<users/{op.operator_email}>"
-            mentions_list.append(mention)
-        else:
-            mention = f"*{op.operator_name}*"
-        op_lines.append(f"• {mention} ({op.pending_count} pending): `{keys}`")
+        mention_tag = f"@{op.operator_name}"
+        mentions_list.append(mention_tag)
+        op_lines.append(f"• *{mention_tag}* ({op.pending_count} pending): `{keys}`")
 
     op_text = "\n".join(op_lines) if op_lines else "All campaigns due today are completed! 🎉"
     mentions_header = f"🔔 Attn: {' '.join(mentions_list)}\n\n" if mentions_list else ""
