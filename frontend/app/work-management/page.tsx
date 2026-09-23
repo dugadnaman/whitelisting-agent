@@ -2379,22 +2379,22 @@ export default function WorkManagementPage() {
 
       {/* Daily SLA Alert Dispatcher Modal */}
       {showAlertModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full p-6 border border-gray-200 space-y-5 max-h-[92vh] flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-start justify-between border-b border-gray-100 pb-4 shrink-0">
+        <div className="fixed inset-0 z-50 bg-black/60 overflow-y-auto flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full border border-gray-200 flex flex-col max-h-[92vh] my-auto overflow-hidden">
+            {/* Modal Header (Sticky Top) */}
+            <div className="p-4 sm:p-5 border-b border-gray-100 flex items-start justify-between shrink-0 bg-white z-10">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xl">✉️</span>
                   <h3 className="text-base font-bold text-gray-900">
-                    Automated 3-Stage Daily SLA Email Dispatcher
+                    Automated 3-Stage Daily SLA Dispatcher
                   </h3>
                   <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
                     IST (UTC+5:30)
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  Progressive notification schedule for campaigns due today that are incomplete: 10:00 AM Kickoff &rarr; 1:00 PM Checkpoint &rarr; 4:00 PM Urgent Attention Required.
+                <p className="text-xs text-gray-500 mt-0.5">
+                  10:00 AM Kickoff &rarr; 1:00 PM Checkpoint &rarr; 4:00 PM Urgent Attention Required.
                 </p>
               </div>
               <button
@@ -2404,6 +2404,9 @@ export default function WorkManagementPage() {
                 ✕
               </button>
             </div>
+
+            {/* Scrollable Modal Content */}
+            <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4">
 
             {/* Scheduler Status Banner */}
             <div className="bg-gradient-to-r from-gray-900 to-indigo-950 text-white rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shrink-0 shadow-sm">
@@ -2571,7 +2574,7 @@ export default function WorkManagementPage() {
             </div>
 
             {/* Modal Body: Two-column layout (Recipients List vs Live Email Preview) */}
-            <div className="flex-1 overflow-hidden grid grid-cols-1 md:grid-cols-12 gap-4 min-h-[300px]">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 h-64 sm:h-72 border border-gray-200 rounded-xl overflow-hidden bg-white">
               {/* Left Column: Operators List */}
               <div className="md:col-span-5 border border-gray-200 rounded-xl overflow-hidden flex flex-col bg-gray-50/50">
                 <div className="p-3 bg-gray-100/70 border-b border-gray-200 text-xs font-bold text-gray-700 flex items-center justify-between">
@@ -2652,42 +2655,43 @@ export default function WorkManagementPage() {
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Modal Footer Actions */}
-            <div className="pt-3 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-              <div className="text-xs text-gray-500">
-                Stage: <strong className="text-gray-900">{alertsPreview?.stage}</strong> • Recipients: <strong className="text-gray-900">{alertsPreview?.recipient_count} operators</strong>
-              </div>
+          {/* Modal Footer Actions (Sticky Bottom) */}
+          <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 bg-gray-50 rounded-b-2xl z-10">
+            <div className="text-xs text-gray-500">
+              Stage: <strong className="text-gray-900">{alertsPreview?.stage}</strong> • Recipients: <strong className="text-gray-900">{alertsPreview?.recipient_count} operators</strong>
+            </div>
 
-              <div className="flex items-center gap-2 self-end sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setShowAlertModal(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50"
-                >
-                  Close
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDispatchAlerts(true)}
-                  disabled={alertsDispatching || alertsPreview?.recipient_count === 0}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-xs font-bold border border-gray-300 transition-all"
-                >
-                  {alertsDispatching ? 'Running...' : 'Send Dry-Run (Simulation)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDispatchAlerts(false)}
-                  disabled={alertsDispatching || alertsPreview?.recipient_count === 0}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95"
-                >
-                  <span>⚡</span>
-                  <span>{alertsDispatching ? 'Dispatching...' : `Dispatch Live Emails (${alertsPreview?.recipient_count || 0})`}</span>
-                </button>
-              </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setShowAlertModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDispatchAlerts(true)}
+                disabled={alertsDispatching || alertsPreview?.recipient_count === 0}
+                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-xs font-bold border border-gray-300 transition-all"
+              >
+                {alertsDispatching ? 'Running...' : 'Send Dry-Run (Simulation)'}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDispatchAlerts(false)}
+                disabled={alertsDispatching || alertsPreview?.recipient_count === 0}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+              >
+                <span>⚡</span>
+                <span>{alertsDispatching ? 'Dispatching...' : `Dispatch Live Alerts (${alertsPreview?.recipient_count || 0})`}</span>
+              </button>
             </div>
           </div>
         </div>
+      </div>
       )}
     </div>
   );
