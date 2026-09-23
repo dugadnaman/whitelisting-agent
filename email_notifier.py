@@ -702,14 +702,21 @@ def send_google_chat_sla_alert(
     }.get(stage, {"title": f"🚨 SLA Alert • {stage}", "color": "#dc2626", "desc": f"{total_tickets} campaigns due today."})
 
     op_lines = []
+    mentions_list = []
     for op in operators:
         keys = ", ".join(t.get("key", "") for t in op.tickets)
-        op_lines.append(f"• *{op.operator_name}* ({op.pending_count} pending): `{keys}`")
+        if op.operator_email and "@" in op.operator_email:
+            mention = f"<users/{op.operator_email}>"
+            mentions_list.append(mention)
+        else:
+            mention = f"*{op.operator_name}*"
+        op_lines.append(f"• {mention} ({op.pending_count} pending): `{keys}`")
 
     op_text = "\n".join(op_lines) if op_lines else "All campaigns due today are completed! 🎉"
+    mentions_header = f"🔔 Attn: {' '.join(mentions_list)}\n\n" if mentions_list else ""
 
     card_payload = {
-        "text": f"*{stage_meta['title']}*\n{stage_meta['desc']}\n\n{op_text}",
+        "text": f"{mentions_header}*{stage_meta['title']}*\n{stage_meta['desc']}\n\n{op_text}",
         "cardsV2": [
             {
                 "cardId": f"slaAlert_{stage}",
