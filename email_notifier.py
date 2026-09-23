@@ -489,6 +489,16 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
         try:
             import requests
             sender_name = os.getenv("SMTP_FROM_NAME") or "Naman Dugad"
+            payload: dict[str, Any] = {
+                "sender": {"name": sender_name, "email": from_email},
+                "to": [{"email": draft.recipient_email, "name": draft.recipient_name}],
+                "subject": draft.subject,
+                "htmlContent": draft.body_html,
+                "textContent": draft.body_text,
+            }
+            if from_email and from_email.lower() != draft.recipient_email.lower():
+                payload["bcc"] = [{"email": from_email, "name": sender_name}]
+
             resp = requests.post(
                 "https://api.brevo.com/v3/smtp/email",
                 headers={
@@ -496,13 +506,7 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
                     "Content-Type": "application/json",
                     "accept": "application/json",
                 },
-                json={
-                    "sender": {"name": sender_name, "email": from_email},
-                    "to": [{"email": draft.recipient_email, "name": draft.recipient_name}],
-                    "subject": draft.subject,
-                    "htmlContent": draft.body_html,
-                    "textContent": draft.body_text,
-                },
+                json=payload,
                 timeout=15,
             )
             if resp.status_code in (200, 201, 202):
