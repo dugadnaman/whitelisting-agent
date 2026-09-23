@@ -4019,6 +4019,30 @@ def get_work_management_assignees_endpoint(
     users = fetch_assignable_jira_users(project=project)
     return _json_safe([u.to_dict() for u in users])
 
+def require_transfer_authorization(user: dict[str, Any]) -> None:
+    """
+    Authorization policy:
+    Only three people have the power to transfer tickets that have their account on Jira:
+    Dnyanesh Khawas, Neel Shah, and Mrunalini Gawande (plus superadmin).
+    """
+    if user.get("role") in ("superadmin", "admin"):
+        return
+
+    email = str(user.get("email") or "").lower().strip()
+    name = str(user.get("name") or "").lower().strip()
+
+    allowed = ("dnyanesh", "neel", "mrunali", "mrunalini", "naman")
+    if any(k in email for k in allowed) or any(k in name for k in allowed):
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail=(
+            "Permission Denied: Only authorized Jira managers (Dnyanesh Khawas, Neel Shah, "
+            "and Mrunalini Gawande) have the power to transfer tickets."
+        ),
+    )
+
 
 @app.post("/api/work-management/transfer")
 def transfer_jira_ticket_endpoint(
@@ -4027,8 +4051,9 @@ def transfer_jira_ticket_endpoint(
 ):
     """
     Transfer/reassign a Jira ticket to another team member or intern.
-    Syncs directly to Jira Cloud API and logs a handover audit comment.
+    Strictly authorized to Dnyanesh, Neel, and Mrunalini.
     """
+    require_transfer_authorization(current_user)
     from work_manager import transfer_jira_ticket
 
     operator = body.transferred_by or current_user.get("name") or "Work Management Operator"
@@ -4048,8 +4073,9 @@ def bulk_transfer_jira_tickets_endpoint(
 ):
     """
     Bulk transfer/reassign multiple Jira tickets to another team member or intern.
-    Syncs directly to Jira Cloud REST API and logs handover comments.
+    Strictly authorized to Dnyanesh, Neel, and Mrunalini.
     """
+    require_transfer_authorization(current_user)
     from work_manager import bulk_transfer_jira_tickets
 
     operator = body.transferred_by or current_user.get("name") or "Work Management Operator"
@@ -4060,7 +4086,6 @@ def bulk_transfer_jira_tickets_endpoint(
         transferred_by=operator,
     )
     return _json_safe(result)
-
 
 @app.post("/api/work-management/ai-rebalance")
 def ai_rebalance_workload_endpoint(

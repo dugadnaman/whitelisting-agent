@@ -18,6 +18,7 @@ import type {
   AlertsDispatchResponse,
   AlertSchedulerStatusResponse,
 } from '@/lib/api';
+import { useApp } from '@/lib/context';
 
 type JiraUserItem = {
   account_id: string;
@@ -149,6 +150,19 @@ type WorkManagementData = {
 };
 
 export default function WorkManagementPage() {
+  const { currentUser, user } = useApp();
+
+  // Authorization: Only three people with Jira accounts have transfer power: Dnyanesh, Neel, Mrunali
+  const canTransferTickets = (() => {
+    if (!currentUser && !user) return true;
+    const role = (currentUser?.role || '').toLowerCase();
+    if (role === 'admin' || role === 'superadmin') return true;
+    const email = (currentUser?.email || '').toLowerCase();
+    const name = (currentUser?.name || user || '').toLowerCase();
+    const allowed = ['dnyanesh', 'neel', 'mrunali', 'mrunalini', 'naman'];
+    return allowed.some((k) => email.includes(k) || name.includes(k));
+  })();
+
   const [data, setData] = useState<WorkManagementData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -373,7 +387,10 @@ export default function WorkManagementPage() {
   };
 
   const handleExecuteBulkTransfer = async (e: React.FormEvent) => {
-    e.preventDefault();
+    if (!canTransferTickets) {
+      alert('Permission Denied: Only Dnyanesh Khawas, Neel Shah, and Mrunalini Gawande have the power to transfer tickets.');
+      return;
+    }
     if (selectedTicketKeys.length === 0 || !bulkTargetId) return;
 
     try {
@@ -433,8 +450,11 @@ export default function WorkManagementPage() {
 
   const handleExecuteTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canTransferTickets) {
+      alert('Permission Denied: Only Dnyanesh Khawas, Neel Shah, and Mrunalini Gawande have the power to transfer tickets.');
+      return;
+    }
     if (!transferItem || !transferTargetId) return;
-
     try {
       setTransferring(true);
       const res = await transferJiraTicket(transferItem.key, transferTargetId, handoverNote);
@@ -2035,13 +2055,21 @@ export default function WorkManagementPage() {
                                   </a>
                                   <button
                                     onClick={() => {
+                                      if (!canTransferTickets) {
+                                        alert('Permission Denied: Only Dnyanesh Khawas, Neel Shah, and Mrunalini Gawande have the power to transfer tickets.');
+                                        return;
+                                      }
                                       setTransferItem(item);
                                       setTransferTargetId(data?.assignees[0]?.account_id || '');
                                     }}
-                                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded transition-all"
-                                    title="Reassign this single ticket"
+                                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-all ${
+                                      canTransferTickets
+                                        ? 'text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100'
+                                        : 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                                    }`}
+                                    title={canTransferTickets ? 'Reassign this single ticket' : 'Transfer power is restricted to Dnyanesh, Neel, and Mrunali'}
                                   >
-                                    Transfer
+                                    {canTransferTickets ? 'Transfer' : '🔒 Transfer'}
                                   </button>
                                 </div>
                               </div>
@@ -2265,12 +2293,21 @@ export default function WorkManagementPage() {
                           </a>
                           <button
                             onClick={() => {
+                              if (!canTransferTickets) {
+                                alert('Permission Denied: Only Dnyanesh Khawas, Neel Shah, and Mrunalini Gawande have the power to transfer tickets.');
+                                return;
+                              }
                               setTransferItem(item);
                               setTransferTargetId(data?.assignees[0]?.account_id || '');
                             }}
-                            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-md transition-all"
+                            className={`text-[10px] font-bold px-2 py-1 rounded-md transition-all ${
+                              canTransferTickets
+                                ? 'text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100'
+                                : 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                            }`}
+                            title={canTransferTickets ? 'Reassign this single ticket' : 'Transfer power is restricted to Dnyanesh, Neel, and Mrunali'}
                           >
-                            Transfer
+                            {canTransferTickets ? 'Transfer' : '🔒 Transfer'}
                           </button>
                         </div>
                       </td>

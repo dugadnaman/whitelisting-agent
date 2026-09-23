@@ -262,7 +262,7 @@ def test_api_bulk_transfer_endpoint():
     from fastapi.testclient import TestClient
     from api import app, get_current_user
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "lead@attributics.com", "name": "Team Lead"}
+    app.dependency_overrides[get_current_user] = lambda: {"email": "dnyanesh.khawas@attributics.com", "name": "Dnyanesh Khawas"}
     client = TestClient(app)
 
     with patch("work_manager.transfer_jira_ticket") as mock_transfer:
@@ -403,3 +403,41 @@ def test_virtual_operational_assignment_soham_and_aadya():
     # Clean up test tickets
     clear_operational_assignment("SWCM-888")
     clear_operational_assignment("SWCM-889")
+
+
+def test_transfer_authorization_policy():
+    """Verify only Dnyanesh, Neel, Mrunalini (and admin) are authorized to transfer tickets."""
+    from fastapi.testclient import TestClient
+    from api import app, get_current_user
+
+    client = TestClient(app)
+
+    # 1. Unauthorized operator (e.g. intern or other user)
+    app.dependency_overrides[get_current_user] = lambda: {
+        "email": "intern@attributics.com",
+        "name": "Intern Operator",
+        "role": "operator",
+    }
+    try:
+        resp_unauth = client.post(
+            "/api/work-management/transfer",
+            json={"issue_key": "SWCM-1", "to_account_id": "712020:test"},
+        )
+        assert resp_unauth.status_code == 403
+        assert "Permission Denied" in resp_unauth.json()["detail"]
+
+        # 2. Authorized manager (e.g. Dnyanesh Khawas)
+        app.dependency_overrides[get_current_user] = lambda: {
+            "email": "dnyanesh.khawas@attributics.com",
+            "name": "Dnyanesh Khawas",
+            "role": "operator",
+        }
+        with patch("work_manager.transfer_jira_ticket") as mock_transfer:
+            mock_transfer.return_value = {"ok": True, "success": True}
+            resp_auth = client.post(
+                "/api/work-management/transfer",
+                json={"issue_key": "SWCM-1", "to_account_id": "712020:c8914cff-1299-4ad7-989b-e38859cbcdbf"},
+            )
+            assert resp_auth.status_code == 200
+    finally:
+        app.dependency_overrides.clear()
