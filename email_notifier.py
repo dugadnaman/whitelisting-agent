@@ -328,6 +328,25 @@ Sent at {get_current_ist_time().strftime('%I:%M %p IST')} by Attributics SLA Dis
     )
 
 
+def get_smtp_sender_info() -> dict[str, Any]:
+    """Inspect environment variables and return active SMTP sender configuration."""
+    _load_env_file()
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = int(os.getenv("SMTP_PORT") or "587")
+    smtp_user = os.getenv("SMTP_USER")
+    from_email = os.getenv("SMTP_FROM_EMAIL") or smtp_user or "alerts@attributics.com"
+    is_configured = bool(smtp_host and smtp_user and os.getenv("SMTP_PASSWORD"))
+
+    return {
+        "is_configured": is_configured,
+        "from_email": from_email,
+        "smtp_host": smtp_host or "Not configured",
+        "smtp_port": smtp_port,
+        "smtp_user": smtp_user or "Not configured",
+        "mode": "LIVE_SMTP" if is_configured else "SIMULATION",
+    }
+
+
 def preview_due_today_alerts(
     project: str = "ALL",
     stage: str = "AUTO",
@@ -339,6 +358,7 @@ def preview_due_today_alerts(
     today_str = date.today().isoformat()
     tickets = get_due_today_incomplete_tickets(project=project)
     operators = group_tickets_by_operator(tickets)
+    sender_info = get_smtp_sender_info()
 
     drafts: list[AlertEmailDraft] = [
         build_stage_email(op, resolved_stage, today_str, project=project)
@@ -351,11 +371,11 @@ def preview_due_today_alerts(
         "project": project,
         "stage": resolved_stage,
         "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "sender_info": sender_info,
         "total_due_today_incomplete": len(tickets),
         "recipient_count": len(drafts),
         "drafts": [d.to_dict() for d in drafts],
     }
-
 
 def send_email_smtp(draft: AlertEmailDraft) -> dict[str, Any]:
     """
@@ -456,13 +476,21 @@ def dispatch_due_today_alerts(
                 failed_count += 1
             results.append(send_res)
 
+    sender_info = preview["sender_info"]
+    real_sent_count = sum(1 for r in results if r.get("delivered") and not r.get("simulated"))
+    simulated_count = sum(1 for r in results if r.get("simulated"))
+
     # Mark sent in scheduler state
     SCHEDULER_STATE.mark_sent(
         day_str=today_str,
         stage=resolved_stage,
         details={
             "delivered_count": delivered_count,
+            "real_sent_count": real_sent_count,
+            "simulated_count": simulated_count,
             "failed_count": failed_count,
+            "from_email": sender_info["from_email"],
+            "smtp_host": sender_info["smtp_host"],
             "recipients": [d["recipient_email"] for d in draft_dicts],
             "operator_name": operator_name,
             "dry_run": dry_run,
@@ -473,9 +501,12 @@ def dispatch_due_today_alerts(
         "ok": True,
         "stage": resolved_stage,
         "date": today_str,
+        "sender_info": sender_info,
         "total_tickets": preview["total_due_today_incomplete"],
         "recipients_count": len(draft_dicts),
         "delivered_count": delivered_count,
+        "real_sent_count": real_sent_count,
+        "simulated_count": simulated_count,
         "failed_count": failed_count,
         "dry_run": dry_run,
         "dispatched_by": operator_name,

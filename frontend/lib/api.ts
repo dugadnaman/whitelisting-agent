@@ -1230,11 +1230,21 @@ export type AlertEmailDraft = {
   ticket_keys: string[];
 };
 
+export type SmtpSenderInfo = {
+  is_configured: boolean;
+  from_email: string;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_user: string;
+  mode: 'LIVE_SMTP' | 'SIMULATION' | string;
+};
+
 export type AlertsPreviewResponse = {
   ok: boolean;
   project: string;
   stage: string;
   ist_time: string;
+  sender_info?: SmtpSenderInfo;
   total_due_today_incomplete: number;
   recipient_count: number;
   drafts: AlertEmailDraft[];
@@ -1244,9 +1254,12 @@ export type AlertsDispatchResponse = {
   ok: boolean;
   stage: string;
   date: string;
+  sender_info?: SmtpSenderInfo;
   total_tickets: number;
   recipients_count: number;
   delivered_count: number;
+  real_sent_count: number;
+  simulated_count: number;
   failed_count: number;
   dry_run: boolean;
   dispatched_by: string;
@@ -1259,7 +1272,6 @@ export type AlertsDispatchResponse = {
     error?: string;
   }>;
 };
-
 export type AlertSchedulerStatusResponse = {
   enabled: boolean;
   ist_time: string;

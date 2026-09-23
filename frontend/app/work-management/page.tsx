@@ -314,9 +314,16 @@ export default function WorkManagementPage() {
     setAlertsDispatching(true);
     try {
       const res = await dispatchAlerts(selectedProject, alertStage, dryRun);
-      alert(
-        `${dryRun ? 'Dry Run' : 'Dispatch'} Complete!\nStage: ${res.stage}\nTotal Recipients: ${res.recipients_count}\nDelivered/Simulated: ${res.delivered_count}\nFailed: ${res.failed_count}`
-      );
+      const sender = res.sender_info;
+      if (res.real_sent_count > 0) {
+        alert(
+          `✅ Live Email Dispatch Complete!\n\nStage: ${res.stage}\nFrom: ${sender?.from_email || 'SMTP Server'}\nRecipients: ${res.recipients_count} operators\nReal Emails Delivered: ${res.real_sent_count}\nFailed: ${res.failed_count}`
+        );
+      } else {
+        alert(
+          `⚠️ Simulation Mode (No Real Emails Sent)\n\nStage: ${res.stage}\nRecipients Evaluated: ${res.recipients_count} operators\nSimulated/Logged: ${res.simulated_count || res.delivered_count}\n\nSender Account: ${sender?.from_email || 'alerts@attributics.com'} (Simulated)\nReason: SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASSWORD) are not configured in Render environment variables.\n\nTo send real emails to your team, add your SMTP server credentials in your Render Environment Variables.`
+        );
+      }
       setShowAlertModal(false);
     } catch (err: unknown) {
       alert(`Alert dispatch failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -2397,6 +2404,36 @@ export default function WorkManagementPage() {
                 {schedulerStatus?.enabled ? 'Pause Automated Scheduler' : 'Enable Automated Scheduler'}
               </button>
             </div>
+
+            {/* Sender Account Status Banner */}
+            {alertsPreview?.sender_info && (
+              <div className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 ${
+                alertsPreview.sender_info.is_configured
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                  : 'bg-amber-50 text-amber-900 border-amber-200'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-base">{alertsPreview.sender_info.is_configured ? '🟢' : '🟡'}</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold">
+                        From Account: <span className="font-mono">{alertsPreview.sender_info.from_email}</span>
+                      </span>
+                      <span className={`px-1.5 py-0.2 rounded text-[10px] font-extrabold uppercase ${
+                        alertsPreview.sender_info.is_configured ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'
+                      }`}>
+                        {alertsPreview.sender_info.mode}
+                      </span>
+                    </div>
+                    <span className="block text-[11px] opacity-85 mt-0.5">
+                      {alertsPreview.sender_info.is_configured
+                        ? `Live SMTP Server Connected: ${alertsPreview.sender_info.smtp_host}:${alertsPreview.sender_info.smtp_port}`
+                        : 'Safe Simulation Mode: Emails are logged, not sent over wire. Add SMTP_HOST, SMTP_USER, SMTP_PASSWORD in Render to send live emails.'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Stage Selector Tabs */}
             <div className="flex flex-wrap items-center gap-2 shrink-0 border-b border-gray-100 pb-3">
