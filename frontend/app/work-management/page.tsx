@@ -317,11 +317,16 @@ export default function WorkManagementPage() {
       const sender = res.sender_info;
       if (res.real_sent_count > 0) {
         alert(
-          `✅ Live Email Dispatch Complete!\n\nStage: ${res.stage}\nFrom: ${sender?.from_email || 'SMTP Server'}\nRecipients: ${res.recipients_count} operators\nReal Emails Delivered: ${res.real_sent_count}\nFailed: ${res.failed_count}`
+          `✅ Live Email Dispatch Complete!\n\nStage: ${res.stage}\nFrom: ${sender?.from_email || 'Email Gateway'}\nRecipients: ${res.recipients_count} operators\nReal Emails Delivered: ${res.real_sent_count}\nFailed: ${res.failed_count}`
+        );
+      } else if (res.failed_count > 0) {
+        const firstErr = res.results.find((r) => r.error)?.error || 'Network error';
+        alert(
+          `❌ Outbound Email Delivery Failed (${res.failed_count} failed)\n\nError: ${firstErr}\n\nWhy this happens:\nRender's Free tier blocks raw outbound SMTP sockets (ports 25, 465, 587) with '[Errno 101] Network is unreachable'.\n\nHow to fix (takes 1 minute):\n1. Add a free RESEND_API_KEY (or SENDGRID_API_KEY) in Render Environment Variables (uses HTTPS Port 443, never blocked by Render).\n2. Or upgrade Render to a paid instance to unblock SMTP ports.`
         );
       } else {
         alert(
-          `⚠️ Simulation Mode (No Real Emails Sent)\n\nStage: ${res.stage}\nRecipients Evaluated: ${res.recipients_count} operators\nSimulated/Logged: ${res.simulated_count || res.delivered_count}\n\nSender Account: ${sender?.from_email || 'alerts@attributics.com'} (Simulated)\nReason: SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASSWORD) are not configured in Render environment variables.\n\nTo send real emails to your team, add your SMTP server credentials in your Render Environment Variables.`
+          `⚠️ Simulation Mode (No Real Emails Sent)\n\nStage: ${res.stage}\nRecipients Evaluated: ${res.recipients_count} operators\nSimulated/Logged: ${res.simulated_count || res.delivered_count}\n\nSender Account: ${sender?.from_email || 'alerts@attributics.com'} (Simulated)\nReason: No outbound credentials configured.\n\nTo send real emails on Render, add RESEND_API_KEY (over HTTPS port 443) or configure SMTP credentials.`
         );
       }
       setShowAlertModal(false);

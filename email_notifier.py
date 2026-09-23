@@ -329,21 +329,42 @@ Sent at {get_current_ist_time().strftime('%I:%M %p IST')} by Attributics SLA Dis
 
 
 def get_smtp_sender_info() -> dict[str, Any]:
-    """Inspect environment variables and return active SMTP sender configuration."""
+    """Inspect environment variables and return active email sender configuration."""
     _load_env_file()
+    resend_key = os.getenv("RESEND_API_KEY")
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
     smtp_host = os.getenv("SMTP_HOST")
     smtp_port = int(os.getenv("SMTP_PORT") or "587")
     smtp_user = os.getenv("SMTP_USER")
     from_email = os.getenv("SMTP_FROM_EMAIL") or smtp_user or "alerts@attributics.com"
-    is_configured = bool(smtp_host and smtp_user and os.getenv("SMTP_PASSWORD"))
 
+    if resend_key:
+        return {
+            "is_configured": True,
+            "from_email": from_email,
+            "smtp_host": "api.resend.com (Port 443 HTTPS)",
+            "smtp_port": 443,
+            "smtp_user": "resend_api",
+            "mode": "LIVE_HTTPS_RESEND",
+        }
+    elif sendgrid_key:
+        return {
+            "is_configured": True,
+            "from_email": from_email,
+            "smtp_host": "api.sendgrid.com (Port 443 HTTPS)",
+            "smtp_port": 443,
+            "smtp_user": "apikey",
+            "mode": "LIVE_HTTPS_SENDGRID",
+        }
+
+    is_smtp = bool(smtp_host and smtp_user and os.getenv("SMTP_PASSWORD"))
     return {
-        "is_configured": is_configured,
+        "is_configured": is_smtp,
         "from_email": from_email,
         "smtp_host": smtp_host or "Not configured",
         "smtp_port": smtp_port,
         "smtp_user": smtp_user or "Not configured",
-        "mode": "LIVE_SMTP" if is_configured else "SIMULATION",
+        "mode": "LIVE_SMTP" if is_smtp else "SIMULATION",
     }
 
 
@@ -411,13 +432,17 @@ def send_email_smtp(draft: AlertEmailDraft) -> dict[str, Any]:
         msg.attach(part1)
         msg.attach(part2)
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-            server.ehlo()
-            if smtp_port != 465:
+        if smtp_port == 465:
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, [draft.recipient_email], msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.ehlo()
                 server.starttls()
                 server.ehlo()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, [draft.recipient_email], msg.as_string())
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, [draft.recipient_email], msg.as_string())
 
         logger.info("Successfully sent alert email to %s: %s", draft.recipient_email, draft.subject)
         return {
@@ -438,6 +463,113 @@ def send_email_smtp(draft: AlertEmailDraft) -> dict[str, Any]:
         }
 
 
+def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
+    """
+    Unified outbound email delivery:
+    1. Resend API (HTTPS Port 443) if RESEND_API_KEY is configured (bypasses cloud host SMTP port blocking).
+    2. SendGrid API (HTTPS Port 443) if SENDGRID_API_KEY is configured.
+    3. Standard SMTP transport via send_email_smtp.
+    """
+    resend_key = os.getenv("RESEND_API_KEY")
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+    from_email = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USER") or "alerts@attributics.com"
+
+    if resend_key:
+        try:
+            import requests
+            resp = requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {resend_key.strip()}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": from_email,
+                    "to": [draft.recipient_email],
+                    "subject": draft.subject,
+                    "html": draft.body_html,
+                    "text": draft.body_text,
+                },
+                timeout=15,
+            )
+            if resp.ok:
+                logger.info("Resend HTTP API sent email to %s: %s", draft.recipient_email, draft.subject)
+                return {
+                    "delivered": True,
+                    "simulated": False,
+                    "recipient": draft.recipient_email,
+                    "subject": draft.subject,
+                    "message": "Email delivered via Resend HTTP API (Port 443 HTTPS).",
+                }
+            else:
+                err_text = resp.text[:300]
+                logger.error("Resend HTTP API error for %s: %s", draft.recipient_email, err_text)
+                return {
+                    "delivered": False,
+                    "simulated": False,
+                    "recipient": draft.recipient_email,
+                    "error": f"Resend API error: {err_text}",
+                    "message": f"Resend API returned status {resp.status_code}",
+                }
+        except Exception as exc:
+            logger.error("Resend request failed for %s: %s", draft.recipient_email, exc)
+            return {
+                "delivered": False,
+                "simulated": False,
+                "recipient": draft.recipient_email,
+                "error": str(exc),
+                "message": f"Resend dispatch error: {exc}",
+            }
+
+    if sendgrid_key:
+        try:
+            import requests
+            resp = requests.post(
+                "https://api.sendgrid.com/v3/mail/send",
+                headers={
+                    "Authorization": f"Bearer {sendgrid_key.strip()}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "personalizations": [{"to": [{"email": draft.recipient_email}]}],
+                    "from": {"email": from_email},
+                    "subject": draft.subject,
+                    "content": [
+                        {"type": "text/plain", "value": draft.body_text},
+                        {"type": "text/html", "value": draft.body_html},
+                    ],
+                },
+                timeout=15,
+            )
+            if resp.status_code in (200, 202):
+                logger.info("SendGrid HTTP API sent email to %s: %s", draft.recipient_email, draft.subject)
+                return {
+                    "delivered": True,
+                    "simulated": False,
+                    "recipient": draft.recipient_email,
+                    "subject": draft.subject,
+                    "message": "Email delivered via SendGrid HTTP API (Port 443 HTTPS).",
+                }
+            else:
+                err_text = resp.text[:300]
+                return {
+                    "delivered": False,
+                    "simulated": False,
+                    "recipient": draft.recipient_email,
+                    "error": f"SendGrid API error: {err_text}",
+                    "message": f"SendGrid API returned status {resp.status_code}",
+                }
+        except Exception as exc:
+            return {
+                "delivered": False,
+                "simulated": False,
+                "recipient": draft.recipient_email,
+                "error": str(exc),
+                "message": f"SendGrid dispatch error: {exc}",
+            }
+
+    # Fallback to SMTP
+    return send_email_smtp(draft)
 def dispatch_due_today_alerts(
     project: str = "ALL",
     stage: str = "AUTO",
@@ -469,7 +601,7 @@ def dispatch_due_today_alerts(
             })
             delivered_count += 1
         else:
-            send_res = send_email_smtp(draft)
+            send_res = send_email_dispatcher(draft)
             if send_res.get("delivered"):
                 delivered_count += 1
             else:
