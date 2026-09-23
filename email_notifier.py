@@ -707,9 +707,21 @@ def send_google_chat_sla_alert(
         keys = ", ".join(t.get("key", "") for t in op.tickets)
         known_ids: dict[str, str] = {
             "Dnyanesh Khawas": "118094956873954063156",
+            "Dnyanesh": "118094956873954063156",
+            "Mrunalini Gawande": "111262272226595238971",
+            "Mrunali Gawande": "111262272226595238971",
+            "Mrunalini": "111262272226595238971",
+            "Mrunali": "111262272226595238971",
+            "Neel Shah": "115510908861903356318",
+            "Neel": "115510908861903356318",
+            "Soham Das": "116501804443197433991",
+            "Soham": "116501804443197433991",
+            "Aadya": "113432812427365134875",
+            "Aalya Mulla": "113432812427365134875",
+            "Mudar": "110968683937158757696",
         }
-        first_word = op.operator_name.upper().split()[0] if op.operator_name else ""
-        uid = os.getenv(f"GCHAT_USER_ID_{first_word}", "").strip() or known_ids.get(op.operator_name, "")
+        first_word = op.operator_name.split()[0].title() if op.operator_name else ""
+        uid = known_ids.get(op.operator_name) or known_ids.get(first_word) or os.getenv(f"GCHAT_USER_ID_{first_word.upper()}", "")
         if uid:
             mention_tag = f"<users/{uid}>"
         else:
