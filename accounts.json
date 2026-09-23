@@ -17,7 +17,10 @@
     "group": "Apparel",
     "channels": ["rcs"],
     "headers": [],
-    "description": "Dedicated Karix RCS to MoEngage sync workspace"
+    "description": "Dedicated Karix RCS to MoEngage sync workspace",
+    "rcs_bot_id": "P7hzkqCcW3x96I6T",
+    "rcs_bot_name": "Apparel Brand",
+    "esmeaddr": "71189600000000"
   },
   {
     "id": "tcl_promo",
