@@ -2328,7 +2328,7 @@ export default function WorkManagementPage() {
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-gray-900">Transfer Ticket {transferItem.key}</h3>
-                <p className="text-xs text-gray-500">Reassign in Jira Cloud and log a handover comment.</p>
+                <p className="text-xs text-gray-500">Direct assignee update in Jira Cloud &amp; Dashboard (Zero comments posted to Jira).</p>
               </div>
               <button onClick={() => setTransferItem(null)} className="text-gray-400 hover:text-gray-600">
                 ✕
@@ -2363,7 +2363,7 @@ export default function WorkManagementPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Handover Note (Optional)</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Internal Note (Optional — saved only on dashboard, never posted to Jira)</label>
                 <textarea
                   value={handoverNote}
                   onChange={(e) => setHandoverNote(e.target.value)}
@@ -2403,7 +2403,7 @@ export default function WorkManagementPage() {
                 <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
                   <span>⚡</span> Bulk Reassign ({selectedTicketKeys.length} Tickets)
                 </h3>
-                <p className="text-xs text-gray-500">Reassign selected tickets in Jira Cloud and log handover notes.</p>
+                <p className="text-xs text-gray-500">Direct bulk assignee update in Jira Cloud &amp; Dashboard (Zero comments posted to Jira).</p>
               </div>
               <button onClick={() => setBulkModalOpen(false)} className="text-gray-400 hover:text-gray-600">
                 ✕
@@ -2441,7 +2441,7 @@ export default function WorkManagementPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1">Handover Audit Note (Optional)</label>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Internal Audit Note (Optional — saved only on dashboard, never posted to Jira)</label>
                 <textarea
                   value={bulkHandoverNote}
                   onChange={(e) => setBulkHandoverNote(e.target.value)}

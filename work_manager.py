@@ -21,7 +21,6 @@ from typing import Any
 import requests
 from config import _load_env_file
 from jira_client import (
-    add_jira_comment,
     get_jira_auth_headers,
     get_jira_credentials,
     list_jira_issues,
