@@ -669,9 +669,12 @@ def send_google_chat_sla_alert(
     Send an interactive rich card to Google Chat Space via Incoming Webhook.
     Uses standard HTTPS Port 443 (never blocked by cloud firewalls).
     """
-    url = webhook_url or os.getenv("GOOGLE_CHAT_WEBHOOK_URL")
+    default_url = (
+        "https://chat.googleapis.com/v1/spaces/AAQAsqKm6oQ/messages?"
+        "key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=er00Zc1ZFnDfrmthvXlRvtkWQHXDd862nhHl9TlguLk"
+    )
+    url = webhook_url if webhook_url is not None else (os.getenv("GOOGLE_CHAT_WEBHOOK_URL") or default_url)
     if not url:
-        logger.info("Google Chat webhook URL not configured. Simulating card dispatch.")
         return {
             "delivered": True,
             "simulated": True,

@@ -263,7 +263,9 @@ export default function WorkManagementPage() {
   const [activePreviewEmail, setActivePreviewEmail] = useState<AlertEmailDraft | null>(null);
   const [sendGoogleChat, setSendGoogleChat] = useState<boolean>(true);
   const [sendDirectEmail, setSendDirectEmail] = useState<boolean>(true);
-  const [googleChatWebhookUrl, setGoogleChatWebhookUrl] = useState<string>('');
+  const DEFAULT_GCHAT_WEBHOOK =
+    'https://chat.googleapis.com/v1/spaces/AAQAsqKm6oQ/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=er00Zc1ZFnDfrmthvXlRvtkWQHXDd862nhHl9TlguLk';
+  const [googleChatWebhookUrl, setGoogleChatWebhookUrl] = useState<string>(DEFAULT_GCHAT_WEBHOOK);
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedGchat = localStorage.getItem('google_chat_webhook_url');

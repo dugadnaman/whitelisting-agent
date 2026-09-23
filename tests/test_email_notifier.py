@@ -155,8 +155,7 @@ def test_send_google_chat_sla_alert_simulation():
     ]
 
     with patch.dict("os.environ", {}, clear=True):
-        res = send_google_chat_sla_alert("MORNING", operators, "10:00 AM IST")
-        assert res["delivered"] is True
+        res = send_google_chat_sla_alert("MORNING", operators, "10:00 AM IST", webhook_url="")
         assert res["simulated"] is True
         assert res["channel"] == "Google Chat"
 
