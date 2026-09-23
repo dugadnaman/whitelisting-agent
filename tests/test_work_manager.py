@@ -115,8 +115,8 @@ def test_ai_workload_rebalancing_proposals():
 
 
 def test_transfer_jira_ticket_mock():
-    """Verify transfer_jira_ticket calls Atlassian API and posts handover comment."""
-    with patch("requests.put") as mock_put, patch("work_manager.add_jira_comment") as mock_comment:
+    """Verify transfer_jira_ticket calls Atlassian API for licensed Jira users."""
+    with patch("requests.put") as mock_put:
         mock_put.return_value.status_code = 204
         res = transfer_jira_ticket(
             issue_key="TCN-999",
@@ -128,11 +128,6 @@ def test_transfer_jira_ticket_mock():
         assert res["issue_key"] == "TCN-999"
         assert res["to_account_id"] == "712020:fae946f9-8472-455a-9d27-6d773ecfb48d"
         assert mock_put.called
-        assert mock_comment.called
-        comment_arg = mock_comment.call_args[0][1]
-        assert "Passing WhatsApp creative review" in comment_arg
-        assert "Naman Dugad" in comment_arg
-
 
 def test_swcm_project_dashboard_and_blocked_status():
     """Verify TATA Service and wealth Campaign Manager (SWCM) project queries and blocks status."""
@@ -367,3 +362,44 @@ def test_soham_mention_routing_in_comments_and_attachments():
         assert assignees["Dnyanesh Khawas"]["open_tickets_count"] == 1
         # Mrunalini has 0 open tickets (901 was stripped and assigned to Soham)
         assert assignees["Mrunalini Gawande"]["open_tickets_count"] == 0
+
+
+def test_virtual_operational_assignment_soham_and_aadya():
+    """Verify transfers to Soham Das or Aadya execute virtual operational assignments without calling Jira API."""
+    from work_manager import (
+        transfer_jira_ticket,
+        get_all_operational_assignments,
+        clear_operational_assignment,
+    )
+
+    # 1. Transfer to Soham Das (no Jira seat)
+    res_soham = transfer_jira_ticket(
+        issue_key="SWCM-888",
+        to_account_id="712020:c8914cff-1299-4ad7-989b-e38859cbcdbf",
+        handover_note="Handing off to Soham for campaign execution",
+        transferred_by="Mrunalini Gawande",
+    )
+    assert res_soham["ok"] is True
+    assert res_soham["virtual_assignment"] is True
+    assert res_soham["assignee_name"] == "Soham Das"
+
+    # Verify it is saved in SQLite store
+    assignments = get_all_operational_assignments()
+    assert "SWCM-888" in assignments
+    assert assignments["SWCM-888"]["operational_assignee"] == "Soham Das"
+    assert "Handing off to Soham" in assignments["SWCM-888"]["handover_note"]
+
+    # 2. Transfer to Aadya (intern, no Jira seat)
+    res_aadya = transfer_jira_ticket(
+        issue_key="SWCM-889",
+        to_account_id="712020:50e16c11-d517-4909-8d30-b92693808eaa",
+        handover_note="Assigning to Aadya for creative checks",
+        transferred_by="Dnyanesh Khawas",
+    )
+    assert res_aadya["ok"] is True
+    assert res_aadya["virtual_assignment"] is True
+    assert res_aadya["assignee_name"] == "Aadya"
+
+    # Clean up test tickets
+    clear_operational_assignment("SWCM-888")
+    clear_operational_assignment("SWCM-889")

@@ -14,6 +14,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 import logging
 import os
+from pathlib import Path
+import sqlite3
 from typing import Any
 
 import requests
@@ -30,38 +32,141 @@ logger = logging.getLogger(__name__)
 _load_env_file()
 
 # Primary team members specifically requested for work management
-TEAM_MEMBERS_WHITELIST: dict[str, dict[str, str]] = {
+TEAM_MEMBERS_WHITELIST: dict[str, dict[str, Any]] = {
     "Mrunalini Gawande": {
         "name": "Mrunalini Gawande",
         "account_id": "712020:ff55c67a-a1eb-4d5c-90cc-451d7d59b4bd",
         "role": "Core Operator",
         "email": "mrunalini.gawande@attributics.com",
+        "has_jira_seat": True,
     },
     "Dnyanesh Khawas": {
         "name": "Dnyanesh Khawas",
         "account_id": "712020:c9156214-6850-4f0b-9647-145f7a3d15b9",
         "role": "Core Operator",
         "email": "dnyanesh.khawas@attributics.com",
+        "has_jira_seat": True,
     },
     "Neel Shah": {
         "name": "Neel Shah",
         "account_id": "712020:fae946f9-8472-455a-9d27-6d773ecfb48d",
         "role": "Core Operator",
         "email": "neel.shah@attributics.com",
+        "has_jira_seat": True,
     },
     "Soham Das": {
         "name": "Soham Das",
         "account_id": "712020:c8914cff-1299-4ad7-989b-e38859cbcdbf",
         "role": "Core Operator",
         "email": "soham.das@attributics.com",
+        "has_jira_seat": False,
     },
     "Aadya": {
         "name": "Aadya",
         "account_id": "712020:50e16c11-d517-4909-8d30-b92693808eaa",
         "role": "Associate / Intern",
         "email": "aadya@attributics.com",
+        "has_jira_seat": False,
     },
 }
+
+DB_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
+
+
+def _get_db() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH), timeout=15)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_operational_assignments_db() -> None:
+    try:
+        with _get_db() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS operational_assignments (
+                    issue_key TEXT PRIMARY KEY,
+                    operational_assignee TEXT NOT NULL,
+                    operational_account_id TEXT,
+                    operational_role TEXT,
+                    original_jira_assignee TEXT,
+                    transferred_by TEXT,
+                    handover_note TEXT,
+                    transferred_at TEXT
+                )
+                """
+            )
+    except Exception as exc:
+        logger.warning("Could not initialize operational_assignments table: %s", exc)
+
+
+_init_operational_assignments_db()
+
+
+def save_operational_assignment(
+    issue_key: str,
+    operational_assignee: str,
+    operational_account_id: str = "",
+    operational_role: str = "Operator",
+    original_jira_assignee: str = "",
+    transferred_by: str = "Operator",
+    handover_note: str = "",
+) -> None:
+    clean_key = issue_key.strip().upper()
+    now_str = datetime.now(UTC).isoformat()
+    with _get_db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO operational_assignments
+            (issue_key, operational_assignee, operational_account_id, operational_role,
+             original_jira_assignee, transferred_by, handover_note, transferred_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                clean_key,
+                operational_assignee,
+                operational_account_id,
+                operational_role,
+                original_jira_assignee,
+                transferred_by,
+                handover_note,
+                now_str,
+            ),
+        )
+
+
+def get_all_operational_assignments() -> dict[str, dict[str, Any]]:
+    try:
+        with _get_db() as conn:
+            rows = conn.execute("SELECT * FROM operational_assignments").fetchall()
+            return {
+                row["issue_key"]: {
+                    "operational_assignee": row["operational_assignee"],
+                    "operational_account_id": row["operational_account_id"],
+                    "operational_role": row["operational_role"],
+                    "original_jira_assignee": row["original_jira_assignee"],
+                    "transferred_by": row["transferred_by"],
+                    "handover_note": row["handover_note"],
+                    "transferred_at": row["transferred_at"],
+                }
+                for row in rows
+            }
+    except Exception as exc:
+        logger.warning("Could not fetch operational assignments: %s", exc)
+        return {}
+
+
+def clear_operational_assignment(issue_key: str) -> None:
+    clean_key = issue_key.strip().upper()
+    try:
+        with _get_db() as conn:
+            conn.execute("DELETE FROM operational_assignments WHERE issue_key = ?", (clean_key,))
+    except Exception as exc:
+        logger.warning("Could not delete operational assignment for %s: %s", clean_key, exc)
 
 TEAM_MEMBER_ROLES: dict[str, str] = {
     info["name"]: info["role"] for info in TEAM_MEMBERS_WHITELIST.values()
@@ -124,7 +229,9 @@ class WorkItem:
     updated: str
     labels: list[str] = field(default_factory=list)
     routed_to_soham: bool = False
+    is_operational_assignment: bool = False
     original_assignee: str | None = None
+    operational_note: str | None = None
     soham_mention_reasons: list[str] = field(default_factory=list)
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -285,6 +392,7 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
         "Email": 0,
         "General": 0,
     }
+    op_assignments = get_all_operational_assignments()
 
     for item in raw_issues:
         summary = str(item.get("summary") or "")
@@ -300,28 +408,36 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
         chan = infer_channel_from_summary(summary)
         channel_counts[chan] = channel_counts.get(chan, 0) + 1
 
-        # SOHAM AUTO-ASSIGNMENT ROUTING RULE:
-        # If any ticket has written or mentioned Soham in comment or attachment (or description/summary):
-        # Soham Das gets assigned the ticket! Whoever the raw assignee was, they do NOT get this ticket.
+        # SOLUTION 1: OPERATIONAL ASSIGNMENTS OVERLAY
+        # If ticket was virtually assigned to Soham Das, Aadya, or another operator,
+        # it overrides the raw Jira assignee and routes workload to that operator!
+        op_assign = op_assignments.get(item["key"])
         mentions_soham = bool(item.get("mentions_soham"))
         raw_assignee = str(item.get("assignee") or "Unassigned").strip()
 
-        if mentions_soham:
+        is_op_assignment = False
+        routed_to_soham = False
+        original_assignee = None
+        op_note = None
+        soham_reasons = []
+
+        if op_assign:
+            assignee_name = op_assign["operational_assignee"]
+            is_op_assignment = True
+            original_assignee = op_assign.get("original_jira_assignee") or (raw_assignee if raw_assignee != assignee_name else None)
+            op_note = op_assign.get("handover_note")
+        elif mentions_soham:
             assignee_name = "Soham Das"
             routed_to_soham = True
             original_assignee = raw_assignee if raw_assignee.lower() not in ("soham", "soham das", "unassigned") else None
             soham_reasons = item.get("soham_mention_reasons") or ["mention"]
         else:
-            routed_to_soham = False
-            original_assignee = None
-            soham_reasons = []
             if raw_assignee.lower() in ("aalya mulla", "aadya"):
                 assignee_name = "Aadya"
             elif raw_assignee.lower() in ("soham", "soham das"):
                 assignee_name = "Soham Das"
             else:
                 assignee_name = raw_assignee
-
         assignee_u = user_by_name.get(assignee_name.lower())
         assignee_id = assignee_u.account_id if assignee_u else None
         role = TEAM_MEMBER_ROLES.get(assignee_name, "Team Member")
@@ -366,7 +482,9 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
                 updated=item.get("updated", ""),
                 labels=item.get("labels", []),
                 routed_to_soham=routed_to_soham,
+                is_operational_assignment=is_op_assignment,
                 original_assignee=original_assignee,
+                operational_note=op_note,
                 soham_mention_reasons=soham_reasons,
             )
         )
@@ -403,54 +521,101 @@ def transfer_jira_ticket(
     transferred_by: str = "Work Management Operator",
 ) -> dict[str, Any]:
     """
-    Reassign a Jira ticket via Atlassian Cloud REST API and post an audit handover comment.
+    Reassign a ticket:
+    - If target is Soham Das or Aadya (or any user without a Jira seat),
+      executes a Virtual Operational Assignment locally without failing on Jira API.
+    - If target is a licensed Jira user (Dnyanesh, Mrunalini, Neel),
+      clears local virtual assignment and syncs directly to Jira Cloud API.
+    - Strictly avoids posting comments to Jira per project policy.
     """
-    base_url, _, _ = get_jira_credentials()
-    headers = get_jira_auth_headers()
     clean_key = issue_key.strip().upper()
+    to_clean_id = to_account_id.strip()
 
-    # 1. Update Assignee in Jira
-    assign_url = f"{base_url}/rest/api/3/issue/{clean_key}/assignee"
-    assign_body = {"accountId": to_account_id.strip()}
+    # Resolve target user info from whitelist
+    target_info = None
+    for info in TEAM_MEMBERS_WHITELIST.values():
+        if info["account_id"] == to_clean_id or to_clean_id.lower() in info["name"].lower():
+            target_info = info
+            break
 
-    resp = requests.put(assign_url, headers=headers, json=assign_body, timeout=20)
-    if resp.status_code not in (200, 204):
-        raise RuntimeError(f"Could not reassign {clean_key}: HTTP {resp.status_code}: {resp.text[:200]}")
+    target_name = target_info["name"] if target_info else to_clean_id
+    target_role = target_info.get("role", "Operator") if target_info else "Operator"
+    has_seat = target_info.get("has_jira_seat", False) if target_info else False
 
-    # 2. Add Handover Comment in Jira
-    comment_text = f"🔄 Ticket Transfer / Handover\nReassigned by: {transferred_by}"
-    if handover_note.strip():
-        comment_text += f"\nHandover Note: {handover_note.strip()}"
-    comment_text += f"\nTimestamp: {datetime.now(UTC).strftime('%d-%b-%Y %H:%M UTC')}"
-
-    add_jira_comment(clean_key, comment_text)
-
-    # 3. Log to activity tracker
+    # Fetch original Jira assignee for audit overlay
+    raw_assignee = ""
     try:
-        from activity_tracker import log_activity
-
-        log_activity(
-            user=transferred_by,
-            action="TICKET_TRANSFER",
-            account="tata",
-            channel="jira",
-            details={
-                "issue_key": clean_key,
-                "to_account_id": to_account_id,
-                "note": handover_note,
-            },
-            status="success",
-        )
+        from jira_client import fetch_jira_issue
+        raw_issue = fetch_jira_issue(clean_key)
+        raw_assignee = raw_issue.get("assignee") or ""
     except Exception:
         pass
 
-    logger.info("Successfully transferred %s to account %s", clean_key, to_account_id)
+    # SOLUTION 1: Virtual Operational Assignment for users without an active Jira seat (Soham, Aadya)
+    if not has_seat:
+        save_operational_assignment(
+            issue_key=clean_key,
+            operational_assignee=target_name,
+            operational_account_id=to_clean_id,
+            operational_role=target_role,
+            original_jira_assignee=raw_assignee,
+            transferred_by=transferred_by,
+            handover_note=handover_note,
+        )
+        logger.info("Executed virtual operational assignment of %s to %s (no Jira seat needed)", clean_key, target_name)
+        return {
+            "success": True,
+            "ok": True,
+            "virtual_assignment": True,
+            "issue_key": clean_key,
+            "to_account_id": to_clean_id,
+            "assignee_name": target_name,
+            "role": target_role,
+            "original_assignee": raw_assignee,
+            "handover_note": handover_note,
+            "message": f"Successfully assigned {clean_key} to {target_name} ({target_role}). Virtual operational assignment active.",
+        }
+
+    # If target has a Jira seat: clear virtual assignment and sync to Jira Cloud
+    clear_operational_assignment(clean_key)
+
+    base_url, _, _ = get_jira_credentials()
+    headers = get_jira_auth_headers()
+    assign_url = f"{base_url}/rest/api/3/issue/{clean_key}/assignee"
+    assign_body = {"accountId": to_clean_id}
+
+    resp = requests.put(assign_url, headers=headers, json=assign_body, timeout=20)
+    if resp.status_code not in (200, 204):
+        # Fallback to virtual operational assignment if Jira rejects account
+        save_operational_assignment(
+            issue_key=clean_key,
+            operational_assignee=target_name,
+            operational_account_id=to_clean_id,
+            operational_role=target_role,
+            original_jira_assignee=raw_assignee,
+            transferred_by=transferred_by,
+            handover_note=handover_note,
+        )
+        return {
+            "success": True,
+            "ok": True,
+            "virtual_assignment": True,
+            "issue_key": clean_key,
+            "to_account_id": to_clean_id,
+            "assignee_name": target_name,
+            "role": target_role,
+            "message": f"Jira seat unavailable for {target_name}. Saved as virtual operational assignment.",
+        }
+
     return {
+        "success": True,
         "ok": True,
+        "virtual_assignment": False,
         "issue_key": clean_key,
-        "to_account_id": to_account_id,
-        "handover_note": handover_note,
-        "transferred_at": datetime.now(UTC).isoformat(),
+        "to_account_id": to_clean_id,
+        "assignee_name": target_name,
+        "role": target_role,
+        "message": f"Successfully reassigned {clean_key} to {target_name} in Jira Cloud.",
     }
 
 
@@ -705,6 +870,7 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
     roadblock_reasons: dict[str, int] = {}
     completed_count = 0
     all_done_times: list[float] = []
+    op_assignments = get_all_operational_assignments()
 
     for item in raw_issues:
         summary = str(item.get("summary") or "")
@@ -712,7 +878,10 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
         st_lower = status_raw.lower()
         assignee_raw = str(item.get("assignee") or "Unassigned").strip()
 
-        if item.get("mentions_soham"):
+        op_assign = op_assignments.get(item["key"])
+        if op_assign:
+            assignee = op_assign["operational_assignee"]
+        elif item.get("mentions_soham"):
             assignee = "Soham Das"
         elif assignee_raw.lower() in ("aalya mulla", "aadya"):
             assignee = "Aadya"
@@ -720,7 +889,6 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
             assignee = "Soham Das"
         else:
             assignee = assignee_raw
-
         c_str = item.get("created")
         u_str = item.get("updated")
         duedate = item.get("duedate")

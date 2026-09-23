@@ -111,6 +111,8 @@ type WorkItem = {
   labels: string[];
   routed_to_soham?: boolean;
   original_assignee?: string | null;
+  is_operational_assignment?: boolean;
+  operational_note?: string | null;
   soham_mention_reasons?: string[];
 };
 
@@ -385,7 +387,9 @@ export default function WorkManagementPage() {
       setBulkHandoverNote('');
       setSelectedTicketKeys([]);
       await handleRefresh();
-      alert(`Successfully transferred ${res.transferred_count} ticket(s) in Jira Cloud!`);
+      const targetUser = data?.assignees.find(a => a.account_id === bulkTargetId);
+      const isVirtual = targetUser?.name === 'Soham Das' || targetUser?.name === 'Aadya';
+      alert(`Successfully assigned ${res.transferred_count} ticket(s) to ${targetUser?.name || 'target queue'}!${isVirtual ? ' (Operational assignment - Jira seat not required)' : ''}`);
     } catch (err: unknown) {
       alert(`Bulk transfer failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -433,15 +437,18 @@ export default function WorkManagementPage() {
 
     try {
       setTransferring(true);
-      await transferJiraTicket(transferItem.key, transferTargetId, handoverNote);
+      const res = await transferJiraTicket(transferItem.key, transferTargetId, handoverNote);
       setTransferItem(null);
       setHandoverNote('');
       await handleRefresh();
-      alert(`Ticket ${transferItem.key} successfully transferred in Jira!`);
+      if (res?.virtual_assignment) {
+        alert(`✅ Ticket ${transferItem.key} operationally assigned to ${res.assignee_name} (Jira seat not required).`);
+      } else {
+        alert(`✅ Ticket ${transferItem.key} successfully transferred in Jira Cloud!`);
+      }
     } catch (err: unknown) {
       alert(`Transfer failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setTransferring(false);
     }
   };
 
@@ -1965,7 +1972,17 @@ export default function WorkManagementPage() {
                                 {item.summary}
                               </p>
 
-                              {item.routed_to_soham && (
+                              {item.is_operational_assignment ? (
+                                <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 max-w-full truncate" title={`Operationally assigned to ${item.assignee_name}. ${item.operational_note ? `Note: ${item.operational_note}` : ''}`}>
+                                  <span>⚡</span>
+                                  <span>Operational: {item.assignee_name}</span>
+                                  {item.original_assignee && (
+                                    <span className="text-[9px] text-indigo-500 font-normal truncate">
+                                      (was {item.original_assignee})
+                                    </span>
+                                  )}
+                                </div>
+                              ) : item.routed_to_soham ? (
                                 <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 max-w-full truncate" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
                                   <span>⚡</span>
                                   <span>Mention: Soham</span>
@@ -1975,7 +1992,7 @@ export default function WorkManagementPage() {
                                     </span>
                                   )}
                                 </div>
-                              )}
+                              ) : null}
                               {/* Card Bottom: Assignee, SLA chip & Transfer button */}
                               <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-1 text-xs">
                                 <div className="flex items-center gap-1.5 min-w-0">
@@ -2202,12 +2219,17 @@ export default function WorkManagementPage() {
                             </span>
                             <span className="font-medium text-gray-800">{item.assignee_name}</span>
                           </div>
-                          {item.routed_to_soham && (
+                          {item.is_operational_assignment ? (
+                            <span className="text-[9px] text-indigo-700 font-bold bg-indigo-50 px-1 rounded border border-indigo-100 mt-0.5 inline-flex items-center gap-0.5 max-w-fit" title={`Operationally assigned to ${item.assignee_name}. ${item.operational_note || ''}`}>
+                              ⚡ Operational: {item.assignee_name}
+                              {item.original_assignee && ` (was ${item.original_assignee})`}
+                            </span>
+                          ) : item.routed_to_soham ? (
                             <span className="text-[9px] text-purple-700 font-bold bg-purple-50 px-1 rounded border border-purple-100 mt-0.5 inline-flex items-center gap-0.5 max-w-fit" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
                               ⚡ Mention in {item.soham_mention_reasons?.join('/') || 'comment'}
                               {item.original_assignee && ` (was ${item.original_assignee})`}
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       </td>
                       <td className="py-2.5 px-3">
@@ -2297,7 +2319,7 @@ export default function WorkManagementPage() {
                 >
                   {data?.assignees.map((a) => (
                     <option key={a.account_id} value={a.account_id}>
-                      {a.name} ({a.role}) — {a.open_tickets_count} open tickets
+                      {a.name} ({a.role}) {a.name === 'Soham Das' || a.name === 'Aadya' ? '⚡ Operational Queue' : ''} — {a.open_tickets_count} open tickets
                     </option>
                   ))}
                 </select>
@@ -2375,7 +2397,7 @@ export default function WorkManagementPage() {
                 >
                   {data?.assignees.map((a) => (
                     <option key={a.account_id} value={a.account_id}>
-                      {a.name} ({a.role}) — {a.open_tickets_count} open tickets
+                      {a.name} ({a.role}) {a.name === 'Soham Das' || a.name === 'Aadya' ? '⚡ Operational Queue' : ''} — {a.open_tickets_count} open tickets
                     </option>
                   ))}
                 </select>
