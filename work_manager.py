@@ -123,7 +123,9 @@ class WorkItem:
     created: str
     updated: str
     labels: list[str] = field(default_factory=list)
-
+    routed_to_soham: bool = False
+    original_assignee: str | None = None
+    soham_mention_reasons: list[str] = field(default_factory=list)
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -298,11 +300,28 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
         chan = infer_channel_from_summary(summary)
         channel_counts[chan] = channel_counts.get(chan, 0) + 1
 
-        assignee_name = str(item.get("assignee") or "Unassigned")
-        if assignee_name.lower() in ("aalya mulla", "aadya"):
-            assignee_name = "Aadya"
-        elif assignee_name.lower() in ("soham", "soham das"):
+        # SOHAM AUTO-ASSIGNMENT ROUTING RULE:
+        # If any ticket has written or mentioned Soham in comment or attachment (or description/summary):
+        # Soham Das gets assigned the ticket! Whoever the raw assignee was, they do NOT get this ticket.
+        mentions_soham = bool(item.get("mentions_soham"))
+        raw_assignee = str(item.get("assignee") or "Unassigned").strip()
+
+        if mentions_soham:
             assignee_name = "Soham Das"
+            routed_to_soham = True
+            original_assignee = raw_assignee if raw_assignee.lower() not in ("soham", "soham das", "unassigned") else None
+            soham_reasons = item.get("soham_mention_reasons") or ["mention"]
+        else:
+            routed_to_soham = False
+            original_assignee = None
+            soham_reasons = []
+            if raw_assignee.lower() in ("aalya mulla", "aadya"):
+                assignee_name = "Aadya"
+            elif raw_assignee.lower() in ("soham", "soham das"):
+                assignee_name = "Soham Das"
+            else:
+                assignee_name = raw_assignee
+
         assignee_u = user_by_name.get(assignee_name.lower())
         assignee_id = assignee_u.account_id if assignee_u else None
         role = TEAM_MEMBER_ROLES.get(assignee_name, "Team Member")
@@ -346,6 +365,9 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
                 created=item.get("created", ""),
                 updated=item.get("updated", ""),
                 labels=item.get("labels", []),
+                routed_to_soham=routed_to_soham,
+                original_assignee=original_assignee,
+                soham_mention_reasons=soham_reasons,
             )
         )
 
@@ -690,7 +712,9 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
         st_lower = status_raw.lower()
         assignee_raw = str(item.get("assignee") or "Unassigned").strip()
 
-        if assignee_raw.lower() in ("aalya mulla", "aadya"):
+        if item.get("mentions_soham"):
+            assignee = "Soham Das"
+        elif assignee_raw.lower() in ("aalya mulla", "aadya"):
             assignee = "Aadya"
         elif assignee_raw.lower() in ("soham", "soham das"):
             assignee = "Soham Das"

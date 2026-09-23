@@ -290,3 +290,80 @@ def test_api_bulk_transfer_endpoint():
             assert data["to_account_id"] == "712020:645c853f-intern"
         finally:
             app.dependency_overrides.clear()
+
+
+def test_soham_mention_routing_in_comments_and_attachments():
+    """
+    Verify that if any ticket mentions Soham in comments, attachments, or description,
+    it is automatically routed to Soham Das and removed from the original assignee's workload.
+    """
+    from unittest.mock import patch
+    from work_manager import get_work_management_dashboard
+
+    mock_issues = [
+        {
+            "key": "TCN-901",
+            "id": "100901",
+            "summary": "Referral Campaign Blast",
+            "status": "In Progress",
+            "assignee": "Mrunalini Gawande",
+            "reporter": "Marketing",
+            "duedate": "2026-09-23",
+            "attachment_count": 1,
+            "attachments": [{"filename": "soham_creatives_v1.png"}],
+            "mentions_soham": True,
+            "soham_mention_reasons": ["attachment"],
+        },
+        {
+            "key": "TCN-902",
+            "id": "100902",
+            "summary": "Festival Offer Push",
+            "status": "In Progress",
+            "assignee": "Dnyanesh Khawas",
+            "reporter": "Marketing",
+            "duedate": "2026-09-23",
+            "attachment_count": 0,
+            "mentions_soham": True,
+            "soham_mention_reasons": ["comment"],
+        },
+        {
+            "key": "TCN-903",
+            "id": "100903",
+            "summary": "Standard Loan Disbursal",
+            "status": "In Progress",
+            "assignee": "Dnyanesh Khawas",
+            "reporter": "Marketing",
+            "duedate": "2026-09-23",
+            "attachment_count": 0,
+            "mentions_soham": False,
+        },
+    ]
+
+    with patch("work_manager.list_jira_issues", return_value=mock_issues):
+        dash = get_work_management_dashboard(project="TCN", limit=10)
+        items = dash["work_items"]
+        assignees = {a["name"]: a for a in dash["assignees"]}
+
+        # TCN-901 was assigned to Mrunalini in Jira, but mentions Soham in attachment -> routed to Soham!
+        item_901 = next(w for w in items if w["key"] == "TCN-901")
+        assert item_901["assignee_name"] == "Soham Das"
+        assert item_901["routed_to_soham"] is True
+        assert item_901["original_assignee"] == "Mrunalini Gawande"
+
+        # TCN-902 was assigned to Dnyanesh in Jira, but mentions Soham in comment -> routed to Soham!
+        item_902 = next(w for w in items if w["key"] == "TCN-902")
+        assert item_902["assignee_name"] == "Soham Das"
+        assert item_902["routed_to_soham"] is True
+        assert item_902["original_assignee"] == "Dnyanesh Khawas"
+
+        # TCN-903 does NOT mention Soham -> stays with Dnyanesh
+        item_903 = next(w for w in items if w["key"] == "TCN-903")
+        assert item_903["assignee_name"] == "Dnyanesh Khawas"
+        assert item_903["routed_to_soham"] is False
+
+        # Workload capacity checks: Soham gets both 901 and 902
+        assert assignees["Soham Das"]["open_tickets_count"] == 2
+        # Dnyanesh only has 903 (902 was stripped and assigned to Soham)
+        assert assignees["Dnyanesh Khawas"]["open_tickets_count"] == 1
+        # Mrunalini has 0 open tickets (901 was stripped and assigned to Soham)
+        assert assignees["Mrunalini Gawande"]["open_tickets_count"] == 0

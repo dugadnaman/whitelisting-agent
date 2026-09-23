@@ -133,9 +133,10 @@ def list_jira_issues(
             "updated",
             "labels",
             "components",
+            "comment",
+            "description",
         ],
     }
-
     resp = requests.post(url, headers=headers, json=payload, timeout=20)
     if not resp.ok:
         raise RuntimeError(f"Jira API error ({resp.status_code}): {resp.text[:300]}")
@@ -146,11 +147,42 @@ def list_jira_issues(
 
     for item in issues_raw:
         fields = item.get("fields", {})
+        summary_val = str(fields.get("summary") or "")
+        desc_val = adf_to_text(fields.get("description"))
+
+        att_list = fields.get("attachment", []) or []
+        att_filenames = [str(a.get("filename") or "") for a in att_list]
+        has_soham_att = any("soham" in fn.lower() for fn in att_filenames)
+
+        comments_raw = fields.get("comment", {}).get("comments", []) if isinstance(fields.get("comment"), dict) else []
+        comments_texts = []
+        for c in comments_raw:
+            c_body = c.get("body")
+            c_text = adf_to_text(c_body) if isinstance(c_body, dict) else str(c_body or "")
+            c_author = str(c.get("author", {}).get("displayName") or "")
+            comments_texts.append(f"{c_author}: {c_text}")
+
+        all_comments_str = " ".join(comments_texts)
+        has_soham_comment = "soham" in all_comments_str.lower()
+        has_soham_desc = "soham" in desc_val.lower()
+        has_soham_sum = "soham" in summary_val.lower()
+
+        mentions_soham = bool(has_soham_att or has_soham_comment or has_soham_desc or has_soham_sum)
+        soham_mention_reasons = []
+        if has_soham_comment:
+            soham_mention_reasons.append("comment")
+        if has_soham_att:
+            soham_mention_reasons.append("attachment")
+        if has_soham_desc:
+            soham_mention_reasons.append("description")
+        if has_soham_sum:
+            soham_mention_reasons.append("summary")
+
         results.append(
             {
                 "key": item.get("key"),
                 "id": item.get("id"),
-                "summary": fields.get("summary", ""),
+                "summary": summary_val,
                 "status": fields.get("status", {}).get("name", "Unknown"),
                 "assignee": fields.get("assignee", {}).get("displayName")
                 if fields.get("assignee")
@@ -161,7 +193,7 @@ def list_jira_issues(
                 "duedate": fields.get("duedate"),
                 "created": fields.get("created"),
                 "updated": fields.get("updated"),
-                "attachment_count": len(fields.get("attachment", [])),
+                "attachment_count": len(att_list),
                 "attachments": [
                     {
                         "id": a.get("id"),
@@ -170,9 +202,13 @@ def list_jira_issues(
                         "mimeType": a.get("mimeType"),
                         "created": a.get("created"),
                     }
-                    for a in fields.get("attachment", [])
+                    for a in att_list
                 ],
                 "labels": fields.get("labels", []),
+                "mentions_soham": mentions_soham,
+                "soham_mention_reasons": soham_mention_reasons,
+                "comments_text": all_comments_str,
+                "description_text": desc_val,
             }
         )
 

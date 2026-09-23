@@ -109,6 +109,9 @@ type WorkItem = {
   created: string;
   updated: string;
   labels: string[];
+  routed_to_soham?: boolean;
+  original_assignee?: string | null;
+  soham_mention_reasons?: string[];
 };
 
 type TransferProposal = {
@@ -1962,6 +1965,17 @@ export default function WorkManagementPage() {
                                 {item.summary}
                               </p>
 
+                              {item.routed_to_soham && (
+                                <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 max-w-full truncate" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
+                                  <span>⚡</span>
+                                  <span>Mention: Soham</span>
+                                  {item.original_assignee && (
+                                    <span className="text-[9px] text-purple-500 font-normal truncate">
+                                      (was {item.original_assignee})
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                               {/* Card Bottom: Assignee, SLA chip & Transfer button */}
                               <div className="pt-2 border-t border-gray-100 flex items-center justify-between gap-1 text-xs">
                                 <div className="flex items-center gap-1.5 min-w-0">
@@ -2173,11 +2187,19 @@ export default function WorkManagementPage() {
                         </span>
                       </td>
                       <td className="py-2.5 px-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-5 h-5 rounded-full bg-gray-200 text-[10px] font-bold text-gray-700 flex items-center justify-center">
-                            {item.assignee_name.charAt(0)}
-                          </span>
-                          <span className="font-medium text-gray-800">{item.assignee_name}</span>
+                        <div className="flex flex-col">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-gray-200 text-[10px] font-bold text-gray-700 flex items-center justify-center">
+                              {item.assignee_name.charAt(0)}
+                            </span>
+                            <span className="font-medium text-gray-800">{item.assignee_name}</span>
+                          </div>
+                          {item.routed_to_soham && (
+                            <span className="text-[9px] text-purple-700 font-bold bg-purple-50 px-1 rounded border border-purple-100 mt-0.5 inline-flex items-center gap-0.5 max-w-fit" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
+                              ⚡ Mention in {item.soham_mention_reasons?.join('/') || 'comment'}
+                              {item.original_assignee && ` (was ${item.original_assignee})`}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="py-2.5 px-3">
