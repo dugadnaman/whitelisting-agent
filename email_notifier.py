@@ -705,12 +705,18 @@ def send_google_chat_sla_alert(
     mentions_list = []
     for op in operators:
         keys = ", ".join(t.get("key", "") for t in op.tickets)
-        mention_tag = f"@{op.operator_name}"
+        first_word = op.operator_name.upper().split()[0] if op.operator_name else ""
+        uid = os.getenv(f"GCHAT_USER_ID_{first_word}", "").strip()
+        if uid:
+            mention_tag = f"<users/{uid}>"
+        else:
+            mention_tag = f"*@{op.operator_name}*"
+
         mentions_list.append(mention_tag)
-        op_lines.append(f"• *{mention_tag}* ({op.pending_count} pending): `{keys}`")
+        op_lines.append(f"• {mention_tag} ({op.pending_count} pending): `{keys}`")
 
     op_text = "\n".join(op_lines) if op_lines else "All campaigns due today are completed! 🎉"
-    mentions_header = f"🔔 Attn: {' '.join(mentions_list)}\n\n" if mentions_list else ""
+    mentions_header = f"<users/all> 🔔 Attn: {' '.join(mentions_list)}\n\n" if mentions_list else ""
 
     card_payload = {
         "text": f"{mentions_header}*{stage_meta['title']}*\n{stage_meta['desc']}\n\n{op_text}",
