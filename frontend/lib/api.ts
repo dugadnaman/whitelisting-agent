@@ -1261,6 +1261,9 @@ export type AlertsDispatchResponse = {
   real_sent_count: number;
   simulated_count: number;
   failed_count: number;
+  jira_posted_count?: number;
+  jira_results?: Array<{ ticket_key: string; operator_name: string; posted: boolean; comment_id?: string; error?: string }>;
+  google_chat_result?: { delivered?: boolean; simulated?: boolean; message?: string; error?: string };
   dry_run: boolean;
   dispatched_by: string;
   results: Array<{
@@ -1271,6 +1274,16 @@ export type AlertsDispatchResponse = {
     message?: string;
     error?: string;
   }>;
+};
+
+export type AlertsDispatchOptions = {
+  project?: string;
+  stage?: string;
+  dry_run?: boolean;
+  send_jira_mentions?: boolean;
+  send_google_chat?: boolean;
+  send_email?: boolean;
+  google_chat_webhook_url?: string;
 };
 export type AlertSchedulerStatusResponse = {
   enabled: boolean;
@@ -1294,11 +1307,11 @@ export async function fetchAlertsPreview(project: string = 'ALL', stage: string 
   return res.json();
 }
 
-export async function dispatchAlerts(project: string = 'ALL', stage: string = 'AUTO', dry_run: boolean = false): Promise<AlertsDispatchResponse> {
+export async function dispatchAlerts(options: AlertsDispatchOptions = {}): Promise<AlertsDispatchResponse> {
   const res = await fetchWithRetry(getApiUrl('/api/work-management/alerts/dispatch'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project, stage, dry_run }),
+    body: JSON.stringify(options),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

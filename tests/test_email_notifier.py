@@ -5,7 +5,7 @@ progressive email copy generation, dry-run simulation, and REST endpoints.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 import pytest
@@ -19,8 +19,10 @@ from email_notifier import (
     dispatch_due_today_alerts,
     get_current_ist_time,
     group_tickets_by_operator,
+    post_all_jira_sla_comments,
     preview_due_today_alerts,
     send_email_smtp,
+    send_google_chat_sla_alert,
 )
 
 
@@ -140,6 +142,83 @@ def test_scheduler_state_deduplication():
     assert state.is_already_sent_today(today_str, "MORNING") is True
     assert state.is_already_sent_today(today_str, "MIDDAY") is False
 
+
+
+def test_post_all_jira_sla_comments():
+    """Verify Jira SLA mention comments are formatted and called with correct account_ids."""
+    operators = [
+        OperatorTicketSummary(
+            operator_name="Dnyanesh Khawas",
+            operator_email="dnyanesh.khawas@attributics.com",
+            role="Core Operator",
+            pending_count=2,
+            tickets=[
+                {"key": "SWCM-10", "summary": "Task 1"},
+                {"key": "SWCM-11", "summary": "Task 2"},
+            ],
+        )
+    ]
+
+    with patch("jira_client.add_jira_sla_mention_comment") as mock_comment:
+        mock_comment.return_value = {"ok": True, "comment_id": "10099"}
+
+        results = post_all_jira_sla_comments(operators, "MORNING", dry_run=False)
+        assert len(results) == 2
+        assert results[0]["posted"] is True
+        assert results[0]["ticket_key"] == "SWCM-10"
+        assert mock_comment.call_count == 2
+
+        # Verify account_id was resolved from whitelist
+        called_account_id = mock_comment.call_args_list[0][1]["account_id"]
+        assert "712020:" in called_account_id
+
+
+def test_send_google_chat_sla_alert_simulation():
+    """Verify Google Chat fallback simulation when no webhook URL is configured."""
+    operators = [
+        OperatorTicketSummary(
+            operator_name="Neel Shah",
+            operator_email="neel.shah@attributics.com",
+            role="Core Operator",
+            pending_count=1,
+            tickets=[{"key": "TCN-99", "summary": "Test Campaign"}],
+        )
+    ]
+
+    with patch.dict("os.environ", {}, clear=True):
+        res = send_google_chat_sla_alert("MORNING", operators, "10:00 AM IST")
+        assert res["delivered"] is True
+        assert res["simulated"] is True
+        assert res["channel"] == "Google Chat"
+
+
+def test_send_google_chat_sla_alert_live():
+    """Verify Google Chat webhook POST request structure."""
+    operators = [
+        OperatorTicketSummary(
+            operator_name="Neel Shah",
+            operator_email="neel.shah@attributics.com",
+            role="Core Operator",
+            pending_count=1,
+            tickets=[{"key": "TCN-99", "summary": "Test Campaign"}],
+        )
+    ]
+
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.status_code = 200
+        mock_post.return_value = mock_resp
+
+        res = send_google_chat_sla_alert(
+            "EOD", operators, "04:00 PM IST", webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages"
+        )
+        assert res["delivered"] is True
+        assert res["simulated"] is False
+        assert mock_post.call_count == 1
+        payload = mock_post.call_args[1]["json"]
+        assert "cardsV2" in payload
+        assert "Urgent" in payload["text"] or "CRITICAL" in payload["text"]
 
 def test_api_alerts_endpoints():
     """Verify FastAPI preview, dispatch, and scheduler endpoints."""

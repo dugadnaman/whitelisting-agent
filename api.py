@@ -4106,7 +4106,10 @@ class DispatchAlertsRequest(BaseModel):
     project: str = "ALL"
     stage: str = "AUTO"  # MORNING, MIDDAY, EOD, AUTO
     dry_run: bool = False
-
+    send_jira_mentions: bool = True
+    send_google_chat: bool = True
+    send_email: bool = True
+    google_chat_webhook_url: str | None = None
 
 class SchedulerToggleRequest(BaseModel):
     enabled: bool
@@ -4148,6 +4151,10 @@ def dispatch_alerts_endpoint(
         stage=body.stage,
         dry_run=body.dry_run,
         operator_name=operator,
+        send_jira_mentions=body.send_jira_mentions,
+        send_google_chat=body.send_google_chat,
+        send_email=body.send_email,
+        google_chat_webhook_url=body.google_chat_webhook_url,
     )
     return _json_safe(data)
 
