@@ -2008,6 +2008,14 @@ export default function WorkManagementPage() {
                                       : item.duedate || 'No Date'}
                                   </span>
 
+                                  <a
+                                    href={`/briefs?key=${item.key}&project=${selectedProject}`}
+                                    className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded transition-all flex items-center gap-0.5"
+                                    title="Extract templates from Jira brief and whitelist to Karix"
+                                  >
+                                    <span>⚡</span>
+                                    <span>Whitelist</span>
+                                  </a>
                                   <button
                                     onClick={() => {
                                       setTransferItem(item);
@@ -2224,15 +2232,25 @@ export default function WorkManagementPage() {
                         </span>
                       </td>
                       <td className="py-2.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            setTransferItem(item);
-                            setTransferTargetId(data?.assignees[0]?.account_id || '');
-                          }}
-                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-md transition-all"
-                        >
-                          Transfer →
-                        </button>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <a
+                            href={`/briefs?key=${item.key}&project=${selectedProject}`}
+                            className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-md transition-all flex items-center gap-1"
+                            title="Extract brief and whitelist to Karix"
+                          >
+                            <span>⚡</span>
+                            <span>Whitelist</span>
+                          </a>
+                          <button
+                            onClick={() => {
+                              setTransferItem(item);
+                              setTransferTargetId(data?.assignees[0]?.account_id || '');
+                            }}
+                            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-md transition-all"
+                          >
+                            Transfer
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

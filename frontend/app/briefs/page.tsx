@@ -51,6 +51,15 @@ export default function JiraBriefsPage() {
       setLoadingIssues(false);
     }
   }, [project, selectedKey]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlKey = params.get('key');
+      const urlProj = params.get('project');
+      if (urlKey) setSelectedKey(urlKey.toUpperCase().trim());
+      if (urlProj) setProject(urlProj.toUpperCase().trim());
+    }
+  }, []);
 
   useEffect(() => {
     loadIssues();

@@ -3518,8 +3518,8 @@ async def submit_jira_brief_endpoint(
         for r in submitted_rcs:
             comment_body += f"• {r['template_name']}: {r['status'].upper()} (ID: {r.get('template_id') or 'N/A'})\n"
 
-    jira_comment_res = await asyncio.to_thread(add_jira_comment, issue_key, comment_body)
-
+    # Jira remains strictly READ-ONLY per project policy (zero comments/writes to Jira)
+    jira_comment_res = {"ok": True, "skipped": True, "message": "Jira comment skipped (Jira is strictly read-only)"}
     log_activity(
         user=user_name,
         action="JIRA_BRIEF_SUBMISSION",
