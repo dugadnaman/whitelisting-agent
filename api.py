@@ -3612,12 +3612,16 @@ async def sync_moengage_rcs_endpoint(
 
 
 @app.get("/api/moengage/rcs/templates")
-async def get_moengage_rcs_templates_endpoint(current_user: dict = Depends(get_current_user)):
-    """List registered RCS templates from MoEngage."""
+async def get_moengage_rcs_templates_endpoint(
+    account: str = Query("tata"),
+    current_user: dict = Depends(get_current_user),
+):
+    """List registered RCS templates from MoEngage for the specified account."""
+    require_tenant_access(account, current_user)
     from moengage_sync import list_moengage_rcs_templates
 
     try:
-        templates = await asyncio.to_thread(list_moengage_rcs_templates)
+        templates = await asyncio.to_thread(list_moengage_rcs_templates, account)
         return _json_safe({"ok": True, "count": len(templates), "templates": templates})
     except Exception as exc:
         logger.exception("Failed to list MoEngage RCS templates: %s", exc)
