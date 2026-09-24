@@ -487,7 +487,103 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
 # ---------------------------------------------------------------------------
 # Excel Spreadsheet Extraction Engine
 # ---------------------------------------------------------------------------
+MONTH_NAMES = {
+    "jan": "jan", "january": "jan",
+    "feb": "feb", "february": "feb",
+    "mar": "mar", "march": "mar",
+    "apr": "apr", "april": "apr",
+    "may": "may",
+    "jun": "jun", "june": "jun",
+    "jul": "jul", "july": "jul",
+    "aug": "aug", "august": "aug",
+    "sep": "sep", "sept": "sep", "september": "sep",
+    "oct": "oct", "october": "oct",
+    "nov": "nov", "november": "nov",
+    "dec": "dec", "december": "dec",
+}
 
+SKIP_SHEET_KEYWORDS = [
+    "planner", "schedule", "calendar", "base count", "tracking",
+    "summary", "exclusion", "report", "metrics", "decile", "overview"
+]
+
+def detect_ticket_month(summary: str, desc: str = "") -> str | None:
+    """Infer the campaign month from the Jira summary or description."""
+    text = f"{summary} {desc}".lower()
+    words = re.findall(r"\b[a-z]+\b", text)
+    for w in words:
+        if w in MONTH_NAMES:
+            return MONTH_NAMES[w]
+    return None
+
+def detect_sheet_month(sheet_name: str) -> str | None:
+    words = re.findall(r"\b[a-z]+\b", sheet_name.lower())
+    for w in words:
+        if w in MONTH_NAMES:
+            return MONTH_NAMES[w]
+    return None
+
+def should_skip_sheet(sheet_name: str, target_month: str | None = None) -> bool:
+    s_low = sheet_name.lower()
+    if any(k in s_low for k in SKIP_SHEET_KEYWORDS):
+        return True
+    if target_month:
+        sheet_month = detect_sheet_month(sheet_name)
+        if sheet_month and sheet_month != target_month:
+            return True
+    return False
+
+def is_valid_template_copy(text: str) -> bool:
+    """
+    Validate that a spreadsheet cell contains genuine customer-facing template copy,
+    rejecting campaign tracking codes, operational notes, counts, and metadata.
+    """
+    if not text:
+        return False
+    s = text.strip()
+    if len(s) < 25:
+        return False
+
+    # 1. Reject internal tracking codes / campaign IDs (e.g. TCLMOE_..., PAPL_..., etc.)
+    if "\n" not in s and re.match(r"^(?:TCLMOE|TCL|PAPL|PQPL|UCL|TCF|MOE|SEG)_[A-Za-z0-9_\'-]+$", s, re.IGNORECASE):
+        return False
+
+    # 2. Reject internal operational notes, file manifests, and count tables
+    s_low = s.lower()
+    if any(s_low.startswith(p) for p in [
+        "short |", "segment count", "grand total", "dob column", "below files",
+        "pls release", "please release", "exclusion list", "date & time",
+        "campaign execution", "channel name", "content format"
+    ]):
+        return False
+
+    # 3. Reject pipe-separated database / tracking headers
+    if "|" in s and ("created_at" in s_low or "valid_until" in s_low or "grand total" in s_low):
+        return False
+
+    # 4. Reject section headers that masquerade as copy
+    if "\n" not in s and len(s) < 60:
+        if any(h in s_low for h in ["wholebase", "automation", "normal term loan", "utility messages", "planner", "schedule"]):
+            return False
+
+    # 5. Must contain at least 4 whitespace-separated words
+    words = s.split()
+    if len(words) < 4:
+        return False
+
+    # 6. Must contain human customer messaging vocabulary or placeholders
+    has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
+    has_greeting = bool(re.search(r"\b(dear|hi|hello|hey|namaste|greeting|welcome|congratulations)\b", s_low))
+    has_messaging_keywords = any(k in s_low for k in [
+        "loan", "offer", "tata", "capital", "emi", "fund", "funds", "interest", "rate", "roi",
+        "apply", "pay", "tap", "click", "₹", "rs.", "rs ", "inr", "lakh", "lacs", "crore",
+        "card", "account", "disbursal", "bank", "due", "cashback", "voucher", "disclaimer",
+        "t&c", "terms", "journey", "benefit", "saving", "savings", "travel", "trip",
+        "holiday", "upgrade", "repayment", "debt", "debts", "eligibility", "pre-approved",
+        "pre approved", "approved", "pre-qualified", "instant", "quick", "flexible"
+    ])
+
+    return has_placeholder or has_greeting or has_messaging_keywords
 
 def _normalize_channel_tag(tag: str) -> str | None:
     """Normalize any string (e.g. 'WhatsApp', 'WA', 'RCS', 'SMS Promotional') to canonical channel."""
@@ -507,7 +603,6 @@ def _normalize_channel_tag(tag: str) -> str | None:
         return "EMAIL"
     return None
 
-
 def _match_sheet_channel(sname: str) -> str | None:
     norm = re.sub(r"[^A-Za-z0-9]", " ", sname).strip().upper()
     words = norm.split()
@@ -519,9 +614,64 @@ def _match_sheet_channel(sname: str) -> str | None:
         return "SMS"
     return None
 
-def _parse_excel_channel_sheets(wb: openpyxl.Workbook) -> list[dict[str, str]]:
+def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
     """
-    Universally parse template content across all sheets in any client Excel file.
+    Universally load any spreadsheet file (.xlsx, .csv, .xls) into a dictionary of
+    sheet_name -> 2D string matrix (raw_rows). Handles CSV encodings and Excel formats.
+    """
+    sheets: dict[str, list[list[str]]] = {}
+    lower_path = str(filepath).lower()
+
+    # 1. Handle CSV files with encoding fallback
+    if lower_path.endswith(".csv"):
+        import csv
+        for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+            try:
+                with open(filepath, "r", encoding=enc, errors="replace") as f:
+                    reader = csv.reader(f)
+                    rows = [[str(cell or "").strip() for cell in r] for r in reader if any(r)]
+                    if rows:
+                        sheets["Sheet1"] = rows
+                        return sheets
+            except Exception:
+                continue
+        return sheets
+
+    # 2. Handle Excel files (.xlsx, .xlsm)
+    try:
+        wb = openpyxl.load_workbook(filepath, data_only=True)
+        for sname in wb.sheetnames:
+            ws = wb[sname]
+            rows: list[list[str]] = []
+            for r in range(1, ws.max_row + 1):
+                vals = [str(ws.cell(row=r, column=c).value or "").strip() for c in range(1, ws.max_column + 1)]
+                if any(vals):
+                    rows.append(vals)
+            if rows:
+                sheets[sname] = rows
+        return sheets
+    except Exception as exc:
+        logger.warning("openpyxl could not load %s: %s", filepath, exc)
+
+    # 3. Fallback: try pandas for .xls or complex formats
+    try:
+        import pandas as pd
+        excel_file = pd.ExcelFile(filepath)
+        for sname in excel_file.sheet_names:
+            df = pd.read_excel(excel_file, sheet_name=sname, header=None)
+            df = df.fillna("")
+            rows = [[str(val).strip() for val in row] for row in df.values.tolist()]
+            rows = [r for r in rows if any(r)]
+            if rows:
+                sheets[sname] = rows
+        return sheets
+    except Exception as exc:
+        logger.warning("pandas fallback could not load %s: %s", filepath, exc)
+
+    return sheets
+def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[str, str]]:
+    """
+    Universally parse template content from 2D raw string rows of any sheet.
     Supports:
     1. Dedicated channel sheets (e.g. 'WA', 'WhatsApp Content', 'SMS_1', 'RCS')
     2. Columnar channel tables (e.g. Column 0 has 'Channel', Column 1 has 'Content')
@@ -530,97 +680,90 @@ def _parse_excel_channel_sheets(wb: openpyxl.Workbook) -> list[dict[str, str]]:
     5. Standard template tables (template_name | body | header | button...)
     """
     items: list[dict[str, str]] = []
+    sheet_chan = _normalize_channel_tag(sname)
+    if not raw_rows:
+        return items
 
-    for sname in wb.sheetnames:
-        sheet_chan = _normalize_channel_tag(sname)
-        ws = wb[sname]
-        raw_rows = []
-        for r in range(1, ws.max_row + 1):
-            row_vals = [str(ws.cell(row=r, column=c).value or "").strip() for c in range(1, ws.max_column + 1)]
-            if any(row_vals):
-                raw_rows.append((r, row_vals))
-        if not raw_rows:
-            continue
+    # Detect channel column or header row
+    chan_col_idx = None
+    header_row_idx = None
 
-        # Detect channel column or header row
-        chan_col_idx = None
-        header_row_idx = None
+    for r_idx, row in enumerate(raw_rows[:5]):
+        for c_idx, val in enumerate(row):
+            v_low = val.lower()
+            if v_low in ("channel", "channel name", "platform", "medium", "mode"):
+                chan_col_idx = c_idx
+                header_row_idx = r_idx
+                break
+        if chan_col_idx is not None:
+            break
 
-        for r_idx, (_, row) in enumerate(raw_rows[:5]):
-            for c_idx, val in enumerate(row):
-                v_low = val.lower()
-                if v_low in ("channel", "channel name", "platform", "medium", "mode"):
-                    chan_col_idx = c_idx
-                    header_row_idx = r_idx
-                    break
-            if chan_col_idx is not None:
+    # If no explicit 'Channel' header, check if column 0 contains channel tags
+    if chan_col_idx is None:
+        chan_tags_in_col0 = sum(1 for row in raw_rows if row and _normalize_channel_tag(row[0]) is not None)
+        if chan_tags_in_col0 >= 1:
+            chan_col_idx = 0
+            header_row_idx = 0 if _normalize_channel_tag(raw_rows[0][0]) is None else -1
+
+    current_channel = sheet_chan
+    start_idx = (header_row_idx + 1) if header_row_idx is not None and header_row_idx >= 0 else 0
+    header_row = [c.lower() for c in raw_rows[header_row_idx]] if header_row_idx is not None and header_row_idx >= 0 and header_row_idx < len(raw_rows) else []
+
+    # Check for columnar headers (e.g. template_name | body | header | button...)
+    body_col_idx = None
+    if header_row:
+        for idx, h in enumerate(header_row):
+            if "header" in h or "title" in h or "type" in h or "name" in h:
+                continue
+            if any(k in h for k in ["body", "content", "copy", "message", "text"]):
+                body_col_idx = idx
                 break
 
-        # If no explicit 'Channel' header, check if column 0 contains channel tags
-        if chan_col_idx is None:
-            chan_tags_in_col0 = sum(1 for _, row in raw_rows if row and _normalize_channel_tag(row[0]) is not None)
-            if chan_tags_in_col0 >= 1:
-                chan_col_idx = 0
-                header_row_idx = 0 if _normalize_channel_tag(raw_rows[0][1][0]) is None else -1
+    header_col_idx = next((i for i, h in enumerate(header_row) if "header" in h and "type" not in h), None)
+    footer_col_idx = next((i for i, h in enumerate(header_row) if "footer" in h), None)
+    btn_text_col_idx = next((i for i, h in enumerate(header_row) if "button_text" in h or "cta" in h), None)
+    btn_url_col_idx = next((i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None)
+    btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
 
-        current_channel = sheet_chan
-        start_idx = (header_row_idx + 1) if header_row_idx is not None and header_row_idx >= 0 else 0
-        header_row = [c.lower() for c in raw_rows[header_row_idx][1]] if header_row_idx is not None and header_row_idx >= 0 and header_row_idx < len(raw_rows) else []
+    for r_num, row in enumerate(raw_rows[start_idx:], start=start_idx + 1):
+        # 1. Section header (only when ALL cells are short and no long copy exists)
+        has_long_copy = any(len(c) > 25 for c in row)
+        if not has_long_copy:
+            for cell in row:
+                c_norm = _normalize_channel_tag(cell)
+                if c_norm and any(k in cell.lower() for k in ["promotional", "retargeting", "utility", "content", "whatsapp", "sms", "rcs"]):
+                    current_channel = c_norm
+                    break
+            continue
 
-        # Check for columnar headers (e.g. template_name | body | header | button...)
-        body_col_idx = None
-        if header_row:
-            for idx, h in enumerate(header_row):
-                if "header" in h or "title" in h or "type" in h or "name" in h:
-                    continue
-                if any(k in h for k in ["body", "content", "copy", "message", "text"]):
-                    body_col_idx = idx
+        # 2. Check channel column
+        if chan_col_idx is not None and chan_col_idx < len(row):
+            row_chan = _normalize_channel_tag(row[chan_col_idx])
+            if row_chan:
+                current_channel = row_chan
+
+        active_chan = current_channel or sheet_chan
+        if not active_chan:
+            for cell in row[:2]:
+                c_norm = _normalize_channel_tag(cell)
+                if c_norm:
+                    active_chan = c_norm
+                    current_channel = c_norm
                     break
 
-        header_col_idx = next((i for i, h in enumerate(header_row) if "header" in h and "type" not in h), None)
-        footer_col_idx = next((i for i, h in enumerate(header_row) if "footer" in h), None)
-        btn_text_col_idx = next((i for i, h in enumerate(header_row) if "button_text" in h or "cta" in h), None)
-        btn_url_col_idx = next((i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None)
-        btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
+        if not active_chan:
+            continue
 
-        for r_num, row in raw_rows[start_idx:]:
-            # 1. Check section header (only when ALL cells are short and no long copy exists)
-            has_long_copy = any(len(c) > 25 for c in row)
-            if not has_long_copy:
-                for cell in row:
-                    c_norm = _normalize_channel_tag(cell)
-                    if c_norm and any(k in cell.lower() for k in ["promotional", "retargeting", "utility", "content", "whatsapp", "sms", "rcs"]):
-                        current_channel = c_norm
-                        break
+        # Skip header rows
+        row_joined = " ".join(row).lower()
+        if any(h in row_joined for h in ["channel", "gujarati", "punjabi", "created_at", "valid_until"]):
+            if not any(len(cell) > 40 for cell in row):
                 continue
 
-            # 2. Check channel column
-            if chan_col_idx is not None and chan_col_idx < len(row):
-                row_chan = _normalize_channel_tag(row[chan_col_idx])
-                if row_chan:
-                    current_channel = row_chan
-
-            active_chan = current_channel or sheet_chan
-            if not active_chan:
-                for cell in row[:2]:
-                    c_norm = _normalize_channel_tag(cell)
-                    if c_norm:
-                        active_chan = c_norm
-                        current_channel = c_norm
-                        break
-
-            if not active_chan:
-                continue
-
-            # Skip header rows
-            row_joined = " ".join(row).lower()
-            if any(h in row_joined for h in ["channel", "gujarati", "punjabi", "created_at", "valid_until"]):
-                if not any(len(cell) > 40 for cell in row):
-                    continue
-
-            # 3. If explicit body column was detected, extract from that column
-            if body_col_idx is not None and body_col_idx < len(row) and len(row[body_col_idx]) > 15:
-                body_val = row[body_col_idx]
+        # 3. If explicit body column was detected, extract from that column
+        if body_col_idx is not None and body_col_idx < len(row) and len(row[body_col_idx]) > 15:
+            body_val = row[body_col_idx]
+            if is_valid_template_copy(body_val):
                 item_dict: dict[str, str] = {
                     "channel": active_chan,
                     "text": body_val,
@@ -649,40 +792,53 @@ def _parse_excel_channel_sheets(wb: openpyxl.Workbook) -> list[dict[str, str]]:
                 items.append(item_dict)
                 continue
 
-            # 4. Otherwise scan non-channel columns for copy (multilingual, multi-column, or row lists)
-            skip_indices = {chan_col_idx} if chan_col_idx is not None else set()
-            for c_idx, cell in enumerate(row):
-                if c_idx in skip_indices:
-                    continue
-                clean_cell = cell.strip()
-                if len(clean_cell) > 20 and not clean_cell.isdigit() and not clean_cell.lower().startswith(("short |", "http://", "https://")):
-                    variant = "General"
-                    if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
-                        variant = row[0].upper()
-                    elif header_row and c_idx < len(header_row):
-                        col_hdr = header_row[c_idx]
-                        if col_hdr and col_hdr not in ("content", "message", "copy", "text", "body"):
-                            variant = col_hdr.title()
+        # 4. Otherwise scan non-channel columns for copy (multilingual, multi-column, or row lists)
+        skip_indices = {chan_col_idx} if chan_col_idx is not None else set()
+        for c_idx, cell in enumerate(row):
+            if c_idx in skip_indices:
+                continue
+            clean_cell = cell.strip()
+            if is_valid_template_copy(clean_cell):
+                variant = "General"
+                if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
+                    variant = row[0].upper()
+                elif header_row and c_idx < len(header_row):
+                    col_hdr = header_row[c_idx]
+                    if col_hdr and col_hdr not in ("content", "message", "copy", "text", "body"):
+                        variant = col_hdr.title()
 
-                    item_dict = {
-                        "channel": active_chan,
-                        "text": clean_cell,
-                        "variant": variant,
-                        "source": f"excel_{sname}_r{r_num}",
-                    }
-                    if "Title:" in clean_cell and "Body:" in clean_cell:
-                        title_m = re.search(r"Title:\s*([^\n]+)", clean_cell)
-                        body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", clean_cell, re.DOTALL)
-                        if title_m:
-                            item_dict["title"] = title_m.group(1).strip()
-                        if body_m:
-                            item_dict["text"] = body_m.group(1).strip()
+                item_dict = {
+                    "channel": active_chan,
+                    "text": clean_cell,
+                    "variant": variant,
+                    "source": f"excel_{sname}_r{r_num}",
+                }
+                if "Title:" in clean_cell and "Body:" in clean_cell:
+                    title_m = re.search(r"Title:\s*([^\n]+)", clean_cell)
+                    body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", clean_cell, re.DOTALL)
+                    if title_m:
+                        item_dict["title"] = title_m.group(1).strip()
+                    if body_m:
+                        item_dict["text"] = body_m.group(1).strip()
 
-                    items.append(item_dict)
+                items.append(item_dict)
 
     return items
 
 
+def _parse_excel_channel_sheets(wb: openpyxl.Workbook, target_month: str | None = None) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for sname in wb.sheetnames:
+        if should_skip_sheet(sname, target_month):
+            continue
+        ws = wb[sname]
+        raw_rows = []
+        for r in range(1, ws.max_row + 1):
+            vals = [str(ws.cell(row=r, column=c).value or "").strip() for c in range(1, ws.max_column + 1)]
+            if any(vals):
+                raw_rows.append(vals)
+        items.extend(_parse_raw_sheet_rows(raw_rows, sname))
+    return items
 def _parse_excel_grid_messages(wb: openpyxl.Workbook) -> list[dict[str, str]]:
     """
     Parse Excel sheets where copy spans multiple contiguous rows
@@ -789,40 +945,34 @@ def _parse_excel_key_value_blocks(wb: openpyxl.Workbook) -> list[dict[str, str]]
     return items
 
 
-def extract_templates_from_excel_file(filepath: Path) -> list[dict[str, str]]:
+def extract_templates_from_excel_file(filepath: Path, target_month: str | None = None) -> list[dict[str, str]]:
     """
-    Inspect and extract template items from any client Excel file across all sheets.
+    Inspect and extract template items from any client spreadsheet (.xlsx, .csv, .xls) across all sheets.
     Combines channel-tagged tables, section headers, grid messages, and key-value blocks.
+    Filters out historical past-month sheets and administrative planner sheets.
     Deduplicates identical templates so multi-sheet workbooks don't produce duplicate cards.
     """
-    try:
-        wb = openpyxl.load_workbook(filepath, data_only=True)
-    except Exception as exc:
-        logger.warning("Could not load Excel file %s: %s", filepath, exc)
+    sheets = _load_spreadsheet_sheets(filepath)
+    if not sheets:
         return []
 
     all_items: list[dict[str, str]] = []
     seen_texts: set[str] = set()
 
-    def _add_items(items: list[dict[str, str]]) -> None:
-        for item in items:
+    for sname, raw_rows in sheets.items():
+        if should_skip_sheet(sname, target_month=target_month):
+            continue
+        sheet_items = _parse_raw_sheet_rows(raw_rows, sname)
+        for item in sheet_items:
             raw_t = item.get("text", "")
+            if not is_valid_template_copy(raw_t):
+                continue
             norm_key = re.sub(r"\s+", " ", raw_t).strip().lower()
-            if norm_key and len(norm_key) > 20 and norm_key not in seen_texts:
+            if norm_key and norm_key not in seen_texts:
                 seen_texts.add(norm_key)
                 all_items.append(item)
 
-    # 1. Parse all sheets (channel column tables, section headers, multilingual columns)
-    _add_items(_parse_excel_channel_sheets(wb))
-
-    # 2. Parse multi-row contiguous grid messages
-    _add_items(_parse_excel_grid_messages(wb))
-
-    # 3. Parse Title/Body key-value blocks
-    _add_items(_parse_excel_key_value_blocks(wb))
-
     return all_items
-
 
 def _extract_images_from_zip(zip_path: Path) -> list[str]:
     """Extract top-level image creatives from a ZIP attachment. Returns local paths.
@@ -1062,12 +1212,12 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     base_name = f"{key.lower().replace('-', '_')}_{re.sub(r'[^a-z0-9]', '_', summary.lower())[:16]}".strip("_")
 
     # 2. Extract templates from attached Excel files first
+    target_month = detect_ticket_month(summary, desc_text)
     extracted_items: list[dict[str, str]] = []
     for excel_path in excel_attachment_paths:
-        items = extract_templates_from_excel_file(excel_path)
+        items = extract_templates_from_excel_file(excel_path, target_month=target_month)
         if items:
             extracted_items.extend(items)
-
     # 3. If no templates found in Excel, parse ADF tables / description text
     if not extracted_items:
         extracted_items = _parse_tables_from_adf(desc_raw)
