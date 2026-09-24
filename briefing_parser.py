@@ -141,6 +141,7 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
         r"(?:₹\s*)?(?:"
         r"\{\{\s*\d+\s*\}\}"
         r"|\{\{\s*[a-zA-Z0-9_\-\s]+\s*\}\}"
+        r"|#?\{#[^#]+#\}#?"
         r"|<[a-zA-Z0-9_\-\s]+>"
         r"|\[[a-zA-Z0-9_\-\s]+\]"
         r"|\{[a-zA-Z0-9_\-\s]+\}"
@@ -175,24 +176,25 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
         if any(w in clean for w in ["branch"]):
             return "Andheri"
 
-        # 2. Suffix cues (immediate following words take highest context priority)
-        if any(k in suffix for k in ["interest", "roi", "rate", "p.a.", "%"]):
-            return "8.5%"
-        if any(k in suffix for k in ["month", "year", "tenure"]):
-            return "24 months"
-        if any(k in suffix for k in ["lakh", "crore", "rupee", "cashback"]):
-            return "5,00,000"
-
-        # 3. Immediate prefix cues
+        # 2. Immediate prefix cues (highest context priority right before the tag)
         last_words = " ".join(ctx.split()[-3:]) if ctx.split() else ""
-        if any(k in last_words for k in ["at", "roi", "rate", "%"]):
-            return "8.5%"
-        if any(k in last_words for k in ["rs.", "rs", "inr", "₹", "of", "worth", "upto", "up to"]):
-            return "5,00,000"
-        if any(k in last_words for k in ["for", "tenure"]):
-            return "24 months"
         if any(k in last_words for k in ["dear", "hi", "hello"]):
             return "Rahul"
+        if any(k in last_words for k in ["rs.", "rs", "inr", "₹", "loan of", "worth", "upto", "up to", "spends of"]):
+            return "5,00,000"
+        if any(k in last_words for k in ["at", "roi", "rate", "%"]):
+            return "8.5%"
+        if any(k in last_words for k in ["for", "tenure"]):
+            return "24 months"
+
+        # 3. Tight suffix cues (first 2 words directly after the tag)
+        first_suffix_words = " ".join(suffix.split()[:2]) if suffix.split() else ""
+        if any(k in first_suffix_words for k in ["interest", "roi", "rate", "p.a.", "%"]):
+            return "8.5%"
+        if any(k in first_suffix_words for k in ["month", "year", "tenure"]):
+            return "24 months"
+        if any(k in first_suffix_words for k in ["lakh", "crore", "rupee", "cashback"]):
+            return "5,00,000"
 
         # 4. Broader context cues
         if any(k in ctx for k in ["rs.", "inr", "₹", "loan of", "spends of"]):

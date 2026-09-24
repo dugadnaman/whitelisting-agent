@@ -66,3 +66,14 @@ def test_markdown_links_and_cta_brackets_preserved():
     assert len(samples) == 2
     assert samples[0] == "Rahul"
     assert samples[1] == "5,00,000"
+
+
+def test_alphanumeric_hash_placeholder_normalization():
+    """Verify {#alphanumeric#} and DLT hash placeholders are converted to {{1}}."""
+    text = "Hi {#alphanumeric#} 👋 Your loan of Rs. {#alphanumeric#} is ready at {#roi#} ROI."
+    normalized, samples = normalize_placeholders(text)
+    assert normalized == "Hi {{1}} 👋 Your loan of Rs. {{2}} is ready at {{3}} ROI."
+    assert len(samples) == 3
+    assert samples[0] == "Rahul"
+    assert samples[1] == "5,00,000"
+    assert samples[2] == "8.5%"
