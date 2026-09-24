@@ -71,8 +71,7 @@ class RcsTemplateDraft:
     media_filename: str | None = None
     action_type: str = "URL"
     action_label: str = "Check Offer"
-    action_url: str = "https://www.tatacapital.com"
-    variables: list[str] = field(default_factory=list)
+    action_url: str = "https://u3.mnge.co/"
     sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
     source_origin: str = "jira"
@@ -119,6 +118,8 @@ def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
         return "moneyfy"
     return default
 
+DEFAULT_CTA_URL = "https://u3.mnge.co/"
+
 
 def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
     """
@@ -131,10 +132,9 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
         return "", []
 
     # 1. Resolve explicit link placeholders first
-    s = re.sub(r"<\s*(?:link|Link|url|URL|website)\s*>", "https://www.tatacapital.com", s)
-    s = re.sub(r"\{\s*(?:link|Link|url|URL|website)\s*\}", "https://www.tatacapital.com", s)
-    s = re.sub(r"\[\s*(?:link|Link|url|URL|website)\s*\]", "https://www.tatacapital.com", s)
-
+    s = re.sub(r"<\s*(?:link|Link|url|URL|website)\s*>", DEFAULT_CTA_URL, s)
+    s = re.sub(r"\{\s*(?:link|Link|url|URL|website)\s*\}", DEFAULT_CTA_URL, s)
+    s = re.sub(r"\[\s*(?:link|Link|url|URL|website)\s*\]", DEFAULT_CTA_URL, s)
     # 2. Unified placeholder pattern matching all informal and existing variables
     placeholder_pat = re.compile(
         r"(?:₹\s*)?(?:"
@@ -236,6 +236,113 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
     normalized = re.sub(r"[ \t]+", " ", normalized)
     return normalized, samples
 
+
+def extract_and_strip_cta(
+    body: str,
+    existing_btn_text: str | None = None,
+    existing_btn_url: str | None = None,
+    existing_footer: str | None = None,
+) -> tuple[str, str, str, str | None]:
+    """
+    Identify and extract the Call-to-Action (CTA) line from a message body,
+    removing it from the body text and placing it cleanly into button_text and button_url.
+    Also identifies trailing T&C disclaimer lines and extracts them to footer_text.
+    If no destination URL is provided, defaults to https://u3.mnge.co/.
+    """
+    if not body:
+        return "", existing_btn_text or "Check Offer", existing_btn_url or DEFAULT_CTA_URL, existing_footer
+
+    text = body.strip()
+    extracted_btn_text = existing_btn_text
+    extracted_url = existing_btn_url
+    extracted_footer = existing_footer
+
+    lines = text.split("\n")
+    cleaned_lines: list[str] = []
+
+    # Clean URL regex (excluding surrounding whitespace and brackets)
+    url_pat = r"(https?://[^\s()\[\]]+|<link>|\{link\}|\[link\]|<url>|\{url\}|\[url\])"
+    for line in lines:
+        sline = line.strip()
+        if not sline:
+            cleaned_lines.append("")
+            continue
+
+        lower_line = sline.lower()
+
+        # 1. T&C / Disclaimer lines: extract as footer and remove from body
+        if any(tc_kw in lower_line for tc_kw in ["t&c", "t & c", "terms & condition", "terms and condition", "terms apply", "conditions apply"]):
+            if not extracted_footer:
+                extracted_footer = "T&C apply"
+            continue
+
+        # 2. Check if line is a genuine CTA line
+        has_url = re.search(url_pat, sline)
+        starts_with_cta = bool(re.match(r"^\s*(?:CTA\s*[:\-–]|CTA\s+)", sline, re.IGNORECASE))
+        starts_with_emoji = bool(re.match(r"^\s*(?:[👉🔗▶️📍📲➡️✅])", sline))
+        is_url_only = bool(re.match(r"^\s*(?:" + url_pat + r")\s*$", sline))
+
+        has_cta_verb = any(v in lower_line for v in [
+            "check your offer", "check my offer", "check offer", "check eligibility",
+            "apply now", "apply online", "apply here", "apply",
+            "explore now", "explore more", "explore",
+            "tap here", "tap to", "tap now",
+            "click here", "click to", "click",
+            "visit now", "visit us", "visit",
+            "view offer", "avail now",
+            "consolidate my debt", "apna offer", "abhi check"
+        ])
+
+        is_cta = False
+        if starts_with_cta:
+            is_cta = True
+        elif is_url_only:
+            is_cta = True
+        elif has_url and (has_cta_verb or starts_with_emoji or ":" in sline):
+            is_cta = True
+        elif starts_with_emoji and (has_cta_verb or ":" in sline):
+            is_cta = True
+
+        if is_cta:
+            # Extract URL if present
+            if has_url:
+                clean_url = has_url.group(1).rstrip(".,_*_`\"").strip()
+                if clean_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
+                    extracted_url = DEFAULT_CTA_URL
+                elif clean_url.startswith("http"):
+                    extracted_url = clean_url
+                text_without_url = re.sub(r"\s*" + re.escape(clean_url) + r"[_*]*", "", sline)
+            else:
+                text_without_url = sline
+
+            # Extract button text from line
+            clean_btn = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", text_without_url)
+            clean_btn = re.sub(r"^(?:CTA\s*|Click\s*here\s*to\s*|Tap\s*to\s*)", "", clean_btn, flags=re.IGNORECASE).strip()
+            clean_btn = re.sub(r"\s+", " ", clean_btn).strip()
+            if clean_btn and len(clean_btn) <= 25 and len(clean_btn) >= 3:
+                extracted_btn_text = clean_btn.title()
+            elif not extracted_btn_text or extracted_btn_text == "Check Offer":
+                if "apply" in lower_line:
+                    extracted_btn_text = "Apply Now"
+                elif "explore" in lower_line:
+                    extracted_btn_text = "Explore Now"
+                elif "offer" in lower_line:
+                    extracted_btn_text = "Check Offer"
+
+            # Drop this CTA line from the body
+            continue
+
+        cleaned_lines.append(line)
+
+    clean_body = "\n".join(cleaned_lines)
+    clean_body = re.sub(r"\n{3,}", "\n\n", clean_body).strip()
+
+    final_btn_text = extracted_btn_text or "Check Offer"
+    final_url = extracted_url or DEFAULT_CTA_URL
+    if final_url.rstrip("/") in ("https://www.tatacapital.com", "http://www.tatacapital.com", "https://tatacapital.com", "http://tatacapital.com", ""):
+        final_url = DEFAULT_CTA_URL
+
+    return clean_body, final_btn_text, final_url, extracted_footer
 
 def _clean_template_name(base: str, channel: str, idx: int) -> str:
     clean = re.sub(r"[^a-zA-Z0-9_]", "_", base.lower()).strip("_")
@@ -703,7 +810,7 @@ def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[s
     Example: 'CTA: Explore Now!\\nGodrej Majesty-NCR' -> ('Explore Now!', 'https://forms.cloud.microsoft/...')
     """
     button_text = "Explore Now"
-    button_url = "https://www.tatacapital.com"
+    button_url = DEFAULT_CTA_URL
 
     # 1. Use real decoded destination URL if hyperlink mark exists
     if cta_links and len(cta_links) > 0:
@@ -869,9 +976,16 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     # 3b. SWCM WhatsApp campaign tables ("Campaign execution format N | WA N")
     swcm_campaigns = _parse_swcm_campaign_tables(desc_raw)
     for idx, campaign in enumerate(swcm_campaigns, start=1):
-        norm_text, samples = normalize_placeholders(campaign["body"])
-        var_tags = re.findall(r"\{\{(\d+)\}\}", norm_text)
         cta_text, cta_url = _parse_swcm_cta(campaign.get("cta_text", ""), campaign.get("cta_links", []))
+        norm_text, samples = normalize_placeholders(campaign["body"])
+        clean_body, swcm_btn_text, swcm_btn_url, swcm_footer = extract_and_strip_cta(
+            norm_text,
+            existing_btn_text=cta_text,
+            existing_btn_url=cta_url,
+        )
+        var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
+        if len(samples) > len(var_tags):
+            samples = samples[:len(var_tags)]
         media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
         if media is None and zip_creative_paths:
             media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
@@ -880,13 +994,14 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             WhatsAppTemplateDraft(
                 template_name=tname,
                 category="MARKETING",
-                body=norm_text,
+                body=clean_body,
                 header_type="IMAGE" if media else "TEXT",
                 media_file=media,
                 media_filename=Path(media).name if media else None,
                 button_type="URL",
-                button_text=cta_text,
-                button_url=cta_url,
+                button_text=swcm_btn_text,
+                button_url=swcm_btn_url,
+                footer_text=swcm_footer,
                 variables=var_tags,
                 sample_values=samples,
                 raw_source=campaign["body"],
@@ -944,19 +1059,30 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         if chan in ("WA", "WHATSAPP"):
             img = wa_creatives[(wa_counter - 1) % len(wa_creatives)] if wa_creatives else None
             tname = _clean_template_name(base_name, "wa", wa_counter)
+            clean_body, cta_btn_text, cta_btn_url, cta_footer = extract_and_strip_cta(
+                norm_text,
+                existing_btn_text=item.get("button_text"),
+                existing_btn_url=item.get("button_url"),
+                existing_footer=item.get("footer"),
+            )
+            var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
+            resolved_vars = var_tags
+            if len(resolved_samples) > len(var_tags):
+                resolved_samples = resolved_samples[:len(var_tags)]
+
             wa_drafts.append(
                 WhatsAppTemplateDraft(
                     template_name=tname,
                     category="MARKETING",
-                    body=norm_text,
+                    body=clean_body,
                     header_type="IMAGE" if img else ("TEXT" if item.get("header") else "TEXT"),
                     header_text=item.get("header"),
-                    footer_text=item.get("footer"),
+                    footer_text=cta_footer or item.get("footer"),
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
-                    button_type=item.get("button_type") or ("URL" if item.get("button_url") else "URL"),
-                    button_text=item.get("button_text") or "Check Offer",
-                    button_url=item.get("button_url") or "https://www.tatacapital.com",
+                    button_type=item.get("button_type") or "URL",
+                    button_text=cta_btn_text,
+                    button_url=cta_btn_url,
                     variables=resolved_vars,
                     sample_values=resolved_samples,
                     raw_source=clean_content,
@@ -968,18 +1094,25 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         elif chan == "RCS":
             img = rcs_creatives[(rcs_counter - 1) % len(rcs_creatives)] if rcs_creatives else None
             tname = _clean_template_name(base_name, "rcs", rcs_counter)
+            clean_body, cta_btn_text, cta_btn_url, _ = extract_and_strip_cta(
+                norm_text,
+                existing_btn_text=item.get("button_text"),
+                existing_btn_url=item.get("button_url"),
+            )
+            var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
+
             rcs_drafts.append(
                 RcsTemplateDraft(
                     template_name=tname,
                     card_title=title,
-                    body=norm_text,
+                    body=clean_body,
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
                     action_type=item.get("button_type") or "URL",
-                    action_label=item.get("button_text") or "Explore Now",
-                    action_url=item.get("button_url") or "https://www.tatacapital.com",
-                    variables=item.get("variables") or variables,
-                    sample_values=item.get("sample_values") or [],
+                    action_label=cta_btn_text,
+                    action_url=cta_btn_url,
+                    variables=item.get("variables") or var_tags,
+                    sample_values=item.get("sample_values") or resolved_samples[:len(var_tags)],
                     raw_source=clean_content,
                     source_origin=source_origin,
                 )
@@ -994,7 +1127,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     text=norm_text,
                     char_count=len(norm_text),
                     variant=variant,
-                    variables=variables,
+                    variables=resolved_vars,
+                    sample_values=resolved_samples,
                     raw_source=clean_content,
                     source_origin=source_origin,
                 )

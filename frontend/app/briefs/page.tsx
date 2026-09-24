@@ -237,7 +237,7 @@ export default function JiraBriefsPage() {
         card_title: rcs.card_title || brief?.summary || 'Tata Capital Offer',
         card_description: rcs.body,
         cta_text: rcs.action_label || 'Explore Now',
-        cta_url: rcs.action_url || 'https://www.tatacapital.com',
+        cta_url: rcs.action_url || 'https://u3.mnge.co/',
       });
       setSyncedRcs((prev) => ({ ...prev, [rcs.template_name]: res.moengage_id }));
       setFeedback({
@@ -786,7 +786,7 @@ export default function JiraBriefsPage() {
                                             type="text"
                                             value={wa.button_url || ''}
                                             onChange={(e) => updateWaField(idx, 'button_url', e.target.value)}
-                                            placeholder="https://www.tatacapital.com"
+                                            placeholder="https://u3.mnge.co/"
                                             disabled={wa.button_type === 'QUICK_REPLY' || wa.button_type === 'NONE'}
                                             className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100"
                                           />
@@ -811,7 +811,7 @@ export default function JiraBriefsPage() {
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className="text-gray-400">CTA Button:</span>
                                       <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
-                                        🔗 {wa.button_text || 'Check Offer'} ({wa.button_url || 'https://www.tatacapital.com'})
+                                        🔗 {wa.button_text || 'Check Offer'} ({wa.button_url || 'https://u3.mnge.co/'})
                                       </span>
                                     </div>
                                   )}

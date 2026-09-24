@@ -3519,11 +3519,14 @@ async def submit_jira_brief_endpoint(
             else:
                 btn_type = (wa.get("button_type") or "NONE").upper().strip()
                 btn_text = (wa.get("button_text") or "").strip()
-                if btn_type == "URL" and (wa.get("button_url") or btn_text):
+                raw_btn_url = (wa.get("button_url") or "").strip()
+                if not raw_btn_url or raw_btn_url.rstrip("/") in ("https://www.tatacapital.com", "http://www.tatacapital.com", "https://tatacapital.com"):
+                    raw_btn_url = "https://u3.mnge.co/"
+                if btn_type == "URL" and (raw_btn_url or btn_text):
                     btn_list.append({
                         "type": "URL",
                         "text": btn_text or "Check Offer",
-                        "url": wa.get("button_url") or "https://www.tatacapital.com",
+                        "url": raw_btn_url,
                     })
                 elif btn_type in ("QUICK_REPLY", "QUICKREPLY") and btn_text:
                     btn_list.append({
@@ -3653,9 +3656,8 @@ class MoEngageRcsSyncRequest(BaseModel):
     card_description: str
     media_url: str | None = None
     cta_text: str = "Explore Now"
-    cta_url: str = "https://www.tatacapital.com"
+    cta_url: str = "https://u3.mnge.co/"
     sender_id: str = "68888420892e852255fca466"
-
 
 @app.post("/api/moengage/rcs/sync")
 async def sync_moengage_rcs_endpoint(
