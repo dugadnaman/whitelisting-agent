@@ -309,43 +309,116 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
 # ---------------------------------------------------------------------------
 
 
+def _match_sheet_channel(sname: str) -> str | None:
+    """
+    Match an Excel sheet name to its intended communication channel.
+    Handles exact names ('WA', 'SMS', 'RCS') as well as descriptive variations
+    ('WhatsApp Content', 'WA Copies', 'RCS Copies', 'SMS_1', 'SMS Content', etc.).
+    """
+    norm = re.sub(r"[^A-Za-z0-9]", " ", sname).strip().upper()
+    words = norm.split()
+    if "WHATSAPP" in norm or "WA" in words:
+        return "WA"
+    if "RCS" in words or "RCS" in norm:
+        return "RCS"
+    if "SMS" in words or "SMS" in norm:
+        return "SMS"
+    return None
+
+
 def _parse_excel_channel_sheets(wb: openpyxl.Workbook) -> list[dict[str, str]]:
     """
-    Check if the workbook has dedicated channel sheets: 'WA', 'SMS', 'RCS', 'PN'.
-    e.g. PQ UCL.xlsx in TCN-527.
+    Check if the workbook has dedicated channel sheets (e.g. 'WA', 'WhatsApp Content',
+    'SMS Copies', 'RCS_1') and extract marketing templates.
+    Supports both columnar tables (e.g. template_name | body | header) and row-based lists.
     """
     items: list[dict[str, str]] = []
-    sheet_map = {
-        "WA": "WA",
-        "WHATSAPP": "WA",
-        "SMS": "SMS",
-        "RCS": "RCS",
-    }
 
     for sname in wb.sheetnames:
-        norm_sname = sname.strip().upper()
-        target_chan = sheet_map.get(norm_sname)
+        target_chan = _match_sheet_channel(sname)
         if not target_chan:
             continue
 
         ws = wb[sname]
-        # Look for rows containing copy
+        raw_rows = []
         for r in range(1, ws.max_row + 1):
             row_vals = [str(ws.cell(row=r, column=c).value or "").strip() for c in range(1, ws.max_column + 1)]
-            label = row_vals[0].lower() if row_vals else ""
+            if any(row_vals):
+                raw_rows.append(row_vals)
 
-            # Check if this row has message copy (e.g. labeled "SMS Text" or "Body" or long content)
-            if any(k in label for k in ["text", "body", "message", "copy", "content"]) or len(row_vals) > 1:
-                candidates = row_vals[1:] if any(k in label for k in ["text", "body", "copy", "sms", "name", "cta"]) else row_vals
+        if not raw_rows:
+            continue
+
+        # 1. Check for columnar template tables where row 0 contains header names
+        header_row = [c.lower() for c in raw_rows[0]]
+        body_col_idx = None
+        for idx, h in enumerate(header_row):
+            if "header" in h or "title" in h or "type" in h or "name" in h:
+                continue
+            if any(k in h for k in ["body", "content", "copy", "message", "text"]):
+                body_col_idx = idx
+                break
+
+        if body_col_idx is not None and len(raw_rows) > 1:
+            header_col_idx = next((i for i, h in enumerate(header_row) if "header" in h and "type" not in h), None)
+            footer_col_idx = next((i for i, h in enumerate(header_row) if "footer" in h), None)
+            btn_text_col_idx = next((i for i, h in enumerate(header_row) if "button_text" in h or "cta" in h), None)
+            btn_url_col_idx = next((i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None)
+            btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
+
+            for r_idx, r in enumerate(raw_rows[1:], start=1):
+                if body_col_idx < len(r) and len(r[body_col_idx]) > 10:
+                    body_val = r[body_col_idx]
+                    item: dict[str, str] = {
+                        "channel": target_chan,
+                        "text": body_val,
+                        "variant": f"Variant {r_idx}" if r_idx > 1 else "General",
+                        "source": f"excel_sheet_{sname}",
+                    }
+                    if header_col_idx is not None and header_col_idx < len(r) and r[header_col_idx]:
+                        item["header"] = r[header_col_idx]
+                    if footer_col_idx is not None and footer_col_idx < len(r) and r[footer_col_idx]:
+                        item["footer"] = r[footer_col_idx]
+                    if btn_text_col_idx is not None and btn_text_col_idx < len(r) and r[btn_text_col_idx]:
+                        item["button_text"] = r[btn_text_col_idx]
+                    if btn_url_col_idx is not None and btn_url_col_idx < len(r) and r[btn_url_col_idx]:
+                        item["button_url"] = r[btn_url_col_idx]
+                    if btn_type_col_idx is not None and btn_type_col_idx < len(r) and r[btn_type_col_idx]:
+                        item["button_type"] = r[btn_type_col_idx]
+
+                    if "Title:" in body_val and "Body:" in body_val:
+                        title_m = re.search(r"Title:\s*([^\n]+)", body_val)
+                        body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", body_val, re.DOTALL)
+                        if title_m:
+                            item["title"] = title_m.group(1).strip()
+                        if body_m:
+                            item["text"] = body_m.group(1).strip()
+
+                    items.append(item)
+            continue
+
+        # 2. Row-based format (e.g. PQ UCL.xlsx where column 0 has labels like 'SMS Text', 'Body')
+        for r_vals in raw_rows:
+            label = r_vals[0].lower() if r_vals else ""
+            if any(k in label for k in ["text", "body", "message", "copy", "content"]) or len(r_vals) > 1:
+                candidates = r_vals[1:] if any(k in label for k in ["text", "body", "copy", "sms", "name", "cta"]) else r_vals
                 for col_idx, cell in enumerate(candidates, start=1):
                     if len(cell) > 25 and not cell.lower().startswith(("http", "as per", "ucl_", "tclmoe_", "clicker")):
                         variant_label = "Retargeting" if col_idx > 1 or "retarget" in cell.lower() else "General"
-                        items.append({
+                        item_dict = {
                             "channel": target_chan,
                             "text": cell,
                             "variant": variant_label,
                             "source": f"excel_sheet_{sname}",
-                        })
+                        }
+                        if "Title:" in cell and "Body:" in cell:
+                            title_m = re.search(r"Title:\s*([^\n]+)", cell)
+                            body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", cell, re.DOTALL)
+                            if title_m:
+                                item_dict["title"] = title_m.group(1).strip()
+                            if body_m:
+                                item_dict["text"] = body_m.group(1).strip()
+                        items.append(item_dict)
 
     return items
 
@@ -355,6 +428,7 @@ def _parse_excel_grid_messages(wb: openpyxl.Workbook) -> list[dict[str, str]]:
     Parse Excel sheets where copy spans multiple contiguous rows
     and Column 0 indicates channel sections like 'SMS' and 'RCS'.
     e.g. LAP Content.xlsx in TCN-525.
+    Handles paragraph breaks safely without prematurely splitting templates on a single empty row.
     """
     items: list[dict[str, str]] = []
 
@@ -379,7 +453,7 @@ def _parse_excel_grid_messages(wb: openpyxl.Workbook) -> list[dict[str, str]]:
                 return
             for c_idx in range(1, cols):
                 lines = current_block.get(c_idx, [])
-                combined = "\n".join([line for line in lines if line and not line.lower().startswith("t&cs apply")])
+                combined = "\n".join([line for line in lines if not line.lower().startswith("t&cs apply")]).strip()
                 if len(combined) > 25:
                     variant_label = f"Variant {c_idx}" if c_idx > 1 else "General"
                     items.append({
@@ -390,18 +464,33 @@ def _parse_excel_grid_messages(wb: openpyxl.Workbook) -> list[dict[str, str]]:
                     })
             current_block = {c: [] for c in range(1, cols)}
 
+        consecutive_empty_rows = 0
+
         for row in raw_rows:
             first_val = row[0].strip().upper()
-            if first_val in ("SMS", "RCS", "WA", "WHATSAPP"):
+            is_channel_header = first_val in ("SMS", "RCS", "WA", "WHATSAPP", "EMAIL", "PN")
+            if is_channel_header:
                 _flush_block(current_channel, num_cols, sname)
                 current_channel = "WA" if first_val in ("WA", "WHATSAPP") else first_val
+                consecutive_empty_rows = 0
 
             has_text = any(len(row[c]) > 0 for c in range(1, num_cols))
             is_empty_row = not has_text or all(row[c] == "" for c in range(1, num_cols))
 
             if is_empty_row:
-                _flush_block(current_channel, num_cols, sname)
+                consecutive_empty_rows += 1
+                # A single empty row is paragraph spacing within the message body.
+                # Only flush when 2+ consecutive empty rows signal the end of a section.
+                if consecutive_empty_rows >= 2:
+                    _flush_block(current_channel, num_cols, sname)
+                    current_channel = None
+                else:
+                    # Preserve paragraph separation
+                    for c in range(1, num_cols):
+                        if current_block[c]:
+                            current_block[c].append("")
             else:
+                consecutive_empty_rows = 0
                 for c in range(1, num_cols):
                     cell_text = row[c].strip()
                     if cell_text and not cell_text.lower().startswith(("group", "channel")):
