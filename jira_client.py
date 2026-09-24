@@ -177,6 +177,13 @@ def list_jira_issues(
             soham_mention_reasons.append("description")
         if has_soham_sum:
             soham_mention_reasons.append("summary")
+        has_mailers_zip = any("mailer" in fn.lower() and fn.endswith(".zip") for fn in att_filenames)
+        has_subject_lines = any("subject" in fn.lower() or fn.endswith((".docx", ".doc")) for fn in att_filenames)
+        sum_low = summary_val.lower()
+        is_email = bool(
+            ("mailer" in sum_low or "mailers" in sum_low or "email" in sum_low or has_mailers_zip)
+            and (has_mailers_zip or has_subject_lines or "email" in sum_low or "mailer" in sum_low)
+        )
 
         results.append(
             {
@@ -209,6 +216,8 @@ def list_jira_issues(
                 "soham_mention_reasons": soham_mention_reasons,
                 "comments_text": all_comments_str,
                 "description_text": desc_val,
+                "is_email": is_email,
+                "campaign_type": "email" if is_email else "messaging",
             }
         )
 

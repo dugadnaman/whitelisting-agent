@@ -33,7 +33,8 @@ export default function JiraBriefsPage() {
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [brief, setBrief] = useState<JiraBriefData | null>(null);
   const [loadingBrief, setLoadingBrief] = useState(false);
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'comments' | 'moengage'>('whatsapp');
+  const [campaignTypeFilter, setCampaignTypeFilter] = useState<'all' | 'messaging' | 'email'>('all');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('whatsapp');
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,7 +111,9 @@ export default function JiraBriefsPage() {
       setEditingCard({});
       const initialAcc = data.account === 'wealth' ? 'tcl_promo' : (data.account || 'tcl_promo');
       setTargetAccount(initialAcc);
-      if (waList.length > 0) {
+      if (data.is_email_campaign) {
+        setActiveTab('email');
+      } else if (waList.length > 0) {
         setActiveTab('whatsapp');
       } else if (rcsList.length > 0) {
         setActiveTab('rcs');
@@ -251,13 +254,18 @@ export default function JiraBriefsPage() {
     }
   };
 
-  const filteredIssues = issues.filter(
-    (i) =>
+  const emailCount = issues.filter((i) => i.is_email).length;
+  const messagingCount = issues.length - emailCount;
+
+  const filteredIssues = issues.filter((i) => {
+    if (campaignTypeFilter === 'messaging' && i.is_email) return false;
+    if (campaignTypeFilter === 'email' && !i.is_email) return false;
+    return (
       i.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
       i.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (i.assignee || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
+    );
+  });
   const totalSelectedCount = selectedWa.size + selectedRcs.size;
 
   return (
@@ -336,6 +344,40 @@ export default function JiraBriefsPage() {
             <span className="text-[11px] text-gray-400 font-medium font-mono">{issues.length} tickets</span>
           </div>
 
+          {/* Segmented Campaign Filter Pills */}
+          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg text-xs font-semibold">
+            <button
+              onClick={() => setCampaignTypeFilter('all')}
+              className={`flex-1 py-1 px-1.5 rounded-md transition text-center text-[11px] ${
+                campaignTypeFilter === 'all'
+                  ? 'bg-white text-gray-900 shadow-2xs font-bold'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              All ({issues.length})
+            </button>
+            <button
+              onClick={() => setCampaignTypeFilter('messaging')}
+              className={`flex-1 py-1 px-1.5 rounded-md transition text-center text-[11px] ${
+                campaignTypeFilter === 'messaging'
+                  ? 'bg-white text-emerald-700 shadow-2xs font-bold'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              🟢 Messaging ({messagingCount})
+            </button>
+            <button
+              onClick={() => setCampaignTypeFilter('email')}
+              className={`flex-1 py-1 px-1.5 rounded-md transition text-center text-[11px] ${
+                campaignTypeFilter === 'email'
+                  ? 'bg-white text-purple-700 shadow-2xs font-bold'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              📧 Email ({emailCount})
+            </button>
+          </div>
+
           <input
             type="text"
             placeholder="Search key, title, assignee..."
@@ -363,7 +405,18 @@ export default function JiraBriefsPage() {
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold font-mono text-blue-700">{issue.key}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold font-mono text-blue-700">{issue.key}</span>
+                        {issue.is_email ? (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                            📧 Email
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            🟢 WA/RCS
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[10px] px-1.5 py-0.2 rounded font-semibold bg-gray-100 text-gray-600">
                         {issue.status}
                       </span>
@@ -432,55 +485,62 @@ export default function JiraBriefsPage() {
 
                   {/* Selective Submission Action Controls */}
                   <div className="flex flex-wrap items-center gap-2">
-                    {/* Channel-Specific Submit Buttons */}
-                    {waTemplates.length > 0 && (
-                      <button
-                        onClick={() => handleSubmitChannel('whatsapp')}
-                        disabled={submitting || selectedWa.size === 0}
-                        className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
-                        title="Submit only the checked WhatsApp templates"
-                      >
-                        <span>🟢 Whitelist WhatsApp Only</span>
-                        <span className="bg-emerald-500 px-1.5 py-0.2 rounded text-[10px]">
-                          {selectedWa.size}
-                        </span>
-                      </button>
-                    )}
+                    {brief.is_email_campaign ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 text-purple-800 border border-purple-200 shadow-2xs">
+                        <span>📧</span>
+                        <span>Direct ESP / MoEngage Deployment (No Karix Whitelisting Needed)</span>
+                      </span>
+                    ) : (
+                      <>
+                        {waTemplates.length > 0 && (
+                          <button
+                            onClick={() => handleSubmitChannel('whatsapp')}
+                            disabled={submitting || selectedWa.size === 0}
+                            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
+                            title="Submit only the checked WhatsApp templates"
+                          >
+                            <span>🟢 Whitelist WhatsApp Only</span>
+                            <span className="bg-emerald-500 px-1.5 py-0.2 rounded text-[10px]">
+                              {selectedWa.size}
+                            </span>
+                          </button>
+                        )}
 
-                    {rcsTemplates.length > 0 && (
-                      <button
-                        onClick={() => handleSubmitChannel('rcs')}
-                        disabled={submitting || selectedRcs.size === 0}
-                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
-                        title="Submit only the checked RCS templates"
-                      >
-                        <span>🔵 Whitelist RCS Only</span>
-                        <span className="bg-blue-500 px-1.5 py-0.2 rounded text-[10px]">
-                          {selectedRcs.size}
-                        </span>
-                      </button>
-                    )}
+                        {rcsTemplates.length > 0 && (
+                          <button
+                            onClick={() => handleSubmitChannel('rcs')}
+                            disabled={submitting || selectedRcs.size === 0}
+                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
+                            title="Submit only the checked RCS templates"
+                          >
+                            <span>🔵 Whitelist RCS Only</span>
+                            <span className="bg-blue-500 px-1.5 py-0.2 rounded text-[10px]">
+                              {selectedRcs.size}
+                            </span>
+                          </button>
+                        )}
 
-                    {/* Master Submit All Button */}
-                    <button
-                      onClick={() => handleSubmitChannel('all')}
-                      disabled={submitting || totalSelectedCount === 0}
-                      className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
-                    >
-                      {submitting ? (
-                        <>
-                          <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
-                          <span>Submitting...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>🚀 Whitelist All Selected</span>
-                          <span className="bg-gray-800 px-1.5 py-0.2 rounded text-[10px]">
-                            {totalSelectedCount}
-                          </span>
-                        </>
-                      )}
-                    </button>
+                        <button
+                          onClick={() => handleSubmitChannel('all')}
+                          disabled={submitting || totalSelectedCount === 0}
+                          className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
+                        >
+                          {submitting ? (
+                            <>
+                              <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
+                              <span>Submitting...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>🚀 Whitelist All Selected</span>
+                              <span className="bg-gray-800 px-1.5 py-0.2 rounded text-[10px]">
+                                {totalSelectedCount}
+                              </span>
+                            </>
+                          )}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -539,74 +599,123 @@ export default function JiraBriefsPage() {
               {/* Multi-Channel Content Tabs */}
               <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs overflow-hidden">
                 <div className="flex border-b border-gray-200 bg-gray-50/70">
-                  <button
-                    onClick={() => setActiveTab('whatsapp')}
-                    className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
-                      activeTab === 'whatsapp'
-                        ? 'border-emerald-600 text-emerald-700 bg-white'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <span>🟢 WhatsApp</span>
-                    <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                      {selectedWa.size}/{waTemplates.length}
-                    </span>
-                  </button>
+                  {brief.is_email_campaign ? (
+                    <>
+                      <button
+                        onClick={() => setActiveTab('email')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'email'
+                            ? 'border-purple-600 text-purple-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>📧 Email Packages & Assets</span>
+                        <span className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          {brief.email_templates?.length || 0}
+                        </span>
+                      </button>
 
-                  <button
-                    onClick={() => setActiveTab('rcs')}
-                    className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
-                      activeTab === 'rcs'
-                        ? 'border-blue-600 text-blue-700 bg-white'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <span>🔵 RCS (DLT)</span>
-                    <span className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                      {selectedRcs.size}/{rcsTemplates.length}
-                    </span>
-                  </button>
+                      <button
+                        onClick={() => setActiveTab('comments')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'comments'
+                            ? 'border-indigo-600 text-indigo-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>💬 Ticket Comments</span>
+                        <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          {brief.comments?.length || 0}
+                        </span>
+                      </button>
 
-                  <button
-                    onClick={() => setActiveTab('sms')}
-                    className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
-                      activeTab === 'sms'
-                        ? 'border-purple-600 text-purple-700 bg-white'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <span>🟣 SMS (DLT)</span>
-                    <span className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                      {brief.sms_templates.length}
-                    </span>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('comments')}
-                    className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
-                      activeTab === 'comments'
-                        ? 'border-indigo-600 text-indigo-700 bg-white'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <span>💬 Comments</span>
-                    <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                      {brief.comments?.length || 0}
-                    </span>
-                  </button>
+                      <button
+                        onClick={() => setActiveTab('moengage')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'moengage'
+                            ? 'border-amber-600 text-amber-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>🎯 MoEngage Email Staging</span>
+                        <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          Draft
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => setActiveTab('whatsapp')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'whatsapp'
+                            ? 'border-emerald-600 text-emerald-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>🟢 WhatsApp</span>
+                        <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          {selectedWa.size}/{waTemplates.length}
+                        </span>
+                      </button>
 
-                  <button
-                    onClick={() => setActiveTab('moengage')}
-                    className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
-                      activeTab === 'moengage'
-                        ? 'border-amber-600 text-amber-700 bg-white'
-                        : 'border-transparent text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    <span>🎯 MoEngage Staging</span>
-                    <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                      Draft
-                    </span>
-                  </button>
+                      <button
+                        onClick={() => setActiveTab('rcs')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'rcs'
+                            ? 'border-blue-600 text-blue-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>🔵 RCS (DLT)</span>
+                        <span className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          {selectedRcs.size}/{rcsTemplates.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => setActiveTab('sms')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'sms'
+                            ? 'border-purple-600 text-purple-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>🟣 SMS (DLT)</span>
+                        <span className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          {brief.sms_templates.length}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => setActiveTab('comments')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'comments'
+                            ? 'border-indigo-600 text-indigo-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>💬 Comments</span>
+                        <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          {brief.comments?.length || 0}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => setActiveTab('moengage')}
+                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                          activeTab === 'moengage'
+                            ? 'border-amber-600 text-amber-700 bg-white'
+                            : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                        <span>🎯 MoEngage Staging</span>
+                        <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                          Draft
+                        </span>
+                      </button>
+                    </>
+                  )}
                 </div>
 
                 {/* Tab Content Panels */}
@@ -1028,6 +1137,47 @@ export default function JiraBriefsPage() {
                     </div>
                   )}
 
+                  {/* Email Packages & Templates Panel */}
+                  {activeTab === 'email' && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
+                        <span className="font-semibold text-gray-700">
+                          Email Campaign Packages & Documents ({brief.email_templates?.length || 0} assets)
+                        </span>
+                        <span className="text-gray-400 text-[11px]">
+                          📦 HTML emailer ZIP packages, preheader documents, and email copy templates.
+                        </span>
+                      </div>
+
+                      {(!brief.email_templates || brief.email_templates.length === 0) ? (
+                        <p className="py-8 text-center text-xs text-gray-400">No email packages detected in this brief.</p>
+                      ) : (
+                        brief.email_templates.map((em, idx) => (
+                          <div key={`email-asset-${idx}`} className="p-4 rounded-xl border border-purple-200 bg-purple-50/30 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2.5">
+                                <span className="text-xl">{em.file_type?.includes('ZIP') ? '📦' : em.file_type?.includes('Subject') ? '📝' : '📄'}</span>
+                                <div>
+                                  <h4 className="font-bold text-xs text-gray-900">{em.filename || em.template_name}</h4>
+                                  <span className="text-[10px] text-purple-700 font-semibold">{em.file_type || 'Email Asset'}</span>
+                                </div>
+                              </div>
+                              {em.local_path && (
+                                <span className="text-[10px] font-mono bg-white text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-semibold">
+                                  ✓ Cached Locally
+                                </span>
+                              )}
+                            </div>
+                            {em.body && (
+                              <div className="bg-white p-3 rounded-lg border border-purple-100 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                {em.body}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                   {/* Comments Panel */}
                   {activeTab === 'comments' && (
                     <div className="space-y-4">

@@ -104,6 +104,7 @@ class ParsedJiraBrief:
     whatsapp_templates: list[dict[str, Any]] = field(default_factory=list)
     rcs_templates: list[dict[str, Any]] = field(default_factory=list)
     sms_templates: list[dict[str, Any]] = field(default_factory=list)
+    email_templates: list[dict[str, Any]] = field(default_factory=list)
     moengage_campaign: dict[str, Any] = field(default_factory=dict)
     attachments_mapped: list[dict[str, Any]] = field(default_factory=list)
     comments: list[dict[str, Any]] = field(default_factory=list)
@@ -1039,7 +1040,25 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     wa_drafts: list[WhatsAppTemplateDraft] = []
     rcs_drafts: list[RcsTemplateDraft] = []
     sms_drafts: list[SmsTemplateDraft] = []
+    email_drafts: list[dict[str, Any]] = []
 
+    # Collect email mailer packages and subject line files from attachments
+    for att in mapped_attachments:
+        fn = att.get("filename", "")
+        lower_fn = fn.lower()
+        if lower_fn.endswith((".zip", ".docx", ".doc", ".html")):
+            f_type = (
+                "HTML Mailer Package"
+                if lower_fn.endswith(".zip")
+                else ("Subject Lines & Preheaders" if lower_fn.endswith((".docx", ".doc")) else "HTML Template")
+            )
+            email_drafts.append({
+                "template_name": Path(fn).stem,
+                "filename": fn,
+                "file_type": f_type,
+                "local_path": att.get("local_path"),
+                "target_channel": "EMAIL",
+            })
     base_name = f"{key.lower().replace('-', '_')}_{re.sub(r'[^a-z0-9]', '_', summary.lower())[:16]}".strip("_")
 
     # 2. Extract templates from attached Excel files first
@@ -1252,6 +1271,15 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             )
             sms_counter += 1
 
+        elif chan in ("EMAIL", "MAILER", "MAIL"):
+            email_drafts.append({
+                "template_name": _clean_template_name(base_name, "email", len(email_drafts) + 1),
+                "filename": f"Email Copy {len(email_drafts) + 1}",
+                "file_type": "Email Body Copy",
+                "body": norm_text,
+                "variant": variant,
+                "source_origin": source_origin,
+            })
     # 5. Build MoEngage Campaign Staging payload
     moengage_campaign = {
         "campaign_name": f"{key} - {summary}",
@@ -1281,6 +1309,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         whatsapp_templates=[asdict(w) for w in wa_drafts],
         rcs_templates=[asdict(r) for r in rcs_drafts],
         sms_templates=[asdict(s) for s in sms_drafts],
+        email_templates=email_drafts,
         moengage_campaign=moengage_campaign,
         attachments_mapped=mapped_attachments,
         comments=raw_comments,

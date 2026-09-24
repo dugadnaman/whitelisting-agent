@@ -853,6 +853,8 @@ export type JiraIssueItem = {
   labels?: string[];
   created?: string;
   updated?: string;
+  is_email?: boolean;
+  campaign_type?: 'email' | 'messaging';
 };
 
 export type JiraWhatsAppDraft = {
@@ -913,6 +915,14 @@ export type JiraBriefData = {
   whatsapp_templates: JiraWhatsAppDraft[];
   rcs_templates: JiraRcsDraft[];
   sms_templates: JiraSmsDraft[];
+  email_templates?: Array<{
+    template_name: string;
+    filename?: string;
+    file_type?: string;
+    body?: string;
+    local_path?: string | null;
+    target_channel?: string;
+  }>;
   moengage_campaign: {
     campaign_name: string;
     target_account: string;
