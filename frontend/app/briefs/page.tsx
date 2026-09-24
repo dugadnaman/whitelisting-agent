@@ -41,8 +41,8 @@ export default function JiraBriefsPage() {
   // Editable template drafts and selection sets
   const [waTemplates, setWaTemplates] = useState<JiraWhatsAppDraft[]>([]);
   const [rcsTemplates, setRcsTemplates] = useState<JiraRcsDraft[]>([]);
-  const [selectedWa, setSelectedWa] = useState<Set<string>>(new Set());
-  const [selectedRcs, setSelectedRcs] = useState<Set<string>>(new Set());
+  const [selectedWa, setSelectedWa] = useState<Set<number>>(new Set());
+  const [selectedRcs, setSelectedRcs] = useState<Set<number>>(new Set());
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
@@ -105,8 +105,8 @@ export default function JiraBriefsPage() {
       const rcsList = data.rcs_templates || [];
       setWaTemplates(waList);
       setRcsTemplates(rcsList);
-      setSelectedWa(new Set(waList.map((w) => w.template_name)));
-      setSelectedRcs(new Set(rcsList.map((r) => r.template_name)));
+      setSelectedWa(new Set(waList.map((_, idx) => idx)));
+      setSelectedRcs(new Set(rcsList.map((_, idx) => idx)));
       setEditingCard({});
       const initialAcc = data.account === 'wealth' ? 'tcl_promo' : (data.account || 'tcl_promo');
       setTargetAccount(initialAcc);
@@ -144,12 +144,12 @@ export default function JiraBriefsPage() {
       let rcsToSubmit: JiraRcsDraft[] = [];
 
       if (channelMode === 'all' || channelMode === 'whatsapp') {
-        waToSubmit = waTemplates.filter((w) => selectedWa.has(w.template_name));
+        waToSubmit = waTemplates.filter((_, idx) => selectedWa.has(idx));
         if (waToSubmit.length > 0) submitChannels.push('whatsapp');
       }
 
       if (channelMode === 'all' || channelMode === 'rcs') {
-        rcsToSubmit = rcsTemplates.filter((r) => selectedRcs.has(r.template_name));
+        rcsToSubmit = rcsTemplates.filter((_, idx) => selectedRcs.has(idx));
         if (rcsToSubmit.length > 0) submitChannels.push('rcs');
       }
 
@@ -203,30 +203,30 @@ export default function JiraBriefsPage() {
     });
   };
 
-  const toggleSelectWa = (name: string) => {
+  const toggleSelectWa = (idx: number) => {
     setSelectedWa((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
       return next;
     });
   };
 
-  const toggleSelectRcs = (name: string) => {
+  const toggleSelectRcs = (idx: number) => {
     setSelectedRcs((prev) => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
       return next;
     });
   };
 
   const selectAllWa = (select: boolean) => {
-    setSelectedWa(select ? new Set(waTemplates.map((w) => w.template_name)) : new Set());
+    setSelectedWa(select ? new Set(waTemplates.map((_, idx) => idx)) : new Set());
   };
 
   const selectAllRcs = (select: boolean) => {
-    setSelectedRcs(select ? new Set(rcsTemplates.map((r) => r.template_name)) : new Set());
+    setSelectedRcs(select ? new Set(rcsTemplates.map((_, idx) => idx)) : new Set());
   };
   const handleSyncRcsToMoEngage = async (rcs: JiraRcsDraft) => {
     try {
@@ -624,12 +624,12 @@ export default function JiraBriefsPage() {
                         <p className="py-8 text-center text-xs text-gray-400">No WhatsApp templates detected in this brief.</p>
                       ) : (
                         waTemplates.map((wa, idx) => {
-                          const isSelected = selectedWa.has(wa.template_name);
-                          const isEditing = editingCard[wa.template_name] || false;
+                          const isSelected = selectedWa.has(idx);
+                          const isEditing = editingCard[`wa-${idx}`] || false;
 
                           return (
                             <div
-                              key={wa.template_name}
+                              key={`wa-card-${idx}`}
                               className={`p-4 rounded-xl border transition space-y-3 ${
                                 isSelected ? 'bg-white border-emerald-300 shadow-xs' : 'bg-gray-50/70 border-gray-200 opacity-60'
                               }`}
@@ -639,7 +639,7 @@ export default function JiraBriefsPage() {
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
-                                    onChange={() => toggleSelectWa(wa.template_name)}
+                                    onChange={() => toggleSelectWa(idx)}
                                     className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
                                   />
                                   {isEditing ? (
@@ -672,7 +672,7 @@ export default function JiraBriefsPage() {
                                   )}
 
                                   <button
-                                    onClick={() => toggleEditCard(wa.template_name)}
+                                    onClick={() => toggleEditCard(`wa-${idx}`)}
                                     className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
                                       isEditing
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
@@ -868,12 +868,12 @@ export default function JiraBriefsPage() {
                         <p className="py-8 text-center text-xs text-gray-400">No RCS templates detected in this brief.</p>
                       ) : (
                         rcsTemplates.map((rcs, idx) => {
-                          const isSelected = selectedRcs.has(rcs.template_name);
-                          const isEditing = editingCard[rcs.template_name] || false;
+                          const isSelected = selectedRcs.has(idx);
+                          const isEditing = editingCard[`rcs-${idx}`] || false;
 
                           return (
                             <div
-                              key={rcs.template_name}
+                              key={`rcs-card-${idx}`}
                               className={`p-4 rounded-xl border transition space-y-3 ${
                                 isSelected ? 'bg-white border-blue-300 shadow-xs' : 'bg-gray-50/70 border-gray-200 opacity-60'
                               }`}
@@ -883,7 +883,7 @@ export default function JiraBriefsPage() {
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
-                                    onChange={() => toggleSelectRcs(rcs.template_name)}
+                                    onChange={() => toggleSelectRcs(idx)}
                                     className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
                                   />
                                   {isEditing ? (
@@ -923,7 +923,7 @@ export default function JiraBriefsPage() {
                                   </button>
 
                                   <button
-                                    onClick={() => toggleEditCard(rcs.template_name)}
+                                    onClick={() => toggleEditCard(`rcs-${idx}`)}
                                     className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
                                       isEditing
                                         ? 'bg-blue-50 text-blue-700 border-blue-300'
