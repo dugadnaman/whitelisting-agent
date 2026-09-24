@@ -174,3 +174,20 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
         assert btn_comp2.buttons[0]["type"] == "PHONE_NUMBER"
         assert btn_comp2.buttons[0]["text"] == "Call Support"
         assert btn_comp2.buttons[0]["phone_number"] == "+919876543210"
+
+
+@patch("api.get_current_user", return_value=MOCK_USER)
+def test_jira_projects_catalog_endpoint(mock_user):
+    """Verify /api/jira/projects returns full Tata Capital project catalog."""
+    response = client.get("/api/jira/projects")
+    assert response.status_code == 200
+    projects = response.json()
+    assert isinstance(projects, list)
+    keys = [p["key"] for p in projects]
+    assert "ALL" in keys
+    assert "TCN" in keys
+    assert "SWCM" in keys
+    assert "TM" in keys
+    assert "TAT" in keys
+    assert "MON" in keys
+    assert "COL" in keys

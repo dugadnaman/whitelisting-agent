@@ -3305,6 +3305,14 @@ def get_system_errors(
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/jira/projects")
+def get_jira_brief_projects_endpoint(current_user: dict = Depends(get_current_user)):
+    """List available Tata Capital Jira projects for campaign briefs."""
+    from work_manager import JIRA_PROJECTS_CATALOG
+
+    return _json_safe(JIRA_PROJECTS_CATALOG)
+
+
 @app.get("/api/jira/issues")
 def get_jira_issues_endpoint(
     project: str = Query("TCN"),

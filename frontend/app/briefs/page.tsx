@@ -3,10 +3,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useApp } from '@/lib/context';
 import {
+  fetchJiraProjects,
   fetchJiraIssues,
   fetchJiraBrief,
   submitJiraBrief,
   syncRcsTemplateToMoEngage,
+  type JiraProjectItem,
   type JiraIssueItem,
   type JiraBriefData,
   type JiraWhatsAppDraft,
@@ -18,8 +20,17 @@ export default function JiraBriefsPage() {
   const { user, accounts, getAccountLabel } = useApp();
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(true);
-  const [project, setProject] = useState<string>('TCN');
-  const [selectedKey, setSelectedKey] = useState<string>('TCN-524');
+  const [projectsList, setProjectsList] = useState<JiraProjectItem[]>([
+    { key: 'ALL', name: 'All Tata Projects Combined' },
+    { key: 'TCN', name: 'Tata Capital New' },
+    { key: 'SWCM', name: 'TATA Service and wealth Campaign Manager' },
+    { key: 'TM', name: 'Tata Moneyfy' },
+    { key: 'TAT', name: 'Tata Capital Marketing' },
+    { key: 'MON', name: 'Moneyfy Mobile' },
+    { key: 'COL', name: 'Collections & Operations' },
+  ]);
+  const [project, setProject] = useState<string>('ALL');
+  const [selectedKey, setSelectedKey] = useState<string>('');
   const [brief, setBrief] = useState<JiraBriefData | null>(null);
   const [loadingBrief, setLoadingBrief] = useState(false);
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'moengage'>('whatsapp');
@@ -40,24 +51,42 @@ export default function JiraBriefsPage() {
   const loadIssues = useCallback(async () => {
     try {
       setLoadingIssues(true);
-      const list = await fetchJiraIssues({ project, limit: 20 });
+      const list = await fetchJiraIssues({ project, limit: 30 });
       setIssues(list);
-      if (list.length > 0 && !list.some((i) => i.key === selectedKey)) {
-        setSelectedKey(list[0].key);
+      if (list.length > 0) {
+        setSelectedKey((prev) => {
+          if (prev && list.some((i) => i.key === prev)) return prev;
+          return list[0].key;
+        });
+      } else {
+        setSelectedKey('');
+        setBrief(null);
       }
     } catch (err) {
       setFeedback({ message: formatError(err), type: 'error' });
     } finally {
       setLoadingIssues(false);
     }
-  }, [project, selectedKey]);
+  }, [project]);
+
+  useEffect(() => {
+    fetchJiraProjects().then((projs) => {
+      if (projs && projs.length > 0) setProjectsList(projs);
+    });
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const urlKey = params.get('key');
       const urlProj = params.get('project');
       if (urlKey) setSelectedKey(urlKey.toUpperCase().trim());
-      if (urlProj) setProject(urlProj.toUpperCase().trim());
+      if (urlProj) {
+        setProject(urlProj.toUpperCase().trim());
+      } else {
+        const saved = localStorage.getItem('briefs_project');
+        if (saved) setProject(saved);
+      }
     }
   }, []);
 
@@ -240,12 +269,23 @@ export default function JiraBriefsPage() {
             <h1 className="text-2xl font-bold text-gray-900">Jira Campaign Briefing Agent</h1>
             <select
               value={project}
-              onChange={(e) => { setProject(e.target.value); setSelectedKey(''); }}
+              onChange={(e) => {
+                const newP = e.target.value;
+                setProject(newP);
+                setSelectedKey('');
+                setBrief(null);
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('briefs_project', newP);
+                }
+              }}
               className="text-xs font-semibold bg-white border border-blue-200 text-blue-700 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
               aria-label="Jira project"
             >
-              <option value="TCN">TCN — Tata Capital New</option>
-              <option value="SWCM">SWCM — Service & Wealth Campaign Manager</option>
+              {projectsList.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.key} — {p.name}
+                </option>
+              ))}
             </select>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />

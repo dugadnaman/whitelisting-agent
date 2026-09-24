@@ -932,6 +932,31 @@ export type JiraBriefData = {
   }>;
 };
 
+export type JiraProjectItem = {
+  key: string;
+  name: string;
+};
+
+export async function fetchJiraProjects(): Promise<JiraProjectItem[]> {
+  try {
+    const res = await fetchWithRetry(getApiUrl("/api/jira/projects"));
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch {
+    // Fall back to static catalog
+  }
+  return [
+    { key: "ALL", name: "All Tata Projects Combined" },
+    { key: "TCN", name: "Tata Capital New" },
+    { key: "SWCM", name: "TATA Service and wealth Campaign Manager" },
+    { key: "TM", name: "Tata Moneyfy" },
+    { key: "TAT", name: "Tata Capital Marketing" },
+    { key: "MON", name: "Moneyfy Mobile" },
+    { key: "COL", name: "Collections & Operations" },
+  ];
+}
+
 export async function fetchJiraIssues(params?: {
   project?: string;
   status?: string;
