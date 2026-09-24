@@ -765,21 +765,59 @@ export default function JiraBriefsPage() {
                                     className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
                                   />
                                   {isEditing ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <label className="text-[10px] uppercase font-bold text-gray-400">Name:</label>
-                                      <input
-                                        type="text"
-                                        value={wa.template_name}
-                                        onChange={(e) => updateWaField(idx, 'template_name', e.target.value)}
-                                        className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
-                                      />
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <label className="text-[10px] uppercase font-bold text-gray-400">Name:</label>
+                                        <input
+                                          type="text"
+                                          value={wa.template_name}
+                                          onChange={(e) => updateWaField(idx, 'template_name', e.target.value)}
+                                          className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
+                                        />
+                                      </div>
+                                      <select
+                                        value={wa.category || 'MARKETING'}
+                                        onChange={(e) => updateWaField(idx, 'category', e.target.value)}
+                                        className="text-[10px] font-bold border border-gray-300 rounded px-1.5 py-1 bg-white cursor-pointer"
+                                      >
+                                        <option value="MARKETING">MARKETING</option>
+                                        <option value="UTILITY">UTILITY</option>
+                                        <option value="AUTHENTICATION">AUTHENTICATION</option>
+                                      </select>
+                                      <select
+                                        value={wa.language || 'en'}
+                                        onChange={(e) => updateWaField(idx, 'language', e.target.value)}
+                                        className="text-[10px] font-bold border border-gray-300 rounded px-1.5 py-1 bg-white font-mono cursor-pointer"
+                                      >
+                                        <option value="en">en (English)</option>
+                                        <option value="hi">hi (Hindi)</option>
+                                        <option value="gu">gu (Gujarati)</option>
+                                        <option value="pa">pa (Punjabi)</option>
+                                        <option value="mr">mr (Marathi)</option>
+                                        <option value="bn">bn (Bengali)</option>
+                                        <option value="ta">ta (Tamil)</option>
+                                        <option value="te">te (Telugu)</option>
+                                        <option value="kn">kn (Kannada)</option>
+                                        <option value="ml">ml (Malayalam)</option>
+                                      </select>
                                     </div>
                                   ) : (
-                                    <span className="font-mono font-bold text-xs text-gray-900">{wa.template_name}</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono font-bold text-xs text-gray-900">{wa.template_name}</span>
+                                      <span className={`text-[10px] px-2 py-0.2 rounded-full font-semibold uppercase ${
+                                        wa.category === 'UTILITY'
+                                          ? 'bg-blue-100 text-blue-800'
+                                          : wa.category === 'AUTHENTICATION'
+                                          ? 'bg-purple-100 text-purple-800'
+                                          : 'bg-emerald-100 text-emerald-800'
+                                      }`}>
+                                        {wa.category}
+                                      </span>
+                                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-gray-100 text-gray-700 font-mono font-semibold uppercase">
+                                        🌐 {(wa.language || 'en').toUpperCase()}
+                                      </span>
+                                    </div>
                                   )}
-                                  <span className="text-[10px] px-2 py-0.2 rounded-full bg-emerald-100 text-emerald-800 font-semibold uppercase">
-                                    {wa.category}
-                                  </span>
                                 </div>
 
                                 <div className="flex items-center gap-2">

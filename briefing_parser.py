@@ -135,18 +135,18 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
         return "", []
 
     # 1. Resolve explicit link placeholders first
-    s = re.sub(r"<\s*(?:link|Link|url|URL|website)\s*>", DEFAULT_CTA_URL, s)
-    s = re.sub(r"\{\s*(?:link|Link|url|URL|website)\s*\}", DEFAULT_CTA_URL, s)
-    s = re.sub(r"\[\s*(?:link|Link|url|URL|website)\s*\]", DEFAULT_CTA_URL, s)
-    # 2. Unified placeholder pattern matching all informal and existing variables
+    s = re.sub(r"<\s*(?:link|Link|url|URL|website|લિંક)\s*>", DEFAULT_CTA_URL, s)
+    s = re.sub(r"\{\s*(?:link|Link|url|URL|website|લિંક)\s*\}", DEFAULT_CTA_URL, s)
+    s = re.sub(r"\[\s*(?:link|Link|url|URL|website|લિંક)\s*\]", DEFAULT_CTA_URL, s)
+    # 2. Unified placeholder pattern matching all informal, regional, and existing variables
     placeholder_pat = re.compile(
         r"(?:₹\s*)?(?:"
         r"\{\{\s*\d+\s*\}\}"
-        r"|\{\{\s*[a-zA-Z0-9_\-\s]+\s*\}\}"
+        r"|\{\{\s*[^\{\}]+\s*\}\}"
         r"|#?\{#[^#]+#\}#?"
-        r"|<[a-zA-Z0-9_\-\s]+>"
-        r"|\[[a-zA-Z0-9_\-\s]+\]"
-        r"|\{[a-zA-Z0-9_\-\s]+\}"
+        r"|<[^<>]+>"
+        r"|\[[^\[\]]+\]"
+        r"|\{[^\{\}]+\}"
         r")"
     )
 
@@ -240,6 +240,42 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
     normalized = placeholder_pat.sub(repl, s)
     normalized = re.sub(r"[ \t]+", " ", normalized)
     return normalized, samples
+
+def detect_language(text: str, column_name: str = "") -> str:
+    """Detect language code (e.g. 'en', 'gu', 'hi', 'pa', 'mr', 'bn', 'ta', 'te', 'kn', 'ml') from column or script."""
+    c_low = column_name.lower().strip()
+    if any(k in c_low for k in ["gujarati", "gujrati", "guj"]): return "gu"
+    if any(k in c_low for k in ["punjabi", "pun"]): return "pa"
+    if any(k in c_low for k in ["hindi", "hin"]): return "hi"
+    if any(k in c_low for k in ["marathi", "mar"]): return "mr"
+    if any(k in c_low for k in ["bengali", "bangla", "ben"]): return "bn"
+    if any(k in c_low for k in ["tamil", "tam"]): return "ta"
+    if any(k in c_low for k in ["telugu", "tel"]): return "te"
+    if any(k in c_low for k in ["kannada", "kan"]): return "kn"
+    if any(k in c_low for k in ["malayalam", "mal"]): return "ml"
+
+    for ch in text:
+        code = ord(ch)
+        if 0x0A80 <= code <= 0x0AFF: return "gu"  # Gujarati
+        if 0x0A00 <= code <= 0x0A7F: return "pa"  # Gurmukhi (Punjabi)
+        if 0x0900 <= code <= 0x097F: return "hi"  # Devanagari (Hindi)
+        if 0x0980 <= code <= 0x09FF: return "bn"  # Bengali
+        if 0x0B80 <= code <= 0x0BFF: return "ta"  # Tamil
+        if 0x0C00 <= code <= 0x0C7F: return "te"  # Telugu
+        if 0x0C80 <= code <= 0x0CFF: return "kn"  # Kannada
+        if 0x0D00 <= code <= 0x0D7F: return "ml"  # Malayalam
+
+    return "en"
+
+
+def detect_category(summary: str, text: str = "", sheet_name: str = "") -> str:
+    """Determine WhatsApp template category (UTILITY, AUTHENTICATION, MARKETING)."""
+    combined = f"{summary} {text} {sheet_name}".lower()
+    if any(k in combined for k in ["otp", "auth", "authentication", "verification code", "2fa"]):
+        return "AUTHENTICATION"
+    if any(k in combined for k in ["utility", "reminder", "statement", "receipt", "alert", "account update", "due date", "not banked", "short banked", "status update"]):
+        return "UTILITY"
+    return "MARKETING"
 
 
 def extract_and_strip_cta(
@@ -637,7 +673,25 @@ def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
                 continue
         return sheets
 
-    # 2. Handle Excel files (.xlsx, .xlsm)
+    # 2. Handle older binary .xls files directly via xlrd
+    if lower_path.endswith(".xls") and not lower_path.endswith(".xlsx"):
+        try:
+            import xlrd
+            xwb = xlrd.open_workbook(filepath)
+            for sname in xwb.sheet_names():
+                xsh = xwb.sheet_by_name(sname)
+                rows: list[list[str]] = []
+                for r in range(xsh.nrows):
+                    vals = [str(xsh.cell_value(r, c) or "").strip() for c in range(xsh.ncols)]
+                    if any(vals):
+                        rows.append(vals)
+                if rows:
+                    sheets[sname] = rows
+            return sheets
+        except Exception as exc:
+            logger.warning("xlrd could not load %s: %s", filepath, exc)
+
+    # 3. Handle Excel files (.xlsx, .xlsm)
     try:
         wb = openpyxl.load_workbook(filepath, data_only=True)
         for sname in wb.sheetnames:
@@ -1160,19 +1214,19 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             except Exception as e:
                 logger.warning("Could not download attachment %s for %s: %s", att_id, key, e)
 
-        fn_upper = fn.upper()
-        target_chan = "GENERAL"
-        if "WA" in fn_upper or "WHATSAPP" in fn_upper:
-            target_chan = "WHATSAPP"
-        elif "RCS" in fn_upper:
-            target_chan = "RCS"
-        elif "SMS" in fn_upper:
-            target_chan = "SMS"
-        elif fn_upper.endswith((".XLSX", ".XLS", ".CSV")):
+        fn_lower = fn.lower()
+        if fn_lower.endswith((".xlsx", ".xls", ".csv")):
             target_chan = "SPREADSHEET_BRIEF"
-        elif fn_upper.endswith((".ZIP", ".DOCX")):
+        elif fn_lower.endswith((".zip", ".docx", ".doc")):
             target_chan = "EMAIL_CREATIVE"
-
+        elif "wa" in fn_lower or "whatsapp" in fn_lower:
+            target_chan = "WHATSAPP"
+        elif "rcs" in fn_lower:
+            target_chan = "RCS"
+        elif "sms" in fn_lower:
+            target_chan = "SMS"
+        else:
+            target_chan = "GENERAL"
         mapped_attachments.append({
             "id": att_id,
             "filename": fn,
@@ -1181,11 +1235,23 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             "target_channel": target_chan,
         })
 
-    wa_creatives = [a for a in mapped_attachments if a["target_channel"] == "WHATSAPP" and a.get("local_path")]
+    IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+    wa_creatives = [
+        a for a in mapped_attachments
+        if a.get("filename", "").lower().endswith(IMAGE_EXTS) and a.get("local_path")
+        and (a["target_channel"] == "WHATSAPP" or "wa" in a.get("filename", "").lower() or "whatsapp" in a.get("filename", "").lower())
+    ]
     if not wa_creatives:
-        wa_creatives = [a for a in mapped_attachments if "image" in a.get("mime", "") and a.get("local_path")]
+        wa_creatives = [
+            a for a in mapped_attachments
+            if a.get("filename", "").lower().endswith(IMAGE_EXTS) and a.get("local_path")
+        ]
 
-    rcs_creatives = [a for a in mapped_attachments if a["target_channel"] == "RCS" and a.get("local_path")] or wa_creatives
+    rcs_creatives = [
+        a for a in mapped_attachments
+        if a.get("filename", "").lower().endswith(IMAGE_EXTS) and a.get("local_path")
+        and (a["target_channel"] == "RCS" or "rcs" in a.get("filename", "").lower())
+    ] or wa_creatives
 
     wa_drafts: list[WhatsAppTemplateDraft] = []
     rcs_drafts: list[RcsTemplateDraft] = []
@@ -1276,10 +1342,14 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         if media is None and zip_creative_paths:
             media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
         tname = _clean_template_name(base_name, "wa", idx)
+        lang = detect_language(clean_body)
+        cat = detect_category(summary, clean_body)
+        tname = _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", idx)
         wa_drafts.append(
             WhatsAppTemplateDraft(
                 template_name=tname,
-                category="MARKETING",
+                category=cat,
+                language=lang,
                 body=clean_body,
                 header_type="IMAGE" if media else "TEXT",
                 media_file=media,
@@ -1344,13 +1414,16 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
 
         if chan in ("WA", "WHATSAPP"):
             img = wa_creatives[(wa_counter - 1) % len(wa_creatives)] if wa_creatives else None
-            tname = _clean_template_name(base_name, "wa", wa_counter)
             clean_body, cta_btn_text, cta_btn_url, cta_footer = extract_and_strip_cta(
                 norm_text,
                 existing_btn_text=item.get("button_text"),
                 existing_btn_url=item.get("button_url"),
                 existing_footer=item.get("footer"),
             )
+            lang = detect_language(clean_body, variant)
+            cat = detect_category(summary, clean_body, item.get("source", ""))
+            tname = _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", wa_counter)
+
             var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
             resolved_vars = var_tags
             if len(resolved_samples) > len(var_tags):
@@ -1359,7 +1432,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             wa_drafts.append(
                 WhatsAppTemplateDraft(
                     template_name=tname,
-                    category="MARKETING",
+                    category=cat,
+                    language=lang,
                     body=clean_body,
                     header_type="IMAGE" if img else ("TEXT" if item.get("header") else "TEXT"),
                     header_text=item.get("header"),
