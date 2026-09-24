@@ -72,6 +72,7 @@ class RcsTemplateDraft:
     action_type: str = "URL"
     action_label: str = "Check Offer"
     action_url: str = "https://u3.mnge.co/"
+    variables: list[str] = field(default_factory=list)
     sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
     source_origin: str = "jira"
