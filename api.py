@@ -169,6 +169,17 @@ def get_public_media(filename: str):
     """Serve cached template header images/videos/documents directly to Karix, Meta, and frontend previews."""
     clean_fn = Path(filename).name
     file_p = MEDIA_CACHE_DIR / clean_fn
+    if not file_p.exists() and clean_fn.startswith("jira_"):
+        m = re.match(r"^jira_(\d+)_(.+)$", clean_fn)
+        if m:
+            att_id = m.group(1)
+            orig_fn = m.group(2)
+            try:
+                from jira_client import download_jira_attachment
+                download_jira_attachment(att_id, orig_fn)
+            except Exception as dl_err:
+                logger.warning("Could not on-demand download Jira attachment %s: %s", att_id, dl_err)
+
     if not file_p.exists():
         # Check root directory fallback
         root_p = Path(clean_fn)
@@ -1507,7 +1518,7 @@ async def _submit_rcs_batch(
                     status=res_item.get("status", "FAILED"),
                     approval_status=res_item.get("approval_status") or "pending",
                     provider_ref_id=res_item.get("provider_ref_id") or res_item.get("template_id"),
-                    error=res_item.get("error"),
+                    error=_clean_error_message(res_item.get("error")),
                 )
                 QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item})
 
@@ -1733,8 +1744,8 @@ async def _submit_wa_batch(
                     status=res_item.get("status", "FAILED"),
                     approval_status=res_item.get("approval_status") or "pending",
                     provider_ref_id=res_item.get("provider_ref_id"),
-                    error=res_item.get("error"),
-                    approval_reason=res_item.get("approval_reason"),
+                    error=_clean_error_message(res_item.get("error")),
+                    approval_reason=_clean_error_message(res_item.get("approval_reason")),
                 )
                 QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item})
 

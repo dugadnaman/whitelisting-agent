@@ -212,6 +212,14 @@ def update_job_status(job_id: str, status: str, error_message: str | None = None
         )
 
 
+def _clean_sql_str(val: Any) -> str | None:
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    return str(val)
+
+
 def record_task_result(
     task_id: str,
     status: str,
@@ -232,6 +240,10 @@ def record_task_result(
     if norm_approval not in ("pending", "approved", "rejected", "unknown"):
         norm_approval = "unknown"
 
+    safe_error = _clean_sql_str(error)
+    safe_provider_ref = _clean_sql_str(provider_ref_id)
+    safe_reason = _clean_sql_str(approval_reason)
+
     with get_db() as conn:
         task = conn.execute("SELECT * FROM job_tasks WHERE id = ?", (task_id,)).fetchone()
         if not task:
@@ -245,7 +257,7 @@ def record_task_result(
                 error = ?, approval_reason = ?, updated_at = ?
             WHERE id = ?
             """,
-            (norm_status, norm_approval, provider_ref_id, error, approval_reason, now, task_id),
+            (norm_status, norm_approval, safe_provider_ref, safe_error, safe_reason, now, task_id),
         )
 
         # Recalculate job summary counts atomically

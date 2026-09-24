@@ -10,9 +10,9 @@ import logging
 import os
 import re
 import time
+from pathlib import Path
 
 import requests
-
 from config import get_esmeaddr
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
@@ -244,7 +244,12 @@ def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: s
         if card.get("fileName") or card.get("file_name"):
             c_entry["fileName"] = card.get("fileName") or card.get("file_name")
         elif card.get("mediaUrl") or card.get("media_url"):
-            c_entry["mediaUrl"] = str(card.get("mediaUrl") or card.get("media_url"))
+            m_val = str(card.get("mediaUrl") or card.get("media_url")).strip()
+            if not (m_val.startswith("http://") or m_val.startswith("https://")):
+                fn = Path(m_val).name
+                host = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "https://whitelisting-agent.onrender.com").rstrip("/")
+                m_val = f"{host}/api/media/{fn}"
+            c_entry["mediaUrl"] = m_val
         cards_list.append(c_entry)
     vi_template = {
         "name": safe_name, "type": "carousel", "botId": bot_id,
@@ -274,7 +279,12 @@ def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: s
     if getattr(payload, "file_name", None):
         card_entry["fileName"] = payload.file_name
     elif payload.media_url:
-        card_entry["mediaUrl"] = str(payload.media_url)
+        media_u = str(payload.media_url).strip()
+        if not (media_u.startswith("http://") or media_u.startswith("https://")):
+            fn = Path(media_u).name
+            host = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "https://whitelisting-agent.onrender.com").rstrip("/")
+            media_u = f"{host}/api/media/{fn}"
+        card_entry["mediaUrl"] = media_u
     vi_template = {
         "name": safe_name, "type": "richcard", "botId": bot_id,
         "orientation": getattr(payload, "orientation", "VERTICAL") or "VERTICAL",
@@ -322,8 +332,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
 
     is_richcard = not is_carousel and not is_text and (
         t_type in ("richcard", "card", "standalone", "rich_card", "image")
-        or bool(getattr(payload, "file_name", None))
-        or bool(payload.media_url)
+        and (bool(getattr(payload, "file_name", None)) or bool(payload.media_url))
     )
     if is_carousel:
         vi_template, param_names = _build_rcs_carousel_vi_template(payload, safe_name, bot_id)
