@@ -3327,6 +3327,7 @@ def get_jira_issues_endpoint(
 @app.get("/api/jira/brief/{issue_key}")
 def get_jira_brief_endpoint(
     issue_key: str,
+    account: str | None = Query(None),
     download_creatives: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
@@ -3338,14 +3339,26 @@ def get_jira_brief_endpoint(
         issue_data = fetch_jira_issue(issue_key)
         parsed = parse_jira_brief(issue_data, download_creatives=download_creatives)
 
-        # Cross-reference parsed WhatsApp templates against live WABA catalog
-        from submission_client import _match_template, fetch_template_list
+        # Cross-reference parsed WhatsApp templates against live WABA catalog (safe fallback if token expired/missing)
+        target_client = (account or parsed.account or "tcl_promo").lower().strip()
+        live_templates = []
+        try:
+            from submission_client import _match_template, fetch_template_list
+            live_templates, _ = fetch_template_list(client=target_client)
+        except Exception as fetch_err:
+            logger.warning(
+                "Could not fetch live WABA templates for cross-referencing on %s: %s",
+                target_client,
+                fetch_err,
+            )
+            live_templates = []
 
-        live_templates, _ = fetch_template_list(client=parsed.account)
+        from submission_client import _match_template
+
         wa_with_live = []
         for wa in parsed.whatsapp_templates:
             wa_copy = dict(wa)
-            matched = _match_template(live_templates, wa["template_name"])
+            matched = _match_template(live_templates, wa["template_name"]) if live_templates else None
             if matched:
                 wa_copy["exists_on_waba"] = True
                 wa_copy["live_status"] = str(matched.get("template_create_status") or matched.get("status", "UNKNOWN")).lower()
@@ -3355,7 +3368,6 @@ def get_jira_brief_endpoint(
                 wa_copy["live_status"] = "not_submitted"
                 wa_copy["live_ref_id"] = None
             wa_with_live.append(wa_copy)
-
         parsed_dict = {
             "issue_key": parsed.issue_key,
             "summary": parsed.summary,

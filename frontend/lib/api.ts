@@ -946,9 +946,10 @@ export async function fetchJiraIssues(params?: {
   return data.issues || [];
 }
 
-export async function fetchJiraBrief(issueKey: string): Promise<JiraBriefData> {
+export async function fetchJiraBrief(issueKey: string, account?: string): Promise<JiraBriefData> {
   const cleanKey = encodeURIComponent(issueKey.trim().toUpperCase());
-  const res = await fetchWithRetry(getApiUrl(`/api/jira/brief/${cleanKey}`));
+  const qs = account ? `?account=${encodeURIComponent(account)}` : "";
+  const res = await fetchWithRetry(getApiUrl(`/api/jira/brief/${cleanKey}${qs}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   const data = await res.json();
   return data.brief;
