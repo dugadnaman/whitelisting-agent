@@ -244,6 +244,20 @@ def fetch_jira_issue(issue_key: str) -> dict[str, Any]:
                 "created": a.get("created"),
             }
         )
+    comments = []
+    raw_comments = fields.get("comment", {}).get("comments", []) if isinstance(fields.get("comment"), dict) else []
+    for c in raw_comments:
+        c_body = c.get("body")
+        c_text = adf_to_text(c_body) if isinstance(c_body, dict) else str(c_body or "")
+        comments.append(
+            {
+                "id": str(c.get("id", "")),
+                "author": c.get("author", {}).get("displayName") or "Unknown",
+                "created": c.get("created", ""),
+                "updated": c.get("updated", ""),
+                "body_text": c_text.strip(),
+            }
+        )
 
     return {
         "key": data.get("key"),
@@ -258,6 +272,7 @@ def fetch_jira_issue(issue_key: str) -> dict[str, Any]:
         "description_raw": description_adf,
         "description_text": description_text.strip(),
         "attachments": attachments,
+        "comments": comments,
         "labels": fields.get("labels", []),
     }
 

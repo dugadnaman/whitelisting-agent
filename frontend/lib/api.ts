@@ -930,6 +930,19 @@ export type JiraBriefData = {
     mime: string;
     target_channel: string;
   }>;
+  comments?: Array<{
+    id: string;
+    author: string;
+    created: string;
+    updated?: string;
+    body_text: string;
+  }>;
+  comment_updates?: Array<{
+    channel: string;
+    text: string;
+    variant: string;
+    source: string;
+  }>;
 };
 
 export type JiraProjectItem = {

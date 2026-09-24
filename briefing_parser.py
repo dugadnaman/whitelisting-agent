@@ -106,7 +106,8 @@ class ParsedJiraBrief:
     sms_templates: list[dict[str, Any]] = field(default_factory=list)
     moengage_campaign: dict[str, Any] = field(default_factory=dict)
     attachments_mapped: list[dict[str, Any]] = field(default_factory=list)
-
+    comments: list[dict[str, Any]] = field(default_factory=list)
+    comment_updates: list[dict[str, Any]] = field(default_factory=list)
 
 def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
     """Infer the correct Tata Capital sub-account from product keywords."""
@@ -265,6 +266,15 @@ def extract_and_strip_cta(
 
     # Clean URL regex (excluding surrounding whitespace and brackets)
     url_pat = r"(https?://[^\s()\[\]]+|<link>|\{link\}|\[link\]|<url>|\{url\}|\[url\])"
+
+    cta_inline_pat = re.compile(
+        r"(?:[👉🔗▶️📍📲➡️✅]\s*)?"
+        r"(?:\*|_)?\s*"
+        r"(?:CTA\s*[:\-–]?\s*|check\s+(?:your\s+|my\s+)?offer|apply\s*(?:now|online|here)?|explore\s*(?:more|now|offer)?|tap\s*(?:here|to\s+save\s+more|now)?|click\s*(?:here|to\s+apply)?|visit\s*(?:now|us)?|view\s*offer|avail\s*now|simplify\s*your\s*repayments?\s*(?:today)?)"
+        r"\s*[:\-–]?\s*(?:\*|_)?\s*"
+        r"(?:" + url_pat + r")",
+        re.IGNORECASE,
+    )
     for line in lines:
         sline = line.strip()
         if not sline:
@@ -279,60 +289,50 @@ def extract_and_strip_cta(
                 extracted_footer = "T&C apply"
             continue
 
-        # 2. Check if line is a genuine CTA line
+        # 2. Check for inline or standalone CTA
         has_url = re.search(url_pat, sline)
+        inline_m = cta_inline_pat.search(sline)
+        is_url_only = bool(re.match(r"^\s*(?:" + url_pat + r")\s*$", sline))
         starts_with_cta = bool(re.match(r"^\s*(?:CTA\s*[:\-–]|CTA\s+)", sline, re.IGNORECASE))
         starts_with_emoji = bool(re.match(r"^\s*(?:[👉🔗▶️📍📲➡️✅])", sline))
-        is_url_only = bool(re.match(r"^\s*(?:" + url_pat + r")\s*$", sline))
 
-        has_cta_verb = any(v in lower_line for v in [
-            "check your offer", "check my offer", "check offer", "check eligibility",
-            "apply now", "apply online", "apply here", "apply",
-            "explore now", "explore more", "explore",
-            "tap here", "tap to", "tap now",
-            "click here", "click to", "click",
-            "visit now", "visit us", "visit",
-            "view offer", "avail now",
-            "consolidate my debt", "apna offer", "abhi check"
-        ])
+        if inline_m:
+            before_part = sline[:inline_m.start()].strip()
+            cta_part = sline[inline_m.start():].strip()
 
-        is_cta = False
-        if starts_with_cta:
-            is_cta = True
-        elif is_url_only:
-            is_cta = True
-        elif has_url and (has_cta_verb or starts_with_emoji or ":" in sline):
-            is_cta = True
-        elif starts_with_emoji and (has_cta_verb or ":" in sline):
-            is_cta = True
-
-        if is_cta:
-            # Extract URL if present
-            if has_url:
-                clean_url = has_url.group(1).rstrip(".,_*_`\"").strip()
-                if clean_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
+            m_url = re.search(url_pat, cta_part)
+            if m_url:
+                c_url = m_url.group(1).rstrip(".,_*_`\"").strip()
+                if c_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
                     extracted_url = DEFAULT_CTA_URL
-                elif clean_url.startswith("http"):
-                    extracted_url = clean_url
-                text_without_url = re.sub(r"\s*" + re.escape(clean_url) + r"[_*]*", "", sline)
-            else:
-                text_without_url = sline
+                elif c_url.startswith("http"):
+                    extracted_url = c_url
 
-            # Extract button text from line
-            clean_btn = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", text_without_url)
+            btn_raw = re.sub(url_pat, "", cta_part)
+            clean_btn = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", btn_raw)
             clean_btn = re.sub(r"^(?:CTA\s*|Click\s*here\s*to\s*|Tap\s*to\s*)", "", clean_btn, flags=re.IGNORECASE).strip()
             clean_btn = re.sub(r"\s+", " ", clean_btn).strip()
             if clean_btn and len(clean_btn) <= 25 and len(clean_btn) >= 3:
                 extracted_btn_text = clean_btn.title()
             elif not extracted_btn_text or extracted_btn_text == "Check Offer":
-                if "apply" in lower_line:
+                if "apply" in cta_part.lower():
                     extracted_btn_text = "Apply Now"
-                elif "explore" in lower_line:
+                elif "explore" in cta_part.lower():
                     extracted_btn_text = "Explore Now"
-                elif "offer" in lower_line:
+                elif "offer" in cta_part.lower():
                     extracted_btn_text = "Check Offer"
 
-            # Drop this CTA line from the body
+            if before_part:
+                cleaned_lines.append(before_part)
+            continue
+
+        elif is_url_only or (has_url and (starts_with_cta or starts_with_emoji or ":" in sline)):
+            if has_url:
+                c_url = has_url.group(1).rstrip(".,_*_`\"").strip()
+                if c_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
+                    extracted_url = DEFAULT_CTA_URL
+                elif c_url.startswith("http"):
+                    extracted_url = c_url
             continue
 
         cleaned_lines.append(line)
@@ -488,12 +488,26 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
 # ---------------------------------------------------------------------------
 
 
+def _normalize_channel_tag(tag: str) -> str | None:
+    """Normalize any string (e.g. 'WhatsApp', 'WA', 'RCS', 'SMS Promotional') to canonical channel."""
+    if not tag:
+        return None
+    t = re.sub(r"[^a-zA-Z0-9]", " ", str(tag)).upper()
+    words = t.split()
+    if "WHATSAPP" in words or "WA" in words or "WHATSAPP" in t:
+        return "WA"
+    if "RCS" in words or "RCS" in t:
+        return "RCS"
+    if "SMS" in words or "SMS" in t:
+        return "SMS"
+    if "PN" in words or "PUSH" in words:
+        return "PN"
+    if "EMAIL" in words or "MAILER" in words:
+        return "EMAIL"
+    return None
+
+
 def _match_sheet_channel(sname: str) -> str | None:
-    """
-    Match an Excel sheet name to its intended communication channel.
-    Handles exact names ('WA', 'SMS', 'RCS') as well as descriptive variations
-    ('WhatsApp Content', 'WA Copies', 'RCS Copies', 'SMS_1', 'SMS Content', etc.).
-    """
     norm = re.sub(r"[^A-Za-z0-9]", " ", sname).strip().upper()
     words = norm.split()
     if "WHATSAPP" in norm or "WA" in words:
@@ -504,100 +518,166 @@ def _match_sheet_channel(sname: str) -> str | None:
         return "SMS"
     return None
 
-
 def _parse_excel_channel_sheets(wb: openpyxl.Workbook) -> list[dict[str, str]]:
     """
-    Check if the workbook has dedicated channel sheets (e.g. 'WA', 'WhatsApp Content',
-    'SMS Copies', 'RCS_1') and extract marketing templates.
-    Supports both columnar tables (e.g. template_name | body | header) and row-based lists.
+    Universally parse template content across all sheets in any client Excel file.
+    Supports:
+    1. Dedicated channel sheets (e.g. 'WA', 'WhatsApp Content', 'SMS_1', 'RCS')
+    2. Columnar channel tables (e.g. Column 0 has 'Channel', Column 1 has 'Content')
+    3. Section header rows (e.g. ['Content', 'SMS Promotional'], ['Content', 'WhatsApp'])
+    4. Multilingual columns (e.g. ['Channel', 'English', 'Gujarati', 'Hindi'])
+    5. Standard template tables (template_name | body | header | button...)
     """
     items: list[dict[str, str]] = []
 
     for sname in wb.sheetnames:
-        target_chan = _match_sheet_channel(sname)
-        if not target_chan:
-            continue
-
+        sheet_chan = _normalize_channel_tag(sname)
         ws = wb[sname]
         raw_rows = []
         for r in range(1, ws.max_row + 1):
             row_vals = [str(ws.cell(row=r, column=c).value or "").strip() for c in range(1, ws.max_column + 1)]
             if any(row_vals):
-                raw_rows.append(row_vals)
-
+                raw_rows.append((r, row_vals))
         if not raw_rows:
             continue
 
-        # 1. Check for columnar template tables where row 0 contains header names
-        header_row = [c.lower() for c in raw_rows[0]]
-        body_col_idx = None
-        for idx, h in enumerate(header_row):
-            if "header" in h or "title" in h or "type" in h or "name" in h:
-                continue
-            if any(k in h for k in ["body", "content", "copy", "message", "text"]):
-                body_col_idx = idx
+        # Detect channel column or header row
+        chan_col_idx = None
+        header_row_idx = None
+
+        for r_idx, (_, row) in enumerate(raw_rows[:5]):
+            for c_idx, val in enumerate(row):
+                v_low = val.lower()
+                if v_low in ("channel", "channel name", "platform", "medium", "mode"):
+                    chan_col_idx = c_idx
+                    header_row_idx = r_idx
+                    break
+            if chan_col_idx is not None:
                 break
 
-        if body_col_idx is not None and len(raw_rows) > 1:
-            header_col_idx = next((i for i, h in enumerate(header_row) if "header" in h and "type" not in h), None)
-            footer_col_idx = next((i for i, h in enumerate(header_row) if "footer" in h), None)
-            btn_text_col_idx = next((i for i, h in enumerate(header_row) if "button_text" in h or "cta" in h), None)
-            btn_url_col_idx = next((i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None)
-            btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
+        # If no explicit 'Channel' header, check if column 0 contains channel tags
+        if chan_col_idx is None:
+            chan_tags_in_col0 = sum(1 for _, row in raw_rows if row and _normalize_channel_tag(row[0]) is not None)
+            if chan_tags_in_col0 >= 1:
+                chan_col_idx = 0
+                header_row_idx = 0 if _normalize_channel_tag(raw_rows[0][1][0]) is None else -1
 
-            for r_idx, r in enumerate(raw_rows[1:], start=1):
-                if body_col_idx < len(r) and len(r[body_col_idx]) > 10:
-                    body_val = r[body_col_idx]
-                    item: dict[str, str] = {
-                        "channel": target_chan,
-                        "text": body_val,
-                        "variant": f"Variant {r_idx}" if r_idx > 1 else "General",
-                        "source": f"excel_sheet_{sname}",
+        current_channel = sheet_chan
+        start_idx = (header_row_idx + 1) if header_row_idx is not None and header_row_idx >= 0 else 0
+        header_row = [c.lower() for c in raw_rows[header_row_idx][1]] if header_row_idx is not None and header_row_idx >= 0 and header_row_idx < len(raw_rows) else []
+
+        # Check for columnar headers (e.g. template_name | body | header | button...)
+        body_col_idx = None
+        if header_row:
+            for idx, h in enumerate(header_row):
+                if "header" in h or "title" in h or "type" in h or "name" in h:
+                    continue
+                if any(k in h for k in ["body", "content", "copy", "message", "text"]):
+                    body_col_idx = idx
+                    break
+
+        header_col_idx = next((i for i, h in enumerate(header_row) if "header" in h and "type" not in h), None)
+        footer_col_idx = next((i for i, h in enumerate(header_row) if "footer" in h), None)
+        btn_text_col_idx = next((i for i, h in enumerate(header_row) if "button_text" in h or "cta" in h), None)
+        btn_url_col_idx = next((i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None)
+        btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
+
+        for r_num, row in raw_rows[start_idx:]:
+            # 1. Check section header (only when ALL cells are short and no long copy exists)
+            has_long_copy = any(len(c) > 25 for c in row)
+            if not has_long_copy:
+                for cell in row:
+                    c_norm = _normalize_channel_tag(cell)
+                    if c_norm and any(k in cell.lower() for k in ["promotional", "retargeting", "utility", "content", "whatsapp", "sms", "rcs"]):
+                        current_channel = c_norm
+                        break
+                continue
+
+            # 2. Check channel column
+            if chan_col_idx is not None and chan_col_idx < len(row):
+                row_chan = _normalize_channel_tag(row[chan_col_idx])
+                if row_chan:
+                    current_channel = row_chan
+
+            active_chan = current_channel or sheet_chan
+            if not active_chan:
+                for cell in row[:2]:
+                    c_norm = _normalize_channel_tag(cell)
+                    if c_norm:
+                        active_chan = c_norm
+                        current_channel = c_norm
+                        break
+
+            if not active_chan:
+                continue
+
+            # Skip header rows
+            row_joined = " ".join(row).lower()
+            if any(h in row_joined for h in ["channel", "gujarati", "punjabi", "created_at", "valid_until"]):
+                if not any(len(cell) > 40 for cell in row):
+                    continue
+
+            # 3. If explicit body column was detected, extract from that column
+            if body_col_idx is not None and body_col_idx < len(row) and len(row[body_col_idx]) > 15:
+                body_val = row[body_col_idx]
+                item_dict: dict[str, str] = {
+                    "channel": active_chan,
+                    "text": body_val,
+                    "variant": f"Variant {r_num}",
+                    "source": f"excel_{sname}_r{r_num}",
+                }
+                if header_col_idx is not None and header_col_idx < len(row) and row[header_col_idx]:
+                    item_dict["header"] = row[header_col_idx]
+                if footer_col_idx is not None and footer_col_idx < len(row) and row[footer_col_idx]:
+                    item_dict["footer"] = row[footer_col_idx]
+                if btn_text_col_idx is not None and btn_text_col_idx < len(row) and row[btn_text_col_idx]:
+                    item_dict["button_text"] = row[btn_text_col_idx]
+                if btn_url_col_idx is not None and btn_url_col_idx < len(row) and row[btn_url_col_idx]:
+                    item_dict["button_url"] = row[btn_url_col_idx]
+                if btn_type_col_idx is not None and btn_type_col_idx < len(row) and row[btn_type_col_idx]:
+                    item_dict["button_type"] = row[btn_type_col_idx]
+
+                if "Title:" in body_val and "Body:" in body_val:
+                    title_m = re.search(r"Title:\s*([^\n]+)", body_val)
+                    body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", body_val, re.DOTALL)
+                    if title_m:
+                        item_dict["title"] = title_m.group(1).strip()
+                    if body_m:
+                        item_dict["text"] = body_m.group(1).strip()
+
+                items.append(item_dict)
+                continue
+
+            # 4. Otherwise scan non-channel columns for copy (multilingual, multi-column, or row lists)
+            skip_indices = {chan_col_idx} if chan_col_idx is not None else set()
+            for c_idx, cell in enumerate(row):
+                if c_idx in skip_indices:
+                    continue
+                clean_cell = cell.strip()
+                if len(clean_cell) > 20 and not clean_cell.isdigit() and not clean_cell.lower().startswith(("short |", "http://", "https://")):
+                    variant = "General"
+                    if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
+                        variant = row[0].upper()
+                    elif header_row and c_idx < len(header_row):
+                        col_hdr = header_row[c_idx]
+                        if col_hdr and col_hdr not in ("content", "message", "copy", "text", "body"):
+                            variant = col_hdr.title()
+
+                    item_dict = {
+                        "channel": active_chan,
+                        "text": clean_cell,
+                        "variant": variant,
+                        "source": f"excel_{sname}_r{r_num}",
                     }
-                    if header_col_idx is not None and header_col_idx < len(r) and r[header_col_idx]:
-                        item["header"] = r[header_col_idx]
-                    if footer_col_idx is not None and footer_col_idx < len(r) and r[footer_col_idx]:
-                        item["footer"] = r[footer_col_idx]
-                    if btn_text_col_idx is not None and btn_text_col_idx < len(r) and r[btn_text_col_idx]:
-                        item["button_text"] = r[btn_text_col_idx]
-                    if btn_url_col_idx is not None and btn_url_col_idx < len(r) and r[btn_url_col_idx]:
-                        item["button_url"] = r[btn_url_col_idx]
-                    if btn_type_col_idx is not None and btn_type_col_idx < len(r) and r[btn_type_col_idx]:
-                        item["button_type"] = r[btn_type_col_idx]
-
-                    if "Title:" in body_val and "Body:" in body_val:
-                        title_m = re.search(r"Title:\s*([^\n]+)", body_val)
-                        body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", body_val, re.DOTALL)
+                    if "Title:" in clean_cell and "Body:" in clean_cell:
+                        title_m = re.search(r"Title:\s*([^\n]+)", clean_cell)
+                        body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", clean_cell, re.DOTALL)
                         if title_m:
-                            item["title"] = title_m.group(1).strip()
+                            item_dict["title"] = title_m.group(1).strip()
                         if body_m:
-                            item["text"] = body_m.group(1).strip()
+                            item_dict["text"] = body_m.group(1).strip()
 
-                    items.append(item)
-            continue
-
-        # 2. Row-based format (e.g. PQ UCL.xlsx where column 0 has labels like 'SMS Text', 'Body')
-        for r_vals in raw_rows:
-            label = r_vals[0].lower() if r_vals else ""
-            if any(k in label for k in ["text", "body", "message", "copy", "content"]) or len(r_vals) > 1:
-                candidates = r_vals[1:] if any(k in label for k in ["text", "body", "copy", "sms", "name", "cta"]) else r_vals
-                for col_idx, cell in enumerate(candidates, start=1):
-                    if len(cell) > 25 and not cell.lower().startswith(("http", "as per", "ucl_", "tclmoe_", "clicker")):
-                        variant_label = "Retargeting" if col_idx > 1 or "retarget" in cell.lower() else "General"
-                        item_dict = {
-                            "channel": target_chan,
-                            "text": cell,
-                            "variant": variant_label,
-                            "source": f"excel_sheet_{sname}",
-                        }
-                        if "Title:" in cell and "Body:" in cell:
-                            title_m = re.search(r"Title:\s*([^\n]+)", cell)
-                            body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", cell, re.DOTALL)
-                            if title_m:
-                                item_dict["title"] = title_m.group(1).strip()
-                            if body_m:
-                                item_dict["text"] = body_m.group(1).strip()
-                        items.append(item_dict)
+                    items.append(item_dict)
 
     return items
 
@@ -709,29 +789,38 @@ def _parse_excel_key_value_blocks(wb: openpyxl.Workbook) -> list[dict[str, str]]
 
 
 def extract_templates_from_excel_file(filepath: Path) -> list[dict[str, str]]:
-    """Inspect and extract template items from any client Excel file."""
+    """
+    Inspect and extract template items from any client Excel file across all sheets.
+    Combines channel-tagged tables, section headers, grid messages, and key-value blocks.
+    Deduplicates identical templates so multi-sheet workbooks don't produce duplicate cards.
+    """
     try:
         wb = openpyxl.load_workbook(filepath, data_only=True)
     except Exception as exc:
         logger.warning("Could not load Excel file %s: %s", filepath, exc)
         return []
 
-    # 1. Try dedicated channel sheets (WA, SMS, RCS)
-    sheet_items = _parse_excel_channel_sheets(wb)
-    if sheet_items:
-        return sheet_items
+    all_items: list[dict[str, str]] = []
+    seen_texts: set[str] = set()
 
-    # 2. Try Title/Body block structure
-    block_items = _parse_excel_key_value_blocks(wb)
-    if block_items:
-        return block_items
+    def _add_items(items: list[dict[str, str]]) -> None:
+        for item in items:
+            raw_t = item.get("text", "")
+            norm_key = re.sub(r"\s+", " ", raw_t).strip().lower()
+            if norm_key and len(norm_key) > 20 and norm_key not in seen_texts:
+                seen_texts.add(norm_key)
+                all_items.append(item)
 
-    # 3. Try multi-row grid format
-    grid_items = _parse_excel_grid_messages(wb)
-    if grid_items:
-        return grid_items
+    # 1. Parse all sheets (channel column tables, section headers, multilingual columns)
+    _add_items(_parse_excel_channel_sheets(wb))
 
-    return []
+    # 2. Parse multi-row contiguous grid messages
+    _add_items(_parse_excel_grid_messages(wb))
+
+    # 3. Parse Title/Body key-value blocks
+    _add_items(_parse_excel_key_value_blocks(wb))
+
+    return all_items
 
 
 def _extract_images_from_zip(zip_path: Path) -> list[str]:
@@ -975,7 +1064,32 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 "source": "jira_pipe",
             })
 
+    # 3c. Check ticket comments for revisions / copy updates
+    raw_comments = issue_data.get("comments", [])
+    comment_updates: list[dict[str, Any]] = []
+    for c in raw_comments:
+        c_body = c.get("body_text", "")
+        author = c.get("author", "Commenter")
+        pipe_m = re.findall(r"^(SMS|WA|RCS|WHATSAPP)\s*\|\s*(.+)$", c_body, re.IGNORECASE | re.MULTILINE)
+        for c_tag, t_val in pipe_m:
+            comment_updates.append({
+                "channel": "WA" if c_tag.upper() in ("WA", "WHATSAPP") else c_tag.upper(),
+                "text": t_val.strip(),
+                "variant": f"Revision by {author}",
+                "source": f"comment_{c.get('id', '')}",
+            })
+        rev_m = re.findall(r"(?:updated|revised|new|approved)\s+(wa|whatsapp|sms|rcs)\s*[:\-–]\s*(.+?)(?=\n\s*(?:updated|revised|new|sms|wa|rcs|$)|\Z)", c_body, re.IGNORECASE | re.DOTALL)
+        for c_tag, t_val in rev_m:
+            if len(t_val.strip()) > 20:
+                comment_updates.append({
+                    "channel": "WA" if c_tag.upper() in ("WA", "WHATSAPP") else c_tag.upper(),
+                    "text": t_val.strip(),
+                    "variant": f"Revision by {author}",
+                    "source": f"comment_rev_{c.get('id', '')}",
+                })
 
+    if comment_updates:
+        extracted_items.extend(comment_updates)
     # 3b. SWCM WhatsApp campaign tables ("Campaign execution format N | WA N")
     swcm_campaigns = _parse_swcm_campaign_tables(desc_raw)
     for idx, campaign in enumerate(swcm_campaigns, start=1):
@@ -1169,4 +1283,6 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         sms_templates=[asdict(s) for s in sms_drafts],
         moengage_campaign=moengage_campaign,
         attachments_mapped=mapped_attachments,
+        comments=raw_comments,
+        comment_updates=comment_updates,
     )

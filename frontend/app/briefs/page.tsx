@@ -33,7 +33,7 @@ export default function JiraBriefsPage() {
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [brief, setBrief] = useState<JiraBriefData | null>(null);
   const [loadingBrief, setLoadingBrief] = useState(false);
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'moengage'>('whatsapp');
+  const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'comments' | 'moengage'>('whatsapp');
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -580,6 +580,19 @@ export default function JiraBriefsPage() {
                       {brief.sms_templates.length}
                     </span>
                   </button>
+                  <button
+                    onClick={() => setActiveTab('comments')}
+                    className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                      activeTab === 'comments'
+                        ? 'border-indigo-600 text-indigo-700 bg-white'
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <span>💬 Comments</span>
+                    <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                      {brief.comments?.length || 0}
+                    </span>
+                  </button>
 
                   <button
                     onClick={() => setActiveTab('moengage')}
@@ -1008,6 +1021,43 @@ export default function JiraBriefsPage() {
 
                             <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
                               {sms.text}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* Comments Panel */}
+                  {activeTab === 'comments' && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
+                        <span className="font-semibold text-gray-700">
+                          Jira Discussion Thread ({brief.comments?.length || 0} comments)
+                        </span>
+                        <span className="text-gray-400 text-[11px]">
+                          💡 Revisions and copy changes posted by operators/managers in Jira comments.
+                        </span>
+                      </div>
+
+                      {(!brief.comments || brief.comments.length === 0) ? (
+                        <p className="py-8 text-center text-xs text-gray-400">No comments posted on this Jira ticket yet.</p>
+                      ) : (
+                        brief.comments.map((comment) => (
+                          <div key={comment.id} className="p-4 rounded-xl border border-gray-200 bg-white shadow-2xs space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                                  {comment.author.charAt(0).toUpperCase()}
+                                </span>
+                                <strong className="text-xs font-semibold text-gray-900">{comment.author}</strong>
+                              </div>
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                {comment.created ? formatDate(comment.created) : ''}
+                              </span>
+                            </div>
+                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                              {comment.body_text}
                             </div>
                           </div>
                         ))
