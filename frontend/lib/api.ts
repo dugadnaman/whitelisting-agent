@@ -486,6 +486,7 @@ export async function fetchCredentials(
   rcs_auth_token?: string;
   esmeaddr?: string;
   rcs_esmeaddr?: string;
+  gemini_api_key?: string;
   is_configured: boolean;
 }> {
   const qs = new URLSearchParams({ account, channel }).toString();
@@ -517,6 +518,7 @@ export async function updateCredentials(creds: {
   rcs_auth_token?: string;
   esmeaddr?: string;
   rcs_esmeaddr?: string;
+  gemini_api_key?: string;
 }): Promise<{ ok: boolean }> {
   const res = await fetchWithRetry(getApiUrl(`/api/credentials`), {
     method: "PUT",
@@ -529,6 +531,21 @@ export async function updateCredentials(creds: {
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+export async function testGemini(apiKey?: string): Promise<{
+  ok: boolean;
+  model?: string;
+  result?: Record<string, unknown>;
+  error?: string;
+}> {
+  const res = await fetchWithRetry(getApiUrl("/api/gemini/test"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(apiKey ? { api_key: apiKey } : {}),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
 
 export async function testCredentials(
   account: Account = "bajaj",

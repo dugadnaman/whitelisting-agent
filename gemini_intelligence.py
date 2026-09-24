@@ -1,9 +1,9 @@
 """
 Google Gemini 3.1 Flash-Lite Semantic Decision Engine for Karix Whitelisting.
-Provides zero-hallucination structured judgments using Google's response_schema:
+Provides constrained structured judgments:
 1. Meta WhatsApp Category Classification (MARKETING, UTILITY, AUTHENTICATION).
-2. Precise Regional Language Code Identification across English and 10 Indian scripts.
-3. Intelligent CTA Button Label Extraction and Headline Separation.
+2. Regional Language Code Identification across English and Indian languages.
+3. CTA Button Label Extraction and Headline Separation.
 4. Robust local heuristic fallback if uncredentialed or offline.
 """
 
@@ -12,8 +12,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
-from pathlib import Path
 from typing import Any
 
 import requests
@@ -26,7 +24,7 @@ DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
 
 def get_gemini_api_key() -> str:
-    """Retrieve Google Gemini API key from environment or credentials.json."""
+    """Retrieve the Google Gemini API key from the process environment or .env."""
     _load_env_file()
     return (
         os.environ.get("GEMINI_API_KEY")

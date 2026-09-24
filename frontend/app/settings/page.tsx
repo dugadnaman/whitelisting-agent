@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection } from '@/lib/api';
+import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection } from '@/lib/api';
 import type { Account, Channel, AccountItem, AuthUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
@@ -54,6 +54,8 @@ export default function SettingsPage() {
   const [smsDlrAuthToken, setSmsDlrAuthToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [geminiTesting, setGeminiTesting] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
 
   // MoEngage form state
@@ -101,6 +103,7 @@ export default function SettingsPage() {
       try {
         const creds = await fetchCredentials(selectedAccount, selectedChannel);
         if (ignore) return;
+        setGeminiApiKey(creds.gemini_api_key || '');
         if (selectedChannel === 'whatsapp') {
           setWabaAuthToken(creds.waba_auth_token || '');
           setWabaId(creds.waba_id || '');
@@ -277,6 +280,29 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleTestGemini() {
+    setGeminiTesting(true);
+    setBanner(null);
+    try {
+      const res = await testGemini(geminiApiKey.trim());
+      if (res.ok) {
+        setBanner({
+          type: 'success',
+          message: `Gemini connected (${res.model || 'Google AI Studio'}). Semantic decisions are available.`,
+        });
+      } else {
+        setBanner({ type: 'error', message: res.error || 'Gemini connectivity test failed.' });
+      }
+    } catch (err) {
+      setBanner({
+        type: 'error',
+        message: err instanceof Error ? err.message : 'Gemini connectivity test failed',
+      });
+    } finally {
+      setGeminiTesting(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setBanner(null);
@@ -302,6 +328,7 @@ export default function SettingsPage() {
         rcs_bot_id: rcsBotId.trim() || undefined,
         rcs_auth_token: rcsAuthToken.trim() || undefined,
         rcs_esmeaddr: esmeaddr.trim() || undefined,
+        gemini_api_key: geminiApiKey.trim() || undefined,
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
@@ -1270,6 +1297,51 @@ export default function SettingsPage() {
         </div>
           </>
         )}
+      </div>
+
+      {/* Gemini Semantic Decision Engine */}
+      <div className="bg-white rounded-xl border border-violet-200 shadow-xs p-6 space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900">Gemini Semantic Decision Engine</h3>
+            <p className="text-[11px] text-gray-500 mt-1">
+              Uses Google Gemini for constrained category, language, header, and CTA decisions.
+              Template body text and URLs remain verbatim.
+            </p>
+          </div>
+          <span className="shrink-0 px-2 py-1 rounded-md bg-violet-50 text-violet-700 text-[10px] font-bold uppercase tracking-wide">
+            AI-assisted
+          </span>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex-1">
+            <label htmlFor="gemini_api_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+              Google AI Studio API Key
+            </label>
+            <input
+              id="gemini_api_key"
+              type="password"
+              value={geminiApiKey}
+              onChange={(e) => setGeminiApiKey(e.target.value)}
+              placeholder="Paste GEMINI_API_KEY"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500 outline-none transition-colors"
+            />
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={handleTestGemini}
+              disabled={geminiTesting || saving || !geminiApiKey.trim()}
+              className="w-full sm:w-auto px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-800 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+            >
+              {geminiTesting ? 'Testing...' : 'Test Gemini'}
+            </button>
+          </div>
+        </div>
+        <p className="text-[11px] text-gray-400">
+          For persistent Render deployments, also set <code>GEMINI_API_KEY</code> in the service environment.
+          The Settings value is applied to the current server process and local runtime environment.
+        </p>
       </div>
 
       {/* Banner */}

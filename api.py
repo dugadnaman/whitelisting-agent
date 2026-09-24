@@ -400,6 +400,10 @@ class CredentialUpdate(BaseModel):
     rcs_bot_id: str | None = None
     rcs_auth_token: str | None = None
     rcs_esmeaddr: str | None = None
+    gemini_api_key: str | None = None
+
+class GeminiTestRequest(BaseModel):
+    api_key: str | None = None
 
 class TemplateValidationRequest(BaseModel):
     body_text: str
@@ -2464,6 +2468,7 @@ def get_credentials(
         "rcs_bot_id": os.environ.get(f"{prefix}_RCS_BOT_ID") or get_rcs_bot_id(acc) or "",
         "rcs_auth_token": os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or "",
         "rcs_esmeaddr": os.environ.get(f"{prefix}_RCS_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR") or get_esmeaddr(acc) or "",
+        "gemini_api_key": os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "",
         "is_configured": is_configured,
     }
 
@@ -2540,7 +2545,17 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
         mapping = _build_rcs_credentials_mapping(creds, prefix)
     else:
         mapping = {}
-    if not mapping:
+
+    runtime_mapping = {}
+    if creds.gemini_api_key is not None and creds.gemini_api_key.strip():
+        v = creds.gemini_api_key.strip()
+        runtime_mapping["GEMINI_API_KEY"] = v
+        runtime_mapping["GOOGLE_API_KEY"] = v
+        os.environ["GEMINI_API_KEY"] = v
+        os.environ["GOOGLE_API_KEY"] = v
+
+    all_mapping = {**mapping, **runtime_mapping}
+    if not all_mapping:
         return {"ok": True}
     # 1. Update .env file
     try:
@@ -2551,15 +2566,15 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#") and "=" in stripped:
                     k = stripped.split("=", 1)[0].strip()
-                    if k in mapping:
-                        lines.append(f"{k}={mapping[k]}")
+                    if k in all_mapping:
+                        lines.append(f"{k}={all_mapping[k]}")
                         seen.add(k)
                     else:
                         lines.append(line)
                 else:
                     lines.append(line)
 
-        for k, v in mapping.items():
+        for k, v in all_mapping.items():
             if k not in seen:
                 lines.append(f"{k}={v}")
 
@@ -2567,32 +2582,32 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     except Exception:
         pass
 
-    # 2. Update persistent credentials.json
-    try:
-        cred_json_path = Path("credentials.json")
-        saved_creds = {}
-        if cred_json_path.exists():
-            try:
-                saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
-            except Exception:
-                saved_creds = {}
-        saved_creds.update(mapping)
-        cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
-    except Exception as ex:
-        logger.warning("Could not write credentials.json: %s", ex)
+    # 2. Update persistent credentials.json only for non-Gemini credentials.
+    # Gemini keys stay in the runtime environment and are never committed.
+    if mapping:
+        try:
+            cred_json_path = Path("credentials.json")
+            saved_creds = {}
+            if cred_json_path.exists():
+                try:
+                    saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
+                except Exception:
+                    saved_creds = {}
+            saved_creds.update(mapping)
+            cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
+        except Exception as ex:
+            logger.warning("Could not write credentials.json: %s", ex)
 
-    # 3. Persist to the GitHub repo so tokens survive Render's ephemeral
-    # filesystem and every deploy/restart — "write once, works on all
-    # devices" until the session itself expires. Requires GITHUB_TOKEN and
-    # GITHUB_REPO env vars; silently skipped when not configured.
-    gh_status = _commit_credentials_to_github()
+    # 3. Persist non-secret credentials to GitHub so they survive Render's
+    # ephemeral filesystem. Gemini keys are intentionally excluded.
+    gh_status = _commit_credentials_to_github() if mapping else None
 
     log_activity(
         user=creds.user_name or "Anonymous Operator",
         action="CREDENTIALS_UPDATE",
         account=acc,
         channel=chan,
-        details={"keys_updated": list(mapping.keys()), "github_persisted": gh_status},
+        details={"keys_updated": list(all_mapping.keys()), "github_persisted": gh_status},
         status="success",
     )
     try:
@@ -3314,6 +3329,32 @@ def get_system_errors(
 # ---------------------------------------------------------------------------
 # Jira Briefing Agent Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.post("/api/gemini/test")
+def test_gemini_endpoint(
+    payload: GeminiTestRequest | None = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Test connectivity to Google Gemini 3.1 Flash-Lite AI Studio API."""
+    from gemini_intelligence import analyze_template_semantics, get_gemini_api_key
+
+    if payload and payload.api_key and payload.api_key.strip():
+        key = payload.api_key.strip()
+        os.environ["GEMINI_API_KEY"] = key
+        os.environ["GOOGLE_API_KEY"] = key
+    else:
+        key = get_gemini_api_key()
+    if not key:
+        return _json_safe({"ok": False, "error": "Missing GEMINI_API_KEY. Configure it in Settings."})
+    try:
+        res = analyze_template_semantics(
+            "Dear Customer, get pre-approved Personal Loan of Rs. 50,000 at 8.5% interest rate. Apply: https://u3.mnge.co/",
+            summary="Test Connectivity",
+        )
+        return _json_safe({"ok": True, "model": "gemini-3.1-flash-lite", "result": res})
+    except Exception as exc:
+        return _json_safe({"ok": False, "error": str(exc)})
 
 
 @app.get("/api/jira/projects")
