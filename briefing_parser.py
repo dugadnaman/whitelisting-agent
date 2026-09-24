@@ -384,6 +384,110 @@ def extract_and_strip_cta(
 
     return clean_body, final_btn_text, final_url, extracted_footer
 
+def is_cta_cell(val: str) -> bool:
+    """Check if a cell contains a CTA link, button text, or redirect instruction."""
+    if not val:
+        return False
+    v = val.strip().lower()
+    if v.startswith(("http://", "https://", "<link>", "{link}", "[link]")):
+        return True
+    if v.startswith(("cta:", "cta -", "cta ", "apply:", "check:", "explore:")):
+        return True
+    if any(k in v for k in ["http://", "https://", "<link>"]) and any(c in v for c in ["apply", "check", "offer", "tap", "click"]):
+        return True
+    return False
+
+
+def decompose_content(
+    raw_text: str,
+    explicit_header: str | None = None,
+    explicit_footer: str | None = None,
+    explicit_btn_text: str | None = None,
+    explicit_btn_url: str | None = None,
+    neighbor_cta: str | None = None,
+    summary: str = "",
+) -> dict[str, Any]:
+    """
+    Decompose any raw template content into structured, ready-to-whitelist components.
+    Works whether:
+    - Everything is in one cell (Header: ... Body: ... CTA: ...)
+    - The CTA is in a neighbor cell
+    - The copy has a leading headline
+    Extracts header, clean body, footer, button type, text, URL, language, category, variables, and samples.
+    """
+    text = raw_text.strip()
+    header_text = explicit_header
+    footer_text = explicit_footer
+    button_text = explicit_btn_text
+    button_url = explicit_btn_url
+
+    # 1. Explicit Title: / Header: / Body: blocks
+    if "Title:" in text and "Body:" in text:
+        title_m = re.search(r"Title:\s*([^\n]+)", text)
+        body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", text, re.DOTALL)
+        cta_m = re.search(r"CTA(?:\s*Button)?:\s*([^\n]+)", text)
+        if title_m:
+            header_text = title_m.group(1).strip()
+        if body_m:
+            text = body_m.group(1).strip()
+        if cta_m:
+            button_text = cta_m.group(1).strip()
+    elif "Header:" in text and "Body:" in text:
+        h_m = re.search(r"Header:\s*([^\n]+)", text)
+        b_m = re.search(r"Body:?\s*(.*?)(?:Footer:|CTA:|$)", text, re.DOTALL)
+        f_m = re.search(r"Footer:\s*([^\n]+)", text)
+        if h_m:
+            header_text = h_m.group(1).strip()
+        if b_m:
+            text = b_m.group(1).strip()
+        if f_m:
+            footer_text = f_m.group(1).strip()
+
+    # 2. Neighbor cell CTA
+    if neighbor_cta:
+        m_url = re.search(r"(https?://[^\s()\[\]]+|<link>)", neighbor_cta)
+        if m_url:
+            button_url = DEFAULT_CTA_URL if m_url.group(1).lower() == "<link>" else m_url.group(1)
+        clean_n = re.sub(r"(https?://[^\s()\[\]]+|<link>)", "", neighbor_cta)
+        clean_n = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", clean_n)
+        clean_n = re.sub(r"^(?:CTA\s*|Click\s*here\s*to\s*|Tap\s*to\s*)", "", clean_n, flags=re.IGNORECASE).strip()
+        if clean_n and 3 <= len(clean_n) <= 25:
+            button_text = clean_n.title()
+
+    # 3. Leading standalone Headline line
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    if len(lines) >= 3 and not header_text:
+        first_line = lines[0]
+        if len(first_line) < 45 and not any(k in first_line.lower() for k in ["dear", "hi", "hello", "{{", "<", "{#"]):
+            if any(k in first_line.lower() for k in ["offer", "festive", "diwali", "save", "special", "congratulations", "upgrade", "alert", "notice", "update"]):
+                header_text = first_line.strip("*_# ")
+                text = "\n\n".join(lines[1:])
+
+    # 4. Extract CTA & Footer from body
+    norm_text, samples = normalize_placeholders(text)
+    clean_body, cta_btn, cta_url, cta_foot = extract_and_strip_cta(
+        norm_text,
+        existing_btn_text=button_text,
+        existing_btn_url=button_url,
+        existing_footer=footer_text,
+    )
+
+    lang = detect_language(clean_body)
+    cat = detect_category(summary or header_text or "", clean_body)
+    var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
+
+    return {
+        "header_text": header_text,
+        "body": clean_body,
+        "footer_text": cta_foot or footer_text,
+        "button_text": cta_btn,
+        "button_url": cta_url,
+        "language": lang,
+        "category": cat,
+        "variables": var_tags,
+        "sample_values": samples[:len(var_tags)],
+    }
+
 def _clean_template_name(base: str, channel: str, idx: int) -> str:
     clean = re.sub(r"[^a-zA-Z0-9_]", "_", base.lower()).strip("_")
     clean = re.sub(r"_+", "_", clean)
@@ -569,6 +673,26 @@ def should_skip_sheet(sheet_name: str, target_month: str | None = None) -> bool:
             return True
     return False
 
+def is_pure_cta_cell(s: str) -> bool:
+    """Check if a cell is purely a CTA button or link without body copy."""
+    if not s:
+        return False
+    text = s.strip()
+    words = text.split()
+    if len(words) > 10:
+        return False
+    url_pat = r"(https?://[^\s()\[\]]+|<link>|\{link\}|\[link\]|<url>|\{url\}|\[url\])"
+    if re.match(r"^\s*(?:" + url_pat + r")\s*$", text):
+        return True
+    if re.match(
+        r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*[:\-–]?\s*|check\s+(?:your\s+|my\s+)?offer|apply\s*(?:now|online|here)?|explore\s*(?:more|now|offer)?|tap\s*(?:here|to\s+save\s+more|now)?|click\s*(?:here|to\s+apply)?|visit\s*(?:now|us)?|view\s*offer|avail\s*now)[\s:\-–]*(?:" + url_pat + r")?\s*$",
+        text,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
+
+
 def is_valid_template_copy(text: str) -> bool:
     """
     Validate that a spreadsheet cell contains genuine customer-facing template copy,
@@ -580,6 +704,9 @@ def is_valid_template_copy(text: str) -> bool:
     if len(s) < 25:
         return False
 
+    # 0. Reject pure CTA button cells (they are buttons, not message bodies)
+    if is_pure_cta_cell(s):
+        return False
     # 1. Reject internal tracking codes / campaign IDs (e.g. TCLMOE_..., PAPL_..., etc.)
     if "\n" not in s and re.match(r"^(?:TCLMOE|TCL|PAPL|PQPL|UCL|TCF|MOE|SEG)_[A-Za-z0-9_\'-]+$", s, re.IGNORECASE):
         return False
@@ -875,6 +1002,54 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                     if body_m:
                         item_dict["text"] = body_m.group(1).strip()
 
+                items.append(item_dict)
+
+    # 3. Pass 3: Universal Spatial Matrix Scanner (The "Arrive Anyhow" Engine)
+    # If no templates were extracted from Pass 1 or Pass 2 (e.g. unformatted A1/A2/B1/B2 layouts)
+    if not items:
+        consumed_coords: set[tuple[int, int]] = set()
+        for r_idx, row in enumerate(raw_rows):
+            for c_idx, cell in enumerate(row):
+                if (r_idx, c_idx) in consumed_coords:
+                    continue
+                clean_cell = cell.strip()
+                if not is_valid_template_copy(clean_cell):
+                    continue
+
+                neighbor_cta = None
+                neighbor_header = None
+
+                # Look right for neighbor CTA
+                if c_idx + 1 < len(row) and is_pure_cta_cell(row[c_idx + 1]):
+                    neighbor_cta = row[c_idx + 1]
+                    consumed_coords.add((r_idx, c_idx + 1))
+                # Look down for neighbor CTA
+                elif r_idx + 1 < len(raw_rows) and c_idx < len(raw_rows[r_idx + 1]) and is_pure_cta_cell(raw_rows[r_idx + 1][c_idx]):
+                    neighbor_cta = raw_rows[r_idx + 1][c_idx]
+                    consumed_coords.add((r_idx + 1, c_idx))
+
+                # Look up for neighbor header
+                if r_idx > 0 and c_idx < len(raw_rows[r_idx - 1]):
+                    top_c = raw_rows[r_idx - 1][c_idx].strip()
+                    if 3 < len(top_c) < 45 and not is_cta_cell(top_c) and not is_valid_template_copy(top_c):
+                        neighbor_header = top_c
+
+                decomp = decompose_content(
+                    clean_cell,
+                    explicit_header=neighbor_header,
+                    neighbor_cta=neighbor_cta,
+                )
+
+                item_dict = {
+                    "channel": sheet_chan or ("RCS" if decomp.get("header_text") else "WA"),
+                    "text": decomp["body"],
+                    "header": decomp["header_text"],
+                    "footer": decomp["footer_text"],
+                    "button_text": decomp["button_text"],
+                    "button_url": decomp["button_url"],
+                    "variant": f"Cell_{r_idx + 1}_{c_idx + 1}",
+                    "source": f"excel_spatial_{sname}_r{r_idx + 1}_c{c_idx + 1}",
+                }
                 items.append(item_dict)
 
     return items
