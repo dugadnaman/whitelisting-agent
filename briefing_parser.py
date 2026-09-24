@@ -711,7 +711,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     # 3b. SWCM WhatsApp campaign tables ("Campaign execution format N | WA N")
     swcm_campaigns = _parse_swcm_campaign_tables(desc_raw)
     for idx, campaign in enumerate(swcm_campaigns, start=1):
-        norm_text, variables = normalize_placeholders(campaign["body"])
+        norm_text, samples = normalize_placeholders(campaign["body"])
+        var_tags = re.findall(r"\{\{(\d+)\}\}", norm_text)
         cta_text, cta_url = _parse_swcm_cta(campaign.get("cta_text", ""), campaign.get("cta_links", []))
         media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
         if media is None and zip_creative_paths:
@@ -728,7 +729,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 button_type="URL",
                 button_text=cta_text,
                 button_url=cta_url,
-                variables=variables,
+                variables=var_tags,
+                sample_values=samples,
                 raw_source=campaign["body"],
                 source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
             )
@@ -776,7 +778,10 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         variant = item.get("variant", "General")
         title = item.get("title") or summary[:32]
         source_origin = item.get("source", "jira")
-        norm_text, variables = normalize_placeholders(clean_content)
+        norm_text, norm_samples = normalize_placeholders(clean_content)
+        var_tags = re.findall(r"\{\{(\d+)\}\}", norm_text)
+        resolved_vars = item.get("variables") or var_tags
+        resolved_samples = item.get("sample_values") or norm_samples
 
         if chan in ("WA", "WHATSAPP"):
             img = wa_creatives[(wa_counter - 1) % len(wa_creatives)] if wa_creatives else None
@@ -794,8 +799,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     button_type=item.get("button_type") or ("URL" if item.get("button_url") else "URL"),
                     button_text=item.get("button_text") or "Check Offer",
                     button_url=item.get("button_url") or "https://www.tatacapital.com",
-                    variables=item.get("variables") or variables,
-                    sample_values=item.get("sample_values") or [],
+                    variables=resolved_vars,
+                    sample_values=resolved_samples,
                     raw_source=clean_content,
                     source_origin=source_origin,
                 )

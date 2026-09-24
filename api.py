@@ -3443,35 +3443,100 @@ async def submit_jira_brief_endpoint(
     if "whatsapp" in req.channels:
         wa_sources = req.whatsapp_templates if req.whatsapp_templates is not None else parsed.whatsapp_templates
         for wa in wa_sources:
-            comps = [
-                TemplateComponent(
-                    type="BODY",
-                    text=wa["body"],
-                    variables=wa.get("variables") or [],
-                )
-            ]
-            if wa.get("header_type") == "IMAGE" and wa.get("media_file"):
-                comps.insert(
-                    0,
+            comps: list[TemplateComponent] = []
+
+            # 1. HEADER component (IMAGE or TEXT)
+            header_type = (wa.get("header_type") or "").upper().strip()
+            header_text = (wa.get("header_text") or "").strip()
+            if header_type == "IMAGE" and wa.get("media_file"):
+                comps.append(
                     TemplateComponent(
                         type="HEADER",
                         format="IMAGE",
                         media_file=wa["media_file"],
-                    ),
+                    )
                 )
-            if wa.get("button_type") == "URL" and wa.get("button_url"):
+            elif (header_type == "TEXT" or not header_type) and header_text:
+                h_vars = re.findall(r"\{\{(\d+)\}\}", header_text)
+                h_example = {"header_text": ["Exclusive"]} if h_vars else None
+                comps.append(
+                    TemplateComponent(
+                        type="HEADER",
+                        format="TEXT",
+                        text=header_text,
+                        example=h_example,
+                    )
+                )
+
+            # 2. BODY component with variables & sample values
+            body_text = str(wa.get("body") or "").strip()
+            body_vars = wa.get("variables") or []
+            if not body_vars:
+                body_vars = re.findall(r"\{\{(\d+)\}\}", body_text)
+
+            sample_vals = [str(v) for v in (wa.get("sample_values") or []) if str(v).strip()]
+            if body_vars and not sample_vals:
+                from submission_client import normalize_whatsapp_text_variables
+                _, auto_samples = normalize_whatsapp_text_variables(body_text, client=acc)
+                if auto_samples:
+                    sample_vals = auto_samples
+                else:
+                    defaults = ["Rahul", "5,00,000", "9.99%", "24 months", "Exclusive", "Tata Capital"]
+                    sample_vals = [defaults[i % len(defaults)] for i in range(len(body_vars))]
+
+            body_example = {"body_text": [sample_vals]} if sample_vals else None
+            comps.append(
+                TemplateComponent(
+                    type="BODY",
+                    text=body_text,
+                    variables=body_vars,
+                    example=body_example,
+                )
+            )
+
+            # 3. FOOTER component
+            footer_text = (wa.get("footer_text") or "").strip()
+            if footer_text:
+                comps.append(
+                    TemplateComponent(
+                        type="FOOTER",
+                        text=footer_text,
+                    )
+                )
+
+            # 4. BUTTONS component (URL, QUICK_REPLY, PHONE_NUMBER)
+            btn_list = []
+            if wa.get("buttons") and isinstance(wa.get("buttons"), list):
+                btn_list.extend(wa["buttons"])
+            else:
+                btn_type = (wa.get("button_type") or "NONE").upper().strip()
+                btn_text = (wa.get("button_text") or "").strip()
+                if btn_type == "URL" and (wa.get("button_url") or btn_text):
+                    btn_list.append({
+                        "type": "URL",
+                        "text": btn_text or "Check Offer",
+                        "url": wa.get("button_url") or "https://www.tatacapital.com",
+                    })
+                elif btn_type in ("QUICK_REPLY", "QUICKREPLY") and btn_text:
+                    btn_list.append({
+                        "type": "QUICK_REPLY",
+                        "text": btn_text,
+                    })
+                elif btn_type in ("PHONE_NUMBER", "PHONE", "CALL") and btn_text:
+                    btn_list.append({
+                        "type": "PHONE_NUMBER",
+                        "text": btn_text,
+                        "phone_number": wa.get("phone_number") or wa.get("button_phone") or "+919876543210",
+                    })
+
+            if btn_list:
                 comps.append(
                     TemplateComponent(
                         type="BUTTONS",
-                        buttons=[
-                            {
-                                "type": "URL",
-                                "text": wa.get("button_text") or "Check Offer",
-                                "url": wa["button_url"],
-                            }
-                        ],
+                        buttons=btn_list,
                     )
                 )
+            from config import get_waba_id
 
             submission = TemplateSubmission(
                 client=acc,
@@ -3479,9 +3544,9 @@ async def submit_jira_brief_endpoint(
                 template_name=wa["template_name"],
                 language=wa.get("language", "en"),
                 category=wa.get("category", "MARKETING"),
+                waba_id=get_waba_id(acc),
                 components=comps,
                 source_ref=f"{issue_key}_{wa['template_name']}",
-                source_file=f"Jira: {issue_key}",
             )
 
             res = await asyncio.to_thread(submit_template, submission, client=acc)

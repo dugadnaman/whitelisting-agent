@@ -644,6 +644,7 @@ export default function JiraBriefsPage() {
                                 </div>
                               </div>
 
+                              {/* Header Creative (Image) */}
                               {wa.header_type === 'IMAGE' && wa.media_filename && (
                                 <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-600 flex items-center justify-between">
                                   <span className="flex items-center gap-1.5 font-medium">
@@ -656,8 +657,28 @@ export default function JiraBriefsPage() {
                                 </div>
                               )}
 
+                              {/* Text Header */}
+                              {wa.header_text && (
+                                <div className="text-xs font-bold text-gray-900 bg-gray-50 px-3 py-1.5 rounded border border-gray-200/80 flex items-center gap-1.5">
+                                  <span className="text-gray-400 text-[10px] font-semibold uppercase">Header:</span>
+                                  <span>{wa.header_text}</span>
+                                </div>
+                              )}
+
                               {isEditing ? (
-                                <div className="space-y-2">
+                                <div className="space-y-2.5">
+                                  {/* Header text edit */}
+                                  <div>
+                                    <label className="block text-[11px] text-gray-500 mb-1">Header Text (optional):</label>
+                                    <input
+                                      type="text"
+                                      value={wa.header_text || ''}
+                                      onChange={(e) => updateWaField(idx, 'header_text', e.target.value)}
+                                      placeholder="e.g. Special Festive Offer"
+                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
+                                    />
+                                  </div>
+
                                   <div className="flex items-center justify-between text-[11px] text-gray-500">
                                     <span>Template Body (use {'{{1}}'}, {'{{2}}'} for variables):</span>
                                     <span>{wa.body.length} chars</span>
@@ -668,9 +689,36 @@ export default function JiraBriefsPage() {
                                     rows={5}
                                     className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
                                   />
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+
+                                  {/* Footer text edit */}
+                                  <div>
+                                    <label className="block text-[11px] text-gray-500 mb-1">Footer / Disclaimer Text (optional):</label>
+                                    <input
+                                      type="text"
+                                      value={wa.footer_text || ''}
+                                      onChange={(e) => updateWaField(idx, 'footer_text', e.target.value)}
+                                      placeholder="e.g. *T&C apply. Tata Capital Financial Services Ltd."
+                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
+                                    />
+                                  </div>
+
+                                  {/* Button controls */}
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                                     <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">CTA Button Text:</label>
+                                      <label className="block text-[11px] text-gray-500 mb-1">Button Type:</label>
+                                      <select
+                                        value={wa.button_type || 'NONE'}
+                                        onChange={(e) => updateWaField(idx, 'button_type', e.target.value)}
+                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold cursor-pointer"
+                                      >
+                                        <option value="NONE">None</option>
+                                        <option value="URL">CTA URL Button</option>
+                                        <option value="QUICK_REPLY">Quick Reply Button</option>
+                                        <option value="PHONE_NUMBER">Call Phone Number</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-[11px] text-gray-500 mb-1">Button Text:</label>
                                       <input
                                         type="text"
                                         value={wa.button_text || ''}
@@ -680,14 +728,30 @@ export default function JiraBriefsPage() {
                                       />
                                     </div>
                                     <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">CTA Button URL:</label>
-                                      <input
-                                        type="text"
-                                        value={wa.button_url || ''}
-                                        onChange={(e) => updateWaField(idx, 'button_url', e.target.value)}
-                                        placeholder="https://www.tatacapital.com"
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
-                                      />
+                                      {wa.button_type === 'PHONE_NUMBER' ? (
+                                        <>
+                                          <label className="block text-[11px] text-gray-500 mb-1">Phone (+91...):</label>
+                                          <input
+                                            type="text"
+                                            value={wa.button_phone || ''}
+                                            onChange={(e) => updateWaField(idx, 'button_phone', e.target.value)}
+                                            placeholder="+919876543210"
+                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
+                                          />
+                                        </>
+                                      ) : (
+                                        <>
+                                          <label className="block text-[11px] text-gray-500 mb-1">Destination URL:</label>
+                                          <input
+                                            type="text"
+                                            value={wa.button_url || ''}
+                                            onChange={(e) => updateWaField(idx, 'button_url', e.target.value)}
+                                            placeholder="https://www.tatacapital.com"
+                                            disabled={wa.button_type === 'QUICK_REPLY' || wa.button_type === 'NONE'}
+                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100"
+                                          />
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -697,11 +761,35 @@ export default function JiraBriefsPage() {
                                     {wa.body}
                                   </div>
 
+                                  {wa.footer_text && (
+                                    <div className="text-[11px] text-gray-500 italic px-1">
+                                      {wa.footer_text}
+                                    </div>
+                                  )}
+
                                   {wa.button_type === 'URL' && (
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className="text-gray-400">CTA Button:</span>
                                       <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
                                         🔗 {wa.button_text || 'Check Offer'} ({wa.button_url || 'https://www.tatacapital.com'})
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {wa.button_type === 'QUICK_REPLY' && (
+                                    <div className="flex items-center gap-2 text-xs">
+                                      <span className="text-gray-400">Quick Reply:</span>
+                                      <span className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/60">
+                                        ⚡ {wa.button_text || 'Interested'}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {wa.button_type === 'PHONE_NUMBER' && (
+                                    <div className="flex items-center gap-2 text-xs">
+                                      <span className="text-gray-400">Call Button:</span>
+                                      <span className="px-2.5 py-1 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200/60 font-mono">
+                                        📞 {wa.button_text || 'Call Us'} ({wa.button_phone || '+919876543210'})
                                       </span>
                                     </div>
                                   )}

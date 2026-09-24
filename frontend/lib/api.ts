@@ -862,12 +862,16 @@ export type JiraWhatsAppDraft = {
   language: string;
   header_type: string;
   header_text?: string | null;
+  footer_text?: string | null;
   media_file?: string | null;
   media_filename?: string | null;
   button_type: string;
   button_text?: string | null;
   button_url?: string | null;
+  button_phone?: string | null;
   variables: string[];
+  sample_values?: string[];
+  buttons?: Array<{ type: string; text: string; url?: string; phone_number?: string }>;
   raw_source: string;
   exists_on_waba?: boolean;
   live_status?: string;

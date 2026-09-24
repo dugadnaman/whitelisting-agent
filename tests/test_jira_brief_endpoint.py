@@ -87,3 +87,90 @@ def test_jira_brief_endpoint_cross_references_live_waba(mock_fetch_issue, mock_u
                 assert matching[0]["exists_on_waba"] is True
                 assert matching[0]["live_status"] == "approved"
                 assert matching[0]["live_ref_id"] == "9876543210"
+
+@patch("api.get_current_user", return_value=MOCK_USER)
+@patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA)
+def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, mock_user):
+    """Verify that submit endpoint preserves TEXT headers, footers, and QUICK_REPLY/PHONE buttons."""
+    from models import SubmissionResult, SubmissionStatus, ApprovalStatus
+
+    captured_submissions = []
+
+    def mock_submit(submission, client="tcl_promo"):
+        captured_submissions.append(submission)
+        return SubmissionResult(
+            template_name=submission.template_name,
+            status=SubmissionStatus.SUBMITTED,
+            approval_status=ApprovalStatus.PENDING,
+            source_ref=submission.source_ref,
+        )
+    req_payload = {
+        "channels": ["whatsapp"],
+        "account": "tcl_promo",
+        "user": "Briefing Operator",
+        "whatsapp_templates": [
+            {
+                "template_name": "festive_promo_wa_1",
+                "category": "MARKETING",
+                "header_type": "TEXT",
+                "header_text": "Diwali Dhamaka Offer",
+                "body": "Dear {{1}}, your pre-approved loan of Rs. {{2}} is ready.",
+                "footer_text": "T&C apply. Tata Capital Ltd.",
+                "button_type": "QUICK_REPLY",
+                "button_text": "Interested",
+                "variables": ["1", "2"],
+                "sample_values": ["Rahul", "5,00,000"],
+            },
+            {
+                "template_name": "call_support_wa_2",
+                "category": "UTILITY",
+                "header_type": "TEXT",
+                "header_text": "Customer Support Alert",
+                "body": "Dear {{1}}, please call our helpdesk for query resolution.",
+                "button_type": "PHONE_NUMBER",
+                "button_text": "Call Support",
+                "button_phone": "+919876543210",
+                "variables": ["1"],
+                "sample_values": ["Priya"],
+            }
+        ],
+    }
+
+    with patch("submission_client.submit_template", side_effect=mock_submit), patch("config.get_waba_id", return_value="12345"):
+        response = client.post("/api/jira/submit/TCN-999", json=req_payload)
+        assert response.status_code == 200, f"Expected 200, got: {response.text}"
+        data = response.json()
+        assert data["ok"] is True
+        assert len(data["whatsapp_submitted"]) == 2
+
+        assert len(captured_submissions) == 2
+
+        # Verify template 1 components
+        sub1 = captured_submissions[0]
+        types = [c.type for c in sub1.components]
+        assert "HEADER" in types, "HEADER component was dropped!"
+        assert "BODY" in types, "BODY component missing!"
+        assert "FOOTER" in types, "FOOTER component was dropped!"
+        assert "BUTTONS" in types, "BUTTONS component was dropped!"
+
+        header_comp = next(c for c in sub1.components if c.type == "HEADER")
+        assert header_comp.format == "TEXT"
+        assert header_comp.text == "Diwali Dhamaka Offer"
+
+        footer_comp = next(c for c in sub1.components if c.type == "FOOTER")
+        assert footer_comp.text == "T&C apply. Tata Capital Ltd."
+
+        btn_comp = next(c for c in sub1.components if c.type == "BUTTONS")
+        assert btn_comp.buttons[0]["type"] == "QUICK_REPLY"
+        assert btn_comp.buttons[0]["text"] == "Interested"
+
+        body_comp = next(c for c in sub1.components if c.type == "BODY")
+        assert body_comp.example is not None
+        assert body_comp.example.get("body_text") == [["Rahul", "5,00,000"]]
+
+        # Verify template 2 PHONE_NUMBER button
+        sub2 = captured_submissions[1]
+        btn_comp2 = next(c for c in sub2.components if c.type == "BUTTONS")
+        assert btn_comp2.buttons[0]["type"] == "PHONE_NUMBER"
+        assert btn_comp2.buttons[0]["text"] == "Call Support"
+        assert btn_comp2.buttons[0]["phone_number"] == "+919876543210"
