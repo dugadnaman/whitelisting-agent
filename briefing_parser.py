@@ -121,51 +121,120 @@ def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
 
 
 def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
-    """Convert informal Jira placeholders (<xxx>, <name>, {link}, etc.) to {{1}}, {{2}}."""
+    """
+    Convert informal Jira placeholders (<xxx>, <name>, [Loan Amount], [ROI], [Tenure], etc.)
+    to strict Meta-compliant sequential placeholders ({{1}}, {{2}}, ...) without collisions.
+    Handles mixed existing {{1}} variables, bracketed parameters, and generates context-aware samples.
+    """
     s = raw_text.strip()
     if not s:
         return "", []
 
+    # 1. Resolve explicit link placeholders first
+    s = re.sub(r"<\s*(?:link|Link|url|URL|website)\s*>", "https://www.tatacapital.com", s)
+    s = re.sub(r"\{\s*(?:link|Link|url|URL|website)\s*\}", "https://www.tatacapital.com", s)
+    s = re.sub(r"\[\s*(?:link|Link|url|URL|website)\s*\]", "https://www.tatacapital.com", s)
+
+    # 2. Unified placeholder pattern matching all informal and existing variables
+    placeholder_pat = re.compile(
+        r"(?:₹\s*)?(?:"
+        r"\{\{\s*\d+\s*\}\}"
+        r"|\{\{\s*[a-zA-Z0-9_\-\s]+\s*\}\}"
+        r"|<[a-zA-Z0-9_\-\s]+>"
+        r"|\[[a-zA-Z0-9_\-\s]+\]"
+        r"|\{[a-zA-Z0-9_\-\s]+\}"
+        r")"
+    )
+
     var_counter = 1
     samples: list[str] = []
 
-    def _replace_money(m: re.Match) -> str:
+    def infer_sample(tag: str, before_context: str, after_context: str = "") -> str:
+        clean = re.sub(r"[^a-zA-Z0-9]", " ", tag).lower().strip()
+        ctx = before_context.lower()
+        suffix = after_context.lower()
+
+        # 1. Semantic keyword checks on the placeholder label itself
+        if any(w in clean for w in ["name", "client", "customer", "first"]):
+            return "Rahul"
+        if any(w in clean for w in ["tenure", "month", "year", "period", "duration"]):
+            return "24 months"
+        if any(w in clean for w in ["roi", "rate", "interest", "percentage"]):
+            return "8.5%"
+        if any(w in clean for w in ["date", "day", "deadline"]):
+            return "15th Oct 2026"
+        if any(w in clean for w in ["amount", "loan", "sanction", "limit", "price", "fee", "xxx", "x"]) or "₹" in tag:
+            return "5,00,000" if "emi" not in clean else "15,000"
+        if any(w in clean for w in ["emi"]):
+            return "15,000"
+        if any(w in clean for w in ["account", "id", "application", "ref", "number"]):
+            return "TCL123456"
+        if any(w in clean for w in ["city", "location"]):
+            return "Mumbai"
+        if any(w in clean for w in ["branch"]):
+            return "Andheri"
+
+        # 2. Suffix cues (immediate following words take highest context priority)
+        if any(k in suffix for k in ["interest", "roi", "rate", "p.a.", "%"]):
+            return "8.5%"
+        if any(k in suffix for k in ["month", "year", "tenure"]):
+            return "24 months"
+        if any(k in suffix for k in ["lakh", "crore", "rupee", "cashback"]):
+            return "5,00,000"
+
+        # 3. Immediate prefix cues
+        last_words = " ".join(ctx.split()[-3:]) if ctx.split() else ""
+        if any(k in last_words for k in ["at", "roi", "rate", "%"]):
+            return "8.5%"
+        if any(k in last_words for k in ["rs.", "rs", "inr", "₹", "of", "worth", "upto", "up to"]):
+            return "5,00,000"
+        if any(k in last_words for k in ["for", "tenure"]):
+            return "24 months"
+        if any(k in last_words for k in ["dear", "hi", "hello"]):
+            return "Rahul"
+
+        # 4. Broader context cues
+        if any(k in ctx for k in ["rs.", "inr", "₹", "loan of", "spends of"]):
+            return "5,00,000"
+        if any(k in ctx for k in [" at ", "interest"]):
+            return "8.5%"
+        if any(k in ctx for k in ["for ", "tenure"]):
+            return "24 months"
+        if any(k in ctx for k in ["dear", "hi ", "hello"]):
+            return "Rahul"
+
+        return "Exclusive"
+
+    def repl(match: re.Match) -> str:
         nonlocal var_counter
-        curr = f"{{{{{var_counter}}}}}"
+        full_match = match.group(0)
+        has_rupee = full_match.startswith("₹")
+        tag = full_match[1:].strip() if has_rupee else full_match
+
+        # CTA keyword exemption: don't convert CTA text in brackets like [Apply Now] or <Click Here>
+        tag_clean = tag.lower()
+        if any(cta in tag_clean for cta in ["apply", "check", "click", "explore", "now", "here", "download", "visit"]):
+            return full_match
+
+        # Markdown link exemption: e.g. [Link Text](https://...)
+        end = match.end()
+        if end < len(s) and s[end] == "(":
+            return full_match
+
+        start = match.start()
+        end = match.end()
+        before_ctx = s[max(0, start - 25):start]
+        after_ctx = s[end:min(len(s), end + 25)]
+        sample = infer_sample(tag, before_ctx, after_ctx)
+        samples.append(sample)
+        prefix = "₹" if has_rupee else ""
+        res = f"{prefix}{{{{{var_counter}}}}}"
         var_counter += 1
-        samples.append("5,00,000")
-        return curr
+        return res
 
-    def _replace_name(m: re.Match) -> str:
-        nonlocal var_counter
-        curr = f"{{{{{var_counter}}}}}"
-        var_counter += 1
-        samples.append("Customer")
-        return curr
-
-    def _replace_generic(m: re.Match) -> str:
-        nonlocal var_counter
-        val = m.group(0)
-        if any(cta in val.lower() for cta in ["apply", "check", "click", "explore", "link", "now", "here"]):
-            return val
-        curr = f"{{{{{var_counter}}}}}"
-        var_counter += 1
-        samples.append("Exclusive")
-        return curr
-
-    s = re.sub(r"₹\s*(?:<[^>]+>|\{[^}]+\})", _replace_money, s)
-    s = re.sub(r"(?:<x+>|<X+>|\{x+\}|\{X+\})", _replace_money, s)
-    s = re.sub(r"(?:<name>|\{name\}|<customer_name>)", _replace_name, s, flags=re.IGNORECASE)
-    # Square-bracket placeholders used by SWCM briefs: [Client Name], [Name], [First Name]
-    s = re.sub(r"\[(?:client\s+name|customer\s+name|first\s+name|name)\]", _replace_name, s, flags=re.IGNORECASE)
-    s = re.sub(r"<[a-zA-Z\-_]+>", _replace_generic, s)
-
-    s = re.sub(r"[ \t]+", " ", s)
-    s = re.sub(r"<\s*(?:link|Link)\s*>", "https://www.tatacapital.com", s)
-    s = re.sub(r"\{\s*(?:link|Link)\s*\}", "https://www.tatacapital.com", s)
-    s = re.sub(r"\[\s*(?:link|Link)\s*\]", "https://www.tatacapital.com", s)
-
-    return s, samples
+    normalized = placeholder_pat.sub(repl, s)
+    normalized = re.sub(r"[ \t]+", " ", normalized)
+    return normalized, samples
 
 
 def _clean_template_name(base: str, channel: str, idx: int) -> str:
