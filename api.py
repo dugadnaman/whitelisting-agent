@@ -3433,7 +3433,6 @@ async def submit_jira_brief_endpoint(
     parsed = await asyncio.to_thread(parse_jira_brief, issue_data, download_creatives=True)
     acc = (req.account or parsed.account or "tcl_promo").lower().strip()
     require_tenant_access(acc, current_user)
-
     # Validate target account credentials before remote submission to avoid 500 errors
     if "whatsapp" in req.channels and (req.whatsapp_templates or parsed.whatsapp_templates):
         try:
@@ -3565,47 +3564,78 @@ async def submit_jira_brief_endpoint(
                 source_ref=f"{issue_key}_{wa['template_name']}",
             )
 
-            res = await asyncio.to_thread(submit_template, submission, client=acc)
-            res.submitted_by = user_name
-            res.source_file = f"Jira: {issue_key}"
-            log_result(res, LOG_PATH)
-            submitted_wa.append({
-                "template_name": res.template_name,
-                "status": res.status.value,
-                "approval_status": res.approval_status.value,
-                "error": res.error,
-            })
+            try:
+                res = await asyncio.to_thread(submit_template, submission, client=acc)
+                res.submitted_by = user_name
+                res.source_file = f"Jira: {issue_key}"
+                log_result(res, LOG_PATH)
+                submitted_wa.append({
+                    "template_name": res.template_name,
+                    "status": res.status.value,
+                    "approval_status": res.approval_status.value,
+                    "error": res.error,
+                })
+            except Exception as wa_exc:
+                logger.exception("Failed to submit WhatsApp template %s: %s", wa["template_name"], wa_exc)
+                submitted_wa.append({
+                    "template_name": wa["template_name"],
+                    "status": "failed",
+                    "approval_status": "rejected",
+                    "error": str(wa_exc),
+                })
 
     # 2. Submit RCS templates
     if "rcs" in req.channels:
         rcs_sources = req.rcs_templates if req.rcs_templates is not None else parsed.rcs_templates
         for rcs in rcs_sources:
-            content_msg = {
-                "text": rcs["body"],
-                "cardTitle": rcs.get("card_title") or parsed.summary[:32],
-            }
-            if rcs.get("media_file"):
-                content_msg["mediaUrl"] = rcs["media_file"]
+            suggestions = []
+            btn_text = rcs.get("button_text") or rcs.get("action_label")
+            btn_url = rcs.get("button_url") or rcs.get("action_url") or "https://u3.mnge.co/"
+            if btn_text:
+                suggestions.append({
+                    "suggestionType": "url_action",
+                    "text": btn_text,
+                    "postbackData": btn_text,
+                    "url": btn_url,
+                })
+
+            has_media = bool(rcs.get("media_file"))
+            rcs_type = "richcard" if has_media else "text"
+            card_title = (rcs.get("card_title") or parsed.summary[:32]) if has_media else None
+            card_desc = rcs["body"] if has_media else None
+            text_msg = rcs["body"]
 
             rcs_sub = RcsTemplateSubmission(
                 client=acc,
+                channel="rcs",
                 template_name=rcs["template_name"],
-                template_type="RICH_CARD_STANDALONE",
+                template_type=rcs_type,
+                card_title=card_title,
+                card_description=card_desc,
+                text_message=text_msg,
+                media_url=rcs.get("media_file"),
+                suggestions=suggestions,
                 source_ref=f"{issue_key}_{rcs['template_name']}",
-                content_message=content_msg,
             )
-
-            rcs_res = await asyncio.to_thread(submit_rcs_template, rcs_sub, client=acc)
-            rcs_res.submitted_by = user_name
-            rcs_res.source_file = f"Jira: {issue_key}"
-            log_rcs_result(rcs_res, RCS_LOG_PATH)
-            submitted_rcs.append({
-                "template_name": rcs_res.template_name,
-                "status": rcs_res.status.value,
-                "template_id": rcs_res.template_id,
-                "error": rcs_res.error,
-            })
-
+            try:
+                rcs_res = await asyncio.to_thread(submit_rcs_template, rcs_sub, client=acc)
+                rcs_res.submitted_by = user_name
+                rcs_res.source_file = f"Jira: {issue_key}"
+                log_rcs_result(rcs_res, RCS_LOG_PATH)
+                submitted_rcs.append({
+                    "template_name": rcs_res.template_name,
+                    "status": rcs_res.status.value,
+                    "template_id": rcs_res.template_id,
+                    "error": rcs_res.error,
+                })
+            except Exception as rcs_exc:
+                logger.exception("Failed to submit RCS template %s: %s", rcs["template_name"], rcs_exc)
+                submitted_rcs.append({
+                    "template_name": rcs["template_name"],
+                    "status": "failed",
+                    "template_id": None,
+                    "error": str(rcs_exc),
+                })
     # 3. Post automated status comment back to Jira
     wa_summary = f"{len(submitted_wa)} WhatsApp templates" if submitted_wa else ""
     rcs_summary = f"{len(submitted_rcs)} RCS templates" if submitted_rcs else ""
