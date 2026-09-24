@@ -320,12 +320,18 @@ def extract_and_strip_cta(
 
         lower_line = sline.lower()
 
-        # 1. T&C / Disclaimer lines: extract as footer and remove from body
-        if any(tc_kw in lower_line for tc_kw in ["t&c", "t & c", "terms & condition", "terms and condition", "terms apply", "conditions apply"]):
+        # 1. Standalone T&C disclaimer line (e.g. '_T&Cs apply https://..._' or 'T&Cs apply.')
+        clean_tc = sline.strip("*_ \t").lower()
+        if clean_tc.startswith(("t&c", "t & c", "terms", "conditions apply", "disclaimer")):
             if not extracted_footer:
                 extracted_footer = "T&C apply"
             continue
-
+        # 2. Check if T&C is attached at the tail of the line
+        m_tail = re.search(r"\s*(?:[*_])?\s*(?:t&c|t\s*&\s*c|terms\s*(?:and|&)?\s*conditions?)\s*(?:apply|applies)?\.?\s*(?:[*_])?\s*$", sline, re.IGNORECASE)
+        if m_tail and m_tail.start() > 10:
+            if not extracted_footer:
+                extracted_footer = "T&C apply"
+            sline = sline[:m_tail.start()].strip()
         # 2. Check for inline or standalone CTA
         has_url = re.search(url_pat, sline)
         inline_m = cta_inline_pat.search(sline)
@@ -471,9 +477,24 @@ def decompose_content(
         existing_btn_url=button_url,
         existing_footer=footer_text,
     )
-
     lang = detect_language(clean_body)
     cat = detect_category(summary or header_text or "", clean_body)
+
+    # Constrained Gemini Intelligence: refine Category, Language, and CTA without altering body text
+    try:
+        from gemini_intelligence import analyze_template_semantics
+        ai_res = analyze_template_semantics(clean_body, summary=summary)
+        if ai_res.get("category"):
+            cat = ai_res["category"]
+        if ai_res.get("language") and lang == "en":
+            lang = ai_res["language"]
+        if not header_text and ai_res.get("header_text"):
+            header_text = ai_res["header_text"]
+        if (not cta_btn or cta_btn == "Check Offer") and ai_res.get("button_text"):
+            cta_btn = ai_res["button_text"]
+    except Exception:
+        pass
+
     var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
 
     return {
