@@ -641,6 +641,30 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
         if "campaign execution format" in first_cell_lower:
             continue
 
+        # Check Key-Value Campaign Metadata Tables (e.g. SWCM-61 where column 0 has metadata labels)
+        first_col_keys = [r[0].lower().strip() for r in raw_rows if r and len(r) >= 1]
+        is_kv_metadata = any(
+            k.startswith(("campaign name", "date & time", "testing email", "testing mobile", "sftp", "database"))
+            or k in ("sms text", "email text", "email html code", "wa text", "whatsapp text")
+            for k in first_col_keys
+        )
+        if is_kv_metadata:
+            kv_dict = {r[0].lower().strip(): r[1].strip() for r in raw_rows if len(r) >= 2}
+            for k_prefix, chan_tag in [
+                ("wa text", "WA"), ("whatsapp text", "WA"), ("wa content", "WA"),
+                ("sms text", "SMS"), ("sms content", "SMS"),
+                ("rcs text", "RCS"), ("rcs content", "RCS"),
+            ]:
+                val = kv_dict.get(k_prefix, "")
+                if val and val.upper() not in ("N/A", "NA", "--", "-", "ATTACHED", "NONE") and is_valid_template_copy(val):
+                    extracted_items.append({
+                        "channel": chan_tag,
+                        "text": val,
+                        "variant": "General",
+                        "source": "jira_adf_kv",
+                    })
+            continue
+
         # Check Pattern B (Row-based channel tags)
         first_row = raw_rows[0]
         first_col_val = first_row[0].strip().upper() if first_row else ""
@@ -651,7 +675,7 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                 if len(r) >= 2:
                     chan_tag = r[0].strip().upper()
                     body_content = r[1].strip()
-                    if body_content and len(body_content) > 10:
+                    if body_content and len(body_content) > 10 and is_valid_template_copy(body_content):
                         extracted_items.append({
                             "channel": chan_tag,
                             "text": body_content,
@@ -668,14 +692,19 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                     if col_idx < len(header_cells):
                         header_name = header_cells[col_idx]
                         if header_name and cell_val and len(cell_val) > 10 and not cell_val.isdigit():
-                            header_lower = header_name.lower()
-                            if "wa" in header_lower:
+                            header_lower = header_name.lower().strip()
+                            # Word boundary match to avoid substrings like 'awarness' matching 'wa'
+                            if re.search(r"\b(wa|whatsapp)\b", header_lower):
                                 chan_type = "WA"
-                            elif "rcs" in header_lower:
+                            elif re.search(r"\b(rcs)\b", header_lower):
                                 chan_type = "RCS"
-                            elif "sms" in header_lower:
+                            elif re.search(r"\b(sms)\b", header_lower):
                                 chan_type = "SMS"
                             else:
+                                continue
+
+                            # Every extracted template body must pass strict template validation
+                            if not is_valid_template_copy(cell_val):
                                 continue
 
                             variant_label = (
@@ -782,7 +811,8 @@ def is_valid_template_copy(text: str) -> bool:
 
     # 2. Reject internal operational notes, file manifests, and count tables
     s_low = s.lower()
-    if any(s_low.startswith(p) for p in [
+    if any(p in s_low for p in [
+        "campaign name |", "sftp path", "date & time of execution", "testing email", "testing mobile",
         "short |", "segment count", "grand total", "dob column", "below files",
         "pls release", "please release", "exclusion list", "date & time",
         "campaign execution", "channel name", "content format"
@@ -1248,6 +1278,145 @@ def _parse_excel_key_value_blocks(wb: openpyxl.Workbook) -> list[dict[str, str]]
     return items
 
 
+def _is_dlt_sms_sheet(raw_rows: list[list[str]], filename: str = "") -> bool:
+    """Detect if an Excel spreadsheet is an official DLT SMS template export."""
+    if not raw_rows or len(raw_rows) < 2:
+        return False
+    header_row = [str(c or "").strip().upper() for c in raw_rows[0]]
+    if "TEMPLATE ID" in header_row and ("TEMPLATE MESSAGE" in header_row or "REGISTERED DLT" in header_row):
+        return True
+    if "sms" in filename.lower() and "TEMPLATE MESSAGE" in header_row:
+        return True
+    return False
+
+
+def _parse_dlt_sms_sheet(raw_rows: list[list[str]], sname: str, filename: str = "") -> list[dict[str, str]]:
+    """Parse official DLT SMS template spreadsheet rows into canonical SMS template dicts."""
+    header_row = [str(c or "").strip().upper() for c in raw_rows[0]]
+    msg_idx = header_row.index("TEMPLATE MESSAGE") if "TEMPLATE MESSAGE" in header_row else None
+    name_idx = header_row.index("TEMPLATE NAME") if "TEMPLATE NAME" in header_row else None
+    id_idx = header_row.index("TEMPLATE ID") if "TEMPLATE ID" in header_row else None
+    header_idx = header_row.index("HEADER") if "HEADER" in header_row else None
+    cat_idx = header_row.index("CATEGORY") if "CATEGORY" in header_row else None
+
+    items = []
+    for r in raw_rows[1:]:
+        if msg_idx is not None and msg_idx < len(r) and r[msg_idx]:
+            msg = str(r[msg_idx]).strip()
+            if not msg or not is_valid_template_copy(msg):
+                continue
+            tname = str(r[name_idx]).strip() if name_idx is not None and name_idx < len(r) and r[name_idx] else ""
+            tid = str(r[id_idx]).strip().strip("'") if id_idx is not None and id_idx < len(r) and r[id_idx] else ""
+            h_val = str(r[header_idx]).strip() if header_idx is not None and header_idx < len(r) and r[header_idx] else ""
+            cat_val = str(r[cat_idx]).strip() if cat_idx is not None and cat_idx < len(r) and r[cat_idx] else "General"
+            items.append({
+                "channel": "SMS",
+                "text": msg,
+                "header": h_val or None,
+                "template_name": tname,
+                "dlt_template_id": tid,
+                "variant": cat_val,
+                "source": f"dlt_sms_{sname}",
+            })
+    return items
+
+
+def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, Any]]:
+    """
+    Extract multi-channel customer communications (WhatsApp, SMS, Email) from Word documents (.docx).
+    Handles client communication briefs segmented by customer tiers (e.g. '1. Customers at or below 50% LTV...').
+    Identifies genuine customer-facing headlines for WhatsApp templates.
+    """
+    try:
+        import docx
+    except Exception as exc:
+        logger.warning("python-docx not available for %s: %s", docx_path, exc)
+        return []
+
+    try:
+        doc = docx.Document(docx_path)
+    except Exception as exc:
+        logger.warning("Failed to open docx file %s: %s", docx_path, exc)
+        return []
+
+    paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    items: list[dict[str, Any]] = []
+    channel_blocks: list[dict[str, Any]] = []
+    curr_block: dict[str, Any] = {"channel": None, "tier": "General", "lines": []}
+    chan_names = {"whatsapp": "WA", "wa": "WA", "sms": "SMS", "email": "EMAIL", "rcs": "RCS"}
+
+    for p in paras:
+        # Check tier header (e.g. 1. Customers at or below 50% LTV...)
+        if re.match(r"^\d+\.\s+Customers?", p, re.IGNORECASE):
+            if curr_block["channel"] and curr_block["lines"]:
+                channel_blocks.append(curr_block)
+            curr_block = {"channel": None, "tier": p, "lines": []}
+            continue
+
+        low = p.lower().strip()
+        if low in chan_names:
+            if curr_block["channel"] and curr_block["lines"]:
+                channel_blocks.append(curr_block)
+            curr_block = {"channel": chan_names[low], "tier": curr_block.get("tier", "General"), "lines": []}
+            continue
+
+        if curr_block["channel"]:
+            curr_block["lines"].append(p)
+
+    if curr_block["channel"] and curr_block["lines"]:
+        channel_blocks.append(curr_block)
+
+    for b in channel_blocks:
+        chan = b["channel"]
+        lines = b["lines"]
+        tier = b["tier"]
+        if not lines:
+            continue
+        header = None
+        if chan == "WA":
+            # If line 0 is a short punchy headline (< 65 chars), treat it as genuine customer header
+            if len(lines) >= 2 and len(lines[0]) < 65 and not lines[0].lower().startswith(("dear", "hi", "pursuant", "your loan", "please", "for ")):
+                header = lines[0]
+                body = "\n".join(lines[1:])
+            else:
+                body = "\n".join(lines)
+            if is_valid_template_copy(body):
+                items.append({
+                    "channel": "WA",
+                    "header": header,
+                    "text": body,
+                    "variant": tier,
+                    "source": f"docx_{Path(docx_path).stem}",
+                })
+        elif chan == "SMS":
+            body = "\n".join(lines)
+            if is_valid_template_copy(body):
+                items.append({
+                    "channel": "SMS",
+                    "header": None,
+                    "text": body,
+                    "variant": tier,
+                    "source": f"docx_{Path(docx_path).stem}",
+                })
+        elif chan == "EMAIL":
+            subject = None
+            body_lines = []
+            for l in lines:
+                if l.lower().startswith("subject:"):
+                    subject = l.split(":", 1)[1].strip()
+                else:
+                    body_lines.append(l)
+            items.append({
+                "channel": "EMAIL",
+                "header": subject,
+                "text": "\n".join(body_lines),
+                "variant": tier,
+                "source": f"docx_{Path(docx_path).stem}",
+            })
+
+    return items
+
+
 def extract_templates_from_excel_file(filepath: Path, target_month: str | None = None) -> list[dict[str, str]]:
     """
     Inspect and extract template items from any client spreadsheet (.xlsx, .csv, .xls) across all sheets.
@@ -1265,7 +1434,10 @@ def extract_templates_from_excel_file(filepath: Path, target_month: str | None =
     for sname, raw_rows in sheets.items():
         if should_skip_sheet(sname, target_month=target_month):
             continue
-        sheet_items = _parse_raw_sheet_rows(raw_rows, sname)
+        if _is_dlt_sms_sheet(raw_rows, filename=filepath.name):
+            sheet_items = _parse_dlt_sms_sheet(raw_rows, sname, filename=filepath.name)
+        else:
+            sheet_items = _parse_raw_sheet_rows(raw_rows, sname)
         for item in sheet_items:
             raw_t = item.get("text", "")
             if not is_valid_template_copy(raw_t):
@@ -1276,7 +1448,6 @@ def extract_templates_from_excel_file(filepath: Path, target_month: str | None =
                 all_items.append(item)
 
     return all_items
-
 def _extract_images_from_zip(zip_path: Path) -> list[str]:
     """Extract top-level image creatives from a ZIP attachment. Returns local paths.
 
@@ -1422,11 +1593,69 @@ def _match_creative_to_campaign(campaign_name: str, images: list[str]) -> str | 
             return img
     return None
 
+def parse_ticket_intent(desc: str) -> dict[str, Any]:
+    """
+    Parse explicit operator and copy instructions from the Jira issue description:
+    - WhatsApp Category (e.g. Utility, Marketing, Authentication)
+    - CTA intent (e.g. 'No CTA', 'Without CTA' -> prevents adding default CTA buttons)
+    - WhatsApp Sender / WABA identifier (e.g. 'TATACAPTRANS')
+    - SMS Sender Header (e.g. 'Tatacl')
+    """
+    info: dict[str, Any] = {
+        "wa_category": None,
+        "no_cta": False,
+        "wa_sender": None,
+        "sms_header": None,
+    }
+    if not desc:
+        return info
+
+    low = desc.lower()
+    if any(k in low for k in ("no cta", "without cta", "cta: none", "cta: na", "cta: n/a", "no button")):
+        info["no_cta"] = True
+
+    lines = [l.strip() for l in desc.split("\n") if l.strip()]
+    in_wa = False
+    in_sms = False
+
+    for line in lines:
+        l_low = line.lower()
+        if l_low.startswith(("whatsapp", "wa:")) or l_low == "wa":
+            in_wa = True
+            in_sms = False
+            continue
+        elif l_low.startswith("sms"):
+            in_sms = True
+            in_wa = False
+            continue
+
+        if in_wa:
+            if line.upper() in ("UTILITY", "MARKETING", "AUTHENTICATION"):
+                info["wa_category"] = line.upper()
+            elif any(k in l_low for k in ("no cta", "without cta", "cta: none", "cta: na", "cta: n/a")):
+                info["no_cta"] = True
+            elif len(line) >= 4 and not info["wa_sender"] and not line.endswith(":"):
+                info["wa_sender"] = line
+        elif in_sms:
+            if "header:" in l_low:
+                info["sms_header"] = line.split(":", 1)[1].strip()
+
+    if not info["wa_category"]:
+        if "utility" in low and "marketing" not in low:
+            info["wa_category"] = "UTILITY"
+        elif "marketing" in low and "utility" not in low:
+            info["wa_category"] = "MARKETING"
+        elif "authentication" in low or "otp" in low:
+            info["wa_category"] = "AUTHENTICATION"
+
+    return info
+
 
 def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True) -> ParsedJiraBrief:
     """
     Parse a complete Jira ticket dictionary:
     - Extracts from Excel attachments if present (.xlsx, .csv).
+    - Extracts multi-channel copy from Word attachments (.docx).
     - Falls back to Jira ADF tables / text.
     - Classifies email mailers (.zip + .docx).
     """
@@ -1435,16 +1664,20 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     desc_text = str(issue_data.get("description_text", ""))
     desc_raw = issue_data.get("description_raw")
     sub_account = infer_sub_account_from_text(summary + " " + desc_text)
+    ticket_intent = parse_ticket_intent(desc_text)
 
-    # Detect Email Mailer tickets (e.g. TCN-528 TCL Mailers Sept)
+    # Detect Email Mailer tickets (e.g. TCN-528 TCL Mailers Sept, SWCM-61)
     raw_attachments = issue_data.get("attachments", [])
-    has_mailers_zip = any("mailer" in a.get("filename", "").lower() and a.get("filename", "").endswith(".zip") for a in raw_attachments)
+    has_mailers_zip = any(("mailer" in a.get("filename", "").lower() or a.get("filename", "").endswith(".zip")) for a in raw_attachments)
     has_subject_lines = any("subject" in a.get("filename", "").lower() or a.get("filename", "").endswith((".docx", ".doc")) for a in raw_attachments)
-    is_email_campaign = ("mailer" in summary.lower() or "mailers" in summary.lower() or has_mailers_zip) and (has_mailers_zip or has_subject_lines)
-
+    is_email_campaign = (
+        ("mailer" in summary.lower() or "mailers" in summary.lower() or "email" in summary.lower() or "email" in desc_text.lower())
+        and (has_mailers_zip or has_subject_lines or "email text" in desc_text.lower())
+    ) or (has_mailers_zip and not excel_attachment_paths and not docx_attachment_paths)
     # 1. Download and categorize attachments
     mapped_attachments: list[dict[str, Any]] = []
     excel_attachment_paths: list[Path] = []
+    docx_attachment_paths: list[Path] = []
     zip_creative_paths: list[str] = []
 
     for att in raw_attachments:
@@ -1458,6 +1691,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 local_path = str(p)
                 if fn.lower().endswith((".xlsx", ".xls", ".csv")):
                     excel_attachment_paths.append(p)
+                elif fn.lower().endswith((".docx", ".doc")):
+                    docx_attachment_paths.append(p)
                 elif fn.lower().endswith(".zip"):
                     zip_creative_paths.extend(_extract_images_from_zip(p))
             except Exception as e:
@@ -1466,7 +1701,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         fn_lower = fn.lower()
         if fn_lower.endswith((".xlsx", ".xls", ".csv")):
             target_chan = "SPREADSHEET_BRIEF"
-        elif fn_lower.endswith((".zip", ".docx", ".doc")):
+        elif fn_lower.endswith((".docx", ".doc")):
+            target_chan = "DOCUMENT_BRIEF"
+        elif fn_lower.endswith(".zip"):
             target_chan = "EMAIL_CREATIVE"
         elif "wa" in fn_lower or "whatsapp" in fn_lower:
             target_chan = "WHATSAPP"
@@ -1526,14 +1763,19 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             })
     base_name = f"{key.lower().replace('-', '_')}_{re.sub(r'[^a-z0-9]', '_', summary.lower())[:16]}".strip("_")
 
-    # 2. Extract templates from attached Excel files first
+    # 2. Extract templates from attached Word (.docx) and Excel (.xlsx) files
     target_month = detect_ticket_month(summary, desc_text)
     extracted_items: list[dict[str, str]] = []
+
+    for docx_path in docx_attachment_paths:
+        docx_items = extract_templates_from_docx_file(docx_path)
+        if docx_items:
+            extracted_items.extend(docx_items)
+
     for excel_path in excel_attachment_paths:
         items = extract_templates_from_excel_file(excel_path, target_month=target_month)
         if items:
             extracted_items.extend(items)
-    # 3. If no templates found in Excel, parse ADF tables / description text
     if not extracted_items:
         extracted_items = _parse_tables_from_adf(desc_raw)
 
@@ -1615,13 +1857,15 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         )
 
     # 3c. TypeSafe AI Semantic Extraction fallback for free-form Jira descriptions
-    if not extracted_items and not swcm_campaigns and desc_text.strip():
+    desc_low = desc_text.lower()
+    is_metadata_brief = any(k in desc_low for k in ("campaign name |", "sftp path", "date & time of execution"))
+    if not extracted_items and not swcm_campaigns and desc_text.strip() and not is_metadata_brief:
         try:
             from jira_extractor import extract_template_from_jira_text
 
             semantic_res = extract_template_from_jira_text(desc_text, summary=summary, allow_ai=True)
             t_comp = semantic_res.template
-            if t_comp.body_text:
+            if t_comp.body_text and is_valid_template_copy(t_comp.body_text):
                 chan_decision = semantic_res.routing.target_channel
                 channels_to_emit = (
                     ["WA", "RCS", "SMS"]
@@ -1649,7 +1893,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     wa_counter = 1
     rcs_counter = 1
     sms_counter = 1
-
+    seen_sms_texts: dict[str, int] = {}
     for item in extracted_items:
         chan = item["channel"].upper()
         clean_content = item["text"]
@@ -1670,8 +1914,19 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 existing_btn_url=item.get("button_url"),
                 existing_footer=item.get("footer"),
             )
+
+            # Apply ticket intent instructions (e.g. No CTA, Utility category)
+            if ticket_intent.get("no_cta"):
+                b_type = "NONE"
+                b_text = None
+                b_url = None
+            else:
+                b_type = item.get("button_type") or ("URL" if cta_btn_url else "NONE")
+                b_text = cta_btn_text
+                b_url = cta_btn_url
+
             lang = detect_language(clean_body, variant)
-            cat = detect_category(summary, clean_body, item.get("source", ""))
+            cat = ticket_intent.get("wa_category") or detect_category(summary, clean_body, item.get("source", ""))
             tname = _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", wa_counter)
 
             var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
@@ -1693,9 +1948,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     footer_text=cta_footer or item.get("footer"),
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
-                    button_type=item.get("button_type") or "URL",
-                    button_text=cta_btn_text,
-                    button_url=cta_btn_url,
+                    button_type=b_type,
+                    button_text=b_text,
+                    button_url=b_url,
                     variables=resolved_vars,
                     sample_values=resolved_samples,
                     raw_source=clean_content,
@@ -1741,7 +1996,14 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             rcs_counter += 1
 
         elif chan == "SMS":
-            tname = _clean_template_name(base_name, "sms", sms_counter)
+            norm_key = re.sub(r"[^a-z0-9]", "", norm_text.lower())[:150]
+            if norm_key in seen_sms_texts:
+                prev_idx = seen_sms_texts[norm_key]
+                if item.get("template_name") and not item["template_name"].startswith("swcm_"):
+                    sms_drafts[prev_idx].template_name = item["template_name"]
+                continue
+            tname = item.get("template_name") or _clean_template_name(base_name, "sms", sms_counter)
+            seen_sms_texts[norm_key] = len(sms_drafts)
             sms_drafts.append(
                 SmsTemplateDraft(
                     template_name=tname,
@@ -1776,6 +2038,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         "push_body": (sms_drafts[0].text if sms_drafts else (wa_drafts[0].body if wa_drafts else summary))[:120],
         "status": "DRAFT",
     }
+
+    if not wa_drafts and not sms_drafts and not rcs_drafts and (email_drafts or "email" in desc_text.lower() or "mail" in desc_text.lower() or "email" in summary.lower()):
+        is_email_campaign = True
 
     campaign_type_label = (
         "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"

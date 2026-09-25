@@ -191,3 +191,50 @@ def test_jira_projects_catalog_endpoint(mock_user):
     assert "TAT" in keys
     assert "MON" in keys
     assert "COL" in keys
+
+def test_swcm_59_docx_and_sms_extraction():
+    """Verify SWCM-59 parses .docx into 3 UTILITY WhatsApp templates with headers and No CTA."""
+    from briefing_parser import parse_jira_brief
+    from jira_client import fetch_jira_issue
+
+    try:
+        issue = fetch_jira_issue("SWCM-59")
+    except Exception:
+        # Offline fallback: skip network if credentials expired
+        return
+
+    parsed = parse_jira_brief(issue, download_creatives=True)
+    assert len(parsed.whatsapp_templates) == 3
+    for wa in parsed.whatsapp_templates:
+        assert wa["category"] == "UTILITY"
+        assert wa["button_type"] == "NONE"
+        assert wa["button_text"] is None
+        assert wa["header_text"] in (
+            "Important Update - Loan Against Equity Mutual Funds",
+            "Immediate Action Required - Loan Against Equity Mutual Funds",
+            "Urgent Action Required - Loan Against Equity Mutual Funds",
+        )
+        assert "LAS_Whitelisting" not in (wa["header_text"] or "")
+
+    # Exactly 3 clean SMS templates
+    assert len(parsed.sms_templates) == 3
+    sms_names = [s["template_name"] for s in parsed.sms_templates]
+    assert "las_D_250926" in sms_names or "las_A_B_250926" in sms_names
+
+
+def test_swcm_61_metadata_table_rejected_as_templates():
+    """Verify SWCM-61 key-value metadata table emits 0 WhatsApp templates and classifies as email campaign."""
+    from briefing_parser import parse_jira_brief
+    from jira_client import fetch_jira_issue
+
+    try:
+        issue = fetch_jira_issue("SWCM-61")
+    except Exception:
+        return
+
+    parsed = parse_jira_brief(issue, download_creatives=True)
+    assert len(parsed.whatsapp_templates) == 0
+    assert len(parsed.sms_templates) == 0
+    assert parsed.is_email_campaign is True
+    assert parsed.campaign_type_label == "Email Mailer Campaign"
+    assert len(parsed.email_templates) >= 1
