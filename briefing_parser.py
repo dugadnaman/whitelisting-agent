@@ -1327,19 +1327,33 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
     Handles client communication briefs segmented by customer tiers (e.g. '1. Customers at or below 50% LTV...').
     Identifies genuine customer-facing headlines for WhatsApp templates.
     """
+    paras: list[str] = []
+
+    # 1. Try python-docx if installed
     try:
         import docx
-    except Exception as exc:
-        logger.warning("python-docx not available for %s: %s", docx_path, exc)
-        return []
-
-    try:
         doc = docx.Document(docx_path)
-    except Exception as exc:
-        logger.warning("Failed to open docx file %s: %s", docx_path, exc)
-        return []
+        paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    except Exception:
+        paras = []
 
-    paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    # 2. Robust zero-dependency fallback using built-in zipfile + XML
+    if not paras:
+        try:
+            import zipfile
+            import xml.etree.ElementTree as ET
+            with zipfile.ZipFile(docx_path) as z:
+                xml_content = z.read("word/document.xml")
+            tree = ET.fromstring(xml_content)
+            for p in tree.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
+                texts = [node.text for node in p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t") if node.text]
+                if texts:
+                    clean_p = "".join(texts).strip()
+                    if clean_p:
+                        paras.append(clean_p)
+        except Exception as exc:
+            logger.warning("Failed to parse docx %s with stdlib XML parser: %s", docx_path, exc)
+            return []
     items: list[dict[str, Any]] = []
     channel_blocks: list[dict[str, Any]] = []
     curr_block: dict[str, Any] = {"channel": None, "tier": "General", "lines": []}
