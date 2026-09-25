@@ -1305,8 +1305,8 @@ export default function SettingsPage() {
           <div>
             <h3 className="text-sm font-bold text-gray-900">Gemini Semantic Decision Engine</h3>
             <p className="text-[11px] text-gray-500 mt-1">
-              Uses Google Gemini for constrained category, language, and validity decisions.
-              Template body text, headers, CTAs, URLs, and variables remain source-derived.
+              Uses Google Gemini for supreme semantic decisions on identified components: category, language,
+              template completeness, and rejecting internal workflow identifiers (like ticket keys and sheet names) from customer headings.
             </p>
           </div>
           <span className="shrink-0 px-2 py-1 rounded-md bg-violet-50 text-violet-700 text-[10px] font-bold uppercase tracking-wide">

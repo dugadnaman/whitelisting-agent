@@ -480,17 +480,34 @@ def decompose_content(
     lang = detect_language(clean_body)
     cat = detect_category(summary or header_text or "", clean_body)
 
-    # Constrained Gemini Intelligence: refine classification only. Gemini never supplies text.
+    # Supreme Gemini Intelligence & Semantic Adjudication on Identified Components
+    is_complete = True
+    completeness_score = 1.0
+    missing_components: list[str] = []
     try:
-        from gemini_intelligence import analyze_template_semantics
-        ai_res = analyze_template_semantics(clean_body, summary=summary)
+        from gemini_intelligence import analyze_template_semantics, is_internal_identifier
+
+        if header_text and is_internal_identifier(header_text, summary=summary):
+            header_text = None
+
+        ai_res = analyze_template_semantics(
+            clean_body,
+            summary=summary,
+            candidate_header=header_text,
+            candidate_cta_text=cta_btn,
+            candidate_cta_url=cta_url,
+        )
         if ai_res.get("category"):
             cat = ai_res["category"]
         if ai_res.get("language") and lang == "en":
             lang = ai_res["language"]
+        if ai_res.get("is_candidate_header_genuine") is False or ai_res.get("is_internal_name") is True:
+            header_text = None
+        is_complete = bool(ai_res.get("is_complete", True))
+        completeness_score = float(ai_res.get("completeness_score", 1.0))
+        missing_components = list(ai_res.get("missing_components") or [])
     except Exception:
         pass
-
     var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
 
     return {
@@ -503,6 +520,9 @@ def decompose_content(
         "category": cat,
         "variables": var_tags,
         "sample_values": samples[:len(var_tags)],
+        "is_complete": is_complete,
+        "completeness_score": completeness_score,
+        "missing_components": missing_components,
     }
 
 def _clean_template_name(base: str, channel: str, idx: int) -> str:
@@ -510,6 +530,38 @@ def _clean_template_name(base: str, channel: str, idx: int) -> str:
     clean = re.sub(r"_+", "_", clean)
     short = clean[:26].strip("_")
     return f"{short}_{channel.lower()}_{idx}"
+
+def derive_clean_card_title(body_text: str, account: str | None = None) -> str:
+    """
+    Derive a clean, customer-facing card title for RCS from the content body,
+    ensuring that internal operational identifiers (e.g. 'LAS_Whitelisting', 'SWCM-59')
+    never appear in customer-facing UI.
+    """
+    if not body_text or not body_text.strip():
+        return "Important Notice"
+
+    low = body_text.lower()
+    if "ltv" in low or "loan against" in low or "mutual fund" in low or "pledge" in low or "shares" in low:
+        return "Notice: Revision in LTV"
+    if "personal loan" in low or "pre-approved" in low or "instant funds" in low:
+        return "Special Personal Loan Offer"
+    if "home loan" in low or "property" in low:
+        return "Special Home Loan Offer"
+    if "business loan" in low:
+        return "Business Loan Opportunity"
+    if "emi" in low or "due date" in low or "overdue" in low or "payment" in low:
+        return "Important Payment Reminder"
+    if "otp" in low or "verification code" in low or "security" in low:
+        return "Account Security Alert"
+    if "credit card" in low or "card" in low:
+        return "Exclusive Card Offer"
+
+    first_line = body_text.strip().split("\n")[0].strip("*_# ")
+    if 5 <= len(first_line) <= 45 and not any(p in first_line.lower() for p in ("dear", "hi", "hello", "{{", "http", "pursuant")):
+        return first_line
+
+    brand = "Tata Capital" if (account and "tata" in account.lower()) or "tata" in low else ("Bajaj Finserv" if "bajaj" in low else "Customer Update")
+    return f"Important Notice from {brand}"
 
 
 def _extract_text_from_adf_node(node: dict[str, Any] | None, preserve_formatting: bool = True) -> str:
@@ -1048,9 +1100,14 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                 # Look up for neighbor header
                 if r_idx > 0 and c_idx < len(raw_rows[r_idx - 1]):
                     top_c = raw_rows[r_idx - 1][c_idx].strip()
-                    if 3 < len(top_c) < 45 and not is_cta_cell(top_c) and not is_valid_template_copy(top_c):
+                    from gemini_intelligence import is_internal_identifier
+                    if (
+                        3 < len(top_c) < 45
+                        and not is_cta_cell(top_c)
+                        and not is_valid_template_copy(top_c)
+                        and not is_internal_identifier(top_c, sheet_name=sname)
+                    ):
                         neighbor_header = top_c
-
                 decomp = decompose_content(
                     clean_cell,
                     explicit_header=neighbor_header,
@@ -1596,8 +1653,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     for item in extracted_items:
         chan = item["channel"].upper()
         clean_content = item["text"]
+        from gemini_intelligence import is_internal_identifier
         variant = item.get("variant", "General")
-        title = item.get("title") or summary[:32]
+        title = item.get("title") or (summary[:32] if not is_internal_identifier(summary) else "")
         source_origin = item.get("source", "jira")
         norm_text, norm_samples = normalize_placeholders(clean_content)
         var_tags = re.findall(r"\{\{(\d+)\}\}", norm_text)
@@ -1620,6 +1678,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             resolved_vars = var_tags
             if len(resolved_samples) > len(var_tags):
                 resolved_samples = resolved_samples[:len(var_tags)]
+            wa_header = item.get("header")
+            if wa_header and is_internal_identifier(wa_header, summary=summary):
+                wa_header = None
 
             wa_drafts.append(
                 WhatsAppTemplateDraft(
@@ -1627,8 +1688,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     category=cat,
                     language=lang,
                     body=clean_body,
-                    header_type="IMAGE" if img else ("TEXT" if item.get("header") else "TEXT"),
-                    header_text=item.get("header"),
+                    header_type="IMAGE" if img else ("TEXT" if wa_header else "TEXT"),
+                    header_text=wa_header,
                     footer_text=cta_footer or item.get("footer"),
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
@@ -1653,10 +1714,18 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             )
             var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
 
+            raw_rcs_title = item.get("title") or item.get("header") or ""
+            if raw_rcs_title and not is_internal_identifier(raw_rcs_title, summary=summary):
+                rcs_card_title = raw_rcs_title
+            elif summary and not is_internal_identifier(summary):
+                rcs_card_title = summary[:32]
+            else:
+                rcs_card_title = derive_clean_card_title(clean_body, account=issue_data.get("account"))
+
             rcs_drafts.append(
                 RcsTemplateDraft(
                     template_name=tname,
-                    card_title=title,
+                    card_title=rcs_card_title,
                     body=clean_body,
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
