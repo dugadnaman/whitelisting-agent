@@ -76,36 +76,13 @@ TEAM_MEMBERS_WHITELIST: dict[str, dict[str, Any]] = {
 DB_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
 
 
-def _get_db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=15)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.row_factory = sqlite3.Row
-    return conn
-
+from db import get_db as _get_db, DB_PATH, init_database
 
 def _init_operational_assignments_db() -> None:
     try:
-        with _get_db() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS operational_assignments (
-                    issue_key TEXT PRIMARY KEY,
-                    operational_assignee TEXT NOT NULL,
-                    operational_account_id TEXT,
-                    operational_role TEXT,
-                    original_jira_assignee TEXT,
-                    transferred_by TEXT,
-                    handover_note TEXT,
-                    transferred_at TEXT
-                )
-                """
-            )
+        init_database()
     except Exception as exc:
-        logger.warning("Could not initialize operational_assignments table: %s", exc)
-
+        logger.warning("Could not initialize database tables: %s", exc)
 
 _init_operational_assignments_db()
 

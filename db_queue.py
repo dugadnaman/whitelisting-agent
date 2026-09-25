@@ -33,64 +33,12 @@ APPROVAL_PRECEDENCE: dict[str, int] = {
 }
 
 
-def get_db(timeout_sec: float = 15.0) -> sqlite3.Connection:
-    """Return an ACID connection with WAL mode and 5000ms busy timeout."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=timeout_sec)
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA synchronous = NORMAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    conn.row_factory = sqlite3.Row
-    return conn
+from db import get_db, DB_PATH, init_database
 
 
 def init_queue_db() -> None:
     """Initialize jobs and tasks tables and run legacy JSONL migration."""
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS ingestion_jobs (
-                id TEXT PRIMARY KEY,
-                tenant_id TEXT NOT NULL,
-                channel TEXT NOT NULL DEFAULT 'whatsapp',
-                filename TEXT NOT NULL,
-                total_count INTEGER NOT NULL,
-                submitted_count INTEGER NOT NULL DEFAULT 0,
-                duplicate_count INTEGER NOT NULL DEFAULT 0,
-                failed_count INTEGER NOT NULL DEFAULT 0,
-                status TEXT NOT NULL CHECK(status IN ('QUEUED', 'RUNNING', 'PAUSED_FOR_AUTH', 'COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED')),
-                submitted_by TEXT,
-                error_message TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS job_tasks (
-                id TEXT PRIMARY KEY,
-                job_id TEXT NOT NULL,
-                tenant_id TEXT NOT NULL,
-                channel TEXT NOT NULL DEFAULT 'whatsapp',
-                source_ref TEXT,
-                template_name TEXT NOT NULL,
-                category TEXT,
-                language TEXT,
-                payload_json TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('PENDING', 'SUBMITTED', 'DUPLICATE', 'FAILED')),
-                approval_status TEXT NOT NULL CHECK(approval_status IN ('pending', 'approved', 'rejected', 'unknown')),
-                provider_ref_id TEXT,
-                error TEXT,
-                approval_reason TEXT,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(job_id) REFERENCES ingestion_jobs(id) ON DELETE CASCADE
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_tenant ON ingestion_jobs(tenant_id, status)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_created ON ingestion_jobs(created_at DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_job ON job_tasks(job_id, status)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_tenant_tpl ON job_tasks(tenant_id, template_name)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_approval ON job_tasks(tenant_id, approval_status)")
+    init_database()
 
     # Run one-way legacy migration if jobs table is newly created/empty
     migrate_legacy_jsonl_if_needed()

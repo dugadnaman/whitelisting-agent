@@ -32,15 +32,7 @@ security = HTTPBearer(auto_error=False)
 # ---------------------------------------------------------------------------
 
 
-def _get_db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=15)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.row_factory = sqlite3.Row
-    return conn
-
+from db import get_db as _get_db, DB_PATH
 
 def hash_password(password: str) -> str:
     """Hash plaintext password with bcrypt salt (10 rounds for responsive container performance)."""
@@ -58,37 +50,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def init_auth_db() -> None:
     """Ensure multi-tenant users table exists with all required columns and seed accounts."""
+    from db import init_database
+    init_database()
+
     with _get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE,
-                password_hash TEXT,
-                name TEXT NOT NULL,
-                tenant_id TEXT NOT NULL DEFAULT 'all',
-                role TEXT DEFAULT 'operator',
-                created_at TEXT NOT NULL,
-                last_login TEXT,
-                is_active INTEGER DEFAULT 1
-            )
-        """)
-        # Check if columns are missing from old schema
-        cur = conn.execute("PRAGMA table_info(users)")
-        existing_cols = {row[1] for row in cur.fetchall()}
-        if "email" not in existing_cols:
-            conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
-        if "password_hash" not in existing_cols:
-            conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
-        if "tenant_id" not in existing_cols:
-            conn.execute("ALTER TABLE users ADD COLUMN tenant_id TEXT DEFAULT 'all'")
-        if "last_login" not in existing_cols:
-            conn.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
-        if "is_active" not in existing_cols:
-            conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1")
-
-        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id)")
-
         # Seed default accounts if needed
         now = datetime.now(UTC).isoformat()
         seed_users = [

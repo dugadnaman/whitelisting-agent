@@ -18,37 +18,11 @@ DB_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
 ACTIVITY_LOG_PATH = "activity_log.jsonl"
 
 
-def _get_db() -> sqlite3.Connection:
-    """Return a connection with Write-Ahead Logging (WAL) and busy timeouts for concurrent safety."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), timeout=15)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.row_factory = sqlite3.Row
-    return conn
-
+from db import get_db as _get_db, DB_PATH, init_database
 
 def init_store() -> None:
-    """Initialize SQLite database tables, indexes, and migrate existing JSONL logs."""
-    with _get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS activities (
-                id TEXT PRIMARY KEY,
-                timestamp TEXT NOT NULL,
-                user TEXT NOT NULL,
-                action TEXT NOT NULL,
-                account TEXT NOT NULL,
-                channel TEXT NOT NULL,
-                details TEXT NOT NULL,
-                status TEXT NOT NULL,
-                ip_address TEXT
-            )
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_act_ts ON activities(timestamp DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_act_user ON activities(user)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_act_account ON activities(account)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_act_action ON activities(action)")
+    """Initialize database tables, indexes, and migrate existing JSONL logs."""
+    init_database()
     try:
         from auth import init_auth_db
 
