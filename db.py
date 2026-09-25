@@ -286,6 +286,63 @@ SQLITE_SCHEMA_DDL = [
         transferred_at TEXT
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS sms_submissions (
+        id TEXT PRIMARY KEY,
+        client TEXT NOT NULL DEFAULT 'bajaj',
+        ackid TEXT,
+        status TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sms_sub_client ON sms_submissions(client, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sms_sub_ackid ON sms_submissions(ackid);",
+    """
+    CREATE TABLE IF NOT EXISTS sms_dlrs (
+        id TEXT PRIMARY KEY,
+        client TEXT NOT NULL DEFAULT 'bajaj',
+        ackid TEXT,
+        status TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sms_dlr_client ON sms_dlrs(client, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sms_dlr_ackid ON sms_dlrs(ackid);",
+    """
+    CREATE TABLE IF NOT EXISTS sms_clicks (
+        id TEXT PRIMARY KEY,
+        client TEXT NOT NULL DEFAULT 'bajaj',
+        ackid TEXT,
+        click_time TEXT,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sms_click_client ON sms_clicks(client, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sms_click_ackid ON sms_clicks(ackid);",
+    """
+    CREATE TABLE IF NOT EXISTS system_errors (
+        id TEXT PRIMARY KEY,
+        timestamp TEXT NOT NULL,
+        severity TEXT NOT NULL,
+        category TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        account TEXT NOT NULL,
+        error_type TEXT,
+        error_message TEXT NOT NULL,
+        module TEXT,
+        function TEXT,
+        stack_trace TEXT,
+        context_json TEXT,
+        remediation_hint TEXT,
+        resolved INTEGER DEFAULT 0,
+        resolved_by TEXT
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sys_err_ts ON system_errors(timestamp DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sys_err_cat ON system_errors(category, severity);",
 ]
 
 POSTGRES_SCHEMA_DDL = [
@@ -376,6 +433,63 @@ POSTGRES_SCHEMA_DDL = [
         transferred_at VARCHAR(100)
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS sms_submissions (
+        id VARCHAR(255) PRIMARY KEY,
+        client VARCHAR(50) NOT NULL DEFAULT 'bajaj',
+        ackid VARCHAR(255),
+        status VARCHAR(50) NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at VARCHAR(100) NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sms_sub_client ON sms_submissions(client, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sms_sub_ackid ON sms_submissions(ackid);",
+    """
+    CREATE TABLE IF NOT EXISTS sms_dlrs (
+        id VARCHAR(255) PRIMARY KEY,
+        client VARCHAR(50) NOT NULL DEFAULT 'bajaj',
+        ackid VARCHAR(255),
+        status VARCHAR(50) NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at VARCHAR(100) NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sms_dlr_client ON sms_dlrs(client, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sms_dlr_ackid ON sms_dlrs(ackid);",
+    """
+    CREATE TABLE IF NOT EXISTS sms_clicks (
+        id VARCHAR(255) PRIMARY KEY,
+        client VARCHAR(50) NOT NULL DEFAULT 'bajaj',
+        ackid VARCHAR(255),
+        click_time VARCHAR(100),
+        payload_json TEXT NOT NULL,
+        created_at VARCHAR(100) NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sms_click_client ON sms_clicks(client, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sms_click_ackid ON sms_clicks(ackid);",
+    """
+    CREATE TABLE IF NOT EXISTS system_errors (
+        id VARCHAR(255) PRIMARY KEY,
+        timestamp VARCHAR(100) NOT NULL,
+        severity VARCHAR(50) NOT NULL,
+        category VARCHAR(50) NOT NULL,
+        channel VARCHAR(50) NOT NULL,
+        account VARCHAR(100) NOT NULL,
+        error_type VARCHAR(255),
+        error_message TEXT NOT NULL,
+        module VARCHAR(255),
+        function VARCHAR(255),
+        stack_trace TEXT,
+        context_json TEXT,
+        remediation_hint TEXT,
+        resolved INTEGER DEFAULT 0,
+        resolved_by VARCHAR(255)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sys_err_ts ON system_errors(timestamp DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_sys_err_cat ON system_errors(category, severity);",
 ]
 
 

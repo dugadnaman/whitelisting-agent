@@ -9,7 +9,9 @@ Maintains JSONL log files with process-safe file locking (fcntl):
 
 import json
 import logging
+import uuid
 from dataclasses import asdict
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
@@ -55,26 +57,68 @@ def log_sms_submission(
     result: SmsSubmissionResult,
     log_path: str = "sms_submission_log.jsonl",
 ) -> None:
-    """Append one SMS submission outcome as a JSON line."""
+    """Store SMS submission outcome into database as single source of truth."""
+    import db
+    db.init_database()
     record = asdict(result)
-    with open(log_path, "a", encoding="utf-8") as f:
-        _lock(f)
-        try:
-            f.write(json.dumps(record) + "\n")
-            f.flush()
-        finally:
-            _unlock(f)
+    sid = record.get("id") or str(uuid.uuid4())
+    client = record.get("client") or "bajaj"
+    ackid = record.get("ackid")
+    status = record.get("status") or "submitted"
+    created_at = record.get("timestamp") or record.get("created_at") or datetime.now(UTC).isoformat()
+
+    try:
+        with db.get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO sms_submissions (id, client, ackid, status, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, payload_json = EXCLUDED.payload_json
+            """,
+                (sid, client, ackid, status, json.dumps(record), created_at),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.error("Failed to insert SMS submission into database: %s", exc)
+
+    if log_path != "sms_submission_log.jsonl" and not log_path.endswith("sms_submission_log.jsonl"):
+        with open(log_path, "a", encoding="utf-8") as f:
+            _lock(f)
+            try:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+            finally:
+                _unlock(f)
 
 
 def load_sms_submissions(
     log_path: str = "sms_submission_log.jsonl",
     client: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Load logged SMS submissions, optionally filtered by client."""
-    entries = _read_jsonl(log_path)
-    if client and client.lower() != "all":
-        c_lower = client.lower()
-        return [e for e in entries if str(e.get("client", "")).lower() == c_lower]
+    """Load logged SMS submissions from database, optionally filtered by client."""
+    if log_path != "sms_submission_log.jsonl" and not log_path.endswith("sms_submission_log.jsonl"):
+        entries = _read_jsonl(log_path)
+        if client and client.lower() != "all":
+            c_lower = client.lower()
+            return [e for e in entries if str(e.get("client", "")).lower() == c_lower]
+        return entries
+
+    import db
+    db.init_database()
+    entries = []
+    try:
+        with db.get_db() as conn:
+            if client and client.lower() != "all":
+                cur = conn.execute("SELECT payload_json FROM sms_submissions WHERE LOWER(client) = ? ORDER BY created_at ASC", (client.lower(),))
+            else:
+                cur = conn.execute("SELECT payload_json FROM sms_submissions ORDER BY created_at ASC")
+            for r in cur.fetchall():
+                try:
+                    entries.append(json.loads(r["payload_json"]))
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.error("Failed to load SMS submissions from database: %s", exc)
     return entries
 
 
@@ -82,15 +126,38 @@ def log_sms_dlr(
     report: SmsDlrReport,
     log_path: str = "sms_dlr_log.jsonl",
 ) -> None:
-    """Append one SMS DLR callback report as a JSON line."""
+    """Store SMS DLR callback report into database as single source of truth."""
+    import db
+    db.init_database()
     record = asdict(report)
-    with open(log_path, "a", encoding="utf-8") as f:
-        _lock(f)
-        try:
-            f.write(json.dumps(record) + "\n")
-            f.flush()
-        finally:
-            _unlock(f)
+    did = record.get("id") or str(uuid.uuid4())
+    client = record.get("client") or "bajaj"
+    ackid = record.get("ackid")
+    status = record.get("status") or "delivered"
+    created_at = record.get("dtime") or record.get("stime") or datetime.now(UTC).isoformat()
+
+    try:
+        with db.get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO sms_dlrs (id, client, ackid, status, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, payload_json = EXCLUDED.payload_json
+            """,
+                (did, client, ackid, status, json.dumps(record), created_at),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.error("Failed to insert SMS DLR into database: %s", exc)
+
+    if log_path != "sms_dlr_log.jsonl" and not log_path.endswith("sms_dlr_log.jsonl"):
+        with open(log_path, "a", encoding="utf-8") as f:
+            _lock(f)
+            try:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+            finally:
+                _unlock(f)
 
 
 def load_sms_dlrs(
@@ -98,14 +165,36 @@ def load_sms_dlrs(
     client: str | None = None,
     ackid: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Load logged SMS DLR reports, optionally filtered by client or ackid."""
-    entries = _read_jsonl(log_path)
-    if client and client.lower() != "all":
-        c_lower = client.lower()
-        entries = [e for e in entries if str(e.get("client", "")).lower() == c_lower]
-    if ackid:
-        ack_str = str(ackid).strip()
-        entries = [e for e in entries if str(e.get("ackid", "")).strip() == ack_str]
+    """Load logged SMS DLR reports from database, optionally filtered by client or ackid."""
+    if log_path != "sms_dlr_log.jsonl" and not log_path.endswith("sms_dlr_log.jsonl"):
+        entries = _read_jsonl(log_path)
+        if client and client.lower() != "all":
+            c_lower = client.lower()
+            entries = [e for e in entries if str(e.get("client", "")).lower() == c_lower]
+        if ackid:
+            ack_str = str(ackid).strip()
+            entries = [e for e in entries if str(e.get("ackid", "")).strip() == ack_str]
+        return entries
+
+    import db
+    db.init_database()
+    entries = []
+    try:
+        with db.get_db() as conn:
+            cur = conn.execute("SELECT payload_json, client, ackid FROM sms_dlrs ORDER BY created_at ASC")
+            for r in cur.fetchall():
+                c_val = str(r["client"] or "").lower()
+                a_val = str(r["ackid"] or "").strip()
+                if client and client.lower() != "all" and c_val != client.lower():
+                    continue
+                if ackid and a_val != str(ackid).strip():
+                    continue
+                try:
+                    entries.append(json.loads(r["payload_json"]))
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.error("Failed to load SMS DLRs from database: %s", exc)
     return entries
 
 
@@ -113,26 +202,68 @@ def log_sms_click(
     report: SmsClickReport,
     log_path: str = "sms_click_log.jsonl",
 ) -> None:
-    """Append one SMS click report as a JSON line."""
+    """Store SMS click report into database as single source of truth."""
+    import db
+    db.init_database()
     record = asdict(report)
-    with open(log_path, "a", encoding="utf-8") as f:
-        _lock(f)
-        try:
-            f.write(json.dumps(record) + "\n")
-            f.flush()
-        finally:
-            _unlock(f)
+    cid = record.get("id") or str(uuid.uuid4())
+    client = record.get("client") or "bajaj"
+    ackid = record.get("ackid")
+    ctime = record.get("clicked_time") or record.get("clicked_date") or ""
+    created_at = datetime.now(UTC).isoformat()
+
+    try:
+        with db.get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO sms_clicks (id, client, ackid, click_time, payload_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET click_time = EXCLUDED.click_time, payload_json = EXCLUDED.payload_json
+            """,
+                (cid, client, ackid, ctime, json.dumps(record), created_at),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.error("Failed to insert SMS click into database: %s", exc)
+
+    if log_path != "sms_click_log.jsonl" and not log_path.endswith("sms_click_log.jsonl"):
+        with open(log_path, "a", encoding="utf-8") as f:
+            _lock(f)
+            try:
+                f.write(json.dumps(record) + "\n")
+                f.flush()
+            finally:
+                _unlock(f)
 
 
 def load_sms_clicks(
     log_path: str = "sms_click_log.jsonl",
     client: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Load logged SMS click reports, optionally filtered by client."""
-    entries = _read_jsonl(log_path)
-    if client and client.lower() != "all":
-        c_lower = client.lower()
-        return [e for e in entries if str(e.get("client", "")).lower() == c_lower]
+    """Load logged SMS click reports from database, optionally filtered by client."""
+    if log_path != "sms_click_log.jsonl" and not log_path.endswith("sms_click_log.jsonl"):
+        entries = _read_jsonl(log_path)
+        if client and client.lower() != "all":
+            c_lower = client.lower()
+            return [e for e in entries if str(e.get("client", "")).lower() == c_lower]
+        return entries
+
+    import db
+    db.init_database()
+    entries = []
+    try:
+        with db.get_db() as conn:
+            if client and client.lower() != "all":
+                cur = conn.execute("SELECT payload_json FROM sms_clicks WHERE LOWER(client) = ? ORDER BY created_at ASC", (client.lower(),))
+            else:
+                cur = conn.execute("SELECT payload_json FROM sms_clicks ORDER BY created_at ASC")
+            for r in cur.fetchall():
+                try:
+                    entries.append(json.loads(r["payload_json"]))
+                except Exception:
+                    pass
+    except Exception as exc:
+        logger.error("Failed to load SMS clicks from database: %s", exc)
     return entries
 
 

@@ -35,68 +35,8 @@ def init_store() -> None:
         init_queue_db()
     except Exception as e:
         logger.debug("Queue DB init check: %s", e)
-    # Migrate any historical JSONL logs into SQLite
-    _migrate_jsonl_to_sqlite()
+    return
 
-
-def _migrate_jsonl_to_sqlite() -> None:
-    """Import existing lines from activity_log.jsonl into SQLite without duplicates."""
-    jsonl_path = Path(ACTIVITY_LOG_PATH)
-    if not jsonl_path.exists():
-        return
-    try:
-        lines = jsonl_path.read_text(encoding="utf-8").splitlines()
-        records_to_insert = []
-        now = datetime.now(UTC).isoformat()
-        users_map = {}
-
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-                rec_id = row.get("id") or str(uuid.uuid4())
-                ts = row.get("timestamp") or now
-                u = (row.get("user") or "Namann").strip()
-                action = row.get("action") or "ACTIVITY"
-                account = row.get("account") or "all"
-                channel = row.get("channel") or "all"
-                details = json.dumps(row.get("details", {}), default=str)
-                status = row.get("status") or "success"
-                ip = row.get("ip_address")
-
-                records_to_insert.append((rec_id, ts, u, action, account, channel, details, status, ip))
-                users_map[u] = users_map.get(u, 0) + 1
-            except Exception:
-                continue
-
-        if records_to_insert:
-            with _get_db() as conn:
-                conn.executemany(
-                    """
-                    INSERT OR IGNORE INTO activities (id, timestamp, user, action, account, channel, details, status, ip_address)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    records_to_insert,
-                )
-
-                for u_name in users_map:
-                    if u_name and u_name != "Anonymous Operator":
-                        conn.execute(
-                            """
-                            INSERT OR IGNORE INTO users (id, email, password_hash, name, tenant_id, role, created_at, last_login, is_active)
-                            VALUES (?, ?, '', ?, 'all', 'Operator', ?, ?, 1)
-                        """,
-                            (
-                                f"u_{uuid.uuid4().hex[:6]}",
-                                f"{u_name.lower().replace(' ', '_')}@karix.com",
-                                u_name,
-                                now,
-                                now,
-                            ),
-                        )
-    except Exception as exc:
-        logger.warning("Error migrating activity_log.jsonl to SQLite: %s", exc)
 
 
 def register_or_update_user(name: str, role: str = "Operator") -> dict:
@@ -191,7 +131,6 @@ def log_activity(
     except Exception as exc:
         logger.error("Failed to insert activity into SQLite: %s", exc)
 
-    # 2. Append to JSONL for backup
     record = {
         "id": record_id,
         "timestamp": ts,
@@ -204,13 +143,6 @@ def log_activity(
     }
     if ip_address:
         record["ip_address"] = ip_address
-
-    try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, default=str) + "\n")
-    except Exception:
-        pass
-
     return record
 
 
