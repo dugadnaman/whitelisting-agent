@@ -427,6 +427,11 @@ export default function SubmitPage() {
           <p className="text-sm text-gray-500 mt-1">
             Upload a spreadsheet of {channelLabel} templates to validate, preview, and submit for {accountLabel}.
           </p>
+          {channel === 'whatsapp' && (
+            <p className="text-[11px] text-indigo-600 mt-1">
+              Flexible format: message/copy/content columns are detected automatically. Template name, category, language, header, and CTA columns are optional.
+            </p>
+          )}
         </div>
 
         {/* Sample download */}

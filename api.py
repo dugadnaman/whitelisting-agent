@@ -1174,6 +1174,13 @@ def _inspect_template_quality_and_warnings(
     ]
 
 
+def _whatsapp_input_diagnostic(filename: str) -> str:
+    return (
+        f"Could not detect customer-facing WhatsApp content in '{filename}'. "
+        "Upload any CSV/XLS/XLSX layout containing a message, copy, content, or text column; "
+        "template name, category, language, header, and CTA fields are optional and inferred when absent."
+    )
+
 @app.post("/api/preview")
 async def preview_file(
     file: UploadFile = File(...),
@@ -1297,7 +1304,7 @@ async def preview_file(
             )
             raise HTTPException(
                 status_code=400,
-                detail=f"No valid WhatsApp templates found in '{file.filename or 'uploaded file'}'. Please ensure the file contains required template columns (template_name, category, language, body) or use the sample CSV format.",
+                detail=_whatsapp_input_diagnostic(file.filename or "uploaded file"),
             )
 
         log_activity(
@@ -1573,7 +1580,7 @@ async def _submit_wa_batch(
 ) -> dict:
     subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc) if suffix in (".xlsx", ".xls") else await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
     if not subs:
-        raise HTTPException(status_code=400, detail=f"No valid WhatsApp templates found in '{filename}' to submit.")
+        raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(filename))
 
     if auto_route:
         from loader import detect_spreadsheet_account
@@ -2166,7 +2173,7 @@ async def delete_templates_from_file(
             subs = await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
 
         if not subs:
-            raise HTTPException(status_code=400, detail=f"No valid template names found in '{file.filename}'.")
+            raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(file.filename or "uploaded file"))
 
         # Extract unique template names in order of appearance
         seen = set()

@@ -2,8 +2,8 @@
 Input loader: turns raw rows (CSV, JSON list, or Excel files) into validated
 TemplateSubmission objects for WhatsApp.
 
-Supports both standard column spreadsheets and unstructured single-cell
-marketing briefs (like Book 4) with automatic image extraction.
+Supports standard schemas, arbitrary semantic column labels, and unstructured
+single-cell marketing briefs with automatic media extraction.
 """
 
 import csv
@@ -355,6 +355,219 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
 
     return components
 
+_DYNAMIC_FIELD_ALIASES = {
+    "name": "template_name",
+    "campaign": "template_name",
+    "campaign_name": "template_name",
+    "campaign_title": "template_name",
+    "copy_id": "template_name",
+    "copy_name": "template_name",
+    "template": "template_name",
+    "template_id": "template_name",
+    "template_title": "template_name",
+    "message": "body",
+    "message_body": "body",
+    "message_copy": "body",
+    "message_text": "body",
+    "copy": "body",
+    "copy_text": "body",
+    "content": "body",
+    "content_copy": "body",
+    "text": "body",
+    "template_text": "body",
+    "whatsapp_copy": "body",
+    "whatsapp_message": "body",
+    "action": "button_text",
+    "action_label": "button_text",
+    "button_label": "button_text",
+    "call_to_action": "button_text",
+    "cta": "button_text",
+    "cta_label": "button_text",
+    "action_link": "button_url",
+    "button_link": "button_url",
+    "cta_link": "button_url",
+    "cta_url": "button_url",
+    "link": "button_url",
+    "url": "button_url",
+    "heading": "header_text",
+    "headline": "header_text",
+    "header": "header_text",
+    "header_copy": "header_text",
+    "disclaimer": "footer_text",
+    "terms": "footer_text",
+    "terms_conditions": "footer_text",
+    "language_code": "language",
+    "lang": "language",
+    "locale": "language",
+    "message_category": "category",
+    "purpose": "category",
+    "template_category": "category",
+}
+_DYNAMIC_METADATA_FIELDS = {
+    "template_name",
+    "body",
+    "button_text",
+    "button_url",
+    "header_text",
+    "footer_text",
+    "language",
+    "category",
+    "client",
+    "channel",
+    "waba_id",
+    "source_ref",
+    "header_type",
+    "header_format",
+    "button_type",
+    "button_url_example",
+    "components",
+    "address",
+    "date",
+    "email",
+    "id",
+    "phone",
+    "status",
+}
+
+
+def _dynamic_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", str(value).strip().lower()).strip("_")
+
+
+def _canonicalize_dynamic_row(raw_row: dict) -> dict[str, str]:
+    """Map human column labels to a small semantic vocabulary without requiring a schema."""
+    canonical: dict[str, str] = {}
+    for raw_key, raw_value in raw_row.items():
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        key = _dynamic_key(raw_key)
+        target = _DYNAMIC_FIELD_ALIASES.get(key, key)
+        canonical.setdefault(target, value)
+    return canonical
+
+
+def _dynamic_body_value(row: dict[str, str]) -> str:
+    body = row.get("body", "").strip()
+    if body:
+        return body
+
+    try:
+        from briefing_parser import is_valid_template_copy
+    except Exception:
+        is_valid_template_copy = lambda value: len(value.split()) >= 6
+
+    candidates = []
+    for key, value in row.items():
+        if key in _DYNAMIC_METADATA_FIELDS or not value.strip():
+            continue
+        clean = value.strip()
+        if clean.startswith(("http://", "https://")) or clean.isdigit():
+            continue
+        if len(clean) < 8:
+            continue
+        lower = clean.lower()
+        has_message_signal = any(
+            token in lower
+            for token in (
+                "dear",
+                "hello",
+                "offer",
+                "loan",
+                "apply",
+                "otp",
+                "code",
+                "payment",
+                "account",
+                "approved",
+                "due",
+                "click",
+                "visit",
+            )
+        )
+        if is_valid_template_copy(clean) or (len(clean.split()) >= 6 and has_message_signal):
+            candidates.append(clean)
+    return max(candidates, key=len, default="")
+
+
+def _dynamic_template_name(row: dict[str, str], source_name: str, row_number: int) -> str:
+    raw_name = row.get("template_name", "").strip()
+    if raw_name:
+        candidate = raw_name
+    else:
+        stem = Path(source_name).stem
+        candidate = f"{stem}_{row_number}"
+    clean = re.sub(r"[^a-zA-Z0-9]+", "_", candidate).strip("_").lower()
+    return (clean or f"template_{row_number}")[:60]
+
+
+def _dynamic_row_to_submission(
+    raw_row: dict,
+    source_name: str,
+    row_number: int,
+    client: str,
+    waba_cache: dict[str, str],
+) -> TemplateSubmission | None:
+    """Build a submission from arbitrary content columns when no standard schema is present."""
+    row = _canonicalize_dynamic_row(raw_row)
+    body = _dynamic_body_value(row)
+    if not body:
+        return None
+
+    parsed = parse_single_cell_whatsapp_block(body, client=client)
+    header = row.get("header_text") or (parsed.get("header") if "\n" in body else None)
+    clean_body = parsed.get("body") or body
+    components: list[dict] = []
+    if header:
+        components.append({"type": "HEADER", "format": "TEXT", "text": header[:60]})
+    components.append({"type": "BODY", "text": clean_body.strip()})
+
+    footer = row.get("footer_text", "").strip()
+    if footer:
+        components.append({"type": "FOOTER", "text": footer})
+
+    has_cta = bool(
+        row.get("button_url")
+        or row.get("button_text")
+        or re.search(
+            r"https?://|(?:apply|check|explore|click|tap|claim).{0,30}(?:now|here|offer|online)",
+            body,
+            re.IGNORECASE,
+        )
+    )
+    button_url = row.get("button_url") or parsed.get("button_url")
+    button_text = row.get("button_text") or parsed.get("button_text")
+    if has_cta and (button_text or button_url):
+        button = {
+            "type": "URL",
+            "text": (button_text or "Check Offer")[:25],
+            "url": button_url or "https://u3.mnge.co/",
+        }
+        if "{{" in button["url"]:
+            button["example"] = [parsed.get("button_example") or "https://www.tatacapital.com"]
+        components.append({"type": "BUTTONS", "buttons": [button]})
+
+    try:
+        from briefing_parser import detect_category, detect_language
+
+        category = row.get("category", "").strip().upper() or detect_category("", clean_body)
+        language = row.get("language", "").strip().lower() or detect_language(clean_body)
+    except Exception:
+        category = row.get("category", "").strip().upper() or "MARKETING"
+        language = row.get("language", "").strip().lower() or "en"
+
+    template_name = _dynamic_template_name(row, source_name, row_number)
+    return TemplateSubmission(
+        client=client,
+        channel="whatsapp",
+        template_name=template_name,
+        language=language,
+        category=category,
+        waba_id=_resolve_row_waba(client, waba_cache),
+        components=[TemplateComponent(**component) for component in components],
+        source_ref=template_name,
+    )
+
 
 def _resolve_row_waba(row_client: str, cache: dict[str, str]) -> str:
     """Resolve the WABA ID for a row's client, cached per client per file load."""
@@ -368,13 +581,27 @@ def _resolve_row_waba(row_client: str, cache: dict[str, str]) -> str:
 
 
 def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
-    """Load templates from a CSV file for the specified client."""
+    """Load standard or dynamically structured WhatsApp rows from CSV."""
     waba_cache: dict[str, str] = {}
     rows = []
+    dynamic_submissions: list[TemplateSubmission] = []
+    source_name = Path(path).name
     with open(path, newline="", encoding="utf-8") as f:
-        for raw_row in csv.DictReader(f):
+        for row_number, raw_row in enumerate(csv.DictReader(f), 2):
             clean_row = {k.strip(): (v.strip() if v else "") for k, v in raw_row.items() if k}
-            if not clean_row.get("template_name") and not clean_row.get("name"):
+            has_standard_components = bool(clean_row.get("components"))
+            has_standard_body = bool(clean_row.get("body") or clean_row.get("body_text"))
+            has_standard_name = bool(clean_row.get("template_name") or clean_row.get("name"))
+
+            if not has_standard_components and not (has_standard_name and has_standard_body):
+                dynamic = _dynamic_row_to_submission(
+                    clean_row, source_name, row_number, client, waba_cache
+                )
+                if dynamic:
+                    dynamic_submissions.append(dynamic)
+                    continue
+
+            if not has_standard_name:
                 continue
 
             if clean_row.get("components"):
@@ -395,18 +622,8 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
 
             rows.append(clean_row)
 
-    # Only keep rows that actually produced template content. A non-template
-    # file (e.g. a customer-data export with a `name` column) would otherwise
-    # be turned into empty, invalid templates instead of being ignored.
     submissions = [_row_to_submission(row, client=client) for row in rows]
-    kept = [s for s in submissions if s.components]
-    for dropped in (s for s in submissions if not s.components):
-        logger.warning(
-            "Dropping row %r from %s: no template components parsed",
-            dropped.template_name,
-            path,
-        )
-    return kept
+    return [s for s in [*submissions, *dynamic_submissions] if s.components]
 
 
 def _build_single_cell_card_submission(
@@ -485,8 +702,8 @@ def _parse_single_cell_excel_blocks(
 
 def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """
-    Load templates from an Excel (.xlsx) file.
-    Supports embedded images/videos/documents, multi-block cards, and standard column tables.
+    Load standard or dynamically structured WhatsApp rows from Excel.
+    Supports embedded images/videos/documents and arbitrary copy column labels.
     """
     import openpyxl
 
@@ -498,41 +715,50 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     wb = openpyxl.load_workbook(path, data_only=True)
     sheet = wb.active
     all_raw_rows = list(sheet.iter_rows(values_only=True))
-    wb.close()
     first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
     has_standard_headers = any(
-        h
-        in (
-            "template_name",
-            "name",
-            "body",
-            "body_text",
-            "components",
-            "category",
-            "language",
-        )
+        h in ("template_name", "name", "body", "body_text", "components", "category", "language")
         for h in first_row
     )
-    block_subs = _parse_single_cell_excel_blocks(all_raw_rows, path, client, extracted_media, waba_cache) if not has_standard_headers else None
+    block_subs = (
+        _parse_single_cell_excel_blocks(all_raw_rows, path, client, extracted_media, waba_cache)
+        if not has_standard_headers
+        else None
+    )
     if block_subs is not None:
+        wb.close()
         return block_subs
 
-    headers = [str(cell.value or "").strip() for cell in sheet[1]]
+    headers = [str(cell.value or "").strip() for cell in sheet[1]] if all_raw_rows else []
     rows = []
+    dynamic_submissions: list[TemplateSubmission] = []
+    source_name = Path(path).name
     v_idx = 0
     img_idx = 0
     doc_idx = 0
 
-    for row in sheet.iter_rows(min_row=2, values_only=True):
+    for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
         if not any(row):
             continue
 
-        raw_row = {}
-        for h, val in zip(headers, row, strict=False):
-            if h:
-                raw_row[h] = str(val).strip() if val is not None else ""
+        raw_row = {
+            h: str(val).strip() if val is not None else ""
+            for h, val in zip(headers, row, strict=False)
+            if h
+        }
+        has_standard_components = bool(raw_row.get("components"))
+        has_standard_body = bool(raw_row.get("body") or raw_row.get("body_text"))
+        has_standard_name = bool(raw_row.get("template_name") or raw_row.get("name"))
 
-        if not raw_row.get("template_name") and not raw_row.get("name"):
+        if not has_standard_components and not (has_standard_name and has_standard_body):
+            dynamic = _dynamic_row_to_submission(
+                raw_row, source_name, row_number, client, waba_cache
+            )
+            if dynamic:
+                dynamic_submissions.append(dynamic)
+                continue
+
+        if not has_standard_name:
             continue
 
         if raw_row.get("components"):
@@ -556,15 +782,9 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
 
         rows.append(raw_row)
 
+    wb.close()
     submissions = [_row_to_submission(row, client=client) for row in rows]
-    kept = [s for s in submissions if s.components]
-    for dropped in (s for s in submissions if not s.components):
-        logger.warning(
-            "Dropping row %r from %s: no template components parsed",
-            dropped.template_name,
-            path,
-        )
-    return kept
+    return [s for s in [*submissions, *dynamic_submissions] if s.components]
 
 
 def load_from_json(path: str) -> list[TemplateSubmission]:
