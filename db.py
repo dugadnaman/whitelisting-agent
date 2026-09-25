@@ -14,6 +14,9 @@ from pathlib import Path
 import re
 import sqlite3
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
 DEFAULT_SQLITE_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
 DB_PATH = DEFAULT_SQLITE_PATH
 
