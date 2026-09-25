@@ -480,7 +480,7 @@ def decompose_content(
     lang = detect_language(clean_body)
     cat = detect_category(summary or header_text or "", clean_body)
 
-    # Constrained Gemini Intelligence: refine Category, Language, and CTA without altering body text
+    # Constrained Gemini Intelligence: refine classification only. Gemini never supplies text.
     try:
         from gemini_intelligence import analyze_template_semantics
         ai_res = analyze_template_semantics(clean_body, summary=summary)
@@ -488,10 +488,6 @@ def decompose_content(
             cat = ai_res["category"]
         if ai_res.get("language") and lang == "en":
             lang = ai_res["language"]
-        if not header_text and ai_res.get("header_text"):
-            header_text = ai_res["header_text"]
-        if (not cta_btn or cta_btn == "Check Offer") and ai_res.get("button_text"):
-            cta_btn = ai_res["button_text"]
     except Exception:
         pass
 
