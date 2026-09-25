@@ -65,10 +65,10 @@ TEAM_MEMBERS_WHITELIST: dict[str, dict[str, Any]] = {
         "has_jira_seat": False,
     },
     "Aadya": {
-        "name": "Aadya",
+        "name": "Aadya Trivedi",
         "account_id": "712020:50e16c11-d517-4909-8d30-b92693808eaa",
         "role": "Associate / Intern",
-        "email": "aadya@attributics.com",
+        "email": "aadya.trivedi@attributics.com",
         "has_jira_seat": False,
     },
 }
@@ -343,7 +343,10 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100, auto_a
     raw_issues = list_jira_issues(project=project, limit=limit)
     assignable_users = fetch_assignable_jira_users(project=project)
     user_by_name = {u.name.lower(): u for u in assignable_users}
-    if "aadya" in user_by_name:
+    if "aadya trivedi" in user_by_name:
+        user_by_name["aadya"] = user_by_name["aadya trivedi"]
+        user_by_name["aalya mulla"] = user_by_name["aadya trivedi"]
+    elif "aadya" in user_by_name:
         user_by_name["aalya mulla"] = user_by_name["aadya"]
     if "soham das" in user_by_name:
         user_by_name["soham"] = user_by_name["soham das"]
@@ -428,8 +431,8 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100, auto_a
                 except Exception as exc:
                     logger.warning("Could not auto-sync unassigned ticket %s to Neel: %s", item["key"], exc)
         else:
-            if raw_assignee.lower() in ("aalya mulla", "aadya"):
-                assignee_name = "Aadya"
+            if raw_assignee.lower() in ("aalya mulla", "aadya", "aadya trivedi"):
+                assignee_name = "Aadya Trivedi"
             elif raw_assignee.lower() in ("soham", "soham das"):
                 assignee_name = "Soham Das"
             else:
@@ -947,8 +950,8 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
             assignee = op_assign["operational_assignee"]
         elif item.get("mentions_soham"):
             assignee = "Soham Das"
-        elif assignee_raw.lower() in ("aalya mulla", "aadya"):
-            assignee = "Aadya"
+        elif assignee_raw.lower() in ("aalya mulla", "aadya", "aadya trivedi"):
+            assignee = "Aadya Trivedi"
         elif assignee_raw.lower() in ("soham", "soham das"):
             assignee = "Soham Das"
         else:

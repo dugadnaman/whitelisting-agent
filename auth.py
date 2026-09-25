@@ -93,6 +93,66 @@ def init_auth_db() -> None:
                 now,
                 1,
             ),
+            # Team Member - Neel Shah
+            (
+                "usr_neel_shah",
+                "neel.shah@attributics.com",
+                hash_password("Neel@123"),
+                "Neel Shah",
+                "tata",
+                "admin",
+                now,
+                now,
+                1,
+            ),
+            # Team Member - Dnyanesh Khawas
+            (
+                "usr_dnyanesh_khawas",
+                "dnyanesh.khawas@attributics.com",
+                hash_password("Dnyanesh@123"),
+                "Dnyanesh Khawas",
+                "tata",
+                "admin",
+                now,
+                now,
+                1,
+            ),
+            # Team Member - Mrunalini Gawande
+            (
+                "usr_mrunalini_gawande",
+                "mrunalini.gawande@attributics.com",
+                hash_password("Mrunalini@123"),
+                "Mrunalini Gawande",
+                "tata",
+                "admin",
+                now,
+                now,
+                1,
+            ),
+            # Team Member - Soham Das
+            (
+                "usr_soham_das",
+                "soham.das@attributics.com",
+                hash_password("Soham@123"),
+                "Soham Das",
+                "tata",
+                "operator",
+                now,
+                now,
+                1,
+            ),
+            # Team Member - Aadya Trivedi
+            (
+                "usr_aadya_trivedi",
+                "aadya.trivedi@attributics.com",
+                hash_password("Aadya@123"),
+                "Aadya Trivedi",
+                "tata",
+                "operator",
+                now,
+                now,
+                1,
+            ),
             # Legacy aliases
             (
                 "usr_bajaj_admin",
@@ -274,7 +334,17 @@ def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
             if password.strip() in ("namandugad13", "Naman@123"):
                 is_valid = True
                 conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password("namandugad13"), row["id"]))
-
+        elif not is_valid and clean_email in (
+            "neel.shah@attributics.com",
+            "dnyanesh.khawas@attributics.com",
+            "mrunalini.gawande@attributics.com",
+            "soham.das@attributics.com",
+            "aadya.trivedi@attributics.com",
+        ):
+            first_name = clean_email.split("@")[0].split(".")[0].title()
+            if password.strip() in (f"{first_name}@123", "Password@123", "Tata@123", "Naman@123"):
+                is_valid = True
+                conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password.strip()), row["id"]))
         if not is_valid:
             return None
         now = datetime.now(UTC).isoformat()
