@@ -3403,6 +3403,18 @@ def get_jira_brief_endpoint(
         from briefing_parser import parse_jira_brief
         from jira_client import fetch_jira_issue
 
+        clean_key = issue_key.strip().upper()
+        if clean_key.isdigit():
+            for p in ["TCN", "SWCM", "TM", "TAT", "MON", "COL"]:
+                try:
+                    cand = f"{p}-{clean_key}"
+                    test_issue = fetch_jira_issue(cand)
+                    if test_issue and test_issue.get("key"):
+                        clean_key = cand
+                        break
+                except Exception:
+                    continue
+        issue_key = clean_key
         issue_data = fetch_jira_issue(issue_key)
         parsed = parse_jira_brief(issue_data, download_creatives=download_creatives)
 

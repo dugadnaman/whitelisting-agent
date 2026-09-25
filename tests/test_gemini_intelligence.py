@@ -98,7 +98,10 @@ def test_las_whitelisting_detected_as_internal_identifier():
     assert is_internal_identifier("Payment Due Reminder") is False
 
 
-def test_las_whitelisting_rejected_from_template_heading():
+def test_las_whitelisting_rejected_from_template_heading(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    gemini_intelligence._DECISION_CACHE.clear()
     swcm_body = (
         "Your Loan Against Mutual Funds facility is above 70% LTV. "
         "Regularise immediately to 70% through additional pledge/repayment Pursuant to the RBI's "

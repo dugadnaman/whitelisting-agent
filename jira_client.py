@@ -114,9 +114,17 @@ def list_jira_issues(
     if status and status.lower() != "all":
         jql_parts.append(f'status = "{status}"')
     if search:
-        clean_q = search.replace('"', '\\"')
-        jql_parts.append(f'(summary ~ "{clean_q}" OR text ~ "{clean_q}")')
-
+        clean_q = search.replace('"', '\\"').strip()
+        m_key = re.match(r"^([A-Za-z]{2,6})-(\d+)$", clean_q)
+        if clean_q.isdigit():
+            proj_candidates = ["TCN", "SWCM", "TM", "TAT", "MON", "COL"]
+            keys_str = ", ".join([f'"{p}-{clean_q}"' for p in proj_candidates])
+            jql_parts = [f'(key in ({keys_str}) OR summary ~ "{clean_q}" OR text ~ "{clean_q}")']
+        elif m_key:
+            key_upper = clean_q.upper()
+            jql_parts = [f'(key = "{key_upper}" OR summary ~ "{clean_q}" OR text ~ "{clean_q}")']
+        else:
+            jql_parts.append(f'(summary ~ "{clean_q}" OR text ~ "{clean_q}")')
     jql = " AND ".join(jql_parts) + " ORDER BY created DESC"
 
     payload = {

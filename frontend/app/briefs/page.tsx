@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from '@/lib/context';
 import {
   fetchJiraProjects,
@@ -49,20 +49,23 @@ export default function JiraBriefsPage() {
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
   const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
+  const activeRequestKey = useRef<string>('');
 
-  const loadIssues = useCallback(async () => {
+  const loadIssues = useCallback(async (queryParam?: string) => {
     try {
       setLoadingIssues(true);
-      const list = await fetchJiraIssues({ project, limit: 30 });
+      const list = await fetchJiraIssues({
+        project,
+        search: queryParam?.trim() || undefined,
+        limit: 50,
+      });
       setIssues(list);
       if (list.length > 0) {
         setSelectedKey((prev) => {
-          if (prev && list.some((i) => i.key === prev)) return prev;
+          // Preserve already-selected ticket! Never randomly clobber user selection with list[0]!
+          if (prev) return prev;
           return list[0].key;
         });
-      } else {
-        setSelectedKey('');
-        setBrief(null);
       }
     } catch (err) {
       setFeedback({ message: formatError(err), type: 'error' });
@@ -82,8 +85,14 @@ export default function JiraBriefsPage() {
       const params = new URLSearchParams(window.location.search);
       const urlKey = params.get('key');
       const urlProj = params.get('project');
-      if (urlKey) setSelectedKey(urlKey.toUpperCase().trim());
-      if (urlProj) {
+      if (urlKey) {
+        const cleanK = urlKey.toUpperCase().trim();
+        setSelectedKey(cleanK);
+        const prefix = cleanK.split('-')[0];
+        if (prefix && ['TCN', 'SWCM', 'TM', 'TAT', 'MON', 'COL'].includes(prefix)) {
+          setProject(prefix);
+        }
+      } else if (urlProj) {
         setProject(urlProj.toUpperCase().trim());
       } else {
         const saved = localStorage.getItem('briefs_project');
@@ -92,17 +101,55 @@ export default function JiraBriefsPage() {
     }
   }, []);
 
+  // Server-side debounced search for tickets
   useEffect(() => {
-    loadIssues();
-  }, [loadIssues]);
+    const timer = setTimeout(() => {
+      loadIssues(searchQuery);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery, loadIssues]);
+
+  const handleSelectIssue = (key: string) => {
+    const cleanKey = key.trim().toUpperCase();
+    setSelectedKey(cleanKey);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('key', cleanKey);
+      window.history.replaceState({}, '', url.toString());
+    }
+    // Auto-align project dropdown if user selected a ticket from another project
+    const prefix = cleanKey.split('-')[0];
+    if (prefix && prefix !== project && project !== 'ALL' && ['TCN', 'SWCM', 'TM', 'TAT', 'MON', 'COL'].includes(prefix)) {
+      setProject(prefix);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('briefs_project', prefix);
+      }
+    }
+  };
 
   const loadBrief = useCallback(async (key: string) => {
     if (!key) return;
+    const cleanKey = key.trim().toUpperCase();
+    activeRequestKey.current = cleanKey;
     try {
       setLoadingBrief(true);
       setFeedback(null);
-      const data = await fetchJiraBrief(key);
+      const data = await fetchJiraBrief(cleanKey);
+      // Discard stale response if user already switched to another ticket
+      if (activeRequestKey.current !== cleanKey && activeRequestKey.current !== (data.issue_key || '')) {
+        return;
+      }
       setBrief(data);
+      // If the backend resolved a numeric key (e.g. 524 -> TCN-524), sync selectedKey to the canonical key
+      if (data.issue_key && data.issue_key !== cleanKey) {
+        setSelectedKey(data.issue_key);
+        activeRequestKey.current = data.issue_key;
+        if (typeof window !== 'undefined') {
+          const url = new URL(window.location.href);
+          url.searchParams.set('key', data.issue_key);
+          window.history.replaceState({}, '', url.toString());
+        }
+      }
       const waList = data.whatsapp_templates || [];
       const rcsList = data.rcs_templates || [];
       setWaTemplates(waList);
@@ -124,9 +171,13 @@ export default function JiraBriefsPage() {
         setActiveTab('moengage');
       }
     } catch (err) {
-      setFeedback({ message: `Failed to load brief for ${key}: ${formatError(err)}`, type: 'error' });
+      if (activeRequestKey.current === cleanKey) {
+        setFeedback({ message: `Failed to load brief for ${key}: ${formatError(err)}`, type: 'error' });
+      }
     } finally {
-      setLoadingBrief(false);
+      if (activeRequestKey.current === cleanKey) {
+        setLoadingBrief(false);
+      }
     }
   }, []);
 
@@ -329,7 +380,7 @@ export default function JiraBriefsPage() {
 
         <div className="flex items-center gap-3">
           <button
-            onClick={loadIssues}
+            onClick={() => loadIssues()}
             disabled={loadingIssues}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 shadow-2xs transition disabled:opacity-50"
           >
@@ -409,23 +460,39 @@ export default function JiraBriefsPage() {
           />
 
           <div className="space-y-2 max-h-[640px] overflow-y-auto pr-1">
-            {loadingIssues ? (
+            {loadingIssues && issues.length === 0 ? (
               <div className="py-12 text-center text-xs text-gray-400">Loading Jira queue...</div>
-            ) : filteredIssues.length === 0 ? (
+            ) : filteredIssues.length === 0 && !selectedKey ? (
               <div className="py-12 text-center text-xs text-gray-400">No matching Jira tickets found.</div>
             ) : (
-              filteredIssues.map((issue) => {
-                const isSelected = issue.key === selectedKey;
-                return (
-                  <button
-                    key={issue.key}
-                    onClick={() => setSelectedKey(issue.key)}
-                    className={`w-full text-left p-3 rounded-lg border transition text-xs space-y-1.5 ${
-                      isSelected
-                        ? 'bg-blue-50/80 border-blue-300 ring-1 ring-blue-400/40 shadow-xs'
-                        : 'bg-white border-gray-200 hover:bg-gray-50/80'
-                    }`}
-                  >
+              (() => {
+                const isSelectedInList = filteredIssues.some((i) => i.key === selectedKey);
+                const displayIssues = [...filteredIssues];
+                if (selectedKey && !isSelectedInList && brief && (brief.issue_key === selectedKey || selectedKey.endsWith(brief.issue_key.split('-')[1] || ''))) {
+                  displayIssues.unshift({
+                    key: brief.issue_key,
+                    id: brief.issue_key,
+                    summary: brief.summary,
+                    status: brief.status || 'In Progress',
+                    assignee: brief.assignee || 'Unassigned',
+                    reporter: brief.reporter || 'Anonymous',
+                    attachment_count: brief.attachments_mapped?.length || 0,
+                    attachments: [],
+                    is_email: brief.is_email_campaign,
+                  });
+                }
+                return displayIssues.map((issue) => {
+                  const isSelected = issue.key === selectedKey;
+                  return (
+                    <button
+                      key={issue.key}
+                      onClick={() => handleSelectIssue(issue.key)}
+                      className={`w-full text-left p-3 rounded-lg border transition text-xs space-y-1.5 ${
+                        isSelected
+                          ? 'bg-blue-50/80 border-blue-300 ring-1 ring-blue-400/40 shadow-xs'
+                          : 'bg-white border-gray-200 hover:bg-gray-50/80'
+                      }`}
+                    >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold font-mono text-blue-700">{issue.key}</span>
@@ -448,9 +515,10 @@ export default function JiraBriefsPage() {
                       <span>👤 {issue.assignee}</span>
                       <span>📎 {issue.attachment_count} creatives</span>
                     </div>
-                  </button>
-                );
-              })
+                    </button>
+                  );
+                });
+              })()
             )}
           </div>
         </div>
