@@ -36,6 +36,7 @@ export default function JiraBriefsPage() {
   const [campaignTypeFilter, setCampaignTypeFilter] = useState<'all' | 'messaging' | 'email'>('all');
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('whatsapp');
   const [submitting, setSubmitting] = useState(false);
+  const [confirmationMode, setConfirmationMode] = useState<'all' | 'whatsapp' | 'rcs' | null>(null);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -185,6 +186,26 @@ export default function JiraBriefsPage() {
     }
   };
 
+  const requestWhitelist = (channelMode: 'all' | 'whatsapp' | 'rcs') => {
+    const count = channelMode === 'whatsapp'
+      ? selectedWa.size
+      : channelMode === 'rcs'
+      ? selectedRcs.size
+      : selectedWa.size + selectedRcs.size;
+    if (count === 0) {
+      setFeedback({ message: 'Please select at least one template to whitelist.', type: 'error' });
+      return;
+    }
+    setConfirmationMode(channelMode);
+  };
+
+  const confirmWhitelist = async () => {
+    if (!confirmationMode) return;
+    const channelMode = confirmationMode;
+    setConfirmationMode(null);
+    await handleSubmitChannel(channelMode);
+  };
+
   // Editing helpers
   const toggleEditCard = (cardId: string) => {
     setEditingCard((prev) => ({ ...prev, [cardId]: !prev[cardId] }));
@@ -269,7 +290,8 @@ export default function JiraBriefsPage() {
   const totalSelectedCount = selectedWa.size + selectedRcs.size;
 
   return (
-    <div className="space-y-6">
+    <>
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
@@ -494,7 +516,7 @@ export default function JiraBriefsPage() {
                       <>
                         {waTemplates.length > 0 && (
                           <button
-                            onClick={() => handleSubmitChannel('whatsapp')}
+                            onClick={() => requestWhitelist('whatsapp')}
                             disabled={submitting || selectedWa.size === 0}
                             className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
                             title="Submit only the checked WhatsApp templates"
@@ -508,7 +530,7 @@ export default function JiraBriefsPage() {
 
                         {rcsTemplates.length > 0 && (
                           <button
-                            onClick={() => handleSubmitChannel('rcs')}
+                            onClick={() => requestWhitelist('rcs')}
                             disabled={submitting || selectedRcs.size === 0}
                             className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
                             title="Submit only the checked RCS templates"
@@ -521,7 +543,7 @@ export default function JiraBriefsPage() {
                         )}
 
                         <button
-                          onClick={() => handleSubmitChannel('all')}
+                          onClick={() => requestWhitelist('all')}
                           disabled={submitting || totalSelectedCount === 0}
                           className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
                         >
@@ -1298,5 +1320,67 @@ export default function JiraBriefsPage() {
         </div>
       </div>
     </div>
+    {confirmationMode && brief && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="whitelist-confirmation-title"
+      >
+        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-5">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0">
+              ⚠️
+            </div>
+            <div>
+              <h2 id="whitelist-confirmation-title" className="text-base font-bold text-gray-900">
+                Confirm whitelisting
+              </h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Review this action before sending templates to Karix.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-2 text-xs text-amber-900">
+            <p>
+              You are about to whitelist the selected templates from <strong>{brief.issue_key}</strong>.
+            </p>
+            <ul className="list-disc list-inside space-y-1">
+              {(confirmationMode === 'all' || confirmationMode === 'whatsapp') && (
+                <li>{selectedWa.size} WhatsApp template{selectedWa.size === 1 ? '' : 's'}</li>
+              )}
+              {(confirmationMode === 'all' || confirmationMode === 'rcs') && (
+                <li>{selectedRcs.size} RCS template{selectedRcs.size === 1 ? '' : 's'}</li>
+              )}
+              <li>Target account: <strong>{accounts.find((account) => account.id === targetAccount)?.name || targetAccount}</strong></li>
+            </ul>
+            <p className="pt-2 border-t border-amber-200/80 font-semibold">
+              After you confirm, the application will submit them for whitelisting.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setConfirmationMode(null)}
+              disabled={submitting}
+              className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={confirmWhitelist}
+              disabled={submitting}
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {submitting ? 'Whitelisting...' : 'Confirm & Whitelist'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
