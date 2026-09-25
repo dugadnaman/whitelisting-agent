@@ -1237,6 +1237,15 @@ export async function bulkTransferJiraTickets(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+export async function assignUnassignedTicketsToNeel(project: string = "ALL") {
+  const qs = project ? `?project=${encodeURIComponent(project)}` : "";
+  const res = await fetchWithRetry(getApiUrl(`/api/work-management/assign-unassigned${qs}`), {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
 
 export async function aiRebalanceWorkload(prompt: string, project: string = "TCN", auto_execute: boolean = false) {
   const res = await fetchWithRetry(getApiUrl(`/api/work-management/ai-rebalance`), {

@@ -11,6 +11,7 @@ import {
   dispatchAlerts,
   fetchAlertSchedulerStatus,
   toggleAlertScheduler,
+  assignUnassignedTicketsToNeel,
 } from '@/lib/api';
 import type {
   AlertEmailDraft,
@@ -130,6 +131,7 @@ type TransferProposal = {
 type WorkManagementData = {
   project: string;
   total_tickets: number;
+  unassigned_count?: number;
   status_counts: {
     PENDING: number;
     BLOCKED: number;
@@ -203,7 +205,7 @@ export default function WorkManagementPage() {
   const [bulkTargetId, setBulkTargetId] = useState<string>('');
   const [bulkHandoverNote, setBulkHandoverNote] = useState<string>('');
   const [bulkTransferring, setBulkTransferring] = useState<boolean>(false);
-
+  const [assigningUnassigned, setAssigningUnassigned] = useState<boolean>(false);
   // Table Sorting
   const [sortField, setSortField] = useState<'key' | 'summary' | 'status' | 'assignee' | 'channel' | 'duedate'>('duedate');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
@@ -541,6 +543,19 @@ export default function WorkManagementPage() {
     return sortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
   });
 
+  const handleAssignUnassignedToNeel = async () => {
+    try {
+      setAssigningUnassigned(true);
+      const res = await assignUnassignedTicketsToNeel(selectedProject);
+      await handleRefresh();
+      alert(res.message || `Successfully assigned ${res.transferred_count} unassigned ticket(s) to Neel Shah in Jira Cloud.`);
+    } catch (err: unknown) {
+      alert(`Assignment to Neel Shah failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAssigningUnassigned(false);
+    }
+  };
+
   return (
     <div className="space-y-8 max-w-7xl mx-auto pb-16">
       {/* Page Header */}
@@ -592,6 +607,20 @@ export default function WorkManagementPage() {
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
             </svg>
             {refreshing ? 'Syncing Jira...' : 'Refresh from Jira'}
+          </button>
+          <button
+            onClick={handleAssignUnassignedToNeel}
+            disabled={assigningUnassigned}
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 shadow-sm transition-all active:scale-95 disabled:opacity-50"
+            title="Automatically assign all unassigned Jira tickets to Neel Shah directly in Jira Cloud"
+          >
+            <span>⚡</span>
+            <span>{assigningUnassigned ? 'Assigning to Neel...' : 'Assign Unassigned to Neel'}</span>
+            {data?.unassigned_count ? (
+              <span className="text-[10px] bg-amber-600 text-white px-1.5 py-0.5 rounded-full font-extrabold">
+                {data.unassigned_count}
+              </span>
+            ) : null}
           </button>
           <button
             onClick={handleOpenAlertsModal}

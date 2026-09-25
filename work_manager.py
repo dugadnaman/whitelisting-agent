@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 _load_env_file()
 
 # Primary team members specifically requested for work management
+NEEL_SHAH_ACCOUNT_ID = "712020:fae946f9-8472-455a-9d27-6d773ecfb48d"
+NEEL_SHAH_NAME = "Neel Shah"
+NEEL_SHAH_ROLE = "Core Operator"
+
 TEAM_MEMBERS_WHITELIST: dict[str, dict[str, Any]] = {
     "Mrunalini Gawande": {
         "name": "Mrunalini Gawande",
@@ -351,7 +355,7 @@ def fetch_assignable_jira_users(project: str = "TCN") -> list[JiraUser]:
     return users_list
 
 
-def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dict[str, Any]:
+def get_work_management_dashboard(project: str = "TCN", limit: int = 100, auto_assign_unassigned: bool = False) -> dict[str, Any]:
     """
     Build the complete Work Management Dashboard:
     - Ingests Jira issues.
@@ -430,6 +434,22 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
             routed_to_soham = True
             original_assignee = raw_assignee if raw_assignee.lower() not in ("soham", "soham das", "unassigned") else None
             soham_reasons = item.get("soham_mention_reasons") or ["mention"]
+        elif raw_assignee.lower() in ("unassigned", "none", "", "--"):
+            # Unassigned tickets policy: automatically route unassigned queue to Neel Shah
+            assignee_name = NEEL_SHAH_NAME
+            is_op_assignment = True
+            original_assignee = "Unassigned"
+            op_note = "Auto-assigned unassigned ticket to Neel Shah per operational policy"
+            if auto_assign_unassigned:
+                try:
+                    transfer_jira_ticket(
+                        issue_key=item["key"],
+                        to_account_id=NEEL_SHAH_ACCOUNT_ID,
+                        handover_note="Auto-assigned unassigned ticket to Neel Shah",
+                        transferred_by="Work Management Auto-Assigner",
+                    )
+                except Exception as exc:
+                    logger.warning("Could not auto-sync unassigned ticket %s to Neel: %s", item["key"], exc)
         else:
             if raw_assignee.lower() in ("aalya mulla", "aadya"):
                 assignee_name = "Aadya"
@@ -503,6 +523,7 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100) -> dic
     return {
         "project": project,
         "total_tickets": len(work_items),
+        "unassigned_count": sum(1 for w in work_items if w.original_assignee == "Unassigned"),
         "status_counts": status_counts,
         "timeline_counts": timeline_counts,
         "channel_counts": channel_counts,
@@ -661,6 +682,73 @@ def bulk_transfer_jira_tickets(
         "transferred_keys": transferred,
         "failed_keys": failed,
         "failed_items": failed,
+    }
+
+def assign_unassigned_tickets_to_neel(project: str = "ALL", limit: int = 50) -> dict[str, Any]:
+    """
+    Find all unassigned tickets in Jira across project(s) and reassign them to Neel Shah directly in Jira Cloud.
+    """
+    from jira_client import get_jira_credentials, get_jira_auth_headers
+    import requests
+
+    base_url, _, _ = get_jira_credentials()
+    headers = get_jira_auth_headers()
+    url = f"{base_url}/rest/api/3/search/jql"
+
+    p_clean = (project or "ALL").strip().upper()
+    if p_clean == "ALL":
+        proj_clause = 'project in ("TCN", "SWCM", "TM", "TAT", "MON", "COL")'
+    else:
+        proj_clause = f'project = "{p_clean}"'
+
+    jql = f"{proj_clause} AND assignee is EMPTY ORDER BY created DESC"
+    payload = {
+        "jql": jql,
+        "maxResults": min(max(1, limit), 100),
+        "fields": ["summary", "status", "project"],
+    }
+
+    resp = requests.post(url, headers=headers, json=payload, timeout=25)
+    if not resp.ok:
+        logger.error("Failed to query unassigned tickets: %s", resp.text)
+        return {
+            "ok": False,
+            "error": f"Jira API error ({resp.status_code}): {resp.text[:200]}",
+            "transferred_count": 0,
+            "transferred_keys": [],
+        }
+
+    issues_raw = resp.json().get("issues", [])
+    unassigned_keys = [i.get("key") for i in issues_raw if i.get("key")]
+
+    transferred = []
+    failed = []
+
+    for key in unassigned_keys:
+        try:
+            res = transfer_jira_ticket(
+                issue_key=key,
+                to_account_id=NEEL_SHAH_ACCOUNT_ID,
+                handover_note="Auto-assigned unassigned ticket to Neel Shah",
+                transferred_by="Work Management Auto-Assigner",
+            )
+            if res.get("ok"):
+                transferred.append(key)
+            else:
+                failed.append({"key": key, "error": str(res.get("error"))})
+        except Exception as exc:
+            logger.error("Failed to assign %s to Neel Shah: %s", key, exc)
+            failed.append({"key": key, "error": str(exc)})
+
+    return {
+        "ok": True,
+        "total_found": len(unassigned_keys),
+        "transferred_count": len(transferred),
+        "transferred_keys": transferred,
+        "failed_count": len(failed),
+        "failed_keys": failed,
+        "target_assignee": NEEL_SHAH_NAME,
+        "message": f"Successfully assigned {len(transferred)} unassigned ticket(s) to Neel Shah in Jira Cloud.",
     }
 
 

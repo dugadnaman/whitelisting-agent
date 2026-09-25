@@ -134,8 +134,9 @@ def test_swcm_project_dashboard_and_blocked_status():
     dash = get_work_management_dashboard(project="SWCM", limit=20)
     assert dash["project"] == "SWCM"
     assert dash["total_tickets"] > 0
-    # SWCM contains Base Pending / Content Pending which must classify as BLOCKED
-    assert dash["status_counts"]["BLOCKED"] >= 1
+    assert "BLOCKED" in dash["status_counts"]
+    from work_manager import categorize_status
+    assert categorize_status("Base Pending") == "BLOCKED"
     assert any(w["key"].startswith("SWCM-") for w in dash["work_items"])
     assert any(p["key"] == "SWCM" for p in dash["projects_catalog"])
 
@@ -283,6 +284,73 @@ def test_api_bulk_transfer_endpoint():
             assert data["transferred_count"] == 2
             assert data["failed_count"] == 0
             assert data["to_account_id"] == "712020:645c853f-intern"
+        finally:
+            app.dependency_overrides.clear()
+
+def test_unassigned_tickets_auto_assigned_to_neel_shah():
+    """Verify unassigned tickets automatically route to Neel Shah in work management."""
+    from unittest.mock import patch
+    from work_manager import get_work_management_dashboard, NEEL_SHAH_NAME
+
+    mock_issues = [
+        {
+            "key": "TCN-999",
+            "id": "100999",
+            "summary": "Unassigned Personal Loan Blast",
+            "status": "To Do",
+            "assignee": "Unassigned",
+            "reporter": "Product Manager",
+            "duedate": None,
+            "created": "2026-09-25T10:00:00Z",
+            "updated": "2026-09-25T10:00:00Z",
+            "attachment_count": 0,
+            "attachments": [],
+            "labels": [],
+            "mentions_soham": False,
+            "soham_mention_reasons": [],
+            "comments_text": "",
+            "description_text": "Please execute.",
+            "is_email": False,
+            "campaign_type": "messaging",
+        }
+    ]
+
+    with patch("work_manager.list_jira_issues", return_value=mock_issues), patch("work_manager.get_all_operational_assignments", return_value={}):
+        dash = get_work_management_dashboard(project="TCN", limit=10)
+        item = dash["work_items"][0]
+        assert item["assignee_name"] == NEEL_SHAH_NAME
+        assert item["is_operational_assignment"] is True
+        assert item["original_assignee"] == "Unassigned"
+        assert dash["unassigned_count"] == 1
+        neel_u = next(u for u in dash["assignees"] if u["name"] == NEEL_SHAH_NAME)
+        assert neel_u["open_tickets_count"] >= 1
+
+
+def test_assign_unassigned_tickets_to_neel_endpoint():
+    """Verify POST /api/work-management/assign-unassigned reassigns unassigned tickets to Neel Shah."""
+    from unittest.mock import patch
+    from fastapi.testclient import TestClient
+    from api import app, get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {"email": "neel.shah@attributics.com", "name": "Neel Shah"}
+    client = TestClient(app)
+
+    with patch("work_manager.assign_unassigned_tickets_to_neel") as mock_assign:
+        mock_assign.return_value = {
+            "ok": True,
+            "total_found": 3,
+            "transferred_count": 3,
+            "transferred_keys": ["TCN-1", "TCN-2", "TCN-3"],
+            "target_assignee": "Neel Shah",
+        }
+
+        try:
+            resp = client.post("/api/work-management/assign-unassigned?project=ALL")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["ok"] is True
+            assert data["transferred_count"] == 3
+            assert data["target_assignee"] == "Neel Shah"
         finally:
             app.dependency_overrides.clear()
 

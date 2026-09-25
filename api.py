@@ -4195,6 +4195,7 @@ class AiRebalanceRequest(BaseModel):
 def get_work_management_dashboard_endpoint(
     project: str = Query("TCN"),
     limit: int = Query(100),
+    auto_assign_unassigned: bool = Query(False),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -4206,7 +4207,7 @@ def get_work_management_dashboard_endpoint(
     """
     from work_manager import get_work_management_dashboard
 
-    data = get_work_management_dashboard(project=project, limit=limit)
+    data = get_work_management_dashboard(project=project, limit=limit, auto_assign_unassigned=auto_assign_unassigned)
     return _json_safe(data)
 
 
@@ -4297,6 +4298,19 @@ def bulk_transfer_jira_tickets_endpoint(
         handover_note=body.handover_note,
         transferred_by=operator,
     )
+    return _json_safe(result)
+
+@app.post("/api/work-management/assign-unassigned")
+def assign_unassigned_to_neel_endpoint(
+    project: str = Query("ALL"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Assign all unassigned Jira tickets to Neel Shah directly in Jira Cloud.
+    """
+    from work_manager import assign_unassigned_tickets_to_neel
+
+    result = assign_unassigned_tickets_to_neel(project=project)
     return _json_safe(result)
 
 @app.post("/api/work-management/ai-rebalance")
