@@ -54,7 +54,10 @@ def test_get_database_url_normalization(monkeypatch):
     assert db.is_postgres() is False
 
 
-def test_db_connection_sqlite_execution():
+def test_db_connection_sqlite_execution(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
+    monkeypatch.delenv("POSTGRESQL_URL", raising=False)
     with db.get_db() as conn:
         assert conn.is_postgres is False
         cur = conn.execute("SELECT COUNT(*) as c FROM users")
@@ -63,13 +66,15 @@ def test_db_connection_sqlite_execution():
         assert row[0] >= 0
 
 
-def test_init_database_executes_cleanly():
+def test_init_database_executes_cleanly(monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
+    monkeypatch.delenv("POSTGRESQL_URL", raising=False)
     db.init_database()
     with db.get_db() as conn:
         tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
         for t in ["users", "activities", "ingestion_jobs", "job_tasks", "operational_assignments"]:
             assert t in tables
-
 
 def test_migration_utility_dry_run():
     from scripts.migrate_sqlite_to_postgres import main

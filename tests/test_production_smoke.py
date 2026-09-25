@@ -92,11 +92,14 @@ def test_auth_signup_and_login_contract():
     assert login_data["token"]
 
 
-def test_sqlite_wal_persistence_and_concurrency():
+def test_sqlite_wal_persistence_and_concurrency(monkeypatch):
     """
     Verify SQLite store runs in WAL mode with normal sync and 5000ms busy timeout,
     guaranteeing concurrent reader-writer safety across worker threads.
     """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
+    monkeypatch.delenv("POSTGRESQL_URL", raising=False)
     with get_db() as conn:
         journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         assert journal_mode.upper() == "WAL"
