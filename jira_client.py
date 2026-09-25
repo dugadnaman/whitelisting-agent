@@ -192,6 +192,36 @@ def list_jira_issues(
             ("mailer" in sum_low or "mailers" in sum_low or "email" in sum_low or has_mailers_zip)
             and (has_mailers_zip or has_subject_lines or "email" in sum_low or "mailer" in sum_low)
         )
+        # Calculate channel-wise campaign counts
+        fn_lowers = [fn.lower() for fn in att_filenames]
+        desc_low = desc_val.lower()
+
+        wa_att_count = sum(1 for fn in fn_lowers if any(k in fn for k in ("wa", "whatsapp")) and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv")))
+        has_wa = "whatsapp" in desc_low or "whatsapp" in sum_low or wa_att_count > 0 or any(fn.endswith((".docx", ".doc")) for fn in fn_lowers)
+        ch_wa = wa_att_count if wa_att_count > 0 else (1 if has_wa and not is_email else 0)
+
+        rcs_att_count = sum(1 for fn in fn_lowers if "rcs" in fn and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv")))
+        has_rcs = "rcs" in desc_low or "rcs" in sum_low or rcs_att_count > 0
+        ch_rcs = rcs_att_count if rcs_att_count > 0 else (1 if has_rcs and not is_email else 0)
+
+        sms_att_count = sum(1 for fn in fn_lowers if "sms" in fn and fn.endswith((".xlsx", ".xls", ".csv", ".txt")))
+        has_sms = "sms" in desc_low or "sms" in sum_low or sms_att_count > 0
+        ch_sms = sms_att_count if sms_att_count > 0 else (1 if has_sms and not is_email else 0)
+
+        has_email_files = any("mailer" in fn or fn.endswith((".zip", ".html")) for fn in fn_lowers)
+        ch_email = 1 if is_email or has_email_files or "email text" in desc_low else 0
+
+        ch_push = 1 if any(k in desc_low or k in sum_low for k in ("push", "moengage", "notification")) else 0
+        total_channels = ch_wa + ch_rcs + ch_sms + ch_email + ch_push
+
+        channel_counts = {
+            "total": total_channels,
+            "whatsapp": ch_wa,
+            "rcs": ch_rcs,
+            "sms": ch_sms,
+            "email": ch_email,
+            "push": ch_push,
+        }
 
         results.append(
             {
@@ -226,6 +256,7 @@ def list_jira_issues(
                 "description_text": desc_val,
                 "is_email": is_email,
                 "campaign_type": "email" if is_email else "messaging",
+                "channel_counts": channel_counts,
             }
         )
 

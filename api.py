@@ -3465,6 +3465,7 @@ def get_jira_brief_endpoint(
             "attachments_mapped": parsed.attachments_mapped,
             "comments": getattr(parsed, "comments", []),
             "comment_updates": getattr(parsed, "comment_updates", []),
+            "channel_counts": getattr(parsed, "channel_counts", {}),
         }
 
         return _json_safe({"ok": True, "brief": parsed_dict})

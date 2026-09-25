@@ -851,6 +851,14 @@ export async function deleteTemplatesFromFile(
 // ---------------------------------------------------------------------------
 // Jira Briefing Agent Client APIs
 // ---------------------------------------------------------------------------
+export type JiraChannelCounts = {
+  total: number;
+  whatsapp: number;
+  rcs: number;
+  sms: number;
+  email: number;
+  push: number;
+};
 
 export type JiraIssueItem = {
   key: string;
@@ -872,6 +880,7 @@ export type JiraIssueItem = {
   updated?: string;
   is_email?: boolean;
   campaign_type?: 'email' | 'messaging';
+  channel_counts?: JiraChannelCounts;
 };
 
 export type JiraWhatsAppDraft = {
@@ -970,6 +979,7 @@ export type JiraBriefData = {
     variant: string;
     source: string;
   }>;
+  channel_counts?: JiraChannelCounts;
 };
 
 export type JiraProjectItem = {

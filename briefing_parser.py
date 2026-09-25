@@ -109,7 +109,7 @@ class ParsedJiraBrief:
     attachments_mapped: list[dict[str, Any]] = field(default_factory=list)
     comments: list[dict[str, Any]] = field(default_factory=list)
     comment_updates: list[dict[str, Any]] = field(default_factory=list)
-
+    channel_counts: dict[str, int] = field(default_factory=dict)
 def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
     """Infer the correct Tata Capital sub-account from product keywords."""
     t = text.lower()
@@ -2060,6 +2060,19 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"
     )
 
+    has_push = bool(
+        moengage_campaign
+        and (moengage_campaign.get("push_body") or moengage_campaign.get("push_title"))
+    )
+    ch_counts = {
+        "total": len(wa_drafts) + len(rcs_drafts) + len(sms_drafts) + len(email_drafts) + (1 if has_push else 0),
+        "whatsapp": len(wa_drafts),
+        "rcs": len(rcs_drafts),
+        "sms": len(sms_drafts),
+        "email": len(email_drafts),
+        "push": 1 if has_push else 0,
+    }
+
     return ParsedJiraBrief(
         issue_key=key,
         summary=summary,
@@ -2078,4 +2091,5 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         attachments_mapped=mapped_attachments,
         comments=raw_comments,
         comment_updates=comment_updates,
+        channel_counts=ch_counts,
     )

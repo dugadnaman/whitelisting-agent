@@ -238,3 +238,23 @@ def test_swcm_61_metadata_table_rejected_as_templates():
     assert parsed.is_email_campaign is True
     assert parsed.campaign_type_label == "Email Mailer Campaign"
     assert len(parsed.email_templates) >= 1
+
+def test_channel_counts_in_brief_and_issues():
+    """Verify channel_counts breakdown is computed on Jira briefs."""
+    from briefing_parser import parse_jira_brief
+    from jira_client import fetch_jira_issue
+
+    try:
+        issue = fetch_jira_issue("SWCM-59")
+    except Exception:
+        return
+
+    parsed = parse_jira_brief(issue, download_creatives=True)
+    assert "channel_counts" in dir(parsed)
+    counts = parsed.channel_counts
+    assert counts["whatsapp"] == 3
+    assert counts["sms"] == 3
+    assert counts["total"] >= 6
+    assert "rcs" in counts
+    assert "email" in counts
+    assert "push" in counts

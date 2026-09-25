@@ -515,6 +515,45 @@ export default function JiraBriefsPage() {
                       <span>👤 {issue.assignee}</span>
                       <span>📎 {issue.attachment_count} creatives</span>
                     </div>
+                    {/* Channel-Wise Campaign Breakdown */}
+                    {(() => {
+                      const counts = (isSelected && brief?.channel_counts) ? brief.channel_counts : issue.channel_counts;
+                      if (!counts || counts.total === 0) return null;
+                      return (
+                        <div className="flex flex-wrap items-center gap-1 pt-1.5 border-t border-gray-100">
+                          {counts.whatsapp > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200" title={`${counts.whatsapp} WhatsApp campaign(s)`}>
+                              <span>WA:</span>
+                              <span className="font-extrabold">{counts.whatsapp}</span>
+                            </span>
+                          )}
+                          {counts.rcs > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200" title={`${counts.rcs} RCS campaign(s)`}>
+                              <span>RCS:</span>
+                              <span className="font-extrabold">{counts.rcs}</span>
+                            </span>
+                          )}
+                          {counts.sms > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 border border-purple-200" title={`${counts.sms} SMS campaign(s)`}>
+                              <span>SMS:</span>
+                              <span className="font-extrabold">{counts.sms}</span>
+                            </span>
+                          )}
+                          {counts.email > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200" title={`${counts.email} Email campaign(s)`}>
+                              <span>Email:</span>
+                              <span className="font-extrabold">{counts.email}</span>
+                            </span>
+                          )}
+                          {counts.push > 0 && (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="Push / MoEngage campaign">
+                              <span>Push:</span>
+                              <span className="font-extrabold">{counts.push}</span>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                     </button>
                   );
                 });
@@ -552,8 +591,58 @@ export default function JiraBriefsPage() {
                       <span>🛠️ Assignee: <strong>{brief.assignee}</strong></span>
                       {brief.duedate && <span>📅 Due Date: <strong>{formatDate(brief.duedate)}</strong></span>}
                     </div>
+                    {/* Channel-Wise Campaign Count Summary Bar */}
+                    <div className="p-3 bg-gradient-to-r from-gray-50 via-blue-50/20 to-indigo-50/15 rounded-xl border border-gray-200/90 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-gray-900 uppercase tracking-wide">
+                            📊 Total Campaigns in Ticket:
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-blue-600 text-white shadow-2xs">
+                            {brief.channel_counts?.total ?? (waTemplates.length + rcsTemplates.length + (brief.sms_templates?.length || 0) + (brief.email_templates?.length || 0) + (brief.moengage_campaign ? 1 : 0))}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-gray-500 font-medium">Channel-wise Breakdown</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-0.5">
+                        {/* WhatsApp */}
+                        <div className={`p-2 rounded-lg border text-center transition ${waTemplates.length > 0 ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
+                          <div className="text-[10px] font-bold uppercase tracking-wider">🟢 WhatsApp</div>
+                          <div className="text-base font-extrabold">{waTemplates.length}</div>
+                          <div className="text-[9px] text-gray-500">{waTemplates.length === 1 ? 'template' : 'templates'}</div>
+                        </div>
+
+                        {/* RCS */}
+                        <div className={`p-2 rounded-lg border text-center transition ${rcsTemplates.length > 0 ? 'bg-blue-50/90 border-blue-200 text-blue-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
+                          <div className="text-[10px] font-bold uppercase tracking-wider">🔵 RCS (DLT)</div>
+                          <div className="text-base font-extrabold">{rcsTemplates.length}</div>
+                          <div className="text-[9px] text-gray-500">{rcsTemplates.length === 1 ? 'card' : 'cards'}</div>
+                        </div>
+
+                        {/* SMS */}
+                        <div className={`p-2 rounded-lg border text-center transition ${(brief.sms_templates?.length || 0) > 0 ? 'bg-purple-50/90 border-purple-200 text-purple-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
+                          <div className="text-[10px] font-bold uppercase tracking-wider">🟣 SMS (DLT)</div>
+                          <div className="text-base font-extrabold">{brief.sms_templates?.length || 0}</div>
+                          <div className="text-[9px] text-gray-500">{(brief.sms_templates?.length || 0) === 1 ? 'template' : 'templates'}</div>
+                        </div>
+
+                        {/* Email */}
+                        <div className={`p-2 rounded-lg border text-center transition ${(brief.email_templates?.length || 0) > 0 ? 'bg-amber-50/90 border-amber-200 text-amber-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
+                          <div className="text-[10px] font-bold uppercase tracking-wider">📧 Email</div>
+                          <div className="text-base font-extrabold">{brief.email_templates?.length || 0}</div>
+                          <div className="text-[9px] text-gray-500">{(brief.email_templates?.length || 0) === 1 ? 'campaign' : 'campaigns'}</div>
+                        </div>
+
+                        {/* Push / MoEngage */}
+                        <div className={`p-2 rounded-lg border text-center transition ${brief.moengage_campaign ? 'bg-indigo-50/90 border-indigo-200 text-indigo-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
+                          <div className="text-[10px] font-bold uppercase tracking-wider">📱 Push / App</div>
+                          <div className="text-base font-extrabold">{brief.moengage_campaign ? 1 : 0}</div>
+                          <div className="text-[9px] text-gray-500">campaign</div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                    {/* Target Account Selector */}
                     <div className="flex flex-wrap items-center gap-2 pt-1.5">
                       <span className="text-xs font-bold text-gray-700">🏢 Whitelist Under Account:</span>
                       <select
