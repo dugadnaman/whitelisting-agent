@@ -12,13 +12,12 @@ import time
 from typing import Any
 
 from activity_tracker import log_activity
+from db_queue import create_job_with_tasks, record_task_result
 from grammar_checker import lint_and_fix_body
 from loader import _row_to_submission
 from rcs_client import fetch_rcs_templates, submit_rcs_template
 from rcs_models import RcsTemplateSubmission
 from rcs_tracker import load_rcs_log
-from db_queue import create_job_with_tasks, record_task_result
-from queue_manager import QUEUE_MANAGER
 from submission_client import (
     SubmissionStatus,
     fetch_template_list,
@@ -135,8 +134,20 @@ def tool_inspect_template(
 
 
 PROMOTIONAL_KEYWORDS = {
-    "discount", "offer", "cashback", "save", "sale", "win", "reward",
-    "bonus", "deals", "deal", "limited time", "festive", "gift", "special prize"
+    "discount",
+    "offer",
+    "cashback",
+    "save",
+    "sale",
+    "win",
+    "reward",
+    "bonus",
+    "deals",
+    "deal",
+    "limited time",
+    "festive",
+    "gift",
+    "special prize",
 }
 
 BANNED_SHORTENERS = ["bit.ly", "tinyurl.com", "rb.gy", "goo.gl", "ow.ly", "is.gd", "buff.ly", "t.co"]
@@ -175,11 +186,13 @@ def remediate_template_rejection(
     cleaned_body, grammar_warnings = lint_and_fix_body(fixed_body)
     fixed_body = cleaned_body
     for w in grammar_warnings:
-        issues_detected.append({
-            "policy": "SYNTAX_GRAMMAR",
-            "issue": w.get("issue"),
-            "suggestion": w.get("suggestion"),
-        })
+        issues_detected.append(
+            {
+                "policy": "SYNTAX_GRAMMAR",
+                "issue": w.get("issue"),
+                "suggestion": w.get("suggestion"),
+            }
+        )
 
     # 2. Sequential Variable Indexing
     var_tokens = re.findall(r"\{\{([^}]+)\}\}", fixed_body)
@@ -187,15 +200,19 @@ def remediate_template_rejection(
         expected_indices = [str(i + 1) for i in range(len(var_tokens))]
         if var_tokens != expected_indices:
             counter = [0]
+
             def repl_var(m):
                 counter[0] += 1
                 return f"{{{{{counter[0]}}}}}"
+
             fixed_body = re.sub(r"\{\{[^}]+\}\}", repl_var, fixed_body)
-            issues_detected.append({
-                "policy": "META_VARIABLE_ORDER",
-                "issue": f"Non-sequential or named variables detected ({', '.join(var_tokens)}).",
-                "suggestion": "Renumbered sequentially to {{1}}, {{2}}, ... per Meta requirement.",
-            })
+            issues_detected.append(
+                {
+                    "policy": "META_VARIABLE_ORDER",
+                    "issue": f"Non-sequential or named variables detected ({', '.join(var_tokens)}).",
+                    "suggestion": "Renumbered sequentially to {{1}}, {{2}}, ... per Meta requirement.",
+                }
+            )
 
     # 3. Word-to-Variable Ratio Check (Meta Error 2388293)
     var_matches = re.findall(r"\{\{\d+\}\}", fixed_body)
@@ -209,21 +226,27 @@ def remediate_template_rejection(
             domain_name = "Bajaj Finserv" if "bajaj" in account.lower() else "Tata Capital"
             addition = f" This is an official service notification regarding your account details. Thank you for choosing {domain_name}."
             fixed_body = fixed_body.rstrip(".") + "." + addition
-            issues_detected.append({
-                "policy": "META_VARIABLE_RATIO",
-                "issue": f"Low word-to-variable ratio ({word_count} words for {var_count} variables = {ratio:.1f}:1). Meta requires >= 2.5:1 (Error 2388293).",
-                "suggestion": f"Expanded fixed contextual copy to achieve compliant ratio ({ratio:.1f}:1 -> compliant).",
-            })
+            issues_detected.append(
+                {
+                    "policy": "META_VARIABLE_RATIO",
+                    "issue": f"Low word-to-variable ratio ({word_count} words for {var_count} variables = {ratio:.1f}:1). Meta requires >= 2.5:1 (Error 2388293).",
+                    "suggestion": f"Expanded fixed contextual copy to achieve compliant ratio ({ratio:.1f}:1 -> compliant).",
+                }
+            )
 
     # 4. Promotional Language in UTILITY / AUTHENTICATION Category
     if fixed_category in ("UTILITY", "AUTHENTICATION"):
-        promo_found = [k for k in PROMOTIONAL_KEYWORDS if re.search(r"\b" + re.escape(k) + r"\b", fixed_body, re.IGNORECASE)]
+        promo_found = [
+            k for k in PROMOTIONAL_KEYWORDS if re.search(r"\b" + re.escape(k) + r"\b", fixed_body, re.IGNORECASE)
+        ]
         if promo_found:
-            issues_detected.append({
-                "policy": "META_CATEGORY_MISMATCH",
-                "issue": f"Promotional keywords ({', '.join(promo_found)}) detected in {fixed_category} category.",
-                "suggestion": "Automatically re-categorized template as MARKETING to comply with Meta category policy.",
-            })
+            issues_detected.append(
+                {
+                    "policy": "META_CATEGORY_MISMATCH",
+                    "issue": f"Promotional keywords ({', '.join(promo_found)}) detected in {fixed_category} category.",
+                    "suggestion": "Automatically re-categorized template as MARKETING to comply with Meta category policy.",
+                }
+            )
             fixed_category = "MARKETING"
 
     # 5. Header length check (<= 60 characters)
@@ -231,11 +254,13 @@ def remediate_template_rejection(
         orig_header = fixed_header
         trimmed = fixed_header[:57].rsplit(" ", 1)[0] + "..." if " " in fixed_header[:57] else fixed_header[:60]
         fixed_header = trimmed
-        issues_detected.append({
-            "policy": "META_HEADER_LENGTH",
-            "issue": f"Header length exceeds Meta 60-character limit ({len(orig_header)} chars).",
-            "suggestion": f"Trimmed header to 60 chars: '{fixed_header}'.",
-        })
+        issues_detected.append(
+            {
+                "policy": "META_HEADER_LENGTH",
+                "issue": f"Header length exceeds Meta 60-character limit ({len(orig_header)} chars).",
+                "suggestion": f"Trimmed header to 60 chars: '{fixed_header}'.",
+            }
+        )
 
     # 6. Button text length check (<= 25 characters) and URL shorteners
     if fixed_buttons:
@@ -246,22 +271,30 @@ def remediate_template_rejection(
                 orig_btn = text
                 shortened = text[:22].rsplit(" ", 1)[0] + "..." if " " in text[:22] else text[:25]
                 b_dict["text"] = shortened
-                issues_detected.append({
-                    "policy": "META_BUTTON_LENGTH",
-                    "issue": f"Button text exceeds Meta 25-character limit ({len(orig_btn)} chars: '{orig_btn}').",
-                    "suggestion": f"Shortened button text to '{shortened}'.",
-                })
+                issues_detected.append(
+                    {
+                        "policy": "META_BUTTON_LENGTH",
+                        "issue": f"Button text exceeds Meta 25-character limit ({len(orig_btn)} chars: '{orig_btn}').",
+                        "suggestion": f"Shortened button text to '{shortened}'.",
+                    }
+                )
             url = b_dict.get("url", "")
             if url:
                 for shortener in BANNED_SHORTENERS:
                     if shortener in url.lower():
-                        clean_domain = "https://www.bajajfinserv.in/services" if "bajaj" in account.lower() else "https://www.tatacapital.com/services"
+                        clean_domain = (
+                            "https://www.bajajfinserv.in/services"
+                            if "bajaj" in account.lower()
+                            else "https://www.tatacapital.com/services"
+                        )
                         b_dict["url"] = clean_domain
-                        issues_detected.append({
-                            "policy": "META_BANNED_URL_SHORTENER",
-                            "issue": f"Prohibited URL shortener '{shortener}' in button link.",
-                            "suggestion": f"Replaced with verified corporate domain '{clean_domain}'.",
-                        })
+                        issues_detected.append(
+                            {
+                                "policy": "META_BANNED_URL_SHORTENER",
+                                "issue": f"Prohibited URL shortener '{shortener}' in button link.",
+                                "suggestion": f"Replaced with verified corporate domain '{clean_domain}'.",
+                            }
+                        )
             new_buttons.append(b_dict)
         fixed_buttons = new_buttons
 
@@ -273,6 +306,7 @@ def remediate_template_rejection(
         "fixed_category": fixed_category,
         "issues_detected": issues_detected,
     }
+
 
 def tool_diagnose_and_fix(
     template_name: str,
@@ -447,7 +481,9 @@ def tool_diagnose_and_fix(
                     "category": fixed_category,
                     "issues_fixed": len(warnings),
                 },
-                status="success" if res.status in (SubmissionStatus.SUBMITTED, SubmissionStatus.DUPLICATE) else "failed",
+                status="success"
+                if res.status in (SubmissionStatus.SUBMITTED, SubmissionStatus.DUPLICATE)
+                else "failed",
             )
         else:
             sub = RcsTemplateSubmission(
@@ -680,6 +716,7 @@ class WhitelistingAgent:
             if res is not None:
                 return res
         return _handle_agent_fallback_guidance(account, channel)
+
     handle_message = execute_instruction
 
 
@@ -689,7 +726,11 @@ def _check_agent_tenant_isolation(text: str, user_profile: dict | None, account:
         user_role = str(user_profile.get("role", "operator")).lower().strip()
         if user_tenant != "all" and user_role != "superadmin":
             for forbidden in [t for t in ["bajaj", "tata"] if t != user_tenant]:
-                if f"for {forbidden}" in text.lower() or f"{forbidden} templates" in text.lower() or f"on {forbidden}" in text.lower():
+                if (
+                    f"for {forbidden}" in text.lower()
+                    or f"{forbidden} templates" in text.lower()
+                    or f"on {forbidden}" in text.lower()
+                ):
                     return {
                         "reply": f"🚫 **Access Denied**: Your account is assigned to **{user_tenant.upper()}** and is strictly forbidden from querying or modifying **{forbidden.upper()}** data.",
                         "actions_taken": [],
@@ -697,6 +738,7 @@ def _check_agent_tenant_isolation(text: str, user_profile: dict | None, account:
                     }, account
             account = user_tenant
     return None, account
+
 
 def _handle_agent_jira_inquiry(text: str, account: str, user: str) -> dict | None:
     t_lower = text.lower().strip()
@@ -736,7 +778,9 @@ def _handle_agent_jira_inquiry(text: str, account: str, user: str) -> dict | Non
 
             if parsed.whatsapp_templates:
                 first_wa = parsed.whatsapp_templates[0]
-                media_str = f"Creative: `{first_wa.get('media_filename')}`" if first_wa.get("media_filename") else "Text Header"
+                media_str = (
+                    f"Creative: `{first_wa.get('media_filename')}`" if first_wa.get("media_filename") else "Text Header"
+                )
                 reply += (
                     f"\n**WhatsApp Preview (`{first_wa['template_name']}`):**\n"
                     f"*Header ({media_str})*\n"
@@ -799,9 +843,9 @@ def _handle_agent_jira_inquiry(text: str, account: str, user: str) -> dict | Non
                 )
 
             reply = (
-                f"### 📋 Active Jira Campaign Briefs (Project: TCN)\n\n"
+                "### 📋 Active Jira Campaign Briefs (Project: TCN)\n\n"
                 + "\n\n".join(lines)
-                + "\n\n*Tip: Ask me to **\"Brief TCN-524\"** to automatically extract templates and creatives.*"
+                + '\n\n*Tip: Ask me to **"Brief TCN-524"** to automatically extract templates and creatives.*'
             )
 
             first_key = issues[0]["key"] if issues else "TCN-524"
@@ -822,12 +866,22 @@ def _handle_agent_jira_inquiry(text: str, account: str, user: str) -> dict | Non
 
     return None
 
+
 def _handle_agent_learning_inquiry(text: str, account: str, channel: str) -> dict | None:
     t_lower = text.lower()
     learn_keywords = [
-        "what have you learned", "learn from error", "learned pattern", "learned patterns",
-        "error pattern", "error patterns", "what did you learn", "how do you prevent",
-        "preventative rules", "self-healing", "learned rules", "learned insights"
+        "what have you learned",
+        "learn from error",
+        "learned pattern",
+        "learned patterns",
+        "error pattern",
+        "error patterns",
+        "what did you learn",
+        "how do you prevent",
+        "preventative rules",
+        "self-healing",
+        "learned rules",
+        "learned insights",
     ]
     if not any(w in t_lower for w in learn_keywords):
         return None
@@ -857,14 +911,34 @@ def _handle_agent_learning_inquiry(text: str, account: str, channel: str) -> dic
         "data": {"patterns": patterns},
     }
 
+
 def _handle_agent_error_inquiry(text: str, account: str, channel: str) -> dict | None:
     t_lower = text.lower()
     error_keywords = [
-        "error log", "error logs", "recent errors", "what error", "what errors",
-        "why did it fail", "why failed", "what went wrong", "show errors", "system errors",
-        "last error", "incident", "failure log", "errors faced", "failures", "why did",
-        "why my", "why templates fail", "why template failed", "why fail", "failed templates",
-        "failed due to", "link error", "png error"
+        "error log",
+        "error logs",
+        "recent errors",
+        "what error",
+        "what errors",
+        "why did it fail",
+        "why failed",
+        "what went wrong",
+        "show errors",
+        "system errors",
+        "last error",
+        "incident",
+        "failure log",
+        "errors faced",
+        "failures",
+        "why did",
+        "why my",
+        "why templates fail",
+        "why template failed",
+        "why fail",
+        "failed templates",
+        "failed due to",
+        "link error",
+        "png error",
     ]
     if not any(w in t_lower for w in error_keywords):
         return None
@@ -906,20 +980,62 @@ def _handle_agent_error_inquiry(text: str, account: str, channel: str) -> dict |
 
 
 def _handle_agent_team_inquiry(text: str, account: str) -> dict | None:
-    if not any(w in text.lower() for w in ["show user", "show users", "list user", "list users", "team member", "who is on the team", "user details", "all users", "my team", "user accounts"]):
+    if not any(
+        w in text.lower()
+        for w in [
+            "show user",
+            "show users",
+            "list user",
+            "list users",
+            "team member",
+            "who is on the team",
+            "user details",
+            "all users",
+            "my team",
+            "user accounts",
+        ]
+    ):
         return None
     team_res = tool_list_team(tenant_id=account)
     members = team_res.get("members", [])
     if not members:
         reply = f"No registered team members found for **{account.title()}**."
     else:
-        lines = [f"• **{m.get('name')}** (`{m.get('email')}`) — Role: `{m.get('role', 'operator').upper()}` | Org: `{m.get('tenant_id', account).upper()}`" for m in members]
-        reply = f"### 👥 Registered Users for {account.title()} ({len(members)} operators):\n\n" + "\n".join(lines) + "\n\n*Tip: You can also inspect team accounts in **[Settings](/settings)** under Organization Team Directory.*"
-    return {"reply": reply, "actions_taken": [{"tool": "list_tenant_team", "result": team_res}], "suggested_actions": ["Poll approval status", "List rejected templates", "How do I submit templates?"], "data": team_res}
+        lines = [
+            f"• **{m.get('name')}** (`{m.get('email')}`) — Role: `{m.get('role', 'operator').upper()}` | Org: `{m.get('tenant_id', account).upper()}`"
+            for m in members
+        ]
+        reply = (
+            f"### 👥 Registered Users for {account.title()} ({len(members)} operators):\n\n"
+            + "\n".join(lines)
+            + "\n\n*Tip: You can also inspect team accounts in **[Settings](/settings)** under Organization Team Directory.*"
+        )
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "list_tenant_team", "result": team_res}],
+        "suggested_actions": ["Poll approval status", "List rejected templates", "How do I submit templates?"],
+        "data": team_res,
+    }
 
 
 def _handle_agent_help_inquiry(text: str, account: str, channel: str) -> dict | None:
-    if not any(w in text.lower() for w in ["how to submit", "how do i submit", "how can i submit", "how to upload", "how do i upload", "how to create", "how does this work", "how do i use", "ways to submit", "help", "instructions", "what can you do"]):
+    if not any(
+        w in text.lower()
+        for w in [
+            "how to submit",
+            "how do i submit",
+            "how can i submit",
+            "how to upload",
+            "how do i upload",
+            "how to create",
+            "how does this work",
+            "how do i use",
+            "ways to submit",
+            "help",
+            "instructions",
+            "what can you do",
+        ]
+    ):
         return None
     reply = (
         f"### 🚀 How to Submit Templates for **{account.title()} ({channel.upper()})**\n\n"
@@ -938,11 +1054,17 @@ def _handle_agent_help_inquiry(text: str, account: str, channel: str) -> dict | 
         "#### 4. ⚡ Terminal CLI Runner\n"
         "• Run: `python3 runner.py samples/templates.xlsx --client bajaj`"
     )
-    return {"reply": reply, "actions_taken": [], "suggested_actions": ["List rejected templates", "Poll approval status", "Create a template named test_promo"]}
+    return {
+        "reply": reply,
+        "actions_taken": [],
+        "suggested_actions": ["List rejected templates", "Poll approval status", "Create a template named test_promo"],
+    }
 
 
 def _handle_agent_template_creation(text: str, account: str, channel: str) -> dict | None:
-    has_create = bool(re.search(r"(?:create|submit|register|new|add)\s+(?:a\s+)?(?:[a-zA-Z]+\s+)?template", text, re.IGNORECASE))
+    has_create = bool(
+        re.search(r"(?:create|submit|register|new|add)\s+(?:a\s+)?(?:[a-zA-Z]+\s+)?template", text, re.IGNORECASE)
+    )
     if not (has_create and any(k in text.lower() for k in ["body", ":", "with text", "message"])):
         return None
     name_m = re.search(r"(?:named|name|id)\s+([a-zA-Z0-9_\-]+)", text, re.IGNORECASE)
@@ -960,11 +1082,29 @@ def _handle_agent_template_creation(text: str, account: str, channel: str) -> di
     else:
         reply = f"### ❌ Submission Failed for `{t_name}`\n\n**Error:** {create_res.get('error')}\n"
         suggested = ["Check credentials", "Lint copy"]
-    return {"reply": reply, "actions_taken": [{"tool": "create_template", "result": create_res}], "suggested_actions": suggested, "data": create_res}
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "create_template", "result": create_res}],
+        "suggested_actions": suggested,
+        "data": create_res,
+    }
 
 
 def _handle_agent_session_refresh(text: str, account: str, user: str) -> dict | None:
-    if not any(w in text.lower() for w in ["refresh session", "relogin", "re-login", "refresh token", "refresh auth", "auto-login", "auto login", "login to karix", "portal login"]):
+    if not any(
+        w in text.lower()
+        for w in [
+            "refresh session",
+            "relogin",
+            "re-login",
+            "refresh token",
+            "refresh auth",
+            "auto-login",
+            "auto login",
+            "login to karix",
+            "portal login",
+        ]
+    ):
         return None
     refresh_res = tool_refresh_session(account=account, user=user)
     if refresh_res.get("success"):
@@ -973,55 +1113,135 @@ def _handle_agent_session_refresh(text: str, account: str, user: str) -> dict | 
     else:
         reply = f"### ⚠️ Manual Token Update Required\n\n{refresh_res.get('error')}"
         suggested = ["List templates", "Poll approval status"]
-    return {"reply": reply, "actions_taken": [{"tool": "refresh_karix_session", "result": refresh_res}], "suggested_actions": suggested, "data": refresh_res}
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "refresh_karix_session", "result": refresh_res}],
+        "suggested_actions": suggested,
+        "data": refresh_res,
+    }
 
 
 def _handle_agent_copy_lint(text: str) -> dict | None:
-    is_lint = any(w in text.lower() for w in ["lint", "check grammar", "fix copy", "clean text", "fix message", "fix text", "check copy", "grammar in:"]) or (
-        ("fix" in text.lower() or "check" in text.lower()) and any(k in text.lower() for k in ["{{", "body:", "message:", "copy:"])
+    is_lint = any(
+        w in text.lower()
+        for w in [
+            "lint",
+            "check grammar",
+            "fix copy",
+            "clean text",
+            "fix message",
+            "fix text",
+            "check copy",
+            "grammar in:",
+        ]
+    ) or (
+        ("fix" in text.lower() or "check" in text.lower())
+        and any(k in text.lower() for k in ["{{", "body:", "message:", "copy:"])
     )
     if not is_lint:
         return None
     raw_copy = text.split(":", 1)[1].strip() if ":" in text else text
     fixed, warns = lint_and_fix_body(raw_copy)
-    warn_lines = "\n".join([f"• **{w['type']}**: {w['issue']} $\\rightarrow$ {w['suggestion']}" for w in warns]) or "• No compliance or grammar issues found."
+    warn_lines = (
+        "\n".join([f"• **{w['type']}**: {w['issue']} $\\rightarrow$ {w['suggestion']}" for w in warns])
+        or "• No compliance or grammar issues found."
+    )
     reply = f"### ✨ Copy Analysis & Remediation\n\n**Cleaned Copy:**\n```\n{fixed}\n```\n\n**Detected Improvements:**\n{warn_lines}\n"
-    return {"reply": reply, "actions_taken": [{"tool": "lint_and_fix_body", "warnings_count": len(warns)}], "suggested_actions": ["Create template from this copy", "List rejected templates", "Poll approval status"]}
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "lint_and_fix_body", "warnings_count": len(warns)}],
+        "suggested_actions": ["Create template from this copy", "List rejected templates", "Poll approval status"],
+    }
 
 
 def _handle_agent_status_poll(text: str, account: str, channel: str) -> dict | None:
     if not any(w in text.lower() for w in ["poll", "sync", "refresh status", "check status"]):
         return None
     poll_res = tool_poll_status(account=account, channel=channel)
-    return {"reply": f"🔄 **Status sync complete.** Polled live WABA status for all pending templates on **{account.title()}**.", "actions_taken": [{"tool": "poll_status", "result": poll_res}], "suggested_actions": ["List approved templates", "List rejected templates"]}
+    return {
+        "reply": f"🔄 **Status sync complete.** Polled live WABA status for all pending templates on **{account.title()}**.",
+        "actions_taken": [{"tool": "poll_status", "result": poll_res}],
+        "suggested_actions": ["List approved templates", "List rejected templates"],
+    }
 
 
 def _handle_agent_list_templates(text: str, account: str, channel: str) -> dict | None:
-    if not (any(w in text.lower() for w in ["list", "show", "get", "fetch", "all"]) and any(s in text.lower() for s in ["rejected", "pending", "approved", "templates", "catalog"])):
+    if not (
+        any(w in text.lower() for w in ["list", "show", "get", "fetch", "all"])
+        and any(s in text.lower() for s in ["rejected", "pending", "approved", "templates", "catalog"])
+    ):
         return None
-    s_filter = "rejected" if "rejected" in text.lower() else ("pending" if "pending" in text.lower() else ("approved" if "approved" in text.lower() else None))
+    s_filter = (
+        "rejected"
+        if "rejected" in text.lower()
+        else ("pending" if "pending" in text.lower() else ("approved" if "approved" in text.lower() else None))
+    )
     list_res = tool_list_templates(account=account, channel=channel, status_filter=s_filter, limit=10)
     tmpls = list_res.get("templates", [])
     if not tmpls:
         reply = f"No `{s_filter or 'active'}` templates found for **{account.title()}** on **{channel.upper()}**."
         suggested = ["Poll status", "Submit new templates"]
     else:
-        lines = [f"• **`{t['name']}`** — Status: `{t['status'].upper()}`" + (f" (Reason: {t.get('reason')})" if t.get("reason") else "") for t in tmpls]
-        reply = f"### 📋 {s_filter.title() if s_filter else 'Catalog'} Templates for {account.title()} ({list_res['total']} found):\n\n" + "\n".join(lines)
-        suggested = [f"Fix and resubmit {tmpls[0]['name']}", "Poll approval status"] if s_filter == "rejected" and tmpls else ["Poll approval status", "List rejected templates"]
-    return {"reply": reply, "actions_taken": [{"tool": "list_templates", "result": list_res}], "suggested_actions": suggested, "data": list_res}
+        lines = [
+            f"• **`{t['name']}`** — Status: `{t['status'].upper()}`"
+            + (f" (Reason: {t.get('reason')})" if t.get("reason") else "")
+            for t in tmpls
+        ]
+        reply = (
+            f"### 📋 {s_filter.title() if s_filter else 'Catalog'} Templates for {account.title()} ({list_res['total']} found):\n\n"
+            + "\n".join(lines)
+        )
+        suggested = (
+            [f"Fix and resubmit {tmpls[0]['name']}", "Poll approval status"]
+            if s_filter == "rejected" and tmpls
+            else ["Poll approval status", "List rejected templates"]
+        )
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "list_templates", "result": list_res}],
+        "suggested_actions": suggested,
+        "data": list_res,
+    }
 
 
 def _handle_agent_rejection_diagnosis(text: str, account: str, channel: str, user: str) -> dict | None:
-    rej_match = re.search(r"(?:check|why|fix|diagnose|resubmit|inspect)\s+.*?(?:template\s+)?([a-zA-Z0-9_\-]+)", text, re.IGNORECASE)
-    is_fix = any(w in text.lower() for w in ["fix", "resubmit", "repair", "remediate", "rejected", "why", "diagnose", "inspect"])
+    rej_match = re.search(
+        r"(?:check|why|fix|diagnose|resubmit|inspect)\s+.*?(?:template\s+)?([a-zA-Z0-9_\-]+)", text, re.IGNORECASE
+    )
+    is_fix = any(
+        w in text.lower() for w in ["fix", "resubmit", "repair", "remediate", "rejected", "why", "diagnose", "inspect"]
+    )
     if not (is_fix and rej_match):
         return None
     cand = rej_match.group(1).strip()
-    stopwords = ("why", "template", "templates", "rejected", "the", "this", "it", "did", "my", "our", "all", "error", "errors", "fail", "failed", "rcs", "whatsapp", "sms")
+    stopwords = (
+        "why",
+        "template",
+        "templates",
+        "rejected",
+        "the",
+        "this",
+        "it",
+        "did",
+        "my",
+        "our",
+        "all",
+        "error",
+        "errors",
+        "fail",
+        "failed",
+        "rcs",
+        "whatsapp",
+        "sms",
+    )
     if cand.lower() in stopwords:
         tokens = re.findall(r"[a-zA-Z0-9_]{3,}", text)
-        filtered = [t for t in tokens if t.lower() not in stopwords and t.lower() not in ("check", "was", "fix", "and", "resubmit", "for", "bajaj", "tata")]
+        filtered = [
+            t
+            for t in tokens
+            if t.lower() not in stopwords
+            and t.lower() not in ("check", "was", "fix", "and", "resubmit", "for", "bajaj", "tata")
+        ]
         cand = filtered[0] if filtered else cand
     if cand.lower() in stopwords:
         return None
@@ -1033,7 +1253,14 @@ def _handle_agent_rejection_diagnosis(text: str, account: str, channel: str, use
             cand = base_cand
 
     auto_submit = any(w in text.lower() for w in ["resubmit", "submit", "apply", "create"])
-    diag_res = tool_diagnose_and_fix(template_name=cand, account=account, channel=channel, user_instructions=text, auto_resubmit=auto_submit, user=user)
+    diag_res = tool_diagnose_and_fix(
+        template_name=cand,
+        account=account,
+        channel=channel,
+        user_instructions=text,
+        auto_resubmit=auto_submit,
+        user=user,
+    )
     if not diag_res.get("success"):
         return {
             "reply": f"❌ Could not find template `{cand}` in the {account.upper()} {channel.upper()} catalog.\n\n*Tip: Try listing your templates to see exact registered names.*",
@@ -1044,11 +1271,18 @@ def _handle_agent_rejection_diagnosis(text: str, account: str, channel: str, use
     d = diag_res["diagnosis"]
     fixes = d["issues_detected"]
     fix_summary = (
-        "\n".join([f"• ⚠️ **{f.get('policy', 'POLICY')}**: {f.get('issue')} $\\rightarrow$ {f.get('suggestion')}" for f in fixes])
+        "\n".join(
+            [
+                f"• ⚠️ **{f.get('policy', 'POLICY')}**: {f.get('issue')} $\\rightarrow$ {f.get('suggestion')}"
+                for f in fixes
+            ]
+        )
         or "• Applied automated Meta variable spacing and punctuation corrections."
     )
     header_info = f"\n**Header Remediated:** `{d['remediated_header']}`" if d.get("remediated_header") else ""
-    category_info = f"\n**Category Adjusted:** `{d.get('remediated_category', 'UTILITY')}`" if d.get("remediated_category") else ""
+    category_info = (
+        f"\n**Category Adjusted:** `{d.get('remediated_category', 'UTILITY')}`" if d.get("remediated_category") else ""
+    )
 
     reply = (
         f"### 🔍 Diagnosis for `{cand}`\n\n"
@@ -1065,7 +1299,12 @@ def _handle_agent_rejection_diagnosis(text: str, account: str, channel: str, use
     else:
         reply += f"\n💡 Remediated copy is ready. Would you like me to submit `{d['new_version_name']}`?"
         suggested = [f"Fix and resubmit as {d['new_version_name']}", "List rejected templates", "Poll approval status"]
-    return {"reply": reply, "actions_taken": [{"tool": "diagnose_and_fix", "target": cand, "result": diag_res}], "suggested_actions": suggested, "data": diag_res}
+    return {
+        "reply": reply,
+        "actions_taken": [{"tool": "diagnose_and_fix", "target": cand, "result": diag_res}],
+        "suggested_actions": suggested,
+        "data": diag_res,
+    }
 
 
 def _handle_agent_fallback_guidance(account: str, channel: str) -> dict:

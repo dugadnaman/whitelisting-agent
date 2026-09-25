@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TemplateDiscrepancyItem:
     """Detailed discrepancy assessment for a single master template."""
+
     template_name: str
     status: str  # WHITELISTED, NOT_WHITELISTED, PENDING, REJECTED, CONTENT_DRIFT, PAUSED
     category: str
@@ -52,6 +53,7 @@ class TemplateDiscrepancyItem:
 @dataclass
 class IdentificationReport:
     """Executive reconciliation report between master catalog and live WABA."""
+
     account: str
     total_master: int
     whitelisted_count: int
@@ -136,9 +138,7 @@ def compute_text_similarity(text_a: str, text_b: str) -> float:
     return round(difflib.SequenceMatcher(None, norm_a, norm_b).ratio(), 3)
 
 
-def evaluate_semantic_equivalence_typesafe(
-    master_text: str, live_text: str
-) -> tuple[bool, float, str]:
+def evaluate_semantic_equivalence_typesafe(master_text: str, live_text: str) -> tuple[bool, float, str]:
     """
     Use TypeSafe System One (Noul primitive) to determine if two template bodies
     are functionally identical despite variable naming or punctuation differences.
@@ -171,6 +171,7 @@ def evaluate_semantic_equivalence_typesafe(
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     prob = pool.submit(asyncio.run, _check()).result(timeout=10)
             else:

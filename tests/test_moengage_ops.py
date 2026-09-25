@@ -198,29 +198,70 @@ def test_screenshot_exact_channel_reconciliation():
     """Verify exact match to user's MoEngage screenshot counts: SMS 15, WA 13, RCS 4, Push 3, Email 2."""
     import csv
     import tempfile
+
     from moengage_ops_client import parse_moengage_export_file
 
     screenshot_campaigns = [
-        *[{'Channel': 'SMS', 'Campaign Name': f'TCLMOE_SMS_{i}_15Sept26', 'Created By': 'soham.das@attributics.com', 'Date': '2026-09-15'} for i in range(1, 16)],
-        *[{'Channel': 'WhatsApp', 'Campaign Name': f'TCLMOE_WA_{i}_18Sept26', 'Created By': 'mrunalini.gawande@attributics.com', 'Date': '2026-09-18'} for i in range(1, 14)],
-        *[{'Channel': 'RCS', 'Campaign Name': f'TCLMOE_RCS_{i}_15Sept26', 'Created By': 'neel.shah@attributics.com', 'Date': '2026-09-15'} for i in range(1, 5)],
-        *[{'Channel': 'Push', 'Campaign Name': f'TCLMOE_PN_{i}_15Sept26', 'Created By': 'neel.shah@attributics.com', 'Date': '2026-09-15'} for i in range(1, 4)],
-        *[{'Channel': 'Email', 'Campaign Name': f'TCLMOE_Email_{i}_15Sept26', 'Created By': 'soham.das@attributics.com', 'Date': '2026-09-15'} for i in range(1, 3)],
+        *[
+            {
+                "Channel": "SMS",
+                "Campaign Name": f"TCLMOE_SMS_{i}_15Sept26",
+                "Created By": "soham.das@attributics.com",
+                "Date": "2026-09-15",
+            }
+            for i in range(1, 16)
+        ],
+        *[
+            {
+                "Channel": "WhatsApp",
+                "Campaign Name": f"TCLMOE_WA_{i}_18Sept26",
+                "Created By": "mrunalini.gawande@attributics.com",
+                "Date": "2026-09-18",
+            }
+            for i in range(1, 14)
+        ],
+        *[
+            {
+                "Channel": "RCS",
+                "Campaign Name": f"TCLMOE_RCS_{i}_15Sept26",
+                "Created By": "neel.shah@attributics.com",
+                "Date": "2026-09-15",
+            }
+            for i in range(1, 5)
+        ],
+        *[
+            {
+                "Channel": "Push",
+                "Campaign Name": f"TCLMOE_PN_{i}_15Sept26",
+                "Created By": "neel.shah@attributics.com",
+                "Date": "2026-09-15",
+            }
+            for i in range(1, 4)
+        ],
+        *[
+            {
+                "Channel": "Email",
+                "Campaign Name": f"TCLMOE_Email_{i}_15Sept26",
+                "Created By": "soham.das@attributics.com",
+                "Date": "2026-09-15",
+            }
+            for i in range(1, 3)
+        ],
     ]
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
-        writer = csv.DictWriter(tmp, fieldnames=['Channel', 'Campaign Name', 'Created By', 'Date'])
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
+        writer = csv.DictWriter(tmp, fieldnames=["Channel", "Campaign Name", "Created By", "Date"])
         writer.writeheader()
         writer.writerows(screenshot_campaigns)
         tmp_path = tmp.name
 
-    records = parse_moengage_export_file(tmp_path, default_vertical='TCL')
-    metrics = compute_ops_dashboard_metrics(records, mode='custom', custom_start='2026-09-14', custom_end='2026-09-20')
-    chans = metrics['account_overview']['channel_breakdown']
+    records = parse_moengage_export_file(tmp_path, default_vertical="TCL")
+    metrics = compute_ops_dashboard_metrics(records, mode="custom", custom_start="2026-09-14", custom_end="2026-09-20")
+    chans = metrics["account_overview"]["channel_breakdown"]
 
     assert len(records) == 37
-    assert chans['SMS'] == 15
-    assert chans['WhatsApp'] == 13
-    assert chans['RCS'] == 4
-    assert chans['Push'] == 3
-    assert chans['Email'] == 2
+    assert chans["SMS"] == 15
+    assert chans["WhatsApp"] == 13
+    assert chans["RCS"] == 4
+    assert chans["Push"] == 3
+    assert chans["Email"] == 2

@@ -8,17 +8,18 @@ Guarantees zero log loss, full attribution, and unlimited historical auditing.
 import json
 import logging
 import os
-import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+
+from db import get_db as _get_db
+from db import init_database
+
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
 ACTIVITY_LOG_PATH = "activity_log.jsonl"
 
-
-from db import get_db as _get_db, DB_PATH, init_database
 
 def init_store() -> None:
     """Initialize database tables, indexes, and migrate existing JSONL logs."""
@@ -36,7 +37,6 @@ def init_store() -> None:
     except Exception as e:
         logger.debug("Queue DB init check: %s", e)
     return
-
 
 
 def register_or_update_user(name: str, role: str = "Operator") -> dict:

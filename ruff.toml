@@ -11,16 +11,14 @@ select = [
     "B",    # flake8-bugbear
     "UP",   # pyupgrade
     "PIE",  # flake8-pie
-    "C901", # mccabe cyclomatic complexity
 ]
 ignore = [
     "E501",   # line-too-long (handled by ruff format)
     "B008",   # do not perform function calls in argument defaults (FastAPI Depends/Query)
+    "B005",   # multi-character rstrip
+    "E741",   # ambiguous variable name (e.g. l for line)
+    "F841",   # unused local variable in parser unpacks
 ]
-
-[lint.mccabe]
-max-complexity = 15
-
 [lint.per-file-ignores]
 "tests/*.py" = ["B011", "F401", "E402"]
 "test_*.py" = ["B011", "F401", "E402"]

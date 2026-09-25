@@ -109,6 +109,8 @@ FALLBACK_PLACEHOLDER_HEADER_HANDLE = FALLBACK_PLACEHOLDER_IMAGE_HANDLE
 # 10 workers). Throttle uploads globally and retry transient failures.
 _MEDIA_UPLOAD_GATE = threading.Semaphore(2)
 _MEDIA_UPLOAD_ATTEMPTS = 3
+
+
 class KarixHealthGovernor:
     """
     Working Memory: Tracks real-time Karix API response latency and error rates
@@ -167,6 +169,7 @@ class KarixHealthGovernor:
             elif avg_latency > 2.0:
                 return 0.2
             return 0.0
+
     def get_health_stats(self) -> dict:
         """Return real-time working memory metrics."""
         with self._lock:
@@ -309,7 +312,9 @@ def _try_official_media_upload(path: Path, mime: str, client: str, errors: list[
                     str(h)[:60],
                 )
                 return str(h)
-            errors.append(f"Official API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}")
+            errors.append(
+                f"Official API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}"
+            )
         else:
             errors.append(f"Official API: HTTP {resp.status_code}: {resp.text[:300]}")
     except OSError as e:
@@ -349,10 +354,7 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
     w_id = get_waba_id(client)
     detail = "; ".join(errors) if errors else "No diagnostic info"
     logger.error("Media upload failed for %s (WABA %s): %s", client, w_id, detail)
-    raise RuntimeError(
-        f"Could not upload media creative to Karix/Meta for {client} (WABA {w_id}). "
-        f"Details: {detail}"
-    )
+    raise RuntimeError(f"Could not upload media creative to Karix/Meta for {client} (WABA {w_id}). Details: {detail}")
 
 
 def _ensure_default_sample_image() -> str:
@@ -481,6 +483,7 @@ def normalize_image_16_9(
             return tmp.name, "image/png"
     return str(input_path_or_bytes), "image/png"
 
+
 def _prepare_local_media_bytes(
     cformat: str, image_bytes: bytes | None, media_file: str | None, media_url: str | None, fix_aspect_ratio: bool
 ) -> tuple[str | None, str]:
@@ -593,10 +596,18 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
         try:
             raw_bytes = Path(media_file).read_bytes()
             media_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
-            ext = ".jpg" if "jpeg" in file_type else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
+            ext = (
+                ".jpg"
+                if "jpeg" in file_type
+                else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
+            )
             cache_file = MEDIA_CACHE_DIR / f"{media_hash}{ext}"
             cache_file.write_bytes(raw_bytes)
-            public_base = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "https://whitelisting-agent.onrender.com"
+            public_base = (
+                os.environ.get("RENDER_EXTERNAL_URL")
+                or os.environ.get("PUBLIC_APP_URL")
+                or "https://whitelisting-agent.onrender.com"
+            )
             public_url = f"{public_base}/api/media/{media_hash}{ext}"
         except Exception as e:
             logger.debug("Media caching notice: %s", e)
@@ -697,7 +708,9 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
             or "name" in tag_clean
         ):
             samples.append("John")
-        elif any(w in line_prefix for w in ("from", "with", "at", "by", "team", "regards", "experience with")) or any(w in tag_clean for w in ("company", "brand", "org")):
+        elif any(w in line_prefix for w in ("from", "with", "at", "by", "team", "regards", "experience with")) or any(
+            w in tag_clean for w in ("company", "brand", "org")
+        ):
             samples.append(company_name)
         elif any(w in line_prefix for w in ("interest", "rate", "roi")):
             samples.append("9.5%")
@@ -785,11 +798,8 @@ def _resolve_button_cta_variables(btns: list, client: str) -> None:
                 logger.info("Forced static CTA to dynamic: %s", url)
             # Always ensure a sample example for the dynamic variable
             if not b.get("example") or not b["example"]:
-                b["example"] = [
-                    "https://www.tatacapital.com/personal-loan.html"
-                ]
+                b["example"] = ["https://www.tatacapital.com/personal-loan.html"]
                 logger.info("Auto-generated URL variable sample for button")
-
 
 
 def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj") -> dict:
@@ -832,6 +842,8 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         "category": payload.category,
         "components": components_raw,
     }
+
+
 def _is_duplicate_or_exists_error(err: object) -> bool:
     """Check if an error string/dict from Karix or Meta indicates the template already exists."""
     if not err:
@@ -903,6 +915,7 @@ def _resolve_existing_template_result(
         channel="whatsapp",
         retry_count=attempt,
     )
+
 
 def _evaluate_portal_create_response(
     resp: requests.Response, data: dict, payload: TemplateSubmission, c: str, attempt: int
@@ -1021,8 +1034,6 @@ def _handle_portal_media_auto_recovery(payload: TemplateSubmission, c: str, reas
 
     payload.components = new_comps
     return _submit_portal_template(payload, client=c)
-
-
 
 
 # Status mapping
@@ -1603,13 +1614,20 @@ def delete_template(template_name: str, client: str = "bajaj") -> dict:
             resp = get_http_session().delete(url, headers=headers, timeout=REQUEST_TIMEOUT)
             if resp.ok:
                 logger.info("Deleted template '%s' (id=%s) via official API (client=%s)", name, template_id, c)
-                return {"ok": True, "template_name": name, "template_id": template_id, "detail": "Deleted via official API"}
+                return {
+                    "ok": True,
+                    "template_name": name,
+                    "template_id": template_id,
+                    "detail": "Deleted via official API",
+                }
             if resp.status_code == 400:
                 body = _parse_karix_json(resp)
                 detail = str(body) if body else resp.text[:500]
                 if "not exist" in detail.lower() or "not found" in detail.lower():
                     return {"ok": True, "template_name": name, "detail": "Template not found (already deleted)"}
-            logger.debug("Official DELETE returned %d for '%s' (id=%s): %s", resp.status_code, name, template_id, resp.text[:300])
+            logger.debug(
+                "Official DELETE returned %d for '%s' (id=%s): %s", resp.status_code, name, template_id, resp.text[:300]
+            )
         except Exception as exc:
             logger.debug("Official DELETE failed for '%s' (id=%s): %s", name, template_id, exc)
     elif not fetch_err:
@@ -1699,7 +1717,14 @@ def delete_templates_bulk(
                 if "not exist" in detail.lower() or "not found" in detail.lower():
                     deleted.append({"ok": True, "template_name": name, "detail": "Already deleted"})
                 else:
-                    failed.append({"ok": False, "template_name": name, "template_id": tid, "detail": f"HTTP {resp.status_code}: {detail}"})
+                    failed.append(
+                        {
+                            "ok": False,
+                            "template_name": name,
+                            "template_id": tid,
+                            "detail": f"HTTP {resp.status_code}: {detail}",
+                        }
+                    )
                     logger.warning("DELETE failed for '%s' (id=%s): HTTP %d", name, tid, resp.status_code)
         except Exception as exc:
             failed.append({"ok": False, "template_name": name, "template_id": tid, "detail": str(exc)})
@@ -1709,6 +1734,9 @@ def delete_templates_bulk(
 
     logger.info(
         "Bulk delete complete for client=%s: %d deleted, %d failed out of %d",
-        c, len(deleted), len(failed), len(template_names),
+        c,
+        len(deleted),
+        len(failed),
+        len(template_names),
     )
     return {"deleted": deleted, "failed": failed, "total": len(template_names)}

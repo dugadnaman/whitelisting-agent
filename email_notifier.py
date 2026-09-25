@@ -16,13 +16,13 @@ Includes:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime, timedelta
 import email.mime.multipart
 import email.mime.text
 import logging
 import os
 import smtplib
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from config import _load_env_file
@@ -65,6 +65,7 @@ def determine_current_stage(ist_now: datetime | None = None) -> str:
 @dataclass
 class OperatorTicketSummary:
     """Group of due-today incomplete tickets assigned to an operator."""
+
     operator_name: str
     operator_email: str
     role: str
@@ -75,6 +76,7 @@ class OperatorTicketSummary:
 @dataclass
 class AlertEmailDraft:
     """Prepared email ready for dispatch."""
+
     stage: str  # MORNING, MIDDAY, EOD
     recipient_email: str
     recipient_name: str
@@ -90,6 +92,7 @@ class AlertEmailDraft:
 
 class AlertSchedulerState:
     """In-memory state of the automated daily alert scheduler."""
+
     def __init__(self) -> None:
         self.enabled: bool = True
         self.last_sent: dict[str, str] = {}  # key: "YYYY-MM-DD_STAGE" -> timestamp
@@ -99,13 +102,15 @@ class AlertSchedulerState:
     def mark_sent(self, day_str: str, stage: str, details: dict[str, Any]) -> None:
         key = f"{day_str}_{stage}"
         self.last_sent[key] = datetime.now(UTC).isoformat()
-        self.history.append({
-            "slot_key": key,
-            "stage": stage,
-            "date": day_str,
-            "dispatched_at": datetime.now(UTC).isoformat(),
-            **details,
-        })
+        self.history.append(
+            {
+                "slot_key": key,
+                "stage": stage,
+                "date": day_str,
+                "dispatched_at": datetime.now(UTC).isoformat(),
+                **details,
+            }
+        )
         if len(self.history) > 100:
             self.history = self.history[-100:]
 
@@ -123,8 +128,7 @@ def get_due_today_incomplete_tickets(project: str = "ALL") -> list[dict[str, Any
     dash = get_work_management_dashboard(project=project, limit=100)
     items = dash.get("work_items", [])
     incomplete_today = [
-        item for item in items
-        if item.get("timeline_bucket") == "TODAY" and item.get("status_category") != "DONE"
+        item for item in items if item.get("timeline_bucket") == "TODAY" and item.get("status_category") != "DONE"
     ]
     return incomplete_today
 
@@ -294,7 +298,7 @@ def build_stage_email(
             </div>
 
             <div style="padding: 16px 24px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; text-align: center; font-size: 11px; color: #9ca3af;">
-                Attributics Automated Jira SLA Dispatcher • Sent at {get_current_ist_time().strftime('%I:%M %p IST')}
+                Attributics Automated Jira SLA Dispatcher • Sent at {get_current_ist_time().strftime("%I:%M %p IST")}
             </div>
         </div>
     </body>
@@ -313,7 +317,7 @@ Assigned Incomplete Campaigns:
 Notice: {urgency_note}
 
 Jira Link: https://tatacapital-team.atlassian.net
-Sent at {get_current_ist_time().strftime('%I:%M %p IST')} by Attributics SLA Dispatcher.
+Sent at {get_current_ist_time().strftime("%I:%M %p IST")} by Attributics SLA Dispatcher.
     """.strip()
 
     return AlertEmailDraft(
@@ -391,8 +395,7 @@ def preview_due_today_alerts(
     sender_info = get_smtp_sender_info()
 
     drafts: list[AlertEmailDraft] = [
-        build_stage_email(op, resolved_stage, today_str, project=project)
-        for op in operators
+        build_stage_email(op, resolved_stage, today_str, project=project) for op in operators
     ]
 
     ist_now = get_current_ist_time()
@@ -407,6 +410,7 @@ def preview_due_today_alerts(
         "drafts": [d.to_dict() for d in drafts],
     }
 
+
 def send_email_smtp(draft: AlertEmailDraft) -> dict[str, Any]:
     """
     Send one draft email via SMTP. Falls back gracefully to simulation if SMTP is unconfigured.
@@ -420,7 +424,10 @@ def send_email_smtp(draft: AlertEmailDraft) -> dict[str, Any]:
     if not smtp_host or not smtp_user or not smtp_pass:
         logger.info(
             "SMTP not fully configured (host=%s, user=%s). Simulating send to %s (%s).",
-            smtp_host, smtp_user, draft.recipient_email, draft.subject
+            smtp_host,
+            smtp_user,
+            draft.recipient_email,
+            draft.subject,
         )
         return {
             "delivered": True,
@@ -488,6 +495,7 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
         masked_key = f"{clean_brevo[:9]}...{clean_brevo[-4:]}" if len(clean_brevo) > 13 else "INVALID_LENGTH"
         try:
             import requests
+
             sender_name = os.getenv("SMTP_FROM_NAME") or "Naman Dugad"
             payload: dict[str, Any] = {
                 "sender": {"name": sender_name, "email": from_email},
@@ -541,6 +549,7 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
     if resend_key:
         try:
             import requests
+
             resp = requests.post(
                 "https://api.resend.com/emails",
                 headers={
@@ -588,6 +597,7 @@ def send_email_dispatcher(draft: AlertEmailDraft) -> dict[str, Any]:
     if sendgrid_key:
         try:
             import requests
+
             resp = requests.post(
                 "https://api.sendgrid.com/v3/mail/send",
                 headers={
@@ -646,6 +656,7 @@ def get_brevo_event_logs(limit: int = 15) -> dict[str, Any]:
     clean_key = brevo_key.strip().strip("'").strip('"')
     try:
         import requests
+
         resp = requests.get(
             f"https://api.brevo.com/v3/smtp/statistics/events?limit={limit}&sort=desc",
             headers={
@@ -659,6 +670,8 @@ def get_brevo_event_logs(limit: int = 15) -> dict[str, Any]:
         return {"ok": False, "status": resp.status_code, "error": resp.text}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
 def send_google_chat_sla_alert(
     stage: str,
     operators: list[OperatorTicketSummary],
@@ -699,7 +712,9 @@ def send_google_chat_sla_alert(
             "color": "#dc2626",
             "desc": f"CRITICAL: {total_tickets} campaigns due today remain incomplete and require immediate attention.",
         },
-    }.get(stage, {"title": f"🚨 SLA Alert • {stage}", "color": "#dc2626", "desc": f"{total_tickets} campaigns due today."})
+    }.get(
+        stage, {"title": f"🚨 SLA Alert • {stage}", "color": "#dc2626", "desc": f"{total_tickets} campaigns due today."}
+    )
 
     op_lines = []
     mentions_list = []
@@ -721,7 +736,11 @@ def send_google_chat_sla_alert(
             "Mudar": "110968683937158757696",
         }
         first_word = op.operator_name.split()[0].title() if op.operator_name else ""
-        uid = known_ids.get(op.operator_name) or known_ids.get(first_word) or os.getenv(f"GCHAT_USER_ID_{first_word.upper()}", "")
+        uid = (
+            known_ids.get(op.operator_name)
+            or known_ids.get(first_word)
+            or os.getenv(f"GCHAT_USER_ID_{first_word.upper()}", "")
+        )
         if uid:
             mention_tag = f"<users/{uid}>"
         else:
@@ -744,24 +763,16 @@ def send_google_chat_sla_alert(
                         "subtitle": f"{total_tickets} Campaigns Due Today • {ist_time_str}",
                     },
                     "sections": [
-                        {
-                            "header": "Operator Workload Breakdown",
-                            "widgets": [
-                                {
-                                    "textParagraph": {
-                                        "text": op_text
-                                    }
-                                }
-                            ]
-                        }
-                    ]
-                }
+                        {"header": "Operator Workload Breakdown", "widgets": [{"textParagraph": {"text": op_text}}]}
+                    ],
+                },
             }
-        ]
+        ],
     }
 
     try:
         import requests
+
         resp = requests.post(url, json=card_payload, timeout=15)
         if resp.ok:
             logger.info("Successfully sent Google Chat SLA alert card for %s", stage)
@@ -824,13 +835,15 @@ def dispatch_due_today_alerts(
         for d_dict in draft_dicts:
             draft = AlertEmailDraft(**d_dict)
             if dry_run:
-                results.append({
-                    "delivered": True,
-                    "simulated": True,
-                    "recipient": draft.recipient_email,
-                    "subject": draft.subject,
-                    "message": "Dry run preview mode — no real network packets dispatched.",
-                })
+                results.append(
+                    {
+                        "delivered": True,
+                        "simulated": True,
+                        "recipient": draft.recipient_email,
+                        "subject": draft.subject,
+                        "message": "Dry run preview mode — no real network packets dispatched.",
+                    }
+                )
                 delivered_count += 1
             else:
                 send_res = send_email_dispatcher(draft)
@@ -857,7 +870,7 @@ def dispatch_due_today_alerts(
             "recipients": [d["recipient_email"] for d in draft_dicts],
             "operator_name": operator_name,
             "dry_run": dry_run,
-        }
+        },
     )
 
     return {
@@ -899,13 +912,17 @@ async def run_scheduler_loop() -> None:
                 if hour == 10 and 0 <= minute <= 5:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "MORNING"):
                         logger.info("Triggering automated 10:00 AM IST Kickoff SLA reminder...")
-                        dispatch_due_today_alerts(project="ALL", stage="MORNING", operator_name="Daily 10:00 AM Scheduler")
+                        dispatch_due_today_alerts(
+                            project="ALL", stage="MORNING", operator_name="Daily 10:00 AM Scheduler"
+                        )
 
                 # Check 1:00 PM slot (13:00 to 13:05 window)
                 elif hour == 13 and 0 <= minute <= 5:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "MIDDAY"):
                         logger.info("Triggering automated 1:00 PM IST Midday Checkpoint SLA reminder...")
-                        dispatch_due_today_alerts(project="ALL", stage="MIDDAY", operator_name="Daily 1:00 PM Scheduler")
+                        dispatch_due_today_alerts(
+                            project="ALL", stage="MIDDAY", operator_name="Daily 1:00 PM Scheduler"
+                        )
 
                 # Check 4:00 PM slot (16:00 to 16:05 window)
                 elif hour == 16 and 0 <= minute <= 5:

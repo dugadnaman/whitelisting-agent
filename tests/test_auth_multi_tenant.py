@@ -144,8 +144,8 @@ class TestMultiTenantAuth(unittest.TestCase):
 
     def test_sample_content_variables_use_tata_capital(self):
         """Verify that variable normalization and CTA examples generate Tata Capital sample values."""
-        from submission_client import normalize_whatsapp_text_variables, _resolve_button_cta_variables
         from loader import infer_whatsapp_cta
+        from submission_client import _resolve_button_cta_variables, normalize_whatsapp_text_variables
 
         # Suffix cue for company / T&C
         text, samples = normalize_whatsapp_text_variables("Offer from {{1}}. Terms & conditions apply.")

@@ -19,6 +19,7 @@ class SubmissionStatus(StrEnum):
     DUPLICATE = "duplicate"
     BLOCKED_ASPECT_RATIO = "blocked_aspect_ratio"
 
+
 class ApprovalStatus(StrEnum):
     """
     Outcome of the actual template REVIEW (separate from submission).
@@ -32,6 +33,7 @@ class ApprovalStatus(StrEnum):
     BLOCKED = "blocked"
     BLOCKED_ASPECT_RATIO = "blocked_aspect_ratio"
     UNKNOWN = "unknown"  # submission failed, or status check errored
+
 
 @dataclass
 class TemplateComponent:
@@ -63,6 +65,7 @@ class TemplateSubmission:
     source_ref: str  # traces back to wherever this row came from
     aspect_ratio_blocked: bool = False
     aspect_ratio_error: str | None = None
+
 
 @dataclass
 class SubmissionResult:

@@ -12,20 +12,21 @@ import logging
 import os
 import re
 import tempfile
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
-import uuid
+
 import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
+
 from db_queue import (
     create_job_with_tasks,
     get_job,
     get_job_tasks,
-    init_queue_db,
     record_task_result,
     update_template_approval_monotonic,
 )
@@ -52,7 +53,9 @@ from config import (
     OFFICIAL_TEMPLATE_BASE_URL,
     _account_prefix,
     _load_env_file,
+    get_esmeaddr,
 )
+from error_tracker import log_error
 from grammar_checker import lint_and_fix_body, validate_meta_technical_compliance
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus, SubmissionResult, SubmissionStatus
@@ -61,6 +64,7 @@ from rcs_client import fetch_rcs_templates
 # RCS pipeline imports
 from rcs_config import (
     get_rcs_auth_headers,
+    get_rcs_bot_id,
     get_rcs_entity_id,
 )
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
@@ -68,16 +72,14 @@ from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
 from rcs_runner import run_rcs
 from rcs_tracker import load_rcs_log, log_rcs_result
 from runner import get_pending_templates_sla_insights, poll_pending, run
-from submission_client import _GOVERNOR, _STATUS_MAP, delete_template, delete_templates_bulk
-from tracker import load_log, log_result, pending_entries
 
 # SMS pipeline imports
 from sms_client import send_sms, test_sms_connection
 from sms_config import (
-    get_sms_dlt_entity_id,
     get_sms_dlr_auth_token,
     get_sms_dlr_gcm_iv,
     get_sms_dlr_gcm_key,
+    get_sms_dlt_entity_id,
     get_sms_sender_id,
 )
 from sms_crypto import decrypt_dlr_gcm
@@ -104,7 +106,8 @@ from sms_tracker import (
     log_sms_dlr,
     log_sms_submission,
 )
-from error_tracker import log_error
+from submission_client import _GOVERNOR, _STATUS_MAP, delete_templates_bulk
+from tracker import load_log, log_result, pending_entries
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -176,6 +179,7 @@ def get_public_media(filename: str):
             orig_fn = m.group(2)
             try:
                 from jira_client import download_jira_attachment
+
                 download_jira_attachment(att_id, orig_fn)
             except Exception as dl_err:
                 logger.warning("Could not on-demand download Jira attachment %s: %s", att_id, dl_err)
@@ -207,7 +211,7 @@ def get_public_media(filename: str):
                 media_type = "image/jpeg"
             elif header.startswith(b"\x89PNG\r\n\x1a\n"):
                 media_type = "image/png"
-            elif header.startswith(b"GIF87a") or header.startswith(b"GIF89a"):
+            elif header.startswith((b"GIF87a", b"GIF89a")):
                 media_type = "image/gif"
             elif header.startswith(b"%PDF"):
                 media_type = "application/pdf"
@@ -402,8 +406,10 @@ class CredentialUpdate(BaseModel):
     rcs_esmeaddr: str | None = None
     gemini_api_key: str | None = None
 
+
 class GeminiTestRequest(BaseModel):
     api_key: str | None = None
+
 
 class TemplateValidationRequest(BaseModel):
     body_text: str
@@ -414,6 +420,7 @@ class TemplateValidationRequest(BaseModel):
     header_format: str | None = None
     account: str = "bajaj"
     use_ai: bool = True
+
 
 # ---------------------------------------------------------------------------
 def _clean_error_message(err) -> str | None:
@@ -473,6 +480,7 @@ def _json_safe(obj):
     if isinstance(obj, (list, tuple, set, frozenset)):
         return [_json_safe(v) for v in obj]
     import dataclasses
+
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return _json_safe(dataclasses.asdict(obj))
     return str(obj)
@@ -673,7 +681,12 @@ def get_stats(
                 "rejected": sum(1 for e in merged if e.get("approval_status") == "rejected"),
                 "error": None,
                 "karix_health": _GOVERNOR.get_health_stats(),
-                "sla_insights": {"pending_count": 0, "due_for_poll_count": 0, "categories": {}, "next_recommended_poll_sec": 120},
+                "sla_insights": {
+                    "pending_count": 0,
+                    "due_for_poll_count": 0,
+                    "categories": {},
+                    "next_recommended_poll_sec": 120,
+                },
             }
 
         # WhatsApp
@@ -735,7 +748,12 @@ def get_stats(
             "duplicate": 0,
             "error": str(exc),
             "karix_health": _GOVERNOR.get_health_stats(),
-            "sla_insights": {"pending_count": 0, "due_for_poll_count": 0, "categories": {}, "next_recommended_poll_sec": 120},
+            "sla_insights": {
+                "pending_count": 0,
+                "due_for_poll_count": 0,
+                "categories": {},
+                "next_recommended_poll_sec": 120,
+            },
         }
 
 
@@ -881,6 +899,8 @@ def _merge_wa_templates(acc: str, status: str | None, search: str | None) -> lis
             seen_names.add(le_name)
 
     return _filter_and_sort_templates(merged_entries, status, search)
+
+
 def _merge_sms_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
     local_entries = load_sms_submissions(client=acc)
     dlrs = load_sms_dlrs(client=acc)
@@ -907,26 +927,28 @@ def _merge_sms_templates(acc: str, status: str | None, search: str | None) -> li
             appr_status = "approved" if sub.get("status_code") == "200" else "rejected"
 
         t_name = f"{sub.get('sender_id', 'SMS')}_{ack}" if ack and ack != "N/A" else f"SMS_{sub.get('id', '')[:8]}"
-        items.append({
-            "source_ref": t_name,
-            "template_name": t_name,
-            "template_id": sub.get("dlt_template_id") or ack,
-            "template_type": "SMS (Text)",
-            "category": "TRANSACTIONAL",
-            "template_message": sub.get("message_preview") or "",
-            "sender_ids": [sub.get("sender_id")] if sub.get("sender_id") else [],
-            "status": "submitted" if sub.get("status_code") == "200" else "failed",
-            "approval_status": appr_status,
-            "submitted_at": sub.get("submitted_at") or "",
-            "client": sub.get("client") or acc,
-            "channel": "sms",
-            "submitted_by": sub.get("submitted_by"),
-            "source_file": sub.get("source_file"),
-            "dest_count": sub.get("dest_count", 0),
-            "error": sub.get("error"),
-            "live": True,
-            "exists_on_waba": False,
-        })
+        items.append(
+            {
+                "source_ref": t_name,
+                "template_name": t_name,
+                "template_id": sub.get("dlt_template_id") or ack,
+                "template_type": "SMS (Text)",
+                "category": "TRANSACTIONAL",
+                "template_message": sub.get("message_preview") or "",
+                "sender_ids": [sub.get("sender_id")] if sub.get("sender_id") else [],
+                "status": "submitted" if sub.get("status_code") == "200" else "failed",
+                "approval_status": appr_status,
+                "submitted_at": sub.get("submitted_at") or "",
+                "client": sub.get("client") or acc,
+                "channel": "sms",
+                "submitted_by": sub.get("submitted_by"),
+                "source_file": sub.get("source_file"),
+                "dest_count": sub.get("dest_count", 0),
+                "error": sub.get("error"),
+                "live": True,
+                "exists_on_waba": False,
+            }
+        )
     return _filter_and_sort_templates(items, status, search)
 
 
@@ -1059,6 +1081,7 @@ def _inspect_single_submission(
                     try:
                         import base64
                         import io
+
                         from PIL import Image
 
                         img = Image.open(io.BytesIO(c_img))
@@ -1082,7 +1105,9 @@ def _inspect_single_submission(
                                 }
                             )
                             card["aspect_ratio_blocked"] = True
-                            card["aspect_ratio_error"] = f"Card {c_idx + 1} image dimension {w}x{h} ({ratio:.2f}:1) does not match required ratio."
+                            card["aspect_ratio_error"] = (
+                                f"Card {c_idx + 1} image dimension {w}x{h} ({ratio:.2f}:1) does not match required ratio."
+                            )
                     except Exception as exc:
                         logger.debug("RCS card image inspection notice: %s", exc)
                     finally:
@@ -1094,6 +1119,7 @@ def _inspect_single_submission(
             try:
                 import base64
                 import io
+
                 from PIL import Image
 
                 img = Image.open(io.BytesIO(standalone_img))
@@ -1132,10 +1158,16 @@ def _inspect_single_submission(
             or "Image is not in recommended aspect ratio. Template will NOT be created."
         )
 
-    body_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "BODY"), "")
+    body_text = next(
+        (str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "BODY"), ""
+    )
     header_comp = next((c for c in components if isinstance(c, dict) and c.get("type") == "HEADER"), None)
-    footer_text = next((str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "FOOTER"), "")
-    buttons_list = next((c.get("buttons", []) for c in components if isinstance(c, dict) and c.get("type") == "BUTTONS"), [])
+    footer_text = next(
+        (str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "FOOTER"), ""
+    )
+    buttons_list = next(
+        (c.get("buttons", []) for c in components if isinstance(c, dict) and c.get("type") == "BUTTONS"), []
+    )
 
     item["compliance_warnings"] = validate_meta_technical_compliance(
         body_text=body_text,
@@ -1180,6 +1212,7 @@ def _whatsapp_input_diagnostic(filename: str) -> str:
         "Upload any CSV/XLS/XLSX layout containing a message, copy, content, or text column; "
         "template name, category, language, header, and CTA fields are optional and inferred when absent."
     )
+
 
 @app.post("/api/preview")
 async def preview_file(
@@ -1235,7 +1268,7 @@ async def preview_file(
             previews = preview_sms_rows(sms_msgs, client=account)
             return [
                 {
-                    "template_name": f"{p['sender_id']}_{idx+1}",
+                    "template_name": f"{p['sender_id']}_{idx + 1}",
                     "category": "TRANSACTIONAL",
                     "language": "en",
                     "status": "VALID",
@@ -1256,9 +1289,7 @@ async def preview_file(
             ]
         elif chan == "rcs":
             if suffix in (".xlsx", ".xls"):
-                submissions = await asyncio.to_thread(
-                    load_rcs_from_excel, tmp_path, client=account, upload_media=False
-                )
+                submissions = await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=account, upload_media=False)
             else:
                 submissions = await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=account)
             if not submissions:
@@ -1364,6 +1395,7 @@ async def _submit_rcs_batch(
 
     if auto_route:
         from loader import detect_spreadsheet_account
+
         detection = detect_spreadsheet_account(subs, current_account=acc)
         if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
             target_acc = detection["detected_account_id"]
@@ -1480,14 +1512,16 @@ async def _submit_rcs_batch(
     task_payloads = []
     for idx, s in enumerate(subs):
         existing_res = results_by_index[idx]
-        task_payloads.append({
-            "source_ref": s.source_ref,
-            "template_name": s.template_name,
-            "status": existing_res["status"].upper() if existing_res else "PENDING",
-            "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
-            "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
-            "error": existing_res.get("error") if existing_res else None,
-        })
+        task_payloads.append(
+            {
+                "source_ref": s.source_ref,
+                "template_name": s.template_name,
+                "status": existing_res["status"].upper() if existing_res else "PENDING",
+                "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
+                "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
+                "error": existing_res.get("error") if existing_res else None,
+            }
+        )
 
     create_job_with_tasks(
         tenant_id=acc,
@@ -1531,7 +1565,9 @@ async def _submit_rcs_batch(
                     provider_ref_id=res_item.get("provider_ref_id") or res_item.get("template_id"),
                     error=_clean_error_message(res_item.get("error")),
                 )
-                QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item})
+                QUEUE_MANAGER.broadcast_event(
+                    job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item}
+                )
 
     final_job = get_job(job_id)
     if final_job:
@@ -1564,7 +1600,13 @@ async def _submit_rcs_batch(
         },
         status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
     )
-    blocked_count = len([e for e in cleaned_entries if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"])
+    blocked_count = len(
+        [
+            e
+            for e in cleaned_entries
+            if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"
+        ]
+    )
     return {
         "job_id": job_id,
         "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
@@ -1575,15 +1617,30 @@ async def _submit_rcs_batch(
         "results": [_json_safe(e) for e in cleaned_entries],
     }
 
+
 async def _submit_wa_batch(
-    tmp_path: str, suffix: str, acc: str, user: str, skip_duplicates: bool, auto_route: bool, fix_aspect_ratio: bool, fix_grammar: bool, filename: str, current_user: dict
+    tmp_path: str,
+    suffix: str,
+    acc: str,
+    user: str,
+    skip_duplicates: bool,
+    auto_route: bool,
+    fix_aspect_ratio: bool,
+    fix_grammar: bool,
+    filename: str,
+    current_user: dict,
 ) -> dict:
-    subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc) if suffix in (".xlsx", ".xls") else await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
+    subs = (
+        await asyncio.to_thread(load_from_excel, tmp_path, client=acc)
+        if suffix in (".xlsx", ".xls")
+        else await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
+    )
     if not subs:
         raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(filename))
 
     if auto_route:
         from loader import detect_spreadsheet_account
+
         detection = detect_spreadsheet_account(subs, current_account=acc)
         if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
             target_acc = detection["detected_account_id"]
@@ -1602,9 +1659,7 @@ async def _submit_wa_batch(
     if skip_duplicates:
         live_templates = fetch_whatsapp_templates(client=acc)
         live_map = {
-            (lt.get("template_name") or "").strip().lower(): lt
-            for lt in live_templates
-            if lt.get("template_name")
+            (lt.get("template_name") or "").strip().lower(): lt for lt in live_templates if lt.get("template_name")
         }
 
     for idx, s in enumerate(subs):
@@ -1613,6 +1668,7 @@ async def _submit_wa_batch(
         wa_blocked_err = getattr(s, "aspect_ratio_error", None)
         if not wa_blocked and getattr(s, "components", None):
             from submission_client import check_whatsapp_image_aspect_ratio
+
             for comp in s.components:
                 if getattr(comp, "type", None) == "HEADER" and str(getattr(comp, "format", "")).upper() == "IMAGE":
                     img_data = getattr(comp, "image_bytes", None)
@@ -1663,7 +1719,9 @@ async def _submit_wa_batch(
                 provider_ref_id=ref_id,
                 error=f"Template already active on WABA ({approval_val.upper()}) — automatically skipped duplicate submission.",
                 provider_response=live_obj,
-                approval_status=ApprovalStatus(approval_val) if approval_val in ("approved", "pending", "rejected") else ApprovalStatus.APPROVED,
+                approval_status=ApprovalStatus(approval_val)
+                if approval_val in ("approved", "pending", "rejected")
+                else ApprovalStatus.APPROVED,
                 client=acc,
                 channel="whatsapp",
                 submitted_by=user,
@@ -1701,17 +1759,19 @@ async def _submit_wa_batch(
     task_payloads = []
     for idx, s in enumerate(subs):
         existing_res = results_by_index[idx]
-        task_payloads.append({
-            "source_ref": s.source_ref,
-            "template_name": s.template_name,
-            "language": s.language,
-            "category": s.category,
-            "components": [asdict(c) for c in s.components],
-            "status": existing_res["status"].upper() if existing_res else "PENDING",
-            "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
-            "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
-            "error": existing_res.get("error") if existing_res else None,
-        })
+        task_payloads.append(
+            {
+                "source_ref": s.source_ref,
+                "template_name": s.template_name,
+                "language": s.language,
+                "category": s.category,
+                "components": [asdict(c) for c in s.components],
+                "status": existing_res["status"].upper() if existing_res else "PENDING",
+                "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
+                "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
+                "error": existing_res.get("error") if existing_res else None,
+            }
+        )
 
     create_job_with_tasks(
         tenant_id=acc,
@@ -1758,7 +1818,9 @@ async def _submit_wa_batch(
                     error=_clean_error_message(res_item.get("error")),
                     approval_reason=_clean_error_message(res_item.get("approval_reason")),
                 )
-                QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item})
+                QUEUE_MANAGER.broadcast_event(
+                    job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item}
+                )
 
     final_job = get_job(job_id)
     if final_job:
@@ -1792,7 +1854,13 @@ async def _submit_wa_batch(
         },
         status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
     )
-    blocked_count = len([e for e in cleaned_entries if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"])
+    blocked_count = len(
+        [
+            e
+            for e in cleaned_entries
+            if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"
+        ]
+    )
     return {
         "job_id": job_id,
         "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
@@ -1878,7 +1946,18 @@ async def submit_file(
                 current_user,
                 fix_aspect_ratio=fix_aspect_ratio,
             )
-        return await _submit_wa_batch(tmp_path, suffix, acc, user, skip_duplicates, auto_route, fix_aspect_ratio, fix_grammar, file.filename or "upload.csv", current_user)
+        return await _submit_wa_batch(
+            tmp_path,
+            suffix,
+            acc,
+            user,
+            skip_duplicates,
+            auto_route,
+            fix_aspect_ratio,
+            fix_grammar,
+            file.filename or "upload.csv",
+            current_user,
+        )
     except HTTPException as http_exc:
         log_error(
             message=f"Submission failed for {acc} ({chan}): {http_exc.detail}",
@@ -2039,6 +2118,7 @@ async def karix_webhook_endpoint(
         "tasks_updated": updated_count,
     }
 
+
 @app.post("/api/poll")
 def poll(
     account: str = Query("bajaj"),
@@ -2074,7 +2154,6 @@ def poll(
             status_code=400,
             detail=f"Poll failed for {acc}: {exc!s}",
         ) from exc
-
 
 
 class DeleteTemplatesRequest(BaseModel):
@@ -2120,7 +2199,6 @@ def delete_templates_endpoint(
     return _json_safe(result)
 
 
-
 @app.post("/api/templates/validate")
 def validate_template_endpoint(
     body: TemplateValidationRequest,
@@ -2143,6 +2221,7 @@ def validate_template_endpoint(
         client=body.account,
     )
     return _json_safe(result)
+
 
 @app.post("/api/templates/delete-file")
 async def delete_templates_from_file(
@@ -2276,6 +2355,7 @@ def identify_templates_json_endpoint(
 
     report = identify_master_templates(body.templates, client=body.account)
     return _json_safe(report.to_dict())
+
 
 @app.get("/api/accounts")
 def get_accounts(current_user: dict = Depends(get_current_user)):
@@ -2439,9 +2519,13 @@ def get_credentials(
     )
     sms_key = os.environ.get(f"{prefix}_SMS_KEY") or os.environ.get("KARIX_SMS_KEY") or ""
     sms_username = os.environ.get(f"{prefix}_SMS_USERNAME") or os.environ.get("KARIX_SMS_USERNAME") or ""
-    sms_encryption_key = os.environ.get(f"{prefix}_SMS_ENCRYPTION_KEY") or os.environ.get("KARIX_SMS_ENCRYPTION_KEY") or ""
+    sms_encryption_key = (
+        os.environ.get(f"{prefix}_SMS_ENCRYPTION_KEY") or os.environ.get("KARIX_SMS_ENCRYPTION_KEY") or ""
+    )
     sms_sender_id = os.environ.get(f"{prefix}_SMS_SENDER_ID") or ("BAJAJF" if is_bajaj else "TATACP")
-    sms_dlr_auth_token = os.environ.get(f"{prefix}_SMS_DLR_AUTH_TOKEN") or os.environ.get("KARIX_SMS_DLR_AUTH_TOKEN") or ""
+    sms_dlr_auth_token = (
+        os.environ.get(f"{prefix}_SMS_DLR_AUTH_TOKEN") or os.environ.get("KARIX_SMS_DLR_AUTH_TOKEN") or ""
+    )
 
     if chan == "sms":
         is_configured = bool(sms_key or sms_username)
@@ -2450,7 +2534,9 @@ def get_credentials(
     elif chan == "rcs":
         rcs_bot_id = os.environ.get(f"{prefix}_RCS_BOT_ID") or get_rcs_bot_id(acc)
         rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or ""
-        rcs_esmeaddr = os.environ.get(f"{prefix}_RCS_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR") or get_esmeaddr(acc)
+        rcs_esmeaddr = (
+            os.environ.get(f"{prefix}_RCS_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR") or get_esmeaddr(acc)
+        )
         is_configured = bool(rcs_bot_id and rcs_auth_token)
     else:
         is_configured = bool(entity_id)
@@ -2474,7 +2560,10 @@ def get_credentials(
         "sms_dlr_auth_token": sms_dlr_auth_token or "",
         "rcs_bot_id": os.environ.get(f"{prefix}_RCS_BOT_ID") or get_rcs_bot_id(acc) or "",
         "rcs_auth_token": os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or "",
-        "rcs_esmeaddr": os.environ.get(f"{prefix}_RCS_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR") or get_esmeaddr(acc) or "",
+        "rcs_esmeaddr": os.environ.get(f"{prefix}_RCS_ESMEADDR")
+        or os.environ.get(f"{prefix}_ESMEADDR")
+        or get_esmeaddr(acc)
+        or "",
         "gemini_api_key": os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "",
         "is_configured": is_configured,
     }
@@ -2483,16 +2572,34 @@ def get_credentials(
 def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata: bool, is_bajaj: bool) -> dict:
     mapping = {}
     fields = [
-        (creds.waba_auth_token, "TATA_WABA_AUTH_TOKEN" if is_tata else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN")),
+        (
+            creds.waba_auth_token,
+            "TATA_WABA_AUTH_TOKEN"
+            if is_tata
+            else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN"),
+        ),
         (creds.waba_id, "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")),
-        (creds.bearer_token, "TATA_KARIX_BEARER_TOKEN" if is_tata else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN")),
-        (creds.session, "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION")),
+        (
+            creds.bearer_token,
+            "TATA_KARIX_BEARER_TOKEN"
+            if is_tata
+            else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN"),
+        ),
+        (
+            creds.session,
+            "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION"),
+        ),
         (creds.user, "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")),
         (creds.portal_username, f"{prefix}_PORTAL_USER"),
         (creds.portal_password, f"{prefix}_PORTAL_PASSWORD"),
         (creds.template_namespace_id, f"{prefix}_TEMPLATE_NAMESPACE_ID"),
         (creds.entity_id, "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")),
-        (creds.lounge_cookie, "TATA_KARIX_LOUNGE_COOKIE" if is_tata else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")),
+        (
+            creds.lounge_cookie,
+            "TATA_KARIX_LOUNGE_COOKIE"
+            if is_tata
+            else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE"),
+        ),
     ]
     for val, key in fields:
         if val is not None and val.strip():
@@ -2500,6 +2607,8 @@ def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata:
             mapping[key] = v
             os.environ[key] = v
     return mapping
+
+
 def _build_sms_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict:
     mapping = {}
     fields = [
@@ -2531,7 +2640,6 @@ def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict
             mapping[key] = v
             os.environ[key] = v
     return mapping
-
 
 
 @app.put("/api/credentials")
@@ -2639,7 +2747,9 @@ def _commit_credentials_to_github() -> str | None:
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
         r = _rq.get(api, headers=headers, timeout=10)
         if not r.ok and r.status_code in (401, 403):
-            reason = r.json().get("message", r.text[:120]) if "json" in r.headers.get("content-type", "") else r.text[:120]
+            reason = (
+                r.json().get("message", r.text[:120]) if "json" in r.headers.get("content-type", "") else r.text[:120]
+            )
             logger.warning("GitHub credentials access denied: HTTP %s: %s", r.status_code, reason)
             return f"failed_http_{r.status_code}: {reason}"
         sha = r.json().get("sha") if r.ok else None
@@ -2703,7 +2813,14 @@ def _test_rcs_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -
 
 
 def _test_whatsapp_channel(
-    acc: str, acc_name: str, prefix: str, is_tata: bool, is_bajaj: bool, creds: CredentialUpdate | None, w_id_key: str, w_tok_key: str
+    acc: str,
+    acc_name: str,
+    prefix: str,
+    is_tata: bool,
+    is_bajaj: bool,
+    creds: CredentialUpdate | None,
+    w_id_key: str,
+    w_tok_key: str,
 ) -> dict:
     results = []
     try:
@@ -2767,6 +2884,8 @@ def _test_whatsapp_channel(
         status="success" if is_ok else "failed",
     )
     return {"ok": is_ok, "message": " | ".join(results)}
+
+
 def _test_sms_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -> dict:
     conn_info = test_sms_connection(client=acc)
     return {
@@ -2820,6 +2939,7 @@ def test_credentials(
     elif chan == "rcs":
         return _test_rcs_channel(acc, acc_name, creds)
     return _test_whatsapp_channel(acc, acc_name, prefix, is_tata, is_bajaj, creds, w_id_key, w_tok_key)
+
 
 @app.get("/api/sample-csv")
 def get_sample_csv(channel: str = Query("whatsapp")):
@@ -2956,6 +3076,7 @@ def agent_chat_endpoint(req: AgentChatRequest, current_user: dict = Depends(get_
 # ---------------------------------------------------------------------------
 # Dedicated SMS Endpoints (Send, Preview, Upload, DLR Webhook, Click Webhook)
 # ---------------------------------------------------------------------------
+
 
 class SmsSendApiRequest(BaseModel):
     dest: list[str] | str | None = None
@@ -3333,6 +3454,8 @@ def get_system_errors(
         "summary": get_error_summary(),
         "errors": [_json_safe(e) for e in load_errors(account=account, channel=channel, limit=limit)],
     }
+
+
 # ---------------------------------------------------------------------------
 # Jira Briefing Agent Endpoints
 # ---------------------------------------------------------------------------
@@ -3423,6 +3546,7 @@ def get_jira_brief_endpoint(
         live_templates = []
         try:
             from submission_client import _match_template, fetch_template_list
+
             live_templates, _ = fetch_template_list(client=target_client)
         except Exception as fetch_err:
             logger.warning(
@@ -3440,7 +3564,9 @@ def get_jira_brief_endpoint(
             matched = _match_template(live_templates, wa["template_name"]) if live_templates else None
             if matched:
                 wa_copy["exists_on_waba"] = True
-                wa_copy["live_status"] = str(matched.get("template_create_status") or matched.get("status", "UNKNOWN")).lower()
+                wa_copy["live_status"] = str(
+                    matched.get("template_create_status") or matched.get("status", "UNKNOWN")
+                ).lower()
                 wa_copy["live_ref_id"] = str(matched.get("fb_template_id") or matched.get("sno") or "")
             else:
                 wa_copy["exists_on_waba"] = False
@@ -3493,7 +3619,7 @@ async def submit_jira_brief_endpoint(
     record results in database queue, and post automated comment back to Jira ticket.
     """
     from briefing_parser import parse_jira_brief
-    from jira_client import add_jira_comment, fetch_jira_issue
+    from jira_client import fetch_jira_issue
     from models import TemplateComponent, TemplateSubmission
     from rcs_client import submit_rcs_template
     from rcs_models import RcsTemplateSubmission
@@ -3509,6 +3635,7 @@ async def submit_jira_brief_endpoint(
     if "whatsapp" in req.channels and (req.whatsapp_templates or parsed.whatsapp_templates):
         try:
             from config import get_waba_id
+
             _ = get_waba_id(acc)
         except Exception as waba_err:
             raise HTTPException(
@@ -3561,6 +3688,7 @@ async def submit_jira_brief_endpoint(
             sample_vals = [str(v) for v in (wa.get("sample_values") or []) if str(v).strip()]
             if body_vars and not sample_vals:
                 from submission_client import normalize_whatsapp_text_variables
+
                 _, auto_samples = normalize_whatsapp_text_variables(body_text, client=acc)
                 if auto_samples:
                     sample_vals = auto_samples
@@ -3596,25 +3724,35 @@ async def submit_jira_brief_endpoint(
                 btn_type = (wa.get("button_type") or "NONE").upper().strip()
                 btn_text = (wa.get("button_text") or "").strip()
                 raw_btn_url = (wa.get("button_url") or "").strip()
-                if not raw_btn_url or raw_btn_url.rstrip("/") in ("https://www.tatacapital.com", "http://www.tatacapital.com", "https://tatacapital.com"):
+                if not raw_btn_url or raw_btn_url.rstrip("/") in (
+                    "https://www.tatacapital.com",
+                    "http://www.tatacapital.com",
+                    "https://tatacapital.com",
+                ):
                     raw_btn_url = "https://u3.mnge.co/"
                 if btn_type == "URL" and (raw_btn_url or btn_text):
-                    btn_list.append({
-                        "type": "URL",
-                        "text": btn_text or "Check Offer",
-                        "url": raw_btn_url,
-                    })
+                    btn_list.append(
+                        {
+                            "type": "URL",
+                            "text": btn_text or "Check Offer",
+                            "url": raw_btn_url,
+                        }
+                    )
                 elif btn_type in ("QUICK_REPLY", "QUICKREPLY") and btn_text:
-                    btn_list.append({
-                        "type": "QUICK_REPLY",
-                        "text": btn_text,
-                    })
+                    btn_list.append(
+                        {
+                            "type": "QUICK_REPLY",
+                            "text": btn_text,
+                        }
+                    )
                 elif btn_type in ("PHONE_NUMBER", "PHONE", "CALL") and btn_text:
-                    btn_list.append({
-                        "type": "PHONE_NUMBER",
-                        "text": btn_text,
-                        "phone_number": wa.get("phone_number") or wa.get("button_phone") or "+919876543210",
-                    })
+                    btn_list.append(
+                        {
+                            "type": "PHONE_NUMBER",
+                            "text": btn_text,
+                            "phone_number": wa.get("phone_number") or wa.get("button_phone") or "+919876543210",
+                        }
+                    )
 
             if btn_list:
                 comps.append(
@@ -3641,20 +3779,24 @@ async def submit_jira_brief_endpoint(
                 res.submitted_by = user_name
                 res.source_file = f"Jira: {issue_key}"
                 log_result(res, LOG_PATH)
-                submitted_wa.append({
-                    "template_name": res.template_name,
-                    "status": res.status.value,
-                    "approval_status": res.approval_status.value,
-                    "error": res.error,
-                })
+                submitted_wa.append(
+                    {
+                        "template_name": res.template_name,
+                        "status": res.status.value,
+                        "approval_status": res.approval_status.value,
+                        "error": res.error,
+                    }
+                )
             except Exception as wa_exc:
                 logger.exception("Failed to submit WhatsApp template %s: %s", wa["template_name"], wa_exc)
-                submitted_wa.append({
-                    "template_name": wa["template_name"],
-                    "status": "failed",
-                    "approval_status": "rejected",
-                    "error": str(wa_exc),
-                })
+                submitted_wa.append(
+                    {
+                        "template_name": wa["template_name"],
+                        "status": "failed",
+                        "approval_status": "rejected",
+                        "error": str(wa_exc),
+                    }
+                )
 
     # 2. Submit RCS templates
     if "rcs" in req.channels:
@@ -3664,12 +3806,14 @@ async def submit_jira_brief_endpoint(
             btn_text = rcs.get("button_text") or rcs.get("action_label")
             btn_url = rcs.get("button_url") or rcs.get("action_url") or "https://u3.mnge.co/"
             if btn_text:
-                suggestions.append({
-                    "suggestionType": "url_action",
-                    "text": btn_text,
-                    "postbackData": btn_text,
-                    "url": btn_url,
-                })
+                suggestions.append(
+                    {
+                        "suggestionType": "url_action",
+                        "text": btn_text,
+                        "postbackData": btn_text,
+                        "url": btn_url,
+                    }
+                )
 
             has_media = bool(rcs.get("media_file"))
             rcs_type = "richcard" if has_media else "text"
@@ -3694,20 +3838,24 @@ async def submit_jira_brief_endpoint(
                 rcs_res.submitted_by = user_name
                 rcs_res.source_file = f"Jira: {issue_key}"
                 log_rcs_result(rcs_res, RCS_LOG_PATH)
-                submitted_rcs.append({
-                    "template_name": rcs_res.template_name,
-                    "status": rcs_res.status.value,
-                    "template_id": rcs_res.template_id,
-                    "error": rcs_res.error,
-                })
+                submitted_rcs.append(
+                    {
+                        "template_name": rcs_res.template_name,
+                        "status": rcs_res.status.value,
+                        "template_id": rcs_res.template_id,
+                        "error": rcs_res.error,
+                    }
+                )
             except Exception as rcs_exc:
                 logger.exception("Failed to submit RCS template %s: %s", rcs["template_name"], rcs_exc)
-                submitted_rcs.append({
-                    "template_name": rcs["template_name"],
-                    "status": "failed",
-                    "template_id": None,
-                    "error": str(rcs_exc),
-                })
+                submitted_rcs.append(
+                    {
+                        "template_name": rcs["template_name"],
+                        "status": "failed",
+                        "template_id": None,
+                        "error": str(rcs_exc),
+                    }
+                )
     # 3. Post automated status comment back to Jira
     wa_summary = f"{len(submitted_wa)} WhatsApp templates" if submitted_wa else ""
     rcs_summary = f"{len(submitted_rcs)} RCS templates" if submitted_rcs else ""
@@ -3720,7 +3868,9 @@ async def submit_jira_brief_endpoint(
     if submitted_wa:
         comment_body += "WhatsApp Templates:\n"
         for w in submitted_wa:
-            comment_body += f"• {w['template_name']}: {w['status'].upper()} (Approval: {w['approval_status'].upper()})\n"
+            comment_body += (
+                f"• {w['template_name']}: {w['status'].upper()} (Approval: {w['approval_status'].upper()})\n"
+            )
         comment_body += "\n"
     if submitted_rcs:
         comment_body += "RCS Templates:\n"
@@ -3743,14 +3893,18 @@ async def submit_jira_brief_endpoint(
         status="success",
     )
 
-    return _json_safe({
-        "ok": True,
-        "issue_key": issue_key,
-        "account": acc,
-        "whatsapp_submitted": submitted_wa,
-        "rcs_submitted": submitted_rcs,
-        "jira_comment": jira_comment_res,
-    })
+    return _json_safe(
+        {
+            "ok": True,
+            "issue_key": issue_key,
+            "account": acc,
+            "whatsapp_submitted": submitted_wa,
+            "rcs_submitted": submitted_rcs,
+            "jira_comment": jira_comment_res,
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # MoEngage RCS Template Management Sync Endpoints
 # ---------------------------------------------------------------------------
@@ -3765,6 +3919,7 @@ class MoEngageRcsSyncRequest(BaseModel):
     cta_text: str = "Explore Now"
     cta_url: str = "https://u3.mnge.co/"
     sender_id: str = "68888420892e852255fca466"
+
 
 @app.post("/api/moengage/rcs/sync")
 async def sync_moengage_rcs_endpoint(
@@ -3861,19 +4016,21 @@ def get_moengage_credentials_endpoint(
     from moengage_sync import get_moengage_credentials
 
     creds = get_moengage_credentials(account)
-    return _json_safe({
-        "ok": True,
-        "account": account,
-        "base_url": creds.get("base_url"),
-        "sender_id": creds.get("sender_id"),
-        "has_token": creds.get("has_token", False),
-        "has_cookie": creds.get("has_cookie", False),
-        "bearer_token": creds.get("bearer_token", ""),
-        "cookie": creds.get("cookie", ""),
-        "expired": creds.get("expired"),
-        "expires_at": creds.get("expires_at"),
-        "remaining_min": creds.get("remaining_min"),
-    })
+    return _json_safe(
+        {
+            "ok": True,
+            "account": account,
+            "base_url": creds.get("base_url"),
+            "sender_id": creds.get("sender_id"),
+            "has_token": creds.get("has_token", False),
+            "has_cookie": creds.get("has_cookie", False),
+            "bearer_token": creds.get("bearer_token", ""),
+            "cookie": creds.get("cookie", ""),
+            "expired": creds.get("expired"),
+            "expires_at": creds.get("expires_at"),
+            "remaining_min": creds.get("remaining_min"),
+        }
+    )
 
 
 @app.put("/api/moengage/credentials")
@@ -3939,6 +4096,7 @@ def update_moengage_credentials_endpoint(
         os.environ[k] = v
 
     from moengage_sync import decode_moengage_token_expiry
+
     expiry = decode_moengage_token_expiry(mapping.get(keys["bearer_token"]))
 
     log_activity(
@@ -3950,13 +4108,15 @@ def update_moengage_credentials_endpoint(
         status="success",
     )
 
-    return _json_safe({
-        "ok": True,
-        "account": req.account,
-        "updated_keys": list(mapping.keys()),
-        "expired": expiry.get("expired"),
-        "remaining_min": expiry.get("remaining_min"),
-    })
+    return _json_safe(
+        {
+            "ok": True,
+            "account": req.account,
+            "updated_keys": list(mapping.keys()),
+            "expired": expiry.get("expired"),
+            "remaining_min": expiry.get("remaining_min"),
+        }
+    )
 
 
 @app.post("/api/moengage/test")
@@ -4068,11 +4228,13 @@ async def sync_moengage_ops_endpoint(
 
     records = await asyncio.to_thread(sync_all_moengage_ops)
     metrics = compute_ops_dashboard_metrics(records, mode="last_week")
-    return _json_safe({
-        "ok": True,
-        "total_records": len(records),
-        "metrics": metrics,
-    })
+    return _json_safe(
+        {
+            "ok": True,
+            "total_records": len(records),
+            "metrics": metrics,
+        }
+    )
 
 
 @app.get("/api/moengage/ops/export-excel")
@@ -4096,6 +4258,7 @@ def get_moengage_ops_workspaces(
 ):
     """List registered MoEngage workspaces for ops reporting."""
     from dataclasses import asdict
+
     from moengage_ops_client import load_workspace_configs
 
     configs = load_workspace_configs()
@@ -4160,12 +4323,14 @@ async def upload_moengage_export_endpoint(
         res = ingest_moengage_export_file(tmp_path, default_vertical=vertical)
         records = load_cached_ops_records()
         metrics = compute_ops_dashboard_metrics(records, mode="last_week")
-        return _json_safe({
-            "ok": True,
-            "filename": file.filename,
-            "result": res,
-            "metrics": metrics,
-        })
+        return _json_safe(
+            {
+                "ok": True,
+                "filename": file.filename,
+                "result": res,
+                "metrics": metrics,
+            }
+        )
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
@@ -4178,12 +4343,12 @@ class TicketTransferRequest(BaseModel):
     transferred_by: str | None = None
 
 
-
 class BulkTicketTransferRequest(BaseModel):
     issue_keys: list[str]
     to_account_id: str
     handover_note: str = ""
     transferred_by: str | None = None
+
 
 class AiRebalanceRequest(BaseModel):
     prompt: str
@@ -4231,6 +4396,7 @@ def get_work_management_assignees_endpoint(
 
     users = fetch_assignable_jira_users(project=project)
     return _json_safe([u.to_dict() for u in users])
+
 
 def require_transfer_authorization(user: dict[str, Any]) -> None:
     """
@@ -4300,6 +4466,7 @@ def bulk_transfer_jira_tickets_endpoint(
     )
     return _json_safe(result)
 
+
 @app.post("/api/work-management/assign-unassigned")
 def assign_unassigned_to_neel_endpoint(
     project: str = Query("ALL"),
@@ -4312,6 +4479,7 @@ def assign_unassigned_to_neel_endpoint(
 
     result = assign_unassigned_tickets_to_neel(project=project)
     return _json_safe(result)
+
 
 @app.post("/api/work-management/ai-rebalance")
 def ai_rebalance_workload_endpoint(
@@ -4360,6 +4528,8 @@ class DispatchAlertsRequest(BaseModel):
     send_google_chat: bool = True
     send_email: bool = True
     google_chat_webhook_url: str | None = None
+
+
 class SchedulerToggleRequest(BaseModel):
     enabled: bool
 
@@ -4417,13 +4587,15 @@ def scheduler_status_endpoint(
     from email_notifier import SCHEDULER_STATE, determine_current_stage, get_current_ist_time
 
     ist_now = get_current_ist_time()
-    return _json_safe({
-        "enabled": SCHEDULER_STATE.enabled,
-        "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
-        "current_stage": determine_current_stage(ist_now),
-        "last_sent": SCHEDULER_STATE.last_sent,
-        "history": SCHEDULER_STATE.history[-10:],
-    })
+    return _json_safe(
+        {
+            "enabled": SCHEDULER_STATE.enabled,
+            "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
+            "current_stage": determine_current_stage(ist_now),
+            "last_sent": SCHEDULER_STATE.last_sent,
+            "history": SCHEDULER_STATE.history[-10:],
+        }
+    )
 
 
 @app.post("/api/work-management/alerts/scheduler-toggle")
@@ -4438,12 +4610,14 @@ def scheduler_toggle_endpoint(
 
     SCHEDULER_STATE.enabled = body.enabled
     ist_now = get_current_ist_time()
-    return _json_safe({
-        "enabled": SCHEDULER_STATE.enabled,
-        "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
-        "current_stage": determine_current_stage(ist_now),
-        "message": f"Automated alert scheduler is now {'ENABLED' if body.enabled else 'DISABLED'}.",
-    })
+    return _json_safe(
+        {
+            "enabled": SCHEDULER_STATE.enabled,
+            "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
+            "current_stage": determine_current_stage(ist_now),
+            "message": f"Automated alert scheduler is now {'ENABLED' if body.enabled else 'DISABLED'}.",
+        }
+    )
 
 
 @app.get("/api/work-management/alerts/delivery-logs")

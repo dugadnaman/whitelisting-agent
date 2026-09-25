@@ -7,12 +7,12 @@ Provides seamless dual-driver support:
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
 import logging
 import os
-from pathlib import Path
 import re
 import sqlite3
+from collections.abc import Iterator, Sequence
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -24,10 +24,7 @@ DB_PATH = DEFAULT_SQLITE_PATH
 def get_database_url() -> str:
     """Retrieve normalized PostgreSQL database URL or empty string if using SQLite."""
     raw = (
-        os.environ.get("DATABASE_URL")
-        or os.environ.get("POSTGRES_URL")
-        or os.environ.get("POSTGRESQL_URL")
-        or ""
+        os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or os.environ.get("POSTGRESQL_URL") or ""
     ).strip()
     if not raw:
         return ""
@@ -181,7 +178,9 @@ def get_db(timeout_sec: float = 15.0) -> DBConnection:
             )
             return DBConnection(conn, is_pg=True)
         except Exception as exc:
-            logger.error("Failed to connect to PostgreSQL at %s: %s. Falling back to SQLite.", pg_url.split("@")[-1], exc)
+            logger.error(
+                "Failed to connect to PostgreSQL at %s: %s. Falling back to SQLite.", pg_url.split("@")[-1], exc
+            )
 
     # SQLite fallback
     DEFAULT_SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -375,7 +374,7 @@ POSTGRES_SCHEMA_DDL = [
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_act_ts ON activities(timestamp DESC);",
-    "CREATE INDEX IF NOT EXISTS idx_act_user ON activities(\"user\");",
+    'CREATE INDEX IF NOT EXISTS idx_act_user ON activities("user");',
     "CREATE INDEX IF NOT EXISTS idx_act_account ON activities(account);",
     "CREATE INDEX IF NOT EXISTS idx_act_action ON activities(action);",
     """
@@ -508,7 +507,10 @@ def init_database() -> None:
 # Migration Utility (SQLite -> PostgreSQL)
 # ---------------------------------------------------------------------------
 
-def migrate_sqlite_to_postgres(sqlite_path: Path | str = DEFAULT_SQLITE_PATH, pg_url: str | None = None) -> dict[str, Any]:
+
+def migrate_sqlite_to_postgres(
+    sqlite_path: Path | str = DEFAULT_SQLITE_PATH, pg_url: str | None = None
+) -> dict[str, Any]:
     """
     Copy all table data from a local SQLite database file into PostgreSQL.
     Safely skips duplicate primary keys using ON CONFLICT DO NOTHING.
@@ -552,10 +554,7 @@ def migrate_sqlite_to_postgres(sqlite_path: Path | str = DEFAULT_SQLITE_PATH, pg
         placeholders = ", ".join(["%s"] * len(col_names))
         pk = col_names[0]
 
-        insert_sql = (
-            f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders}) "
-            f"ON CONFLICT ({pk}) DO NOTHING"
-        )
+        insert_sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders}) ON CONFLICT ({pk}) DO NOTHING"
 
         with dest_conn.cursor() as dest_cur:
             psycopg2.extras.execute_batch(

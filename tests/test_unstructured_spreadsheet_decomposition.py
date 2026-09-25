@@ -9,7 +9,9 @@ Verifies:
 """
 
 from pathlib import Path
+
 import openpyxl
+
 from briefing_parser import (
     decompose_content,
     extract_templates_from_excel_file,
@@ -55,11 +57,15 @@ def test_unformatted_grid_of_templates(tmp_path: Path):
     ws.title = "Unformatted Grid"
 
     # A1 has template 1, A2 has template 2
-    ws["A1"] = "Dear Customer, pre-approved loan of Rs. 25,000 is ready for you from Tata Capital. Apply: https://u3.mnge.co/a1"
+    ws["A1"] = (
+        "Dear Customer, pre-approved loan of Rs. 25,000 is ready for you from Tata Capital. Apply: https://u3.mnge.co/a1"
+    )
     ws["A2"] = "Hi Customer, festive loan offer with zero processing fee is available. Apply: https://u3.mnge.co/a2"
 
     # B1 has template 3, B2 has template 4
-    ws["B1"] = "Special Diwali business loan offer up to Rs. 10 Lakhs is live from Tata Capital. Apply: https://u3.mnge.co/b1"
+    ws["B1"] = (
+        "Special Diwali business loan offer up to Rs. 10 Lakhs is live from Tata Capital. Apply: https://u3.mnge.co/b1"
+    )
     ws["B2"] = "Upgrade your dream vehicle with Tata Capital Auto Loan starting 8.75% ROI. Apply: https://u3.mnge.co/b2"
 
     fpath = tmp_path / "arbitrary_grid.xlsx"

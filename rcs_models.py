@@ -17,6 +17,7 @@ class RcsSubmissionStatus(StrEnum):
     DUPLICATE = "duplicate"
     BLOCKED_ASPECT_RATIO = "blocked_aspect_ratio"
 
+
 @dataclass
 class RcsSuggestion:
     """One suggested reply or action for an RCS template."""
@@ -67,6 +68,7 @@ class RcsTemplateSubmission:
     source_ref: str = ""
     aspect_ratio_blocked: bool = False
     aspect_ratio_error: str | None = None
+
     def __post_init__(self):
         if not self.source_ref:
             self.source_ref = self.template_name

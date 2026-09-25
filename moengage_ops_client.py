@@ -15,11 +15,11 @@ Scoping Rules:
 """
 
 import base64
-from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta
 import json
 import logging
 import os
+from dataclasses import asdict, dataclass
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -183,7 +183,9 @@ def _normalize_channel_name(channel_raw: str | None, label: str | None = None) -
     return "Push"
 
 
-def infer_channel_from_name_or_raw(channel_raw: str | None = None, name: str | None = None, label: str | None = None) -> str:
+def infer_channel_from_name_or_raw(
+    channel_raw: str | None = None, name: str | None = None, label: str | None = None
+) -> str:
     """
     Map channel using both MoEngage raw channel tag and standard campaign name suffixes
     (_WA -> WhatsApp, _RCS -> RCS, _SMS -> SMS, _PN -> Push, _Email -> Email).
@@ -204,6 +206,8 @@ def infer_channel_from_name_or_raw(channel_raw: str | None = None, name: str | N
         return "Push"
 
     return _normalize_channel_name(channel_raw, label=label)
+
+
 def _infer_vertical_from_name(name: str, default_vertical: str) -> str:
     """Infer vertical from campaign naming patterns matching Excel formulas."""
     n_lower = name.lower()
@@ -298,7 +302,9 @@ def fetch_workspace_campaigns(
         try:
             resp = requests.post(url, headers=headers, json=body, timeout=20)
             if not resp.ok:
-                logger.warning("Campaigns search for %s failed (%d): %s", config.workspace_name, resp.status_code, resp.text[:200])
+                logger.warning(
+                    "Campaigns search for %s failed (%d): %s", config.workspace_name, resp.status_code, resp.text[:200]
+                )
                 break
             data = resp.json().get("data", {}).get("campaigns", [])
             if not data:
@@ -383,7 +389,11 @@ def fetch_workspace_flows(
                 is_attributics = "@attributics.com" in c_by.lower()
                 vertical = _infer_vertical_from_name(name, config.vertical)
                 # In Collections sheet: Owned is true if status == "Active"
-                in_scope = (status.lower() == "active") if config.vertical == "Collections" else (is_attributics and not is_test)
+                in_scope = (
+                    (status.lower() == "active")
+                    if config.vertical == "Collections"
+                    else (is_attributics and not is_test)
+                )
 
                 records.append(
                     NormalizedOpsRecord(
@@ -407,7 +417,9 @@ def fetch_workspace_flows(
                 flow_id = f.get("flow_id")
                 if flow_id:
                     try:
-                        detail_resp = requests.get(f"{config.get_base_url()}/v5/flows/{flow_id}", headers=headers, timeout=12)
+                        detail_resp = requests.get(
+                            f"{config.get_base_url()}/v5/flows/{flow_id}", headers=headers, timeout=12
+                        )
                         if detail_resp.ok:
                             detail_data = detail_resp.json().get("data", {})
                             nodes = detail_data.get("structure", {}).get("nodes", [])
@@ -417,9 +429,15 @@ def fetch_workspace_flows(
                                     node_sub = str(node.get("sub_type") or cfg.get("channel") or "")
                                     node_label = str(node.get("label") or "")
                                     node_chan = _normalize_channel_name(node_sub, label=node_label)
-                                    node_name = cfg.get("campaign_name") or node.get("label") or f"{name}_{node_chan}_node"
+                                    node_name = (
+                                        cfg.get("campaign_name") or node.get("label") or f"{name}_{node_chan}_node"
+                                    )
                                     node_test = _is_test_campaign(node_name) or is_test
-                                    node_in_scope = (is_attributics or not node_test) if config.vertical == "Collections" else (in_scope and not node_test)
+                                    node_in_scope = (
+                                        (is_attributics or not node_test)
+                                        if config.vertical == "Collections"
+                                        else (in_scope and not node_test)
+                                    )
 
                                     records.append(
                                         NormalizedOpsRecord(
@@ -482,7 +500,9 @@ def load_cached_ops_records() -> list[NormalizedOpsRecord]:
     return sync_all_moengage_ops()
 
 
-def get_date_range_bounds(mode: str = "last_week", custom_start: str | None = None, custom_end: str | None = None) -> tuple[date, date]:
+def get_date_range_bounds(
+    mode: str = "last_week", custom_start: str | None = None, custom_end: str | None = None
+) -> tuple[date, date]:
     """Calculate effective start and end dates matching the Excel Dashboard formulas."""
     today = datetime.now(UTC).date()
     mode_clean = (mode or "last_week").lower().strip()
@@ -531,7 +551,8 @@ def compute_ops_dashboard_metrics(
     # Filter in-scope records by date
     # Note: In Collections, flows are reported as live active snapshot (not date filtered), exactly per spreadsheet row 44
     date_filtered_records = [
-        r for r in records
+        r
+        for r in records
         if r.in_scope and (start_str <= r.date <= end_str or (r.vertical == "Collections" and r.type == "Flow"))
     ]
 
@@ -544,15 +565,18 @@ def compute_ops_dashboard_metrics(
         account_overview_verticals = {"TCL", "Services", "Wealth", "Moneyfy"}
         title = "TCL + Services + Wealth + Moneyfy Combined"
     overview_camps = [
-        r for r in date_filtered_records
+        r
+        for r in date_filtered_records
         if r.type == "Campaign" and r.vertical in account_overview_verticals and (start_str <= r.date <= end_str)
     ]
     overview_flows = [
-        r for r in date_filtered_records
+        r
+        for r in date_filtered_records
         if r.type == "Flow" and r.vertical in account_overview_verticals and (start_str <= r.date <= end_str)
     ]
     overview_nodes = [
-        r for r in date_filtered_records
+        r
+        for r in date_filtered_records
         if r.type == "Node" and r.vertical in account_overview_verticals and (start_str <= r.date <= end_str)
     ]
 
@@ -575,15 +599,18 @@ def compute_ops_dashboard_metrics(
     vertical_breakdown: dict[str, dict[str, Any]] = {}
     for v in all_verticals:
         v_camps = [
-            r for r in date_filtered_records
+            r
+            for r in date_filtered_records
             if r.vertical == v and r.type == "Campaign" and (start_str <= r.date <= end_str)
         ]
         v_flows = [
-            r for r in date_filtered_records
+            r
+            for r in date_filtered_records
             if r.vertical == v and r.type == "Flow" and (v == "Collections" or (start_str <= r.date <= end_str))
         ]
         v_nodes = [
-            r for r in date_filtered_records
+            r
+            for r in date_filtered_records
             if r.vertical == v and r.type == "Node" and (v == "Collections" or (start_str <= r.date <= end_str))
         ]
 
@@ -686,6 +713,7 @@ def parse_moengage_export_file(file_path: Path | str, default_vertical: str = "T
     Automatically infers channels (SMS, RCS, WhatsApp, Email, Push) and Attributics scope.
     """
     import csv
+
     import openpyxl
 
     path = Path(file_path)
@@ -701,7 +729,7 @@ def parse_moengage_export_file(file_path: Path | str, default_vertical: str = "T
             if any(row_dict.values()):
                 rows_data.append(row_dict)
     else:
-        with open(path, mode="r", encoding="utf-8-sig", errors="replace") as f:
+        with open(path, encoding="utf-8-sig", errors="replace") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 if any(row.values()):
@@ -723,11 +751,7 @@ def parse_moengage_export_file(file_path: Path | str, default_vertical: str = "T
         chan = infer_channel_from_name_or_raw(raw_chan, name=name)
 
         c_by = str(
-            row.get("Created By")
-            or row.get("Created by")
-            or row.get("created_by")
-            or row.get("Author")
-            or ""
+            row.get("Created By") or row.get("Created by") or row.get("created_by") or row.get("Author") or ""
         ).strip()
 
         date_val = (

@@ -50,8 +50,9 @@ class TestCredentialContract(unittest.TestCase):
 
         fake_session = MagicMock()
         fake_session.post.return_value = FakeResponse()
-        with patch("submission_client.get_portal_auth_headers") as mock_headers, patch(
-            "submission_client.get_http_session", return_value=fake_session
+        with (
+            patch("submission_client.get_portal_auth_headers") as mock_headers,
+            patch("submission_client.get_http_session", return_value=fake_session),
         ):
             mock_headers.return_value = {"Authorization": "Bearer x", "Session": "s", "User": "u"}
             res = submit_template(submission, client="tchfl")
@@ -87,8 +88,7 @@ class TestCredentialContract(unittest.TestCase):
         # Snapshot pre-existing values so the test restores them exactly —
         # never delete real operator credentials.
         saved_env = {
-            k: os.environ.get(k)
-            for k in ("TCHFL_KARIX_BEARER_TOKEN", "TCHFL_KARIX_SESSION", "TCHFL_KARIX_USER")
+            k: os.environ.get(k) for k in ("TCHFL_KARIX_BEARER_TOKEN", "TCHFL_KARIX_SESSION", "TCHFL_KARIX_USER")
         }
         creds_path = Path("credentials.json")
         saved_file = creds_path.read_text(encoding="utf-8") if creds_path.exists() else None

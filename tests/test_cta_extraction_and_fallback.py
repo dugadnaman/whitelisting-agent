@@ -56,11 +56,7 @@ def test_cta_with_custom_campaign_url_preserved():
 
 def test_cta_without_url_defaults_to_u3_mnge_co():
     """Verify CTA line without URL defaults to https://u3.mnge.co/."""
-    body = (
-        "Too many EMIs? Consolidate them today.\n"
-        "Check your offer: <link>\n"
-        "T&Cs apply."
-    )
+    body = "Too many EMIs? Consolidate them today.\nCheck your offer: <link>\nT&Cs apply."
     clean_body, btn_text, btn_url, _ = extract_and_strip_cta(body)
     assert "<link>" not in clean_body
     assert "Check your offer:" not in clean_body

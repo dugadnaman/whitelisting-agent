@@ -21,7 +21,7 @@ from pathlib import Path
 
 from config import get_waba_id
 from loader import load_from_list
-from models import ApprovalStatus
+from models import ApprovalStatus, SubmissionResult, SubmissionStatus
 from submission_client import (
     _STATUS_MAP,
     _match_template,
@@ -35,11 +35,36 @@ from tracker import log_result, pending_entries, update_results
 _TERMINAL_STATUSES = {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}
 
 CATEGORY_APPROVAL_SLAS = {
-    "AUTHENTICATION": {"initial_delay_sec": 60, "poll_interval_sec": 60, "avg_approval_sec": 120, "label": "Authentication (Auto)"},
-    "UTILITY": {"initial_delay_sec": 120, "poll_interval_sec": 120, "avg_approval_sec": 240, "label": "Utility (Fast ~3m)"},
-    "MARKETING_TEXT": {"initial_delay_sec": 600, "poll_interval_sec": 300, "avg_approval_sec": 1200, "label": "Marketing Text (~15m)"},
-    "MARKETING_MEDIA": {"initial_delay_sec": 1200, "poll_interval_sec": 600, "avg_approval_sec": 2400, "label": "Marketing Media (~35m)"},
-    "DEFAULT": {"initial_delay_sec": 300, "poll_interval_sec": 300, "avg_approval_sec": 900, "label": "Standard (~10m)"},
+    "AUTHENTICATION": {
+        "initial_delay_sec": 60,
+        "poll_interval_sec": 60,
+        "avg_approval_sec": 120,
+        "label": "Authentication (Auto)",
+    },
+    "UTILITY": {
+        "initial_delay_sec": 120,
+        "poll_interval_sec": 120,
+        "avg_approval_sec": 240,
+        "label": "Utility (Fast ~3m)",
+    },
+    "MARKETING_TEXT": {
+        "initial_delay_sec": 600,
+        "poll_interval_sec": 300,
+        "avg_approval_sec": 1200,
+        "label": "Marketing Text (~15m)",
+    },
+    "MARKETING_MEDIA": {
+        "initial_delay_sec": 1200,
+        "poll_interval_sec": 600,
+        "avg_approval_sec": 2400,
+        "label": "Marketing Media (~35m)",
+    },
+    "DEFAULT": {
+        "initial_delay_sec": 300,
+        "poll_interval_sec": 300,
+        "avg_approval_sec": 900,
+        "label": "Standard (~10m)",
+    },
 }
 
 
@@ -110,14 +135,16 @@ def get_pending_templates_sla_insights(log_path: str = "submission_log.jsonl", c
         if is_due:
             due_items.append(entry)
 
-        details.append({
-            "template_name": entry.get("template_name"),
-            "category_tier": tier,
-            "category_label": sla["label"],
-            "age_sec": int(age_sec),
-            "estimated_remaining_sec": est_remaining_sec,
-            "is_due_for_poll": is_due,
-        })
+        details.append(
+            {
+                "template_name": entry.get("template_name"),
+                "category_tier": tier,
+                "category_label": sla["label"],
+                "age_sec": int(age_sec),
+                "estimated_remaining_sec": est_remaining_sec,
+                "is_due_for_poll": is_due,
+            }
+        )
 
     remaining_times = [d["estimated_remaining_sec"] for d in details if d["estimated_remaining_sec"] > 0]
     next_poll = min(remaining_times) if remaining_times else 60
@@ -130,6 +157,7 @@ def get_pending_templates_sla_insights(log_path: str = "submission_log.jsonl", c
         "next_recommended_poll_sec": next_poll,
         "templates_status": details[:10],
     }
+
 
 def run(
     templates_raw: list[dict],
@@ -237,7 +265,9 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
     updates: dict[str, dict] = {}
     for entry in to_check:
         ref = entry["source_ref"]
-        matched = _match_template(templates, entry.get("provider_ref_id", "")) or _match_template(templates, entry.get("template_name", ""))
+        matched = _match_template(templates, entry.get("provider_ref_id", "")) or _match_template(
+            templates, entry.get("template_name", "")
+        )
         if matched is None:
             print(f"  {entry['template_name']}: not on WABA yet (stays pending)")
             continue
@@ -253,7 +283,9 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
                 "updated_at": now,
             }
             fb_id = str(matched.get("fb_template_id") or matched.get("sno") or "")
-            if fb_id and (not entry.get("provider_ref_id") or entry.get("provider_ref_id") == entry.get("template_name")):
+            if fb_id and (
+                not entry.get("provider_ref_id") or entry.get("provider_ref_id") == entry.get("template_name")
+            ):
                 update_payload["provider_ref_id"] = fb_id
             updates[ref] = update_payload
             print(f"  {entry['template_name']}: {status.value}")
@@ -272,6 +304,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
         "pending": len(to_check) - updated,
         "insights": get_pending_templates_sla_insights(log_path, client=c),
     }
+
 
 def run_file(
     file_path: str,
@@ -325,6 +358,7 @@ def run_file(
         list(executor.map(_submit_single, submissions))
 
     print(f"Done. Results appended to {log_path}")
+
 
 if __name__ == "__main__":
     import os

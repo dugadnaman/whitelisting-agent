@@ -4,6 +4,7 @@ Unit tests for unified PostgreSQL and SQLite database engine (db.py).
 
 import os
 from pathlib import Path
+
 import pytest
 
 import db
@@ -76,9 +77,11 @@ def test_init_database_executes_cleanly(monkeypatch):
         for t in ["users", "activities", "ingestion_jobs", "job_tasks", "operational_assignments"]:
             assert t in tables
 
+
 def test_migration_utility_dry_run():
-    from scripts.migrate_sqlite_to_postgres import main
     import sys
+
+    from scripts.migrate_sqlite_to_postgres import main
 
     orig_argv = sys.argv
     try:

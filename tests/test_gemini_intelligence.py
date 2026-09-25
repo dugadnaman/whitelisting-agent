@@ -63,7 +63,9 @@ def test_gemini_supreme_decision_contract(monkeypatch):
     assert result["is_complete"] is True
     assert result["is_candidate_header_genuine"] is False
     assert result["is_internal_name"] is True
-    assert result["header_rejection_reason"] == "'LAS_Whitelisting' is an internal campaign identifier, not customer copy."
+    assert (
+        result["header_rejection_reason"] == "'LAS_Whitelisting' is an internal campaign identifier, not customer copy."
+    )
     assert result["customer_facing_title"] == "Notice: Revision in LTV"
     assert result["source"] == "gemini_3.1_flash_lite"
 

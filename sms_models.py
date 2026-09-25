@@ -4,6 +4,7 @@ Data models for the Karix SMS JSON API integration.
 Includes dataclasses and enums for message structures, submission requests/responses,
 delivery reports (DLR), and click tracking reports.
 """
+
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime

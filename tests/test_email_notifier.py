@@ -7,8 +7,8 @@ progressive email copy generation, dry-run simulation, and REST endpoints.
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from email_notifier import (
     AlertEmailDraft,
@@ -117,7 +117,14 @@ def test_send_email_smtp_simulation_fallback():
 def test_dispatch_due_today_alerts_dry_run():
     """Verify dispatch_due_today_alerts in dry-run mode returns draft summaries without errors."""
     mock_tickets = [
-        {"key": "SWCM-99", "summary": "Alert Test", "assignee_name": "Dnyanesh Khawas", "timeline_bucket": "TODAY", "status_category": "PENDING", "channel": "WhatsApp"},
+        {
+            "key": "SWCM-99",
+            "summary": "Alert Test",
+            "assignee_name": "Dnyanesh Khawas",
+            "timeline_bucket": "TODAY",
+            "status_category": "PENDING",
+            "channel": "WhatsApp",
+        },
     ]
 
     with patch("email_notifier.get_due_today_incomplete_tickets", return_value=mock_tickets):
@@ -187,6 +194,7 @@ def test_send_google_chat_sla_alert_live():
         payload = mock_post.call_args[1]["json"]
         assert "cardsV2" in payload
         assert "Urgent" in payload["text"] or "CRITICAL" in payload["text"]
+
 
 def test_api_alerts_endpoints():
     """Verify FastAPI preview, dispatch, and scheduler endpoints."""

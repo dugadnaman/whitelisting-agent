@@ -36,6 +36,7 @@ MAX_RETRIES = 3
 BACKOFF_SECONDS = 2
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
+
 def _sanitize_message(
     msg: SmsMessage,
     default_sender: str,

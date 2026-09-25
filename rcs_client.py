@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import requests
+
 from config import get_esmeaddr
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
@@ -183,9 +184,7 @@ def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
     return suggestions
 
 
-def _build_rcs_clean_suggestions(
-    raw_suggs: list, next_var_idx: int, param_names: list[str]
-) -> tuple[list[dict], int]:
+def _build_rcs_clean_suggestions(raw_suggs: list, next_var_idx: int, param_names: list[str]) -> tuple[list[dict], int]:
     clean_suggs = []
     for s in raw_suggs:
         stext = s.get("text") or "Apply Now"
@@ -223,21 +222,29 @@ def _build_rcs_clean_suggestions(
     return clean_suggs, next_var_idx
 
 
-def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
+def _build_rcs_carousel_vi_template(
+    payload: RcsTemplateSubmission, safe_name: str, bot_id: str
+) -> tuple[dict, list[str]]:
     cards_list = []
     all_params: list[str] = []
     next_var_idx = 1
 
     for c_idx, card in enumerate((payload.carousel_cards or []), 1):
         c_title_raw = card.get("cardTitle") or card.get("card_title") or f"Offer {c_idx}"
-        c_title_norm, title_params, next_var_idx = _extract_and_number_rcs_variables(c_title_raw, start_index=next_var_idx)
+        c_title_norm, title_params, next_var_idx = _extract_and_number_rcs_variables(
+            c_title_raw, start_index=next_var_idx
+        )
         all_params.extend(title_params)
 
         c_desc_raw = card.get("cardDescription") or card.get("card_description") or card.get("body") or ""
         c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(c_desc_raw, start_index=next_var_idx)
         all_params.extend(desc_params)
 
-        raw_suggs = card.get("suggestions") or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}])
+        raw_suggs = card.get("suggestions") or (
+            _build_single_suggestion(payload)
+            if getattr(payload, "button_text", None)
+            else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
+        )
         clean_suggs, next_var_idx = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
 
         c_entry: dict = {"cardTitle": c_title_norm, "cardDescription": c_desc_norm, "suggestions": clean_suggs}
@@ -245,14 +252,20 @@ def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: s
             c_entry["fileName"] = card.get("fileName") or card.get("file_name")
         elif card.get("mediaUrl") or card.get("media_url"):
             m_val = str(card.get("mediaUrl") or card.get("media_url")).strip()
-            if not (m_val.startswith("http://") or m_val.startswith("https://")):
+            if not m_val.startswith(("http://", "https://")):
                 fn = Path(m_val).name
-                host = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "https://whitelisting-agent.onrender.com").rstrip("/")
+                host = (
+                    os.environ.get("RENDER_EXTERNAL_URL")
+                    or os.environ.get("APP_URL")
+                    or "https://whitelisting-agent.onrender.com"
+                ).rstrip("/")
                 m_val = f"{host}/api/media/{fn}"
             c_entry["mediaUrl"] = m_val
         cards_list.append(c_entry)
     vi_template = {
-        "name": safe_name, "type": "carousel", "botId": bot_id,
+        "name": safe_name,
+        "type": "carousel",
+        "botId": bot_id,
         "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
         "width": getattr(payload, "width", "MEDIUM") or "MEDIUM",
         "carouselCard": cards_list,
@@ -260,7 +273,9 @@ def _build_rcs_carousel_vi_template(payload: RcsTemplateSubmission, safe_name: s
     return vi_template, all_params
 
 
-def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
+def _build_rcs_richcard_vi_template(
+    payload: RcsTemplateSubmission, safe_name: str, bot_id: str
+) -> tuple[dict, list[str]]:
     raw_title = payload.card_title or payload.template_name.replace("_", " ").title()
     c_title_norm, title_params, next_var_idx = _extract_and_number_rcs_variables(raw_title, start_index=1)
 
@@ -268,7 +283,11 @@ def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: s
     normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=next_var_idx)
     all_params = title_params + param_names
 
-    raw_suggs = payload.suggestions or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}])
+    raw_suggs = payload.suggestions or (
+        _build_single_suggestion(payload)
+        if getattr(payload, "button_text", None)
+        else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
+    )
     clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
 
     card_entry: dict = {
@@ -280,24 +299,34 @@ def _build_rcs_richcard_vi_template(payload: RcsTemplateSubmission, safe_name: s
         card_entry["fileName"] = payload.file_name
     elif payload.media_url:
         media_u = str(payload.media_url).strip()
-        if not (media_u.startswith("http://") or media_u.startswith("https://")):
+        if not media_u.startswith(("http://", "https://")):
             fn = Path(media_u).name
-            host = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or "https://whitelisting-agent.onrender.com").rstrip("/")
+            host = (
+                os.environ.get("RENDER_EXTERNAL_URL")
+                or os.environ.get("APP_URL")
+                or "https://whitelisting-agent.onrender.com"
+            ).rstrip("/")
             media_u = f"{host}/api/media/{fn}"
         card_entry["mediaUrl"] = media_u
     vi_template = {
-        "name": safe_name, "type": "richcard", "botId": bot_id,
+        "name": safe_name,
+        "type": "richcard",
+        "botId": bot_id,
         "orientation": getattr(payload, "orientation", "VERTICAL") or "VERTICAL",
         "height": getattr(payload, "height", "MEDIUM") or "MEDIUM",
         "standaloneCard": card_entry,
     }
     return vi_template, all_params
+
+
 def _build_rcs_text_vi_template(payload: RcsTemplateSubmission, safe_name: str, bot_id: str) -> tuple[dict, list[str]]:
     raw_text = payload.text_message or getattr(payload, "template_message", "") or ""
     if payload.card_title and payload.card_title.strip() and payload.card_title.strip() not in raw_text:
         raw_text = f"{payload.card_title.strip()}\n\n{raw_text}"
     normalized_text, param_names, next_var_idx = _extract_and_number_rcs_variables(raw_text, start_index=1)
-    raw_suggs = payload.suggestions or (_build_single_suggestion(payload) if getattr(payload, "button_text", None) else [])
+    raw_suggs = payload.suggestions or (
+        _build_single_suggestion(payload) if getattr(payload, "button_text", None) else []
+    )
     clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, param_names)
 
     vi_template = {
@@ -330,9 +359,13 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
 
     is_text = t_type in ("text", "plain", "standard", "plain_text") and not is_carousel
 
-    is_richcard = not is_carousel and not is_text and (
-        t_type in ("richcard", "card", "standalone", "rich_card", "image")
-        and (bool(getattr(payload, "file_name", None)) or bool(payload.media_url))
+    is_richcard = (
+        not is_carousel
+        and not is_text
+        and (
+            t_type in ("richcard", "card", "standalone", "rich_card", "image")
+            and (bool(getattr(payload, "file_name", None)) or bool(payload.media_url))
+        )
     )
     if is_carousel:
         vi_template, param_names = _build_rcs_carousel_vi_template(payload, safe_name, bot_id)
@@ -348,6 +381,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
         "viTemplate": vi_template,
         "templateCategory": getattr(payload, "template_category", "TRANSACTIONAL") or "TRANSACTIONAL",
     }
+
 
 def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") -> RcsSubmissionResult:
     """
@@ -473,7 +507,9 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
                     safe_name = re.sub(r"[^a-zA-Z0-9_]", "_", payload.template_name)[:25].strip("_").lower()
                     for lt in live_templates:
                         vi = lt.get("viTemplate") or {}
-                        lt_name = str(vi.get("name") or lt.get("template_name") or lt.get("templateId") or "").strip().lower()
+                        lt_name = (
+                            str(vi.get("name") or lt.get("template_name") or lt.get("templateId") or "").strip().lower()
+                        )
                         if lt_name and (lt_name == payload.template_name.lower() or lt_name == safe_name):
                             matched_id = str(lt.get("templateId") or lt.get("id") or "")
                             approval_st = str(lt.get("status") or "approved").lower()

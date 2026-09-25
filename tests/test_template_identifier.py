@@ -6,8 +6,8 @@ fuzzy diffing, TypeSafe AI semantic equivalence, and discrepancy reporting.
 
 from unittest.mock import MagicMock, patch
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
 from models import TemplateComponent, TemplateSubmission
 from template_identifier import (
@@ -123,7 +123,9 @@ def test_identify_master_templates_content_drift():
             waba_id="123456",
             source_ref="row_3",
             components=[
-                TemplateComponent(type="BODY", text="Diwali Special: Zero processing fee on all loans applied before Oct 31!"),
+                TemplateComponent(
+                    type="BODY", text="Diwali Special: Zero processing fee on all loans applied before Oct 31!"
+                ),
             ],
         )
     ]
@@ -210,17 +212,32 @@ def test_api_identify_json_endpoint():
 
     try:
         with patch("template_identifier.fetch_template_list") as mock_fetch:
-            mock_fetch.return_value = ([
-                {"template_name": "demo_live_tpl", "status": "APPROVED", "components": [{"type": "BODY", "text": "Live hello."}]}
-            ], None)
+            mock_fetch.return_value = (
+                [
+                    {
+                        "template_name": "demo_live_tpl",
+                        "status": "APPROVED",
+                        "components": [{"type": "BODY", "text": "Live hello."}],
+                    }
+                ],
+                None,
+            )
 
             resp = client.post(
                 "/api/templates/identify-json",
                 json={
                     "account": "tata",
                     "templates": [
-                        {"template_name": "demo_live_tpl", "category": "UTILITY", "components": [{"type": "BODY", "text": "Live hello."}]},
-                        {"template_name": "demo_missing_tpl", "category": "MARKETING", "components": [{"type": "BODY", "text": "Brand new copy."}]},
+                        {
+                            "template_name": "demo_live_tpl",
+                            "category": "UTILITY",
+                            "components": [{"type": "BODY", "text": "Live hello."}],
+                        },
+                        {
+                            "template_name": "demo_missing_tpl",
+                            "category": "MARKETING",
+                            "components": [{"type": "BODY", "text": "Brand new copy."}],
+                        },
                     ],
                 },
             )

@@ -97,7 +97,9 @@ def test_work_management_dashboard_aggregation():
 
 def test_ai_workload_rebalancing_proposals():
     """Verify AI workload dispatcher evaluates context and proposes ticket reassignments."""
-    prompt = "Mrunalini is overloaded with tickets due this week, transfer some tickets to other team members or interns"
+    prompt = (
+        "Mrunalini is overloaded with tickets due this week, transfer some tickets to other team members or interns"
+    )
     res = ai_rebalance_workload(prompt, project="TCN", auto_execute=False)
 
     assert res["ok"] is True
@@ -127,6 +129,7 @@ def test_transfer_jira_ticket_mock():
         assert res["to_account_id"] == "712020:fae946f9-8472-455a-9d27-6d773ecfb48d"
         assert mock_put.called
 
+
 def test_swcm_project_dashboard_and_blocked_status():
     """Verify TATA Service and wealth Campaign Manager (SWCM) project queries and blocks status."""
     dash = get_work_management_dashboard(project="SWCM", limit=20)
@@ -134,6 +137,7 @@ def test_swcm_project_dashboard_and_blocked_status():
     assert dash["total_tickets"] > 0
     assert "BLOCKED" in dash["status_counts"]
     from work_manager import categorize_status
+
     assert categorize_status("Base Pending") == "BLOCKED"
     assert any(w["key"].startswith("SWCM-") for w in dash["work_items"])
     assert any(p["key"] == "SWCM" for p in dash["projects_catalog"])
@@ -166,15 +170,11 @@ def test_turnaround_and_bottleneck_analytics():
     assert "karix_meta" in attr
     assert "attributics" in attr
     assert attr["total_roadblocks"] == (
-        attr["tata_capital"]["count"]
-        + attr["karix_meta"]["count"]
-        + attr["attributics"]["count"]
+        attr["tata_capital"]["count"] + attr["karix_meta"]["count"] + attr["attributics"]["count"]
     )
     if attr["total_roadblocks"] > 0:
         total_pct = (
-            attr["tata_capital"]["percentage"]
-            + attr["karix_meta"]["percentage"]
-            + attr["attributics"]["percentage"]
+            attr["tata_capital"]["percentage"] + attr["karix_meta"]["percentage"] + attr["attributics"]["percentage"]
         )
         assert round(total_pct) == 100
 
@@ -203,6 +203,7 @@ def test_turnaround_and_bottleneck_analytics():
 def test_api_turnaround_analytics_endpoint():
     """Verify GET /api/work-management/turnaround-analytics returns expected analytics payload."""
     from fastapi.testclient import TestClient
+
     from api import app, get_current_user
 
     app.dependency_overrides[get_current_user] = lambda: {"email": "test@attributics.com", "name": "Test User"}
@@ -225,7 +226,8 @@ def test_api_turnaround_analytics_endpoint():
 
 def test_bulk_transfer_jira_tickets():
     """Verify bulk_transfer_jira_tickets iterates across issues, reassigns, and audits."""
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import patch
+
     from work_manager import bulk_transfer_jira_tickets
 
     with patch("work_manager.transfer_jira_ticket") as mock_transfer:
@@ -258,10 +260,15 @@ def test_bulk_transfer_jira_tickets():
 def test_api_bulk_transfer_endpoint():
     """Verify POST /api/work-management/bulk-transfer accepts batch reassignments."""
     from unittest.mock import patch
+
     from fastapi.testclient import TestClient
+
     from api import app, get_current_user
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "dnyanesh.khawas@attributics.com", "name": "Dnyanesh Khawas"}
+    app.dependency_overrides[get_current_user] = lambda: {
+        "email": "dnyanesh.khawas@attributics.com",
+        "name": "Dnyanesh Khawas",
+    }
     client = TestClient(app)
 
     with patch("work_manager.transfer_jira_ticket") as mock_transfer:
@@ -285,10 +292,12 @@ def test_api_bulk_transfer_endpoint():
         finally:
             app.dependency_overrides.clear()
 
+
 def test_unassigned_tickets_auto_assigned_to_neel_shah():
     """Verify unassigned tickets automatically route to Neel Shah in work management."""
     from unittest.mock import patch
-    from work_manager import get_work_management_dashboard, NEEL_SHAH_NAME
+
+    from work_manager import NEEL_SHAH_NAME, get_work_management_dashboard
 
     mock_issues = [
         {
@@ -313,7 +322,10 @@ def test_unassigned_tickets_auto_assigned_to_neel_shah():
         }
     ]
 
-    with patch("work_manager.list_jira_issues", return_value=mock_issues), patch("work_manager.get_all_operational_assignments", return_value={}):
+    with (
+        patch("work_manager.list_jira_issues", return_value=mock_issues),
+        patch("work_manager.get_all_operational_assignments", return_value={}),
+    ):
         dash = get_work_management_dashboard(project="TCN", limit=10)
         item = dash["work_items"][0]
         assert item["assignee_name"] == NEEL_SHAH_NAME
@@ -327,7 +339,9 @@ def test_unassigned_tickets_auto_assigned_to_neel_shah():
 def test_assign_unassigned_tickets_to_neel_endpoint():
     """Verify POST /api/work-management/assign-unassigned reassigns unassigned tickets to Neel Shah."""
     from unittest.mock import patch
+
     from fastapi.testclient import TestClient
+
     from api import app, get_current_user
 
     app.dependency_overrides[get_current_user] = lambda: {"email": "neel.shah@attributics.com", "name": "Neel Shah"}
@@ -359,6 +373,7 @@ def test_soham_mention_routing_in_comments_and_attachments():
     it is automatically routed to Soham Das and removed from the original assignee's workload.
     """
     from unittest.mock import patch
+
     from work_manager import get_work_management_dashboard
 
     mock_issues = [
@@ -433,9 +448,9 @@ def test_soham_mention_routing_in_comments_and_attachments():
 def test_virtual_operational_assignment_soham_and_aadya():
     """Verify transfers to Soham Das or Aadya execute virtual operational assignments without calling Jira API."""
     from work_manager import (
-        transfer_jira_ticket,
-        get_all_operational_assignments,
         clear_operational_assignment,
+        get_all_operational_assignments,
+        transfer_jira_ticket,
     )
 
     # 1. Transfer to Soham Das (no Jira seat)
@@ -472,6 +487,7 @@ def test_virtual_operational_assignment_soham_and_aadya():
 def test_transfer_authorization_policy():
     """Verify only Dnyanesh, Neel, Mrunalini (and admin) are authorized to transfer tickets."""
     from fastapi.testclient import TestClient
+
     from api import app, get_current_user
 
     client = TestClient(app)

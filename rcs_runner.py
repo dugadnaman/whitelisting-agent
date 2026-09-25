@@ -16,6 +16,7 @@ from rcs_tracker import log_rcs_result
 
 logger = logging.getLogger(__name__)
 
+
 def run_rcs(
     templates_raw: list,
     log_path: str = "rcs_submission_log.jsonl",
@@ -40,15 +41,20 @@ def run_rcs(
         log_rcs_result(result, log_path)
 
         # Record template failures into central error log & feed learning engine
-        if result.status == RcsSubmissionStatus.FAILED or (result.error and result.status != RcsSubmissionStatus.SUBMITTED):
+        if result.status == RcsSubmissionStatus.FAILED or (
+            result.error and result.status != RcsSubmissionStatus.SUBMITTED
+        ):
             try:
                 from error_tracker import log_error
+
                 log_error(
                     message=f"RCS template '{result.template_name}' creation failed: {result.error}",
                     account=client,
                     channel="rcs",
                     severity="ERROR" if result.status == RcsSubmissionStatus.FAILED else "WARNING",
-                    category="TEMPLATE_CREATION_FAILED" if result.status == RcsSubmissionStatus.FAILED else "DUPLICATE_TEMPLATE",
+                    category="TEMPLATE_CREATION_FAILED"
+                    if result.status == RcsSubmissionStatus.FAILED
+                    else "DUPLICATE_TEMPLATE",
                     module="rcs_client.py",
                     function="submit_rcs_template",
                     context={

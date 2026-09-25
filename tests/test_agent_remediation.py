@@ -28,6 +28,7 @@ def test_remediate_variable_ratio_violation():
     assert "official service notification" in res["fixed_body"].lower()
     # Check that new ratio satisfies >= 2.5:1
     import re
+
     words = re.findall(r"\b\w+\b", re.sub(r"\{\{\d+\}\}", " ", res["fixed_body"]))
     vars_found = re.findall(r"\{\{\d+\}\}", res["fixed_body"])
     assert len(words) / len(vars_found) >= 2.5
@@ -51,7 +52,9 @@ def test_remediate_header_length_limit():
 
 def test_remediate_promotional_in_utility():
     """Verify templates with marketing language in UTILITY category are re-categorized to MARKETING."""
-    body_with_promo = "Dear {{1}}, enjoy an exclusive 50% discount and festive cashback offer on your loan disbursement of {{2}}."
+    body_with_promo = (
+        "Dear {{1}}, enjoy an exclusive 50% discount and festive cashback offer on your loan disbursement of {{2}}."
+    )
     res = remediate_template_rejection(
         template_name="cat_test",
         body_text=body_with_promo,
@@ -105,8 +108,9 @@ def test_copilot_diagnose_and_auto_resubmit_integration():
         client="bajaj",
     )
 
-    with patch("agent.tool_inspect_template", return_value=mock_inspection), patch(
-        "agent.submit_template", return_value=mock_submit_result
+    with (
+        patch("agent.tool_inspect_template", return_value=mock_inspection),
+        patch("agent.submit_template", return_value=mock_submit_result),
     ):
         result = tool_diagnose_and_fix(
             template_name="emic_check_wa_07aug",

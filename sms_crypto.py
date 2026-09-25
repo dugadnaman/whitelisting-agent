@@ -7,6 +7,7 @@ Implements:
 2. AES-GCM encryption and decryption for SMS Delivery Report (DLR) HTTPs Callback Webhooks
    (per Karix DLR Forwarding Integration Guide).
 """
+
 import base64
 import os
 
@@ -18,6 +19,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 # ---------------------------------------------------------------------------
 # PII Encryption / Decryption (AES-256-CBC + PBKDF2WithHmacSHA1, 11 iterations)
 # ---------------------------------------------------------------------------
+
 
 def _derive_aes_key(password_str: str, salt: bytes) -> bytes:
     """Derive 256-bit AES key using PBKDF2 with HMAC-SHA1 and 11 iterations."""
@@ -116,6 +118,7 @@ def decrypt_sms_pii(encrypted_b64: str, secure_key_b64: str) -> str:
 # ---------------------------------------------------------------------------
 # DLR AES-GCM Encryption / Decryption
 # ---------------------------------------------------------------------------
+
 
 def _normalize_key_bytes(key: str | bytes) -> bytes:
     """Normalize key string or bytes to standard AES key length (16, 24, or 32 bytes)."""

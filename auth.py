@@ -6,7 +6,6 @@ user lifecycle management, default account seeding, and FastAPI tenant guards.
 
 import logging
 import os
-import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,6 +15,8 @@ import bcrypt
 import jwt
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from db import get_db as _get_db
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +32,6 @@ security = HTTPBearer(auto_error=False)
 # Database Schema & Initialization
 # ---------------------------------------------------------------------------
 
-
-from db import get_db as _get_db, DB_PATH
 
 def hash_password(password: str) -> str:
     """Hash plaintext password with bcrypt salt (10 rounds for responsive container performance)."""
@@ -51,6 +50,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def init_auth_db() -> None:
     """Ensure multi-tenant users table exists with all required columns and seed accounts."""
     from db import init_database
+
     init_database()
 
     with _get_db() as conn:
@@ -330,10 +330,16 @@ def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
         if not row:
             return None
         is_valid = verify_password(password, row["password_hash"])
-        if not is_valid and clean_email in ("dugadnaman@gmail.com", "namandugad46@gmail.com", "namandugad@attributics.com"):
+        if not is_valid and clean_email in (
+            "dugadnaman@gmail.com",
+            "namandugad46@gmail.com",
+            "namandugad@attributics.com",
+        ):
             if password.strip() in ("namandugad13", "Naman@123"):
                 is_valid = True
-                conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password("namandugad13"), row["id"]))
+                conn.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?", (hash_password("namandugad13"), row["id"])
+                )
         elif not is_valid and clean_email in (
             "neel.shah@attributics.com",
             "dnyanesh.khawas@attributics.com",
@@ -344,7 +350,9 @@ def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
             first_name = clean_email.split("@")[0].split(".")[0].title()
             if password.strip() in (f"{first_name}@123", "Password@123", "Tata@123", "Naman@123"):
                 is_valid = True
-                conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password.strip()), row["id"]))
+                conn.execute(
+                    "UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(password.strip()), row["id"])
+                )
         if not is_valid:
             return None
         now = datetime.now(UTC).isoformat()

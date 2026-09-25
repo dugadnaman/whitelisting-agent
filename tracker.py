@@ -9,11 +9,11 @@ import json
 import logging
 import uuid
 from dataclasses import asdict
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
-from models import SubmissionResult
 import db
+from models import SubmissionResult
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ try:
     def _unlock(f):
         fcntl.flock(f, fcntl.LOCK_UN)
 except ImportError:
+
     def _lock(f):
         pass
 
@@ -201,9 +202,15 @@ def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl")
         with db.get_db() as conn:
             for ref, upd in updates_by_ref.items():
                 status = upd.get("status")
-                status_val = (status.value.upper() if hasattr(status, "value") else str(status).upper()) if status else None
+                status_val = (
+                    (status.value.upper() if hasattr(status, "value") else str(status).upper()) if status else None
+                )
                 app_status = upd.get("approval_status")
-                app_val = (app_status.value.lower() if hasattr(app_status, "value") else str(app_status).lower()) if app_status else None
+                app_val = (
+                    (app_status.value.lower() if hasattr(app_status, "value") else str(app_status).lower())
+                    if app_status
+                    else None
+                )
                 prov_id = upd.get("provider_ref_id")
                 app_reason = upd.get("approval_reason")
 
@@ -231,7 +238,11 @@ def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl")
 def pending_entries(log_path: str = "submission_log.jsonl") -> list[dict]:
     """Entries still awaiting a final approval outcome, read from database."""
     if log_path != "submission_log.jsonl" and not log_path.endswith("submission_log.jsonl"):
-        return [e for e in load_log(log_path) if e.get("status") in ("submitted", "duplicate") and e.get("approval_status") == "pending"]
+        return [
+            e
+            for e in load_log(log_path)
+            if e.get("status") in ("submitted", "duplicate") and e.get("approval_status") == "pending"
+        ]
 
     db.init_database()
     entries = []

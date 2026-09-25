@@ -21,7 +21,8 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from api import app
-from sms_client import send_quick_sms, send_sms, test_sms_connection as check_sms_connection
+from sms_client import send_quick_sms, send_sms
+from sms_client import test_sms_connection as check_sms_connection
 from sms_crypto import (
     decrypt_dlr_gcm,
     decrypt_sms_pii,
@@ -399,15 +400,17 @@ class TestSmsApiEndpoints(unittest.TestCase):
         """Test Karix AES-GCM encrypted DLR callback."""
         gcm_key = "0123456789abcdef0123456789abcdef"
         gcm_iv = "123456789012"
-        plain_dlr = json.dumps({
-            "acode": "bajaj_acct",
-            "ackid": "ACK_GCM_999",
-            "mid": "MID_GCM_111",
-            "dest": "919876543210",
-            "send": "BAJAJF",
-            "Statusflag": "Success",
-            "reason": "Delivered",
-        })
+        plain_dlr = json.dumps(
+            {
+                "acode": "bajaj_acct",
+                "ackid": "ACK_GCM_999",
+                "mid": "MID_GCM_111",
+                "dest": "919876543210",
+                "send": "BAJAJF",
+                "Statusflag": "Success",
+                "reason": "Delivered",
+            }
+        )
         cipher_b64 = encrypt_dlr_gcm(plain_dlr, gcm_key, gcm_iv)
 
         payload = {

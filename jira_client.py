@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
 from config import _load_env_file
 
 logger = logging.getLogger(__name__)
@@ -23,20 +24,9 @@ MEDIA_CACHE_DIR.mkdir(exist_ok=True)
 def get_jira_credentials() -> tuple[str, str, str]:
     """Load Jira base URL, email, and API token from environment / credentials.json."""
     _load_env_file()
-    base_url = (
-        os.environ.get("JIRA_BASE_URL")
-        or "https://tatacapital-team.atlassian.net"
-    ).rstrip("/")
-    email = (
-        os.environ.get("JIRA_USER_EMAIL")
-        or os.environ.get("JIRA_EMAIL")
-        or ""
-    ).strip()
-    token = (
-        os.environ.get("JIRA_API_TOKEN")
-        or os.environ.get("ATLASSIAN_API_TOKEN")
-        or ""
-    ).strip()
+    base_url = (os.environ.get("JIRA_BASE_URL") or "https://tatacapital-team.atlassian.net").rstrip("/")
+    email = (os.environ.get("JIRA_USER_EMAIL") or os.environ.get("JIRA_EMAIL") or "").strip()
+    token = (os.environ.get("JIRA_API_TOKEN") or os.environ.get("ATLASSIAN_API_TOKEN") or "").strip()
     return base_url, email, token
 
 
@@ -82,8 +72,7 @@ def adf_to_text(node: dict[str, Any] | None) -> str:
         rows = []
         for row in node.get("content", []):
             cells = [
-                "".join(adf_to_text(c) for c in cell.get("content", [])).strip()
-                for cell in row.get("content", [])
+                "".join(adf_to_text(c) for c in cell.get("content", [])).strip() for cell in row.get("content", [])
             ]
             rows.append(" | ".join(cells))
         return "\n".join(rows) + "\n\n"
@@ -196,11 +185,23 @@ def list_jira_issues(
         fn_lowers = [fn.lower() for fn in att_filenames]
         desc_low = desc_val.lower()
 
-        wa_att_count = sum(1 for fn in fn_lowers if any(k in fn for k in ("wa", "whatsapp")) and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv")))
-        has_wa = "whatsapp" in desc_low or "whatsapp" in sum_low or wa_att_count > 0 or any(fn.endswith((".docx", ".doc")) for fn in fn_lowers)
+        wa_att_count = sum(
+            1
+            for fn in fn_lowers
+            if any(k in fn for k in ("wa", "whatsapp"))
+            and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv"))
+        )
+        has_wa = (
+            "whatsapp" in desc_low
+            or "whatsapp" in sum_low
+            or wa_att_count > 0
+            or any(fn.endswith((".docx", ".doc")) for fn in fn_lowers)
+        )
         ch_wa = wa_att_count if wa_att_count > 0 else (1 if has_wa and not is_email else 0)
 
-        rcs_att_count = sum(1 for fn in fn_lowers if "rcs" in fn and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv")))
+        rcs_att_count = sum(
+            1 for fn in fn_lowers if "rcs" in fn and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv"))
+        )
         has_rcs = "rcs" in desc_low or "rcs" in sum_low or rcs_att_count > 0
         ch_rcs = rcs_att_count if rcs_att_count > 0 else (1 if has_rcs and not is_email else 0)
 
@@ -229,12 +230,8 @@ def list_jira_issues(
                 "id": item.get("id"),
                 "summary": summary_val,
                 "status": fields.get("status", {}).get("name", "Unknown"),
-                "assignee": fields.get("assignee", {}).get("displayName")
-                if fields.get("assignee")
-                else "Unassigned",
-                "reporter": fields.get("reporter", {}).get("displayName")
-                if fields.get("reporter")
-                else "Anonymous",
+                "assignee": fields.get("assignee", {}).get("displayName") if fields.get("assignee") else "Unassigned",
+                "reporter": fields.get("reporter", {}).get("displayName") if fields.get("reporter") else "Anonymous",
                 "duedate": fields.get("duedate"),
                 "created": fields.get("created"),
                 "updated": fields.get("updated"),
@@ -387,6 +384,7 @@ def add_jira_comment(issue_key: str, comment_text: str) -> dict[str, Any]:
 
     return {"ok": True, "comment_id": resp.json().get("id")}
 
+
 def extract_issue_templates(
     issue_key: str,
     download_creatives: bool = False,
@@ -395,7 +393,6 @@ def extract_issue_templates(
     Fetch a Jira ticket and semantically extract template drafts, channel routing,
     and Meta-compliant sample values.
     """
-    from dataclasses import asdict
     from briefing_parser import parse_jira_brief
 
     issue_data = fetch_jira_issue(issue_key)

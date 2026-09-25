@@ -7,7 +7,9 @@ Verifies:
 """
 
 from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
+
 import api
 
 client = TestClient(api.app)
@@ -27,10 +29,13 @@ MOCK_ISSUE_DATA = {
             {
                 "type": "paragraph",
                 "content": [
-                    {"type": "text", "text": "Header: Diwali Dhamaka\nBody: Dear Customer, get Rs. 50,000 personal loan.\nFooter: T&C apply\nButton: Apply -> https://www.tatacapital.com"}
-                ]
+                    {
+                        "type": "text",
+                        "text": "Header: Diwali Dhamaka\nBody: Dear Customer, get Rs. 50,000 personal loan.\nFooter: T&C apply\nButton: Apply -> https://www.tatacapital.com",
+                    }
+                ],
             }
-        ]
+        ],
     },
     "description_text": "Header: Diwali Dhamaka\nBody: Dear Customer, get Rs. 50,000 personal loan.\nFooter: T&C apply\nButton: Apply -> https://www.tatacapital.com",
     "attachments": [],
@@ -88,11 +93,12 @@ def test_jira_brief_endpoint_cross_references_live_waba(mock_fetch_issue, mock_u
                 assert matching[0]["live_status"] == "approved"
                 assert matching[0]["live_ref_id"] == "9876543210"
 
+
 @patch("api.get_current_user", return_value=MOCK_USER)
 @patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA)
 def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, mock_user):
     """Verify that submit endpoint preserves TEXT headers, footers, and QUICK_REPLY/PHONE buttons."""
-    from models import SubmissionResult, SubmissionStatus, ApprovalStatus
+    from models import ApprovalStatus, SubmissionResult, SubmissionStatus
 
     captured_submissions = []
 
@@ -104,6 +110,7 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
             approval_status=ApprovalStatus.PENDING,
             source_ref=submission.source_ref,
         )
+
     req_payload = {
         "channels": ["whatsapp"],
         "account": "tcl_promo",
@@ -132,11 +139,14 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
                 "button_phone": "+919876543210",
                 "variables": ["1"],
                 "sample_values": ["Priya"],
-            }
+            },
         ],
     }
 
-    with patch("submission_client.submit_template", side_effect=mock_submit), patch("config.get_waba_id", return_value="12345"):
+    with (
+        patch("submission_client.submit_template", side_effect=mock_submit),
+        patch("config.get_waba_id", return_value="12345"),
+    ):
         response = client.post("/api/jira/submit/TCN-999", json=req_payload)
         assert response.status_code == 200, f"Expected 200, got: {response.text}"
         data = response.json()
@@ -192,6 +202,7 @@ def test_jira_projects_catalog_endpoint(mock_user):
     assert "MON" in keys
     assert "COL" in keys
 
+
 def test_swcm_59_docx_and_sms_extraction():
     """Verify SWCM-59 parses .docx into 3 UTILITY WhatsApp templates with headers and No CTA."""
     from briefing_parser import parse_jira_brief
@@ -238,6 +249,7 @@ def test_swcm_61_metadata_table_rejected_as_templates():
     assert parsed.is_email_campaign is True
     assert parsed.campaign_type_label == "Email Mailer Campaign"
     assert len(parsed.email_templates) >= 1
+
 
 def test_channel_counts_in_brief_and_issues():
     """Verify channel_counts breakdown is computed on Jira briefs."""

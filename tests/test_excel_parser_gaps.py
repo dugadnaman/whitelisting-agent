@@ -7,6 +7,7 @@ Verifies:
 """
 
 import openpyxl
+
 from briefing_parser import (
     _match_sheet_channel,
     _parse_excel_channel_sheets,
@@ -47,20 +48,24 @@ def test_parse_excel_channel_sheets_with_varied_names():
     ws_wa.title = "WhatsApp Content"
 
     ws_wa.append(["template_name", "body", "header_text", "button_text", "button_url"])
-    ws_wa.append([
-        "diwali_offer_wa",
-        "Dear Customer, enjoy special Diwali loan offers with low interest rates from Tata Capital.",
-        "Festive Offer",
-        "Apply Now",
-        "https://www.tatacapital.com/diwali",
-    ])
+    ws_wa.append(
+        [
+            "diwali_offer_wa",
+            "Dear Customer, enjoy special Diwali loan offers with low interest rates from Tata Capital.",
+            "Festive Offer",
+            "Apply Now",
+            "https://www.tatacapital.com/diwali",
+        ]
+    )
 
     ws_rcs = wb.create_sheet(title="RCS Copies")
     ws_rcs.append(["Copy Header", "Message Body"])
-    ws_rcs.append([
-        "RCS Body",
-        "Title: Dream Car Loans\nBody: Get instant car loan approval at 8.75% p.a.\nCTA: Check Eligibility",
-    ])
+    ws_rcs.append(
+        [
+            "RCS Body",
+            "Title: Dream Car Loans\nBody: Get instant car loan approval at 8.75% p.a.\nCTA: Check Eligibility",
+        ]
+    )
 
     ws_sms = wb.create_sheet(title="SMS_1")
     ws_sms.append(["SMS Text", "Dear Customer, your EMI of Rs. 15,000 is due on 5th Oct. Pay now: https://tcl.in"])

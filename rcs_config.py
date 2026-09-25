@@ -93,7 +93,11 @@ def get_rcs_bot_id(client: str = "tata") -> str:
         return os.environ.get("TATA_RCS_BOT_ID") or os.environ.get("TATA_RCS_SENDER_ID") or TATA_RCS_BOT_ID
     elif c == "bajaj":
         return os.environ.get("BAJAJ_RCS_BOT_ID") or os.environ.get("BAJAJ_RCS_SENDER_ID") or BAJAJ_RCS_BOT_ID
-    bot = os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID") or DEFAULT_RCS_BOT_IDS.get(c)
+    bot = (
+        os.environ.get(f"{prefix}_RCS_BOT_ID")
+        or os.environ.get(f"{prefix}_RCS_SENDER_ID")
+        or DEFAULT_RCS_BOT_IDS.get(c)
+    )
     if not bot:
         raise OSError(
             f"Missing RCS Bot ID for {client} ({prefix}_RCS_BOT_ID). "
@@ -108,6 +112,7 @@ def get_rcs_bot_name(client: str = "tcl_promo") -> str:
     c = (client or "tcl_promo").lower().strip()
     prefix = _account_prefix(c)
     return os.environ.get(f"{prefix}_RCS_BOT_NAME") or DEFAULT_RCS_BOT_NAMES.get(c, "")
+
 
 def get_rcs_entity_id(client: str = "tata") -> str:
     """Return the Entity ID for RCS DLT templates."""
@@ -130,12 +135,18 @@ def get_rcs_esmeaddr(client: str = "tata") -> str:
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
         or os.environ.get(f"{prefix}_ESMEADDR")
         or ("72148300000000" if c == "apparel" else None)
-        or (os.environ.get("TATA_ESMEADDR") if c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy") else None)
+        or (
+            os.environ.get("TATA_ESMEADDR")
+            if c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy")
+            else None
+        )
     )
     if not esme:
         from config import get_esmeaddr
+
         return get_esmeaddr(c)
     return str(esme).strip()
+
 
 def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
     """

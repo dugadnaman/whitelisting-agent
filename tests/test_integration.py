@@ -105,7 +105,9 @@ def test_duplicate_submission_skipping():
     client = TestClient(api.app)
     # Sign up/in as tata user
     email = "dupe_test@attributics.com"
-    client.post("/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Dupe Tester", "tenant_id": "tata"})
+    client.post(
+        "/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Dupe Tester", "tenant_id": "tata"}
+    )
     r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
     token = r.json().get("token") or r.json().get("access_token")
     H = {"Authorization": f"Bearer {token}"}
@@ -124,6 +126,7 @@ def test_duplicate_submission_skipping():
     def fake_run(raw_list, log_path, **kwargs):
         from models import SubmissionResult, SubmissionStatus
         from tracker import log_result
+
         for item in raw_list:
             res = SubmissionResult(
                 source_ref=item.get("source_ref", item.get("template_name", "")),
@@ -133,7 +136,10 @@ def test_duplicate_submission_skipping():
             )
             log_result(res, log_path)
 
-    with patch("api.fetch_whatsapp_templates", return_value=mock_live), patch("api.run", side_effect=fake_run) as mock_run:
+    with (
+        patch("api.fetch_whatsapp_templates", return_value=mock_live),
+        patch("api.run", side_effect=fake_run) as mock_run,
+    ):
         r = client.post(
             "/api/submit?account=tchfl&channel=whatsapp&skip_duplicates=true",
             files={"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")},
@@ -299,21 +305,25 @@ def test_predictive_category_approval_polling():
     from runner import classify_template_category_sla, get_pending_templates_sla_insights
 
     # 1. UTILITY template classification
-    util_tier, util_sla = classify_template_category_sla({
-        "category": "UTILITY",
-        "components": [{"type": "BODY", "text": "Your account statement is ready."}],
-    })
+    util_tier, util_sla = classify_template_category_sla(
+        {
+            "category": "UTILITY",
+            "components": [{"type": "BODY", "text": "Your account statement is ready."}],
+        }
+    )
     assert util_tier == "UTILITY"
     assert util_sla["avg_approval_sec"] <= 300
 
     # 2. MARKETING Media template classification
-    media_tier, media_sla = classify_template_category_sla({
-        "category": "MARKETING",
-        "components": [
-            {"type": "HEADER", "format": "IMAGE"},
-            {"type": "BODY", "text": "Check out our special offer."},
-        ],
-    })
+    media_tier, media_sla = classify_template_category_sla(
+        {
+            "category": "MARKETING",
+            "components": [
+                {"type": "HEADER", "format": "IMAGE"},
+                {"type": "BODY", "text": "Check out our special offer."},
+            ],
+        }
+    )
     assert media_tier == "MARKETING_MEDIA"
     assert media_sla["avg_approval_sec"] >= 1800
 
@@ -324,6 +334,7 @@ def test_predictive_category_approval_polling():
 
     print("✓ test_predictive_category_approval_polling passed!")
 
+
 def test_duplicate_error_reconciliation_to_approved():
     """
     Verify that when Karix or Meta returns 'Template Already Exist.' or
@@ -333,6 +344,7 @@ def test_duplicate_error_reconciliation_to_approved():
     and fb_template_id instead of wrongly reporting FAILED.
     """
     from unittest.mock import MagicMock, patch
+
     from models import ApprovalStatus, SubmissionStatus, TemplateSubmission
     from submission_client import _evaluate_portal_create_response
 
@@ -394,13 +406,17 @@ def test_in_batch_duplicate_skipping_and_row_order():
     """
     import io
     from unittest.mock import patch
+
     from fastapi.testclient import TestClient
+
     import api
     from models import SubmissionResult, SubmissionStatus
 
     client = TestClient(api.app)
     email = "batch_dupe_test@attributics.com"
-    client.post("/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Batch Tester", "tenant_id": "tchfl"})
+    client.post(
+        "/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Batch Tester", "tenant_id": "tchfl"}
+    )
     r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
     token = r.json().get("token") or r.json().get("access_token")
     H = {"Authorization": f"Bearer {token}"}
@@ -414,8 +430,10 @@ def test_in_batch_duplicate_skipping_and_row_order():
     )
 
     submitted_names = []
+
     def fake_run(raw_list, log_path, **kwargs):
         from tracker import log_result
+
         for item in raw_list:
             tname = item.get("template_name", "")
             submitted_names.append(tname)
@@ -462,10 +480,11 @@ def test_poll_pending_updates_duplicate_templates():
     and poll_pending successfully updates their approval_status to approved.
     """
     import tempfile
+    from unittest.mock import patch
+
     from models import ApprovalStatus, SubmissionResult, SubmissionStatus
     from runner import poll_pending
     from tracker import log_result, pending_entries
-    from unittest.mock import patch
 
     with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as tmp:
         tmp_path = tmp.name
@@ -489,7 +508,11 @@ def test_poll_pending_updates_duplicate_templates():
 
     # Mock live template list returning APPROVED
     mock_templates = [
-        {"template_name": "hfl_patp_rnr_030926", "template_create_status": "APPROVED", "fb_template_id": "2029846117715567"}
+        {
+            "template_name": "hfl_patp_rnr_030926",
+            "template_create_status": "APPROVED",
+            "fb_template_id": "2029846117715567",
+        }
     ]
     with patch("runner.fetch_template_list", return_value=(mock_templates, None)):
         summary = poll_pending(tmp_path, client="tchfl")
@@ -498,10 +521,12 @@ def test_poll_pending_updates_duplicate_templates():
     assert summary["pending"] == 0
 
     from tracker import load_log
+
     updated_log = load_log(tmp_path)
     assert updated_log[0]["approval_status"] == "approved"
     assert updated_log[0]["provider_ref_id"] == "2029846117715567"
     print("✓ test_poll_pending_updates_duplicate_templates passed!")
+
 
 if __name__ == "__main__":
     # Check credentials are set

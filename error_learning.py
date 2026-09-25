@@ -5,13 +5,15 @@ Synthesizes error patterns from error_log.jsonl into actionable preventative rul
 stored in learned_patterns.json. Applies pre-flight checks to prevent known errors
 before API submission, and powers agent-driven self-healing.
 """
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+
 import json
 import logging
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+
 LEARNED_PATTERNS_FILE = "learned_patterns.json"
 logger = logging.getLogger(__name__)
 

@@ -23,6 +23,7 @@ def _fmt_ts(iso_str: str) -> str:
         return ""
     try:
         from datetime import datetime
+
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         local_dt = dt.astimezone()
         tz_name = local_dt.tzname() or "Local"
@@ -35,6 +36,7 @@ def sync_remote_errors(server_url: str = "https://whitelisting-agent.onrender.co
     """Silently pull newly logged errors from production server into local error_log.jsonl."""
     try:
         import urllib.request
+
         api_endpoint = f"{server_url.rstrip('/')}/api/system/errors?limit=50"
         req = urllib.request.Request(api_endpoint, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=4) as resp:
@@ -42,6 +44,7 @@ def sync_remote_errors(server_url: str = "https://whitelisting-agent.onrender.co
         if not remote_errs:
             return
         from error_tracker import ERROR_LOG_PATH, load_errors
+
         local_errs = load_errors(limit=5000)
         local_ids = {e.get("id") for e in local_errs}
         new_ones = [e for e in remote_errs if e.get("id") not in local_ids]
@@ -51,6 +54,7 @@ def sync_remote_errors(server_url: str = "https://whitelisting-agent.onrender.co
                     f.write(json.dumps(e) + "\n")
     except Exception:
         pass
+
 
 def show_summary():
     s = get_error_summary()
@@ -169,7 +173,9 @@ def main():
     parser.add_argument("--severity", help="Filter by severity (ERROR, CRITICAL, WARNING)")
     parser.add_argument("--limit", type=int, default=15, help="Number of records to show (default: 15)")
     parser.add_argument("--summary", action="store_true", help="Show error summary breakdown")
-    parser.add_argument("--learned", action="store_true", help="View synthesized learned error patterns and preventative rules")
+    parser.add_argument(
+        "--learned", action="store_true", help="View synthesized learned error patterns and preventative rules"
+    )
     args = parser.parse_args()
     sync_remote_errors()
     if args.learned:

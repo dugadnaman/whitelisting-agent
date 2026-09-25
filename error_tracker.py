@@ -7,15 +7,16 @@ a structured JSONL log (error_log.jsonl) with process-safe file locking.
 Accessible directly to the operator and the autonomous AI agent to diagnose
 issues, inspect stack traces, and guide automated remediation.
 """
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+
 import json
 import logging
-from pathlib import Path
 import sys
 import traceback
-from typing import Any
 import uuid
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 ERROR_LOG_PATH = "error_log.jsonl"
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ def log_error(
     # Feed learning engine to extract patterns and update knowledge base
     try:
         from error_learning import learn_from_error
+
         learn_from_error(
             error_message=rec.error_message,
             account=rec.account,

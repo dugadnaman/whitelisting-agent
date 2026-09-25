@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import openpyxl
+
 from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,8 @@ def clean_safelink(url: str | None) -> str:
         except Exception:
             pass
     return clean
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -110,6 +113,8 @@ class ParsedJiraBrief:
     comments: list[dict[str, Any]] = field(default_factory=list)
     comment_updates: list[dict[str, Any]] = field(default_factory=list)
     channel_counts: dict[str, int] = field(default_factory=dict)
+
+
 def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
     """Infer the correct Tata Capital sub-account from product keywords."""
     t = text.lower()
@@ -120,6 +125,7 @@ def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
     if any(k in t for k in ["moneyfy", "mutual fund", "sip"]):
         return "moneyfy"
     return default
+
 
 DEFAULT_CTA_URL = "https://u3.mnge.co/"
 
@@ -228,8 +234,8 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
 
         start = match.start()
         end = match.end()
-        before_ctx = s[max(0, start - 25):start]
-        after_ctx = s[end:min(len(s), end + 25)]
+        before_ctx = s[max(0, start - 25) : start]
+        after_ctx = s[end : min(len(s), end + 25)]
         sample = infer_sample(tag, before_ctx, after_ctx)
         samples.append(sample)
         prefix = "₹" if has_rupee else ""
@@ -241,29 +247,47 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
     normalized = re.sub(r"[ \t]+", " ", normalized)
     return normalized, samples
 
+
 def detect_language(text: str, column_name: str = "") -> str:
     """Detect language code (e.g. 'en', 'gu', 'hi', 'pa', 'mr', 'bn', 'ta', 'te', 'kn', 'ml') from column or script."""
     c_low = column_name.lower().strip()
-    if any(k in c_low for k in ["gujarati", "gujrati", "guj"]): return "gu"
-    if any(k in c_low for k in ["punjabi", "pun"]): return "pa"
-    if any(k in c_low for k in ["hindi", "hin"]): return "hi"
-    if any(k in c_low for k in ["marathi", "mar"]): return "mr"
-    if any(k in c_low for k in ["bengali", "bangla", "ben"]): return "bn"
-    if any(k in c_low for k in ["tamil", "tam"]): return "ta"
-    if any(k in c_low for k in ["telugu", "tel"]): return "te"
-    if any(k in c_low for k in ["kannada", "kan"]): return "kn"
-    if any(k in c_low for k in ["malayalam", "mal"]): return "ml"
+    if any(k in c_low for k in ["gujarati", "gujrati", "guj"]):
+        return "gu"
+    if any(k in c_low for k in ["punjabi", "pun"]):
+        return "pa"
+    if any(k in c_low for k in ["hindi", "hin"]):
+        return "hi"
+    if any(k in c_low for k in ["marathi", "mar"]):
+        return "mr"
+    if any(k in c_low for k in ["bengali", "bangla", "ben"]):
+        return "bn"
+    if any(k in c_low for k in ["tamil", "tam"]):
+        return "ta"
+    if any(k in c_low for k in ["telugu", "tel"]):
+        return "te"
+    if any(k in c_low for k in ["kannada", "kan"]):
+        return "kn"
+    if any(k in c_low for k in ["malayalam", "mal"]):
+        return "ml"
 
     for ch in text:
         code = ord(ch)
-        if 0x0A80 <= code <= 0x0AFF: return "gu"  # Gujarati
-        if 0x0A00 <= code <= 0x0A7F: return "pa"  # Gurmukhi (Punjabi)
-        if 0x0900 <= code <= 0x097F: return "hi"  # Devanagari (Hindi)
-        if 0x0980 <= code <= 0x09FF: return "bn"  # Bengali
-        if 0x0B80 <= code <= 0x0BFF: return "ta"  # Tamil
-        if 0x0C00 <= code <= 0x0C7F: return "te"  # Telugu
-        if 0x0C80 <= code <= 0x0CFF: return "kn"  # Kannada
-        if 0x0D00 <= code <= 0x0D7F: return "ml"  # Malayalam
+        if 0x0A80 <= code <= 0x0AFF:
+            return "gu"  # Gujarati
+        if 0x0A00 <= code <= 0x0A7F:
+            return "pa"  # Gurmukhi (Punjabi)
+        if 0x0900 <= code <= 0x097F:
+            return "hi"  # Devanagari (Hindi)
+        if 0x0980 <= code <= 0x09FF:
+            return "bn"  # Bengali
+        if 0x0B80 <= code <= 0x0BFF:
+            return "ta"  # Tamil
+        if 0x0C00 <= code <= 0x0C7F:
+            return "te"  # Telugu
+        if 0x0C80 <= code <= 0x0CFF:
+            return "kn"  # Kannada
+        if 0x0D00 <= code <= 0x0D7F:
+            return "ml"  # Malayalam
 
     return "en"
 
@@ -273,7 +297,21 @@ def detect_category(summary: str, text: str = "", sheet_name: str = "") -> str:
     combined = f"{summary} {text} {sheet_name}".lower()
     if any(k in combined for k in ["otp", "auth", "authentication", "verification code", "2fa"]):
         return "AUTHENTICATION"
-    if any(k in combined for k in ["utility", "reminder", "statement", "receipt", "alert", "account update", "due date", "not banked", "short banked", "status update"]):
+    if any(
+        k in combined
+        for k in [
+            "utility",
+            "reminder",
+            "statement",
+            "receipt",
+            "alert",
+            "account update",
+            "due date",
+            "not banked",
+            "short banked",
+            "status update",
+        ]
+    ):
         return "UTILITY"
     return "MARKETING"
 
@@ -327,11 +365,15 @@ def extract_and_strip_cta(
                 extracted_footer = "T&C apply"
             continue
         # 2. Check if T&C is attached at the tail of the line
-        m_tail = re.search(r"\s*(?:[*_])?\s*(?:t&c|t\s*&\s*c|terms\s*(?:and|&)?\s*conditions?)\s*(?:apply|applies)?\.?\s*(?:[*_])?\s*$", sline, re.IGNORECASE)
+        m_tail = re.search(
+            r"\s*(?:[*_])?\s*(?:t&c|t\s*&\s*c|terms\s*(?:and|&)?\s*conditions?)\s*(?:apply|applies)?\.?\s*(?:[*_])?\s*$",
+            sline,
+            re.IGNORECASE,
+        )
         if m_tail and m_tail.start() > 10:
             if not extracted_footer:
                 extracted_footer = "T&C apply"
-            sline = sline[:m_tail.start()].strip()
+            sline = sline[: m_tail.start()].strip()
         # 2. Check for inline or standalone CTA
         has_url = re.search(url_pat, sline)
         inline_m = cta_inline_pat.search(sline)
@@ -340,12 +382,12 @@ def extract_and_strip_cta(
         starts_with_emoji = bool(re.match(r"^\s*(?:[👉🔗▶️📍📲➡️✅])", sline))
 
         if inline_m:
-            before_part = sline[:inline_m.start()].strip()
-            cta_part = sline[inline_m.start():].strip()
+            before_part = sline[: inline_m.start()].strip()
+            cta_part = sline[inline_m.start() :].strip()
 
             m_url = re.search(url_pat, cta_part)
             if m_url:
-                c_url = m_url.group(1).rstrip(".,_*_`\"").strip()
+                c_url = m_url.group(1).rstrip('.,_*_`"').strip()
                 if c_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
                     extracted_url = DEFAULT_CTA_URL
                 elif c_url.startswith("http"):
@@ -353,7 +395,9 @@ def extract_and_strip_cta(
 
             btn_raw = re.sub(url_pat, "", cta_part)
             clean_btn = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", btn_raw)
-            clean_btn = re.sub(r"^(?:CTA\s*|Click\s*here\s*to\s*|Tap\s*to\s*)", "", clean_btn, flags=re.IGNORECASE).strip()
+            clean_btn = re.sub(
+                r"^(?:CTA\s*|Click\s*here\s*to\s*|Tap\s*to\s*)", "", clean_btn, flags=re.IGNORECASE
+            ).strip()
             clean_btn = re.sub(r"\s+", " ", clean_btn).strip()
             if clean_btn and len(clean_btn) <= 25 and len(clean_btn) >= 3:
                 extracted_btn_text = clean_btn.title()
@@ -371,7 +415,7 @@ def extract_and_strip_cta(
 
         elif is_url_only or (has_url and (starts_with_cta or starts_with_emoji or ":" in sline)):
             if has_url:
-                c_url = has_url.group(1).rstrip(".,_*_`\"").strip()
+                c_url = has_url.group(1).rstrip('.,_*_`"').strip()
                 if c_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
                     extracted_url = DEFAULT_CTA_URL
                 elif c_url.startswith("http"):
@@ -385,10 +429,17 @@ def extract_and_strip_cta(
 
     final_btn_text = extracted_btn_text or "Check Offer"
     final_url = extracted_url or DEFAULT_CTA_URL
-    if final_url.rstrip("/") in ("https://www.tatacapital.com", "http://www.tatacapital.com", "https://tatacapital.com", "http://tatacapital.com", ""):
+    if final_url.rstrip("/") in (
+        "https://www.tatacapital.com",
+        "http://www.tatacapital.com",
+        "https://tatacapital.com",
+        "http://tatacapital.com",
+        "",
+    ):
         final_url = DEFAULT_CTA_URL
 
     return clean_body, final_btn_text, final_url, extracted_footer
+
 
 def is_cta_cell(val: str) -> bool:
     """Check if a cell contains a CTA link, button text, or redirect instruction."""
@@ -399,7 +450,9 @@ def is_cta_cell(val: str) -> bool:
         return True
     if v.startswith(("cta:", "cta -", "cta ", "apply:", "check:", "explore:")):
         return True
-    if any(k in v for k in ["http://", "https://", "<link>"]) and any(c in v for c in ["apply", "check", "offer", "tap", "click"]):
+    if any(k in v for k in ["http://", "https://", "<link>"]) and any(
+        c in v for c in ["apply", "check", "offer", "tap", "click"]
+    ):
         return True
     return False
 
@@ -465,7 +518,21 @@ def decompose_content(
     if len(lines) >= 3 and not header_text:
         first_line = lines[0]
         if len(first_line) < 45 and not any(k in first_line.lower() for k in ["dear", "hi", "hello", "{{", "<", "{#"]):
-            if any(k in first_line.lower() for k in ["offer", "festive", "diwali", "save", "special", "congratulations", "upgrade", "alert", "notice", "update"]):
+            if any(
+                k in first_line.lower()
+                for k in [
+                    "offer",
+                    "festive",
+                    "diwali",
+                    "save",
+                    "special",
+                    "congratulations",
+                    "upgrade",
+                    "alert",
+                    "notice",
+                    "update",
+                ]
+            ):
                 header_text = first_line.strip("*_# ")
                 text = "\n\n".join(lines[1:])
 
@@ -519,17 +586,19 @@ def decompose_content(
         "language": lang,
         "category": cat,
         "variables": var_tags,
-        "sample_values": samples[:len(var_tags)],
+        "sample_values": samples[: len(var_tags)],
         "is_complete": is_complete,
         "completeness_score": completeness_score,
         "missing_components": missing_components,
     }
+
 
 def _clean_template_name(base: str, channel: str, idx: int) -> str:
     clean = re.sub(r"[^a-zA-Z0-9_]", "_", base.lower()).strip("_")
     clean = re.sub(r"_+", "_", clean)
     short = clean[:26].strip("_")
     return f"{short}_{channel.lower()}_{idx}"
+
 
 def derive_clean_card_title(body_text: str, account: str | None = None) -> str:
     """
@@ -557,10 +626,16 @@ def derive_clean_card_title(body_text: str, account: str | None = None) -> str:
         return "Exclusive Card Offer"
 
     first_line = body_text.strip().split("\n")[0].strip("*_# ")
-    if 5 <= len(first_line) <= 45 and not any(p in first_line.lower() for p in ("dear", "hi", "hello", "{{", "http", "pursuant")):
+    if 5 <= len(first_line) <= 45 and not any(
+        p in first_line.lower() for p in ("dear", "hi", "hello", "{{", "http", "pursuant")
+    ):
         return first_line
 
-    brand = "Tata Capital" if (account and "tata" in account.lower()) or "tata" in low else ("Bajaj Finserv" if "bajaj" in low else "Customer Update")
+    brand = (
+        "Tata Capital"
+        if (account and "tata" in account.lower()) or "tata" in low
+        else ("Bajaj Finserv" if "bajaj" in low else "Customer Update")
+    )
     return f"Important Notice from {brand}"
 
 
@@ -595,7 +670,7 @@ def _extract_links_from_adf_node(node: dict[str, Any] | None) -> list[str]:
     if not node or not isinstance(node, dict):
         return links
     if node.get("type") == "text":
-        for m in (node.get("marks") or []):
+        for m in node.get("marks") or []:
             if isinstance(m, dict) and m.get("type") == "link":
                 href = m.get("attrs", {}).get("href")
                 if href and not href.startswith("mailto:"):
@@ -605,6 +680,7 @@ def _extract_links_from_adf_node(node: dict[str, Any] | None) -> list[str]:
     for c in node.get("content", []):
         links.extend(_extract_links_from_adf_node(c))
     return links
+
 
 def _find_adf_tables(node: Any) -> list[dict[str, Any]]:
     tables = []
@@ -637,7 +713,7 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
             continue
 
         # Skip SWCM key-value campaign tables (handled by _parse_swcm_campaign_tables)
-        first_cell_lower = (raw_rows[0][0].strip().lower() if raw_rows and raw_rows[0] else "")
+        first_cell_lower = raw_rows[0][0].strip().lower() if raw_rows and raw_rows[0] else ""
         if "campaign execution format" in first_cell_lower:
             continue
 
@@ -651,18 +727,28 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
         if is_kv_metadata:
             kv_dict = {r[0].lower().strip(): r[1].strip() for r in raw_rows if len(r) >= 2}
             for k_prefix, chan_tag in [
-                ("wa text", "WA"), ("whatsapp text", "WA"), ("wa content", "WA"),
-                ("sms text", "SMS"), ("sms content", "SMS"),
-                ("rcs text", "RCS"), ("rcs content", "RCS"),
+                ("wa text", "WA"),
+                ("whatsapp text", "WA"),
+                ("wa content", "WA"),
+                ("sms text", "SMS"),
+                ("sms content", "SMS"),
+                ("rcs text", "RCS"),
+                ("rcs content", "RCS"),
             ]:
                 val = kv_dict.get(k_prefix, "")
-                if val and val.upper() not in ("N/A", "NA", "--", "-", "ATTACHED", "NONE") and is_valid_template_copy(val):
-                    extracted_items.append({
-                        "channel": chan_tag,
-                        "text": val,
-                        "variant": "General",
-                        "source": "jira_adf_kv",
-                    })
+                if (
+                    val
+                    and val.upper() not in ("N/A", "NA", "--", "-", "ATTACHED", "NONE")
+                    and is_valid_template_copy(val)
+                ):
+                    extracted_items.append(
+                        {
+                            "channel": chan_tag,
+                            "text": val,
+                            "variant": "General",
+                            "source": "jira_adf_kv",
+                        }
+                    )
             continue
 
         # Check Pattern B (Row-based channel tags)
@@ -676,12 +762,14 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                     chan_tag = r[0].strip().upper()
                     body_content = r[1].strip()
                     if body_content and len(body_content) > 10 and is_valid_template_copy(body_content):
-                        extracted_items.append({
-                            "channel": chan_tag,
-                            "text": body_content,
-                            "variant": "General",
-                            "source": "jira_adf",
-                        })
+                        extracted_items.append(
+                            {
+                                "channel": chan_tag,
+                                "text": body_content,
+                                "variant": "General",
+                                "source": "jira_adf",
+                            }
+                        )
             continue
 
         # Pattern A (Columnar headers in row 0)
@@ -712,12 +800,14 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                                 if "retarget" in header_lower
                                 else ("Non clicker" if "non" in header_lower else "General")
                             )
-                            extracted_items.append({
-                                "channel": chan_type,
-                                "text": cell_val,
-                                "variant": variant_label,
-                                "source": "jira_adf",
-                            })
+                            extracted_items.append(
+                                {
+                                    "channel": chan_type,
+                                    "text": cell_val,
+                                    "variant": variant_label,
+                                    "source": "jira_adf",
+                                }
+                            )
 
     return extracted_items
 
@@ -726,24 +816,46 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
 # Excel Spreadsheet Extraction Engine
 # ---------------------------------------------------------------------------
 MONTH_NAMES = {
-    "jan": "jan", "january": "jan",
-    "feb": "feb", "february": "feb",
-    "mar": "mar", "march": "mar",
-    "apr": "apr", "april": "apr",
+    "jan": "jan",
+    "january": "jan",
+    "feb": "feb",
+    "february": "feb",
+    "mar": "mar",
+    "march": "mar",
+    "apr": "apr",
+    "april": "apr",
     "may": "may",
-    "jun": "jun", "june": "jun",
-    "jul": "jul", "july": "jul",
-    "aug": "aug", "august": "aug",
-    "sep": "sep", "sept": "sep", "september": "sep",
-    "oct": "oct", "october": "oct",
-    "nov": "nov", "november": "nov",
-    "dec": "dec", "december": "dec",
+    "jun": "jun",
+    "june": "jun",
+    "jul": "jul",
+    "july": "jul",
+    "aug": "aug",
+    "august": "aug",
+    "sep": "sep",
+    "sept": "sep",
+    "september": "sep",
+    "oct": "oct",
+    "october": "oct",
+    "nov": "nov",
+    "november": "nov",
+    "dec": "dec",
+    "december": "dec",
 }
 
 SKIP_SHEET_KEYWORDS = [
-    "planner", "schedule", "calendar", "base count", "tracking",
-    "summary", "exclusion", "report", "metrics", "decile", "overview"
+    "planner",
+    "schedule",
+    "calendar",
+    "base count",
+    "tracking",
+    "summary",
+    "exclusion",
+    "report",
+    "metrics",
+    "decile",
+    "overview",
 ]
+
 
 def detect_ticket_month(summary: str, desc: str = "") -> str | None:
     """Infer the campaign month from the Jira summary or description."""
@@ -754,12 +866,14 @@ def detect_ticket_month(summary: str, desc: str = "") -> str | None:
             return MONTH_NAMES[w]
     return None
 
+
 def detect_sheet_month(sheet_name: str) -> str | None:
     words = re.findall(r"\b[a-z]+\b", sheet_name.lower())
     for w in words:
         if w in MONTH_NAMES:
             return MONTH_NAMES[w]
     return None
+
 
 def should_skip_sheet(sheet_name: str, target_month: str | None = None) -> bool:
     s_low = sheet_name.lower()
@@ -770,6 +884,7 @@ def should_skip_sheet(sheet_name: str, target_month: str | None = None) -> bool:
         if sheet_month and sheet_month != target_month:
             return True
     return False
+
 
 def is_pure_cta_cell(s: str) -> bool:
     """Check if a cell is purely a CTA button or link without body copy."""
@@ -783,7 +898,9 @@ def is_pure_cta_cell(s: str) -> bool:
     if re.match(r"^\s*(?:" + url_pat + r")\s*$", text):
         return True
     if re.match(
-        r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*[:\-–]?\s*|check\s+(?:your\s+|my\s+)?offer|apply\s*(?:now|online|here)?|explore\s*(?:more|now|offer)?|tap\s*(?:here|to\s+save\s+more|now)?|click\s*(?:here|to\s+apply)?|visit\s*(?:now|us)?|view\s*offer|avail\s*now)[\s:\-–]*(?:" + url_pat + r")?\s*$",
+        r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*[:\-–]?\s*|check\s+(?:your\s+|my\s+)?offer|apply\s*(?:now|online|here)?|explore\s*(?:more|now|offer)?|tap\s*(?:here|to\s+save\s+more|now)?|click\s*(?:here|to\s+apply)?|visit\s*(?:now|us)?|view\s*offer|avail\s*now)[\s:\-–]*(?:"
+        + url_pat
+        + r")?\s*$",
         text,
         re.IGNORECASE,
     ):
@@ -811,12 +928,28 @@ def is_valid_template_copy(text: str) -> bool:
 
     # 2. Reject internal operational notes, file manifests, and count tables
     s_low = s.lower()
-    if any(p in s_low for p in [
-        "campaign name |", "sftp path", "date & time of execution", "testing email", "testing mobile",
-        "short |", "segment count", "grand total", "dob column", "below files",
-        "pls release", "please release", "exclusion list", "date & time",
-        "campaign execution", "channel name", "content format"
-    ]):
+    if any(
+        p in s_low
+        for p in [
+            "campaign name |",
+            "sftp path",
+            "date & time of execution",
+            "testing email",
+            "testing mobile",
+            "short |",
+            "segment count",
+            "grand total",
+            "dob column",
+            "below files",
+            "pls release",
+            "please release",
+            "exclusion list",
+            "date & time",
+            "campaign execution",
+            "channel name",
+            "content format",
+        ]
+    ):
         return False
 
     # 3. Reject pipe-separated database / tracking headers
@@ -825,7 +958,10 @@ def is_valid_template_copy(text: str) -> bool:
 
     # 4. Reject section headers that masquerade as copy
     if "\n" not in s and len(s) < 60:
-        if any(h in s_low for h in ["wholebase", "automation", "normal term loan", "utility messages", "planner", "schedule"]):
+        if any(
+            h in s_low
+            for h in ["wholebase", "automation", "normal term loan", "utility messages", "planner", "schedule"]
+        ):
             return False
 
     # 5. Must contain at least 4 whitespace-separated words
@@ -836,16 +972,64 @@ def is_valid_template_copy(text: str) -> bool:
     # 6. Must contain human customer messaging vocabulary or placeholders
     has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
     has_greeting = bool(re.search(r"\b(dear|hi|hello|hey|namaste|greeting|welcome|congratulations)\b", s_low))
-    has_messaging_keywords = any(k in s_low for k in [
-        "loan", "offer", "tata", "capital", "emi", "fund", "funds", "interest", "rate", "roi",
-        "apply", "pay", "tap", "click", "₹", "rs.", "rs ", "inr", "lakh", "lacs", "crore",
-        "card", "account", "disbursal", "bank", "due", "cashback", "voucher", "disclaimer",
-        "t&c", "terms", "journey", "benefit", "saving", "savings", "travel", "trip",
-        "holiday", "upgrade", "repayment", "debt", "debts", "eligibility", "pre-approved",
-        "pre approved", "approved", "pre-qualified", "instant", "quick", "flexible"
-    ])
+    has_messaging_keywords = any(
+        k in s_low
+        for k in [
+            "loan",
+            "offer",
+            "tata",
+            "capital",
+            "emi",
+            "fund",
+            "funds",
+            "interest",
+            "rate",
+            "roi",
+            "apply",
+            "pay",
+            "tap",
+            "click",
+            "₹",
+            "rs.",
+            "rs ",
+            "inr",
+            "lakh",
+            "lacs",
+            "crore",
+            "card",
+            "account",
+            "disbursal",
+            "bank",
+            "due",
+            "cashback",
+            "voucher",
+            "disclaimer",
+            "t&c",
+            "terms",
+            "journey",
+            "benefit",
+            "saving",
+            "savings",
+            "travel",
+            "trip",
+            "holiday",
+            "upgrade",
+            "repayment",
+            "debt",
+            "debts",
+            "eligibility",
+            "pre-approved",
+            "pre approved",
+            "approved",
+            "pre-qualified",
+            "instant",
+            "quick",
+            "flexible",
+        ]
+    )
 
     return has_placeholder or has_greeting or has_messaging_keywords
+
 
 def _normalize_channel_tag(tag: str) -> str | None:
     """Normalize any string (e.g. 'WhatsApp', 'WA', 'RCS', 'SMS Promotional') to canonical channel."""
@@ -865,6 +1049,7 @@ def _normalize_channel_tag(tag: str) -> str | None:
         return "EMAIL"
     return None
 
+
 def _match_sheet_channel(sname: str) -> str | None:
     norm = re.sub(r"[^A-Za-z0-9]", " ", sname).strip().upper()
     words = norm.split()
@@ -875,6 +1060,7 @@ def _match_sheet_channel(sname: str) -> str | None:
     if "SMS" in words or "SMS" in norm:
         return "SMS"
     return None
+
 
 def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
     """
@@ -887,9 +1073,10 @@ def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
     # 1. Handle CSV files with encoding fallback
     if lower_path.endswith(".csv"):
         import csv
+
         for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
             try:
-                with open(filepath, "r", encoding=enc, errors="replace") as f:
+                with open(filepath, encoding=enc, errors="replace") as f:
                     reader = csv.reader(f)
                     rows = [[str(cell or "").strip() for cell in r] for r in reader if any(r)]
                     if rows:
@@ -903,6 +1090,7 @@ def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
     if lower_path.endswith(".xls") and not lower_path.endswith(".xlsx"):
         try:
             import xlrd
+
             xwb = xlrd.open_workbook(filepath)
             for sname in xwb.sheet_names():
                 xsh = xwb.sheet_by_name(sname)
@@ -936,6 +1124,7 @@ def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
     # 3. Fallback: try pandas for .xls or complex formats
     try:
         import pandas as pd
+
         excel_file = pd.ExcelFile(filepath)
         for sname in excel_file.sheet_names:
             df = pd.read_excel(excel_file, sheet_name=sname, header=None)
@@ -949,6 +1138,8 @@ def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
         logger.warning("pandas fallback could not load %s: %s", filepath, exc)
 
     return sheets
+
+
 def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[str, str]]:
     """
     Universally parse template content from 2D raw string rows of any sheet.
@@ -987,7 +1178,11 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
 
     current_channel = sheet_chan
     start_idx = (header_row_idx + 1) if header_row_idx is not None and header_row_idx >= 0 else 0
-    header_row = [c.lower() for c in raw_rows[header_row_idx]] if header_row_idx is not None and header_row_idx >= 0 and header_row_idx < len(raw_rows) else []
+    header_row = (
+        [c.lower() for c in raw_rows[header_row_idx]]
+        if header_row_idx is not None and header_row_idx >= 0 and header_row_idx < len(raw_rows)
+        else []
+    )
 
     # Check for columnar headers (e.g. template_name | body | header | button...)
     body_col_idx = None
@@ -1002,7 +1197,9 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
     header_col_idx = next((i for i, h in enumerate(header_row) if "header" in h and "type" not in h), None)
     footer_col_idx = next((i for i, h in enumerate(header_row) if "footer" in h), None)
     btn_text_col_idx = next((i for i, h in enumerate(header_row) if "button_text" in h or "cta" in h), None)
-    btn_url_col_idx = next((i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None)
+    btn_url_col_idx = next(
+        (i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None
+    )
     btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
 
     for r_num, row in enumerate(raw_rows[start_idx:], start=start_idx + 1):
@@ -1011,7 +1208,10 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
         if not has_long_copy:
             for cell in row:
                 c_norm = _normalize_channel_tag(cell)
-                if c_norm and any(k in cell.lower() for k in ["promotional", "retargeting", "utility", "content", "whatsapp", "sms", "rcs"]):
+                if c_norm and any(
+                    k in cell.lower()
+                    for k in ["promotional", "retargeting", "utility", "content", "whatsapp", "sms", "rcs"]
+                ):
                     current_channel = c_norm
                     break
             continue
@@ -1123,7 +1323,11 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                     neighbor_cta = row[c_idx + 1]
                     consumed_coords.add((r_idx, c_idx + 1))
                 # Look down for neighbor CTA
-                elif r_idx + 1 < len(raw_rows) and c_idx < len(raw_rows[r_idx + 1]) and is_pure_cta_cell(raw_rows[r_idx + 1][c_idx]):
+                elif (
+                    r_idx + 1 < len(raw_rows)
+                    and c_idx < len(raw_rows[r_idx + 1])
+                    and is_pure_cta_cell(raw_rows[r_idx + 1][c_idx])
+                ):
                     neighbor_cta = raw_rows[r_idx + 1][c_idx]
                     consumed_coords.add((r_idx + 1, c_idx))
 
@@ -1131,6 +1335,7 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                 if r_idx > 0 and c_idx < len(raw_rows[r_idx - 1]):
                     top_c = raw_rows[r_idx - 1][c_idx].strip()
                     from gemini_intelligence import is_internal_identifier
+
                     if (
                         3 < len(top_c) < 45
                         and not is_cta_cell(top_c)
@@ -1172,6 +1377,8 @@ def _parse_excel_channel_sheets(wb: openpyxl.Workbook, target_month: str | None 
                 raw_rows.append(vals)
         items.extend(_parse_raw_sheet_rows(raw_rows, sname))
     return items
+
+
 def _parse_excel_grid_messages(wb: openpyxl.Workbook) -> list[dict[str, str]]:
     """
     Parse Excel sheets where copy spans multiple contiguous rows
@@ -1205,12 +1412,14 @@ def _parse_excel_grid_messages(wb: openpyxl.Workbook) -> list[dict[str, str]]:
                 combined = "\n".join([line for line in lines if not line.lower().startswith("t&cs apply")]).strip()
                 if len(combined) > 25:
                     variant_label = f"Variant {c_idx}" if c_idx > 1 else "General"
-                    items.append({
-                        "channel": channel,
-                        "text": combined,
-                        "variant": variant_label,
-                        "source": f"excel_grid_{sheet_name}",
-                    })
+                    items.append(
+                        {
+                            "channel": channel,
+                            "text": combined,
+                            "variant": variant_label,
+                            "source": f"excel_grid_{sheet_name}",
+                        }
+                    )
             current_block = {c: [] for c in range(1, cols)}
 
         consecutive_empty_rows = 0
@@ -1267,13 +1476,15 @@ def _parse_excel_key_value_blocks(wb: openpyxl.Workbook) -> list[dict[str, str]]
                     body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", val, re.DOTALL)
                     title = title_m.group(1).strip() if title_m else "Tata Capital Offer"
                     body = body_m.group(1).strip() if body_m else val
-                    items.append({
-                        "channel": "RCS",
-                        "text": body,
-                        "title": title,
-                        "variant": "App Downloads",
-                        "source": f"excel_block_{sname}",
-                    })
+                    items.append(
+                        {
+                            "channel": "RCS",
+                            "text": body,
+                            "title": title,
+                            "variant": "App Downloads",
+                            "source": f"excel_block_{sname}",
+                        }
+                    )
 
     return items
 
@@ -1307,17 +1518,21 @@ def _parse_dlt_sms_sheet(raw_rows: list[list[str]], sname: str, filename: str = 
                 continue
             tname = str(r[name_idx]).strip() if name_idx is not None and name_idx < len(r) and r[name_idx] else ""
             tid = str(r[id_idx]).strip().strip("'") if id_idx is not None and id_idx < len(r) and r[id_idx] else ""
-            h_val = str(r[header_idx]).strip() if header_idx is not None and header_idx < len(r) and r[header_idx] else ""
+            h_val = (
+                str(r[header_idx]).strip() if header_idx is not None and header_idx < len(r) and r[header_idx] else ""
+            )
             cat_val = str(r[cat_idx]).strip() if cat_idx is not None and cat_idx < len(r) and r[cat_idx] else "General"
-            items.append({
-                "channel": "SMS",
-                "text": msg,
-                "header": h_val or None,
-                "template_name": tname,
-                "dlt_template_id": tid,
-                "variant": cat_val,
-                "source": f"dlt_sms_{sname}",
-            })
+            items.append(
+                {
+                    "channel": "SMS",
+                    "text": msg,
+                    "header": h_val or None,
+                    "template_name": tname,
+                    "dlt_template_id": tid,
+                    "variant": cat_val,
+                    "source": f"dlt_sms_{sname}",
+                }
+            )
     return items
 
 
@@ -1332,6 +1547,7 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
     # 1. Try python-docx if installed
     try:
         import docx
+
         doc = docx.Document(docx_path)
         paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     except Exception:
@@ -1340,13 +1556,18 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
     # 2. Robust zero-dependency fallback using built-in zipfile + XML
     if not paras:
         try:
-            import zipfile
             import xml.etree.ElementTree as ET
+            import zipfile
+
             with zipfile.ZipFile(docx_path) as z:
                 xml_content = z.read("word/document.xml")
             tree = ET.fromstring(xml_content)
             for p in tree.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
-                texts = [node.text for node in p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t") if node.text]
+                texts = [
+                    node.text
+                    for node in p.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t")
+                    if node.text
+                ]
                 if texts:
                     clean_p = "".join(texts).strip()
                     if clean_p:
@@ -1389,29 +1610,37 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
         header = None
         if chan == "WA":
             # If line 0 is a short punchy headline (< 65 chars), treat it as genuine customer header
-            if len(lines) >= 2 and len(lines[0]) < 65 and not lines[0].lower().startswith(("dear", "hi", "pursuant", "your loan", "please", "for ")):
+            if (
+                len(lines) >= 2
+                and len(lines[0]) < 65
+                and not lines[0].lower().startswith(("dear", "hi", "pursuant", "your loan", "please", "for "))
+            ):
                 header = lines[0]
                 body = "\n".join(lines[1:])
             else:
                 body = "\n".join(lines)
             if is_valid_template_copy(body):
-                items.append({
-                    "channel": "WA",
-                    "header": header,
-                    "text": body,
-                    "variant": tier,
-                    "source": f"docx_{Path(docx_path).stem}",
-                })
+                items.append(
+                    {
+                        "channel": "WA",
+                        "header": header,
+                        "text": body,
+                        "variant": tier,
+                        "source": f"docx_{Path(docx_path).stem}",
+                    }
+                )
         elif chan == "SMS":
             body = "\n".join(lines)
             if is_valid_template_copy(body):
-                items.append({
-                    "channel": "SMS",
-                    "header": None,
-                    "text": body,
-                    "variant": tier,
-                    "source": f"docx_{Path(docx_path).stem}",
-                })
+                items.append(
+                    {
+                        "channel": "SMS",
+                        "header": None,
+                        "text": body,
+                        "variant": tier,
+                        "source": f"docx_{Path(docx_path).stem}",
+                    }
+                )
         elif chan == "EMAIL":
             subject = None
             body_lines = []
@@ -1420,13 +1649,15 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
                     subject = l.split(":", 1)[1].strip()
                 else:
                     body_lines.append(l)
-            items.append({
-                "channel": "EMAIL",
-                "header": subject,
-                "text": "\n".join(body_lines),
-                "variant": tier,
-                "source": f"docx_{Path(docx_path).stem}",
-            })
+            items.append(
+                {
+                    "channel": "EMAIL",
+                    "header": subject,
+                    "text": "\n".join(body_lines),
+                    "variant": tier,
+                    "source": f"docx_{Path(docx_path).stem}",
+                }
+            )
 
     return items
 
@@ -1462,6 +1693,8 @@ def extract_templates_from_excel_file(filepath: Path, target_month: str | None =
                 all_items.append(item)
 
     return all_items
+
+
 def _extract_images_from_zip(zip_path: Path) -> list[str]:
     """Extract top-level image creatives from a ZIP attachment. Returns local paths.
 
@@ -1523,14 +1756,16 @@ def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None) -> list[dict[str
         wa_content = fields.get("WA Content", {}).get("text", "")
         if wa_content:
             cta_info = fields.get("CTA / LINK", {})
-            campaigns.append({
-                "wa_label": header[1].strip(),
-                "campaign_name": fields.get("Campaign Name", {}).get("text", ""),
-                "body": wa_content,
-                "cta_text": cta_info.get("text", ""),
-                "cta_links": cta_info.get("links", []),
-                "schedule": fields.get("Date & Time of execution", {}).get("text", ""),
-            })
+            campaigns.append(
+                {
+                    "wa_label": header[1].strip(),
+                    "campaign_name": fields.get("Campaign Name", {}).get("text", ""),
+                    "body": wa_content,
+                    "cta_text": cta_info.get("text", ""),
+                    "cta_links": cta_info.get("links", []),
+                    "schedule": fields.get("Date & Time of execution", {}).get("text", ""),
+                }
+            )
 
     return campaigns
 
@@ -1561,11 +1796,12 @@ def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[s
     # If no hyperlink mark was attached, fallback to URL in text if any
     if not cta_links:
         for line in lines:
-            if line.startswith("http://") or line.startswith("https://"):
+            if line.startswith(("http://", "https://")):
                 button_url = line
                 break
 
     return button_text, button_url
+
 
 _LOCATION_KEYWORDS = {
     "noida": "noida",
@@ -1589,16 +1825,11 @@ def _match_creative_to_campaign(campaign_name: str, images: list[str]) -> str | 
     when no WhatsApp-named creative matches.
     """
     cname_lower = campaign_name.lower()
-    target_keywords = {
-        v for k, v in _LOCATION_KEYWORDS.items() if k in cname_lower
-    }
+    target_keywords = {v for k, v in _LOCATION_KEYWORDS.items() if k in cname_lower}
     if not target_keywords:
         return None
 
-    wa_named = [
-        i for i in images
-        if "whatsapp" in Path(i).name.lower() or "whatsap" in Path(i).name.lower()
-    ]
+    wa_named = [i for i in images if "whatsapp" in Path(i).name.lower() or "whatsap" in Path(i).name.lower()]
     other = [i for i in images if i not in wa_named]
 
     for img in wa_named + other:
@@ -1606,6 +1837,7 @@ def _match_creative_to_campaign(campaign_name: str, images: list[str]) -> str | 
         if any(kw in img_lower for kw in target_keywords):
             return img
     return None
+
 
 def parse_ticket_intent(desc: str) -> dict[str, Any]:
     """
@@ -1682,13 +1914,24 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
 
     # Detect Email Mailer tickets (e.g. TCN-528 TCL Mailers Sept, SWCM-61)
     raw_attachments = issue_data.get("attachments", [])
-    has_mailers_zip = any(("mailer" in a.get("filename", "").lower() or a.get("filename", "").endswith(".zip")) for a in raw_attachments)
-    has_subject_lines = any("subject" in a.get("filename", "").lower() or a.get("filename", "").endswith((".docx", ".doc")) for a in raw_attachments)
+    has_mailers_zip = any(
+        ("mailer" in a.get("filename", "").lower() or a.get("filename", "").endswith(".zip")) for a in raw_attachments
+    )
+    has_subject_lines = any(
+        "subject" in a.get("filename", "").lower() or a.get("filename", "").endswith((".docx", ".doc"))
+        for a in raw_attachments
+    )
+    has_excel = any(a.get("filename", "").lower().endswith((".xlsx", ".xls", ".csv")) for a in raw_attachments)
+    has_docx = any(a.get("filename", "").lower().endswith((".docx", ".doc")) for a in raw_attachments)
     is_email_campaign = (
-        ("mailer" in summary.lower() or "mailers" in summary.lower() or "email" in summary.lower() or "email" in desc_text.lower())
+        (
+            "mailer" in summary.lower()
+            or "mailers" in summary.lower()
+            or "email" in summary.lower()
+            or "email" in desc_text.lower()
+        )
         and (has_mailers_zip or has_subject_lines or "email text" in desc_text.lower())
-    ) or (has_mailers_zip and not excel_attachment_paths and not docx_attachment_paths)
-    # 1. Download and categorize attachments
+    ) or (has_mailers_zip and not has_excel and not has_docx)
     mapped_attachments: list[dict[str, Any]] = []
     excel_attachment_paths: list[Path] = []
     docx_attachment_paths: list[Path] = []
@@ -1727,29 +1970,38 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             target_chan = "SMS"
         else:
             target_chan = "GENERAL"
-        mapped_attachments.append({
-            "id": att_id,
-            "filename": fn,
-            "local_path": local_path,
-            "mime": mime,
-            "target_channel": target_chan,
-        })
+        mapped_attachments.append(
+            {
+                "id": att_id,
+                "filename": fn,
+                "local_path": local_path,
+                "mime": mime,
+                "target_channel": target_chan,
+            }
+        )
 
     IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
     wa_creatives = [
-        a for a in mapped_attachments
-        if a.get("filename", "").lower().endswith(IMAGE_EXTS) and a.get("local_path")
-        and (a["target_channel"] == "WHATSAPP" or "wa" in a.get("filename", "").lower() or "whatsapp" in a.get("filename", "").lower())
+        a
+        for a in mapped_attachments
+        if a.get("filename", "").lower().endswith(IMAGE_EXTS)
+        and a.get("local_path")
+        and (
+            a["target_channel"] == "WHATSAPP"
+            or "wa" in a.get("filename", "").lower()
+            or "whatsapp" in a.get("filename", "").lower()
+        )
     ]
     if not wa_creatives:
         wa_creatives = [
-            a for a in mapped_attachments
-            if a.get("filename", "").lower().endswith(IMAGE_EXTS) and a.get("local_path")
+            a for a in mapped_attachments if a.get("filename", "").lower().endswith(IMAGE_EXTS) and a.get("local_path")
         ]
 
     rcs_creatives = [
-        a for a in mapped_attachments
-        if a.get("filename", "").lower().endswith(IMAGE_EXTS) and a.get("local_path")
+        a
+        for a in mapped_attachments
+        if a.get("filename", "").lower().endswith(IMAGE_EXTS)
+        and a.get("local_path")
         and (a["target_channel"] == "RCS" or "rcs" in a.get("filename", "").lower())
     ] or wa_creatives
 
@@ -1768,13 +2020,15 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 if lower_fn.endswith(".zip")
                 else ("Subject Lines & Preheaders" if lower_fn.endswith((".docx", ".doc")) else "HTML Template")
             )
-            email_drafts.append({
-                "template_name": Path(fn).stem,
-                "filename": fn,
-                "file_type": f_type,
-                "local_path": att.get("local_path"),
-                "target_channel": "EMAIL",
-            })
+            email_drafts.append(
+                {
+                    "template_name": Path(fn).stem,
+                    "filename": fn,
+                    "file_type": f_type,
+                    "local_path": att.get("local_path"),
+                    "target_channel": "EMAIL",
+                }
+            )
     base_name = f"{key.lower().replace('-', '_')}_{re.sub(r'[^a-z0-9]', '_', summary.lower())[:16]}".strip("_")
 
     # 2. Extract templates from attached Word (.docx) and Excel (.xlsx) files
@@ -1797,12 +2051,14 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         # Pipe blocks fallback (e.g. SMS | ... or WA | ...)
         pipe_blocks = re.findall(r"^(SMS|WA|RCS)\s*\|\s*(.+)$", desc_text, re.IGNORECASE | re.MULTILINE)
         for chan_tag, text_val in pipe_blocks:
-            extracted_items.append({
-                "channel": chan_tag.upper(),
-                "text": text_val.strip(),
-                "variant": "General",
-                "source": "jira_pipe",
-            })
+            extracted_items.append(
+                {
+                    "channel": chan_tag.upper(),
+                    "text": text_val.strip(),
+                    "variant": "General",
+                    "source": "jira_pipe",
+                }
+            )
 
     # 3c. Check ticket comments for revisions / copy updates
     raw_comments = issue_data.get("comments", [])
@@ -1812,21 +2068,29 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         author = c.get("author", "Commenter")
         pipe_m = re.findall(r"^(SMS|WA|RCS|WHATSAPP)\s*\|\s*(.+)$", c_body, re.IGNORECASE | re.MULTILINE)
         for c_tag, t_val in pipe_m:
-            comment_updates.append({
-                "channel": "WA" if c_tag.upper() in ("WA", "WHATSAPP") else c_tag.upper(),
-                "text": t_val.strip(),
-                "variant": f"Revision by {author}",
-                "source": f"comment_{c.get('id', '')}",
-            })
-        rev_m = re.findall(r"(?:updated|revised|new|approved)\s+(wa|whatsapp|sms|rcs)\s*[:\-–]\s*(.+?)(?=\n\s*(?:updated|revised|new|sms|wa|rcs|$)|\Z)", c_body, re.IGNORECASE | re.DOTALL)
-        for c_tag, t_val in rev_m:
-            if len(t_val.strip()) > 20:
-                comment_updates.append({
+            comment_updates.append(
+                {
                     "channel": "WA" if c_tag.upper() in ("WA", "WHATSAPP") else c_tag.upper(),
                     "text": t_val.strip(),
                     "variant": f"Revision by {author}",
-                    "source": f"comment_rev_{c.get('id', '')}",
-                })
+                    "source": f"comment_{c.get('id', '')}",
+                }
+            )
+        rev_m = re.findall(
+            r"(?:updated|revised|new|approved)\s+(wa|whatsapp|sms|rcs)\s*[:\-–]\s*(.+?)(?=\n\s*(?:updated|revised|new|sms|wa|rcs|$)|\Z)",
+            c_body,
+            re.IGNORECASE | re.DOTALL,
+        )
+        for c_tag, t_val in rev_m:
+            if len(t_val.strip()) > 20:
+                comment_updates.append(
+                    {
+                        "channel": "WA" if c_tag.upper() in ("WA", "WHATSAPP") else c_tag.upper(),
+                        "text": t_val.strip(),
+                        "variant": f"Revision by {author}",
+                        "source": f"comment_rev_{c.get('id', '')}",
+                    }
+                )
 
     if comment_updates:
         extracted_items.extend(comment_updates)
@@ -1842,7 +2106,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         )
         var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
         if len(samples) > len(var_tags):
-            samples = samples[:len(var_tags)]
+            samples = samples[: len(var_tags)]
         media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
         if media is None and zip_creative_paths:
             media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
@@ -1887,19 +2151,21 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     else (["WA"] if chan_decision == "WHATSAPP" else [chan_decision])
                 )
                 for c_tag in channels_to_emit:
-                    extracted_items.append({
-                        "channel": c_tag,
-                        "text": t_comp.body_text,
-                        "header": t_comp.header_text,
-                        "footer": t_comp.footer_text,
-                        "button_text": t_comp.button_text,
-                        "button_url": t_comp.button_url,
-                        "button_type": t_comp.button_type,
-                        "variant": semantic_res.routing.campaign_purpose,
-                        "source": "jira_typesafe_extractor",
-                        "variables": semantic_res.variables,
-                        "sample_values": semantic_res.sample_values,
-                    })
+                    extracted_items.append(
+                        {
+                            "channel": c_tag,
+                            "text": t_comp.body_text,
+                            "header": t_comp.header_text,
+                            "footer": t_comp.footer_text,
+                            "button_text": t_comp.button_text,
+                            "button_url": t_comp.button_url,
+                            "button_type": t_comp.button_type,
+                            "variant": semantic_res.routing.campaign_purpose,
+                            "source": "jira_typesafe_extractor",
+                            "variables": semantic_res.variables,
+                            "sample_values": semantic_res.sample_values,
+                        }
+                    )
         except Exception as ex:
             logger.warning("TypeSafe semantic Jira extraction skipped: %s", ex)
 
@@ -1912,6 +2178,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         chan = item["channel"].upper()
         clean_content = item["text"]
         from gemini_intelligence import is_internal_identifier
+
         variant = item.get("variant", "General")
         title = item.get("title") or (summary[:32] if not is_internal_identifier(summary) else "")
         source_origin = item.get("source", "jira")
@@ -1946,7 +2213,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
             resolved_vars = var_tags
             if len(resolved_samples) > len(var_tags):
-                resolved_samples = resolved_samples[:len(var_tags)]
+                resolved_samples = resolved_samples[: len(var_tags)]
             wa_header = item.get("header")
             if wa_header and is_internal_identifier(wa_header, summary=summary):
                 wa_header = None
@@ -2002,7 +2269,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     action_label=cta_btn_text,
                     action_url=cta_btn_url,
                     variables=item.get("variables") or var_tags,
-                    sample_values=item.get("sample_values") or resolved_samples[:len(var_tags)],
+                    sample_values=item.get("sample_values") or resolved_samples[: len(var_tags)],
                     raw_source=clean_content,
                     source_origin=source_origin,
                 )
@@ -2033,14 +2300,16 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             sms_counter += 1
 
         elif chan in ("EMAIL", "MAILER", "MAIL"):
-            email_drafts.append({
-                "template_name": _clean_template_name(base_name, "email", len(email_drafts) + 1),
-                "filename": f"Email Copy {len(email_drafts) + 1}",
-                "file_type": "Email Body Copy",
-                "body": norm_text,
-                "variant": variant,
-                "source_origin": source_origin,
-            })
+            email_drafts.append(
+                {
+                    "template_name": _clean_template_name(base_name, "email", len(email_drafts) + 1),
+                    "filename": f"Email Copy {len(email_drafts) + 1}",
+                    "file_type": "Email Body Copy",
+                    "body": norm_text,
+                    "variant": variant,
+                    "source_origin": source_origin,
+                }
+            )
     # 5. Build MoEngage Campaign Staging payload
     moengage_campaign = {
         "campaign_name": f"{key} - {summary}",
@@ -2053,17 +2322,17 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         "status": "DRAFT",
     }
 
-    if not wa_drafts and not sms_drafts and not rcs_drafts and (email_drafts or "email" in desc_text.lower() or "mail" in desc_text.lower() or "email" in summary.lower()):
+    if (
+        not wa_drafts
+        and not sms_drafts
+        and not rcs_drafts
+        and (email_drafts or "email" in desc_text.lower() or "mail" in desc_text.lower() or "email" in summary.lower())
+    ):
         is_email_campaign = True
 
-    campaign_type_label = (
-        "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"
-    )
+    campaign_type_label = "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"
 
-    has_push = bool(
-        moengage_campaign
-        and (moengage_campaign.get("push_body") or moengage_campaign.get("push_title"))
-    )
+    has_push = bool(moengage_campaign and (moengage_campaign.get("push_body") or moengage_campaign.get("push_title")))
     ch_counts = {
         "total": len(wa_drafts) + len(rcs_drafts) + len(sms_drafts) + len(email_drafts) + (1 if has_push else 0),
         "whatsapp": len(wa_drafts),

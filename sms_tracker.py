@@ -11,7 +11,7 @@ import json
 import logging
 import uuid
 from dataclasses import asdict
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +59,7 @@ def log_sms_submission(
 ) -> None:
     """Store SMS submission outcome into database as single source of truth."""
     import db
+
     db.init_database()
     record = asdict(result)
     sid = record.get("id") or str(uuid.uuid4())
@@ -104,12 +105,16 @@ def load_sms_submissions(
         return entries
 
     import db
+
     db.init_database()
     entries = []
     try:
         with db.get_db() as conn:
             if client and client.lower() != "all":
-                cur = conn.execute("SELECT payload_json FROM sms_submissions WHERE LOWER(client) = ? ORDER BY created_at ASC", (client.lower(),))
+                cur = conn.execute(
+                    "SELECT payload_json FROM sms_submissions WHERE LOWER(client) = ? ORDER BY created_at ASC",
+                    (client.lower(),),
+                )
             else:
                 cur = conn.execute("SELECT payload_json FROM sms_submissions ORDER BY created_at ASC")
             for r in cur.fetchall():
@@ -128,6 +133,7 @@ def log_sms_dlr(
 ) -> None:
     """Store SMS DLR callback report into database as single source of truth."""
     import db
+
     db.init_database()
     record = asdict(report)
     did = record.get("id") or str(uuid.uuid4())
@@ -177,6 +183,7 @@ def load_sms_dlrs(
         return entries
 
     import db
+
     db.init_database()
     entries = []
     try:
@@ -204,6 +211,7 @@ def log_sms_click(
 ) -> None:
     """Store SMS click report into database as single source of truth."""
     import db
+
     db.init_database()
     record = asdict(report)
     cid = record.get("id") or str(uuid.uuid4())
@@ -249,12 +257,16 @@ def load_sms_clicks(
         return entries
 
     import db
+
     db.init_database()
     entries = []
     try:
         with db.get_db() as conn:
             if client and client.lower() != "all":
-                cur = conn.execute("SELECT payload_json FROM sms_clicks WHERE LOWER(client) = ? ORDER BY created_at ASC", (client.lower(),))
+                cur = conn.execute(
+                    "SELECT payload_json FROM sms_clicks WHERE LOWER(client) = ? ORDER BY created_at ASC",
+                    (client.lower(),),
+                )
             else:
                 cur = conn.execute("SELECT payload_json FROM sms_clicks ORDER BY created_at ASC")
             for r in cur.fetchall():

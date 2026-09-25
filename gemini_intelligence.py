@@ -16,10 +16,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any
 import re
+from typing import Any
 
 import requests
+
 from config import _load_env_file
 
 logger = logging.getLogger(__name__)
@@ -31,11 +32,7 @@ DEFAULT_MODEL = "gemini-3.1-flash-lite"
 def get_gemini_api_key() -> str:
     """Retrieve the Google Gemini API key from the process environment or .env."""
     _load_env_file()
-    return (
-        os.environ.get("GEMINI_API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
-        or ""
-    ).strip()
+    return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
 
 
 def is_internal_identifier(name: str | None, summary: str = "", sheet_name: str = "") -> bool:
@@ -180,7 +177,7 @@ def analyze_template_semantics(
         f"CHANNEL: {channel}\n"
         f"CANDIDATE HEADER/TITLE: {cand_header or 'None'}\n"
         f"CANDIDATE CTA: {candidate_cta_text or 'None'} (URL: {candidate_cta_url or 'None'})\n"
-        f"TEMPLATE CONTENT BODY:\n\"\"\"\n{clean_text[:1200]}\n\"\"\"\n\n"
+        f'TEMPLATE CONTENT BODY:\n"""\n{clean_text[:1200]}\n"""\n\n'
         f"Adjudication Rules:\n"
         f"1. category: 'UTILITY' for operational updates, account alerts, receipts, EMI reminders, billing, LTV revisions, or regulatory notifications.\n"
         f"   'AUTHENTICATION' for OTP or login verification codes.\n"
@@ -276,9 +273,8 @@ def analyze_template_semantics(
                 "completeness_notes": str(raw_decision.get("completeness_notes") or ""),
                 "is_candidate_header_genuine": is_genuine,
                 "is_internal_name": is_internal,
-                "header_rejection_reason": raw_decision.get("header_rejection_reason") or (
-                    f"'{cand_header}' is an internal identifier, not customer copy" if is_internal else None
-                ),
+                "header_rejection_reason": raw_decision.get("header_rejection_reason")
+                or (f"'{cand_header}' is an internal identifier, not customer copy" if is_internal else None),
                 "customer_facing_title": raw_decision.get("customer_facing_title"),
                 "is_cta_genuine": bool(raw_decision.get("is_cta_genuine", True)),
                 "source": "gemini_3.1_flash_lite",
@@ -323,9 +319,7 @@ def _heuristic_decision(
     is_internal = is_internal_identifier(header_cand, summary=summary, sheet_name=sheet_name)
     is_genuine_header = bool(header_cand and not is_internal and header_cand.lower() in text.lower())
     rejection_reason = (
-        f"'{header_cand}' is an internal ticket or campaign identifier, not customer copy"
-        if is_internal
-        else None
+        f"'{header_cand}' is an internal ticket or campaign identifier, not customer copy" if is_internal else None
     )
 
     has_min_len = len(text.strip()) >= 30
@@ -351,7 +345,9 @@ def _heuristic_decision(
         "is_complete": is_complete,
         "completeness_score": completeness_score,
         "missing_components": missing,
-        "completeness_notes": "Template is complete and verified." if is_complete else "Template may be truncated or missing signoff.",
+        "completeness_notes": "Template is complete and verified."
+        if is_complete
+        else "Template may be truncated or missing signoff.",
         "is_candidate_header_genuine": is_genuine_header,
         "is_internal_name": is_internal,
         "header_rejection_reason": rejection_reason,

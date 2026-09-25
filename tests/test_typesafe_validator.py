@@ -58,10 +58,7 @@ def test_typesafe_category_mismatch_promotional_in_utility():
     assert report.ai_checked is True
     assert report.predicted_category == "MARKETING"
     assert report.category_mismatch is True
-    assert any(
-        w["type"] in ("META_CATEGORY_MISMATCH", "PROMOTIONAL_IN_UTILITY")
-        for w in report.warnings
-    )
+    assert any(w["type"] in ("META_CATEGORY_MISMATCH", "PROMOTIONAL_IN_UTILITY") for w in report.warnings)
     # Severity should be error because submitting marketing as utility is forbidden by Meta
     assert any(w.get("severity") == "error" for w in report.warnings)
     assert report.is_safe_to_submit is False
@@ -69,7 +66,9 @@ def test_typesafe_category_mismatch_promotional_in_utility():
 
 def test_typesafe_authentication_otp_classification():
     """Verify OTP verification messages are classified as AUTHENTICATION."""
-    otp_body = "{{1}} is your one-time password (OTP) to log in to your Bajaj account. Valid for 5 minutes. Do not share it."
+    otp_body = (
+        "{{1}} is your one-time password (OTP) to log in to your Bajaj account. Valid for 5 minutes. Do not share it."
+    )
     report = validate_template_semantic_quality(
         body_text=otp_body,
         declared_category="AUTHENTICATION",
@@ -140,6 +139,7 @@ def test_async_typesafe_validator():
     )
     assert report.ai_checked is True
     assert report.predicted_category == "AUTHENTICATION"
+
 
 def test_submission_client_validate_ai_gate():
     """Verify submit_template with validate_ai=True blocks submissions with critical AI compliance errors."""

@@ -16,6 +16,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from config import get_waba_id
 from db_queue import (
@@ -335,7 +336,9 @@ class QueueManager:
                 status=status_map.get(rcs_res.status, SubmissionStatus.FAILED),
                 provider_ref_id=rcs_res.template_id,
                 error=rcs_res.error,
-                approval_status=ApprovalStatus.APPROVED if rcs_res.status == RcsSubmissionStatus.SUBMITTED else ApprovalStatus.UNKNOWN,
+                approval_status=ApprovalStatus.APPROVED
+                if rcs_res.status == RcsSubmissionStatus.SUBMITTED
+                else ApprovalStatus.UNKNOWN,
                 client=clean_tenant,
                 channel="rcs",
             )
@@ -370,7 +373,9 @@ class QueueManager:
             source_ref=task_row["source_ref"] or task_row["template_name"],
         )
 
-        has_media = any(c.type == "HEADER" and (c.format or "").upper() in ("IMAGE", "VIDEO", "DOCUMENT") for c in components)
+        has_media = any(
+            c.type == "HEADER" and (c.format or "").upper() in ("IMAGE", "VIDEO", "DOCUMENT") for c in components
+        )
         if has_media:
             return await asyncio.to_thread(_submit_portal_template, wa_sub, client=clean_tenant)
         else:

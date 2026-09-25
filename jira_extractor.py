@@ -50,7 +50,9 @@ class JiraRoutingDecision:
 
     target_channel: str = "WHATSAPP"  # WHATSAPP, RCS, SMS, MULTI_CHANNEL
     channel_confidence: float = 1.0
-    campaign_purpose: str = "LOAN_OFFER"  # LOAN_OFFER, EMI_COLLECTION, TRANSACTION_SERVICE, AUTHENTICATION, GENERAL_ANNOUNCEMENT
+    campaign_purpose: str = (
+        "LOAN_OFFER"  # LOAN_OFFER, EMI_COLLECTION, TRANSACTION_SERVICE, AUTHENTICATION, GENERAL_ANNOUNCEMENT
+    )
     purpose_confidence: float = 1.0
     has_header: bool = False
     has_footer: bool = False
@@ -112,13 +114,21 @@ def _segment_text_components(raw_text: str) -> ExtractedTemplateComponent:
     text = raw_text.strip()
 
     # 1. Look for explicit Header block
-    h_match = re.search(r"(?:^|\n)\s*(?:Header|Title|Headline)\s*[:\-–]\s*(.+?)(?=\n\s*(?:Body|Message|Content|Footer|Button|CTA)|$)", text, re.IGNORECASE | re.DOTALL)
+    h_match = re.search(
+        r"(?:^|\n)\s*(?:Header|Title|Headline)\s*[:\-–]\s*(.+?)(?=\n\s*(?:Body|Message|Content|Footer|Button|CTA)|$)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
     if h_match:
         header_text = h_match.group(1).strip()
         header_text = re.sub(r"\n+", " ", header_text).strip()
 
     # 2. Look for explicit Footer block
-    f_match = re.search(r"(?:^|\n)\s*(?:Footer|Disclaimer|T&C)\s*[:\-–]\s*(.+?)(?=\n\s*(?:Button|CTA|Action)|$)", text, re.IGNORECASE | re.DOTALL)
+    f_match = re.search(
+        r"(?:^|\n)\s*(?:Footer|Disclaimer|T&C)\s*[:\-–]\s*(.+?)(?=\n\s*(?:Button|CTA|Action)|$)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
     if f_match:
         footer_text = f_match.group(1).strip()
         footer_text = re.sub(r"\n+", " ", footer_text).strip()
@@ -140,7 +150,11 @@ def _segment_text_components(raw_text: str) -> ExtractedTemplateComponent:
             button_type = "QUICK_REPLY"
 
     # 4. Extract Body block
-    b_body_match = re.search(r"(?:^|\n)\s*(?:Body|Message|Content|Text)\s*[:\-–]\s*(.+?)(?=\n\s*(?:Footer|Disclaimer|T&C|Button|CTA)|$)", text, re.IGNORECASE | re.DOTALL)
+    b_body_match = re.search(
+        r"(?:^|\n)\s*(?:Body|Message|Content|Text)\s*[:\-–]\s*(.+?)(?=\n\s*(?:Footer|Disclaimer|T&C|Button|CTA)|$)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
     if b_body_match:
         body_text = b_body_match.group(1).strip()
     else:
@@ -158,7 +172,9 @@ def _segment_text_components(raw_text: str) -> ExtractedTemplateComponent:
         filtered_lines = []
         for line in lines:
             llow = line.lower().strip()
-            if llow.startswith(("hi ", "hello ", "dear team", "please find", "please whitelist", "campaign:", "channel:")):
+            if llow.startswith(
+                ("hi ", "hello ", "dear team", "please find", "please whitelist", "campaign:", "channel:")
+            ):
                 continue
             filtered_lines.append(line)
         body_text = "\n".join(filtered_lines).strip() or text
@@ -197,7 +213,9 @@ def route_jira_brief(
         else:
             chan = "WHATSAPP"
 
-        purpose = "LOAN_OFFER" if any(w in lower for w in ("loan", "offer", "emi", "disburs")) else "GENERAL_ANNOUNCEMENT"
+        purpose = (
+            "LOAN_OFFER" if any(w in lower for w in ("loan", "offer", "emi", "disburs")) else "GENERAL_ANNOUNCEMENT"
+        )
         has_header = bool(re.search(r"\bheader\b", lower))
         has_footer = bool(re.search(r"\bfooter\b", lower))
         has_cta = bool(re.search(r"\b(button|cta|link)\b", lower))
@@ -239,7 +257,9 @@ def route_jira_brief(
                     ),
                     "has_header": Noul(instructions="Does the brief specify an explicit header line or banner?"),
                     "has_footer": Noul(instructions="Does the brief specify an explicit footer or disclaimer?"),
-                    "has_cta": Noul(instructions="Does the brief specify a call-to-action (CTA) button or action link?"),
+                    "has_cta": Noul(
+                        instructions="Does the brief specify a call-to-action (CTA) button or action link?"
+                    ),
                 },
             )
 

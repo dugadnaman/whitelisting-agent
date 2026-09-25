@@ -354,7 +354,7 @@ def validate_meta_technical_compliance(
             )
             if ai_rep.ai_checked and ai_rep.warnings:
                 compliance_warnings.extend(ai_rep.warnings)
-        except Exception as err:
+        except Exception:
             # Gracefully ignore AI errors to avoid failing rule-based compliance
             pass
 

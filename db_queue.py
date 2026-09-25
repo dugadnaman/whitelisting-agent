@@ -11,11 +11,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from db import get_db, init_database
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,6 @@ APPROVAL_PRECEDENCE: dict[str, int] = {
     "approved": 2,
     "rejected": 2,
 }
-
-
-from db import get_db, DB_PATH, init_database
 
 
 def init_queue_db() -> None:
@@ -89,24 +87,26 @@ def create_job_with_tasks(
             pref = str(t["provider_ref_id"]) if t.get("provider_ref_id") is not None else None
             err = str(t["error"]) if t.get("error") is not None else None
 
-            task_rows.append((
-                tid,
-                jid,
-                tenant_id,
-                channel,
-                sref,
-                tname,
-                cat,
-                lang,
-                payload,
-                initial_status,
-                approval,
-                pref,
-                err,
-                0,
-                now,
-                now,
-            ))
+            task_rows.append(
+                (
+                    tid,
+                    jid,
+                    tenant_id,
+                    channel,
+                    sref,
+                    tname,
+                    cat,
+                    lang,
+                    payload,
+                    initial_status,
+                    approval,
+                    pref,
+                    err,
+                    0,
+                    now,
+                    now,
+                )
+            )
 
         conn.executemany(
             """
@@ -356,24 +356,32 @@ def migrate_legacy_jsonl_if_needed() -> None:
     # 1. WhatsApp JSONL
     if SUBMISSION_LOG_PATH.exists():
         with get_db() as conn:
-            has_wa = conn.execute("SELECT count(*) as c FROM ingestion_jobs WHERE id = 'job_legacy_whatsapp'").fetchone()["c"]
+            has_wa = conn.execute(
+                "SELECT count(*) as c FROM ingestion_jobs WHERE id = 'job_legacy_whatsapp'"
+            ).fetchone()["c"]
         if has_wa == 0:
             try:
-                lines = [json.loads(line) for line in SUBMISSION_LOG_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+                lines = [
+                    json.loads(line)
+                    for line in SUBMISSION_LOG_PATH.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
                 if lines:
                     tasks = []
                     for entry in lines:
                         tname = entry.get("template_name", "unknown")
-                        tasks.append({
-                            "template_name": tname,
-                            "source_ref": entry.get("source_ref", tname),
-                            "status": entry.get("status", "submitted"),
-                            "approval_status": entry.get("approval_status", "pending"),
-                            "provider_ref_id": entry.get("provider_ref_id"),
-                            "error": entry.get("error"),
-                            "client": entry.get("client", "bajaj"),
-                            "channel": "whatsapp",
-                        })
+                        tasks.append(
+                            {
+                                "template_name": tname,
+                                "source_ref": entry.get("source_ref", tname),
+                                "status": entry.get("status", "submitted"),
+                                "approval_status": entry.get("approval_status", "pending"),
+                                "provider_ref_id": entry.get("provider_ref_id"),
+                                "error": entry.get("error"),
+                                "client": entry.get("client", "bajaj"),
+                                "channel": "whatsapp",
+                            }
+                        )
                     create_job_with_tasks(
                         tenant_id="legacy_import",
                         channel="whatsapp",
@@ -391,24 +399,32 @@ def migrate_legacy_jsonl_if_needed() -> None:
     # 2. RCS JSONL
     if RCS_SUBMISSION_LOG_PATH.exists():
         with get_db() as conn:
-            has_rcs = conn.execute("SELECT count(*) as c FROM ingestion_jobs WHERE id = 'job_legacy_rcs'").fetchone()["c"]
+            has_rcs = conn.execute("SELECT count(*) as c FROM ingestion_jobs WHERE id = 'job_legacy_rcs'").fetchone()[
+                "c"
+            ]
         if has_rcs == 0:
             try:
-                lines = [json.loads(line) for line in RCS_SUBMISSION_LOG_PATH.read_text(encoding="utf-8").splitlines() if line.strip()]
+                lines = [
+                    json.loads(line)
+                    for line in RCS_SUBMISSION_LOG_PATH.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
                 if lines:
                     tasks = []
                     for entry in lines:
                         tname = entry.get("template_name", "unknown")
-                        tasks.append({
-                            "template_name": tname,
-                            "source_ref": entry.get("source_ref", tname),
-                            "status": entry.get("status", "submitted"),
-                            "approval_status": entry.get("approval_status", "approved"),
-                            "provider_ref_id": entry.get("provider_ref_id") or entry.get("template_id"),
-                            "error": entry.get("error"),
-                            "client": entry.get("client", "bajaj"),
-                            "channel": "rcs",
-                        })
+                        tasks.append(
+                            {
+                                "template_name": tname,
+                                "source_ref": entry.get("source_ref", tname),
+                                "status": entry.get("status", "submitted"),
+                                "approval_status": entry.get("approval_status", "approved"),
+                                "provider_ref_id": entry.get("provider_ref_id") or entry.get("template_id"),
+                                "error": entry.get("error"),
+                                "client": entry.get("client", "bajaj"),
+                                "channel": "rcs",
+                            }
+                        )
                     create_job_with_tasks(
                         tenant_id="legacy_import",
                         channel="rcs",

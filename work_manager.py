@@ -10,16 +10,18 @@ Connects to Atlassian Jira Cloud (tatacapital-team.atlassian.net) to provide:
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime
 import logging
 import os
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, date, datetime
 from pathlib import Path
-import sqlite3
 from typing import Any
 
 import requests
+
 from config import _load_env_file
+from db import get_db as _get_db
+from db import init_database
 from jira_client import (
     get_jira_auth_headers,
     get_jira_credentials,
@@ -76,13 +78,12 @@ TEAM_MEMBERS_WHITELIST: dict[str, dict[str, Any]] = {
 DB_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
 
 
-from db import get_db as _get_db, DB_PATH, init_database
-
 def _init_operational_assignments_db() -> None:
     try:
         init_database()
     except Exception as exc:
         logger.warning("Could not initialize database tables: %s", exc)
+
 
 _init_operational_assignments_db()
 
@@ -148,9 +149,8 @@ def clear_operational_assignment(issue_key: str) -> None:
     except Exception as exc:
         logger.warning("Could not delete operational assignment for %s: %s", clean_key, exc)
 
-TEAM_MEMBER_ROLES: dict[str, str] = {
-    info["name"]: info["role"] for info in TEAM_MEMBERS_WHITELIST.values()
-}
+
+TEAM_MEMBER_ROLES: dict[str, str] = {info["name"]: info["role"] for info in TEAM_MEMBERS_WHITELIST.values()}
 TEAM_MEMBER_ROLES["Aalya Mulla"] = "Associate / Intern"
 
 
@@ -164,6 +164,7 @@ JIRA_PROJECTS_CATALOG: list[dict[str, str]] = [
     {"key": "MON", "name": "Moneyfy"},
     {"key": "COL", "name": "Collections"},
 ]
+
 
 @dataclass
 class JiraUser:
@@ -213,6 +214,7 @@ class WorkItem:
     original_assignee: str | None = None
     operational_note: str | None = None
     soham_mention_reasons: list[str] = field(default_factory=list)
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -275,7 +277,19 @@ def categorize_status(status_raw: str | None) -> str:
     s = status_raw.lower().strip()
     if any(k in s for k in ("done", "closed", "resolved", "completed", "whitelisted", "approved")):
         return "DONE"
-    if any(k in s for k in ("base pending", "content pending", "asset pending", "blocked", "hold", "waiting", "client feedback", "pause")):
+    if any(
+        k in s
+        for k in (
+            "base pending",
+            "content pending",
+            "asset pending",
+            "blocked",
+            "hold",
+            "waiting",
+            "client feedback",
+            "pause",
+        )
+    ):
         return "BLOCKED"
     return "PENDING"
 
@@ -332,7 +346,9 @@ def fetch_assignable_jira_users(project: str = "TCN") -> list[JiraUser]:
     return users_list
 
 
-def get_work_management_dashboard(project: str = "TCN", limit: int = 100, auto_assign_unassigned: bool = False) -> dict[str, Any]:
+def get_work_management_dashboard(
+    project: str = "TCN", limit: int = 100, auto_assign_unassigned: bool = False
+) -> dict[str, Any]:
     """
     Build the complete Work Management Dashboard:
     - Ingests Jira issues.
@@ -407,12 +423,16 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100, auto_a
         if op_assign:
             assignee_name = op_assign["operational_assignee"]
             is_op_assignment = True
-            original_assignee = op_assign.get("original_jira_assignee") or (raw_assignee if raw_assignee != assignee_name else None)
+            original_assignee = op_assign.get("original_jira_assignee") or (
+                raw_assignee if raw_assignee != assignee_name else None
+            )
             op_note = op_assign.get("handover_note")
         elif mentions_soham:
             assignee_name = "Soham Das"
             routed_to_soham = True
-            original_assignee = raw_assignee if raw_assignee.lower() not in ("soham", "soham das", "unassigned") else None
+            original_assignee = (
+                raw_assignee if raw_assignee.lower() not in ("soham", "soham das", "unassigned") else None
+            )
             soham_reasons = item.get("soham_mention_reasons") or ["mention"]
         elif raw_assignee.lower() in ("unassigned", "none", "", "--"):
             # Unassigned tickets policy: automatically route unassigned queue to Neel Shah
@@ -488,11 +508,11 @@ def get_work_management_dashboard(project: str = "TCN", limit: int = 100, auto_a
             )
         )
 
-
     # Calculate completion rates
     for u in assignable_users:
         if u.total_handled_count > 0:
             u.completion_rate = round((u.completed_tickets_count / u.total_handled_count) * 100, 1)
+
     # Sort assignable users by core operators first, then open tickets count
     def _user_sort_key(u: JiraUser) -> tuple[int, int]:
         is_core = 0 if u.role == "Core Operator" else (1 if "Intern" in u.role else 2)
@@ -546,6 +566,7 @@ def transfer_jira_ticket(
     raw_assignee = ""
     try:
         from jira_client import fetch_jira_issue
+
         raw_issue = fetch_jira_issue(clean_key)
         raw_assignee = raw_issue.get("assignee") or ""
     except Exception:
@@ -664,12 +685,14 @@ def bulk_transfer_jira_tickets(
         "failed_items": failed,
     }
 
+
 def assign_unassigned_tickets_to_neel(project: str = "ALL", limit: int = 50) -> dict[str, Any]:
     """
     Find all unassigned tickets in Jira across project(s) and reassign them to Neel Shah directly in Jira Cloud.
     """
-    from jira_client import get_jira_credentials, get_jira_auth_headers
     import requests
+
+    from jira_client import get_jira_auth_headers, get_jira_credentials
 
     base_url, _, _ = get_jira_credentials()
     headers = get_jira_auth_headers()
@@ -1065,7 +1088,9 @@ def get_turnaround_and_bottleneck_analytics(project: str = "SWCM", limit: int = 
         )
 
     # Sort operator leaderboard by completed count desc, then avg cycle time
-    operator_velocities.sort(key=lambda o: (-o.completed_count, o.avg_cycle_time_hours if o.avg_cycle_time_hours > 0 else 999))
+    operator_velocities.sort(
+        key=lambda o: (-o.completed_count, o.avg_cycle_time_hours if o.avg_cycle_time_hours > 0 else 999)
+    )
 
     team_avg_hours = sum(all_done_times) / len(all_done_times) if all_done_times else 0.0
     team_avg_days = round(team_avg_hours / 24, 2)

@@ -415,16 +415,16 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     if is_carousel:
         template_type = "carousel"
         carousel_cards = _build_carousel_cards_from_row(row)
-    elif raw_type in ("text", "plain", "standard", "plain_text") and not media_url and header_type not in ("image", "media", "richcard"):
+    elif (
+        raw_type in ("text", "plain", "standard", "plain_text")
+        and not media_url
+        and header_type not in ("image", "media", "richcard")
+    ):
         template_type = "text"
         carousel_cards = []
         if card_title and card_title not in message:
             message = f"{card_title}\n\n{message}"
-    elif (
-        raw_type in ("richcard", "card", "image")
-        or header_type in ("image", "media", "richcard")
-        or media_url
-    ):
+    elif raw_type in ("richcard", "card", "image") or header_type in ("image", "media", "richcard") or media_url:
         template_type = "richcard"
         carousel_cards = []
     else:
@@ -540,6 +540,7 @@ def _spec_for_carousel(sub: RcsTemplateSubmission) -> dict:
         CAROUSEL_IMAGE_SPECS[("MEDIUM", "MEDIUM")],
     )
 
+
 def check_rcs_image_aspect_ratio(
     media_data: bytes, template_type: str = "carousel"
 ) -> tuple[bool, str, tuple[int, int], float]:
@@ -550,6 +551,7 @@ def check_rcs_image_aspect_ratio(
     """
     try:
         import io
+
         from PIL import Image
 
         img = Image.open(io.BytesIO(media_data))
@@ -599,7 +601,6 @@ def check_rcs_image_aspect_ratio(
         return True, "", (0, 0), 1.0
 
 
-
 def _extract_images_spatially(path: str) -> dict[int, list[tuple[str, bytes]]]:
     """
     Extract embedded images from an Excel (.xlsx) file, mapping each image
@@ -608,6 +609,7 @@ def _extract_images_spatially(path: str) -> dict[int, list[tuple[str, bytes]]]:
     sorted by column (left-to-right).
     """
     import collections
+
     import openpyxl
 
     images_by_row: dict[int, list[tuple[int, str, bytes]]] = collections.defaultdict(list)
@@ -700,6 +702,7 @@ def _upload_and_bind_rcs_images(
             return Path(orig_fname).suffix.lower()
         return ".png"
 
+    media_cursor = 0
     for sub in subs:
         excel_row = getattr(sub, "_excel_row", None)
         row_images = spatial_images.get(excel_row, []) if (spatial_images and excel_row) else []
@@ -707,7 +710,9 @@ def _upload_and_bind_rcs_images(
         safe_tname = re.sub(r"[^a-zA-Z0-9_]", "_", sub.template_name or f"tpl_{excel_row or 1}")[:25]
 
         if sub.template_type == "richcard":
-            target_img = row_images[0] if row_images else (raw_media[media_cursor] if media_cursor < len(raw_media) else None)
+            target_img = (
+                row_images[0] if row_images else (raw_media[media_cursor] if media_cursor < len(raw_media) else None)
+            )
             if not row_images and target_img:
                 media_cursor += 1
             if target_img:
@@ -723,7 +728,9 @@ def _upload_and_bind_rcs_images(
                     sub.file_name = unique_fn
 
                     # Strict aspect ratio validation gate
-                    is_valid, err_msg, (w, h), ratio = check_rcs_image_aspect_ratio(media_data, template_type="richcard")
+                    is_valid, err_msg, (w, h), ratio = check_rcs_image_aspect_ratio(
+                        media_data, template_type="richcard"
+                    )
                     if not is_valid:
                         sub.aspect_ratio_blocked = True
                         sub.aspect_ratio_error = err_msg
@@ -734,11 +741,12 @@ def _upload_and_bind_rcs_images(
                             sub.file_name = k_name
                             logger.info("Bound user pasted rich card media %s -> Karix %s", unique_fn, k_name)
                         except Exception as up_ex:
-                            logger.info("Portal mediaUpload unavailable (%s); serving user image via %s", up_ex, sub.media_url)
+                            logger.info(
+                                "Portal mediaUpload unavailable (%s); serving user image via %s", up_ex, sub.media_url
+                            )
                             sub.file_name = None
                 except Exception as ex:
                     logger.warning("Failed to process rich card media: %s", ex)
-
 
         elif sub.template_type == "carousel" and sub.carousel_cards:
             spec = _spec_for_carousel(sub)
@@ -767,7 +775,9 @@ def _upload_and_bind_rcs_images(
                         card["fileName"] = unique_fn
 
                         # Strict aspect ratio validation gate
-                        is_valid, err_msg, (w, h), ratio = check_rcs_image_aspect_ratio(media_data, template_type="carousel")
+                        is_valid, err_msg, (w, h), ratio = check_rcs_image_aspect_ratio(
+                            media_data, template_type="carousel"
+                        )
                         if not is_valid:
                             card["aspect_ratio_blocked"] = True
                             card["aspect_ratio_error"] = err_msg
@@ -781,10 +791,15 @@ def _upload_and_bind_rcs_images(
                                 card["fileName"] = k_name
                                 logger.info("Bound user pasted carousel card %d media -> Karix %s", c_idx + 1, k_name)
                             except Exception as up_ex:
-                                logger.info("Portal mediaUpload unavailable (%s); serving user image via %s", up_ex, card["mediaUrl"])
+                                logger.info(
+                                    "Portal mediaUpload unavailable (%s); serving user image via %s",
+                                    up_ex,
+                                    card["mediaUrl"],
+                                )
                                 card.pop("fileName", None)
                     except Exception as ex:
                         logger.warning("Failed to process carousel card media: %s", ex)
+
 
 def load_rcs_from_excel(
     path: str,
@@ -794,6 +809,7 @@ def load_rcs_from_excel(
 ) -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
+
     # Extract spatial images mapped by row and column, plus raw media fallback
     spatial_images = _extract_images_spatially(path)
     raw_media = _extract_images_from_xlsx(path)

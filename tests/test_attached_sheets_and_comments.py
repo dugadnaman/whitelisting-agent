@@ -7,7 +7,9 @@ Verifies:
 """
 
 from pathlib import Path
+
 import openpyxl
+
 from briefing_parser import (
     extract_templates_from_excel_file,
     parse_jira_brief,
@@ -22,14 +24,18 @@ def test_excel_channel_column_and_section_header_extraction(tmp_path: Path):
     ws1 = wb.active
     ws1.title = "Campaign Copies"
     ws1.append(["Channel", "Content"])
-    ws1.append([
-        "WhatsApp",
-        "Dear {#Alphanumeric#}, travel the world with Tata Capital Personal Loan up to ₹35 Lakhs. T&Cs apply.",
-    ])
-    ws1.append([
-        "RCS",
-        "Title:\nTravel Offers\nBody:\nGet instant vacation loan approvals.\nCTA Button:\nApply Now",
-    ])
+    ws1.append(
+        [
+            "WhatsApp",
+            "Dear {#Alphanumeric#}, travel the world with Tata Capital Personal Loan up to ₹35 Lakhs. T&Cs apply.",
+        ]
+    )
+    ws1.append(
+        [
+            "RCS",
+            "Title:\nTravel Offers\nBody:\nGet instant vacation loan approvals.\nCTA Button:\nApply Now",
+        ]
+    )
 
     # Sheet 2: Section header table like October Whitelisting (TCN-533)
     ws2 = wb.create_sheet(title="Section Format")

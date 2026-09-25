@@ -64,10 +64,9 @@ def test_monotonic_approval_state_machine():
     - Delayed carrier PENDING cannot overwrite APPROVED
     """
     import uuid
+
     tname = f"tpl_mono_{uuid.uuid4().hex[:6]}"
-    tasks = [
-        {"template_name": tname, "source_ref": "ref_m1", "status": "SUBMITTED", "approval_status": "pending"}
-    ]
+    tasks = [{"template_name": tname, "source_ref": "ref_m1", "status": "SUBMITTED", "approval_status": "pending"}]
     job = create_job_with_tasks(
         tenant_id="tchfl",
         channel="whatsapp",
@@ -111,6 +110,7 @@ def test_monotonic_approval_state_machine():
 
 def test_rate_limiter_token_bucket_and_429_backoff():
     """Verify per-WABA token bucket consumption and dynamic 429 throttling."""
+
     async def _run_test():
         bucket = WabaTokenBucket(waba_id="test_waba_123", rate_per_sec=10.0, capacity=2.0)
         assert bucket.tokens == 2.0
@@ -126,9 +126,11 @@ def test_rate_limiter_token_bucket_and_429_backoff():
 
         # Verify bucket throttled_until is in the future
         import time
+
         assert bucket.throttled_until > time.monotonic()
 
     asyncio.run(_run_test())
+
 
 def test_circuit_breaker_paused_for_auth_and_auto_resume():
     """Verify PAUSED_FOR_AUTH circuit tripping and event-bus auto-resume."""
@@ -166,7 +168,14 @@ def test_webhook_authentication_and_targeted_verification():
     - Monotonic state update in database
     """
     # Create target task in database
-    tasks = [{"template_name": "hfl_patp_so_030926", "source_ref": "webhook_ref_1", "status": "SUBMITTED", "approval_status": "pending"}]
+    tasks = [
+        {
+            "template_name": "hfl_patp_so_030926",
+            "source_ref": "webhook_ref_1",
+            "status": "SUBMITTED",
+            "approval_status": "pending",
+        }
+    ]
     job = create_job_with_tasks(
         tenant_id="tchfl",
         channel="whatsapp",
@@ -210,7 +219,9 @@ def test_job_management_endpoints():
     """Verify GET /api/jobs/{id} and POST /api/jobs/{id}/resume endpoints."""
     # Authenticate as tchfl user
     email = "job_tester@attributics.com"
-    client.post("/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Job Tester", "tenant_id": "tchfl"})
+    client.post(
+        "/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Job Tester", "tenant_id": "tchfl"}
+    )
     r_login = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
     token = r_login.json().get("token") or r_login.json().get("access_token")
     headers = {"Authorization": f"Bearer {token}"}

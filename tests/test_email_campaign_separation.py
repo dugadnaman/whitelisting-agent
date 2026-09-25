@@ -7,6 +7,7 @@ Verifies:
 """
 
 from unittest.mock import patch
+
 from briefing_parser import parse_jira_brief
 from jira_client import list_jira_issues
 
@@ -33,7 +34,12 @@ def test_list_jira_issues_separates_email_and_messaging():
                     "summary": "Priority || Whitelisting || WTD PL Campaign",
                     "status": {"name": "In Progress"},
                     "attachment": [
-                        {"id": "502", "filename": "content.xlsx", "size": 2000, "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+                        {
+                            "id": "502",
+                            "filename": "content.xlsx",
+                            "size": 2000,
+                            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        }
                     ],
                 },
             },
@@ -68,7 +74,11 @@ def test_parse_jira_brief_separates_email_templates():
         "description_text": "Please deploy the September mailer package.",
         "attachments": [
             {"id": "701", "filename": "tcl_sept_mailers.zip", "mimeType": "application/zip"},
-            {"id": "702", "filename": "sept_subject_lines.docx", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+            {
+                "id": "702",
+                "filename": "sept_subject_lines.docx",
+                "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            },
         ],
     }
 

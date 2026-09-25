@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 _TATA_GROUP = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
 
 
-
 def infer_whatsapp_cta(text: str, client: str = "bajaj") -> tuple[str, str, str]:
     """
     If no explicit CTA is provided:
@@ -71,6 +70,7 @@ def infer_whatsapp_cta(text: str, client: str = "bajaj") -> tuple[str, str, str]
     else:
         base_domain = "https://www.tatacapital.com"
         return "Apply Now", f"{base_domain}/personal-loan.html/{{{{1}}}}", f"{base_domain}/personal-loan.html"
+
 
 def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> dict:
     """
@@ -355,6 +355,7 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
 
     return components
 
+
 _DYNAMIC_FIELD_ALIASES = {
     "name": "template_name",
     "campaign": "template_name",
@@ -455,7 +456,9 @@ def _dynamic_body_value(row: dict[str, str]) -> str:
     try:
         from briefing_parser import is_valid_template_copy
     except Exception:
-        is_valid_template_copy = lambda value: len(value.split()) >= 6
+
+        def is_valid_template_copy(value: str) -> bool:
+            return len(value.split()) >= 6
 
     candidates = []
     for key, value in row.items():
@@ -594,9 +597,7 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
             has_standard_name = bool(clean_row.get("template_name") or clean_row.get("name"))
 
             if not has_standard_components and not (has_standard_name and has_standard_body):
-                dynamic = _dynamic_row_to_submission(
-                    clean_row, source_name, row_number, client, waba_cache
-                )
+                dynamic = _dynamic_row_to_submission(clean_row, source_name, row_number, client, waba_cache)
                 if dynamic:
                     dynamic_submissions.append(dynamic)
                     continue
@@ -717,8 +718,7 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     all_raw_rows = list(sheet.iter_rows(values_only=True))
     first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
     has_standard_headers = any(
-        h in ("template_name", "name", "body", "body_text", "components", "category", "language")
-        for h in first_row
+        h in ("template_name", "name", "body", "body_text", "components", "category", "language") for h in first_row
     )
     block_subs = (
         _parse_single_cell_excel_blocks(all_raw_rows, path, client, extracted_media, waba_cache)
@@ -741,19 +741,13 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
         if not any(row):
             continue
 
-        raw_row = {
-            h: str(val).strip() if val is not None else ""
-            for h, val in zip(headers, row, strict=False)
-            if h
-        }
+        raw_row = {h: str(val).strip() if val is not None else "" for h, val in zip(headers, row, strict=False) if h}
         has_standard_components = bool(raw_row.get("components"))
         has_standard_body = bool(raw_row.get("body") or raw_row.get("body_text"))
         has_standard_name = bool(raw_row.get("template_name") or raw_row.get("name"))
 
         if not has_standard_components and not (has_standard_name and has_standard_body):
-            dynamic = _dynamic_row_to_submission(
-                raw_row, source_name, row_number, client, waba_cache
-            )
+            dynamic = _dynamic_row_to_submission(raw_row, source_name, row_number, client, waba_cache)
             if dynamic:
                 dynamic_submissions.append(dynamic)
                 continue
@@ -794,6 +788,8 @@ def load_from_json(path: str) -> list[TemplateSubmission]:
 
 def load_from_list(rows: list[dict], client: str = "bajaj") -> list[TemplateSubmission]:
     return [_row_to_submission(row, client=client) for row in rows]
+
+
 def _bind_embedded_media_to_row(
     raw_row: dict,
     videos: list,
@@ -841,7 +837,13 @@ def _bind_embedded_media_to_row(
 
 
 def _score_single_row_routing(
-    explicit_client: str, raw_header_val: str, comp_headers: list[str], comp_text: str, tname: str, scores: dict, reasons: dict
+    explicit_client: str,
+    raw_header_val: str,
+    comp_headers: list[str],
+    comp_text: str,
+    tname: str,
+    scores: dict,
+    reasons: dict,
 ) -> None:
     for rule in ACCOUNT_ROUTING_RULES:
         r_id = rule["id"]
@@ -866,8 +868,6 @@ def _score_single_row_routing(
                     reasons[r_id].append(f"Keyword '{kw}'")
 
 
-
-
 ACCOUNT_ROUTING_RULES = [
     {
         "id": "tchfl",
@@ -881,7 +881,15 @@ ACCOUNT_ROUTING_RULES = [
         "name": "TCL — Promotional (PL, BL, UCL, NCL, LAP)",
         "headers": ["PLTATA", "TATABL", "ALTATA", "TCLLAP", "Tatacl", "TCLPROMO"],
         "name_prefixes": ["pl_", "bl_", "ucl_", "ncl_", "lap_", "promo_"],
-        "keywords": ["personal loan", "business loan", "used car loan", "two wheeler", "promotional", "pltata", "tatabl"],
+        "keywords": [
+            "personal loan",
+            "business loan",
+            "used car loan",
+            "two wheeler",
+            "promotional",
+            "pltata",
+            "tatabl",
+        ],
     },
     {
         "id": "tcl_trans",

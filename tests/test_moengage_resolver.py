@@ -56,7 +56,9 @@ def test_find_semantic_duplicate_in_list():
             "name": "tcl_personal_loan_diwali",
             "meta_data": {
                 "template_id": "pl_diwali_2026",
-                "data": {"description": "Celebrate Diwali with instant pre-approved personal loans from Tata Capital. Apply now!"},
+                "data": {
+                    "description": "Celebrate Diwali with instant pre-approved personal loans from Tata Capital. Apply now!"
+                },
             },
         },
     ]
@@ -145,10 +147,11 @@ def test_sync_karix_rcs_to_moengage_dedup_and_attributes_integration():
         }
     ]
 
-    with patch("rcs_client.fetch_rcs_templates", return_value=fake_karix_templates), \
-         patch("moengage_sync.list_moengage_rcs_templates", return_value=fake_moengage_existing), \
-         patch("moengage_sync.create_moengage_rcs_template") as mock_create:
-
+    with (
+        patch("rcs_client.fetch_rcs_templates", return_value=fake_karix_templates),
+        patch("moengage_sync.list_moengage_rcs_templates", return_value=fake_moengage_existing),
+        patch("moengage_sync.create_moengage_rcs_template") as mock_create,
+    ):
         mock_create.return_value = {"ok": True, "moengage_id": "moe_new_123"}
 
         res = sync_karix_rcs_to_moengage(
@@ -187,9 +190,11 @@ def test_apparel_account_rcs_only_sync():
         }
     ]
 
-    with patch("rcs_client.fetch_rcs_templates", return_value=fake_templates), \
-         patch("moengage_sync.list_moengage_rcs_templates", return_value=[]), \
-         patch("moengage_sync.create_moengage_rcs_template") as mock_create:
+    with (
+        patch("rcs_client.fetch_rcs_templates", return_value=fake_templates),
+        patch("moengage_sync.list_moengage_rcs_templates", return_value=[]),
+        patch("moengage_sync.create_moengage_rcs_template") as mock_create,
+    ):
         mock_create.return_value = {"ok": True, "moengage_id": "apparel_moe_1"}
 
         res = sync_karix_rcs_to_moengage(account="apparel")
@@ -202,10 +207,16 @@ def test_apparel_account_rcs_only_sync():
 def test_apparel_account_blocks_spreadsheet_submission():
     """Verify API blocks spreadsheet submission and preview for apparel account."""
     import io
+
     from fastapi.testclient import TestClient
+
     from api import app, get_current_user
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "admin@attributics.com", "role": "superadmin", "tenant_id": "all"}
+    app.dependency_overrides[get_current_user] = lambda: {
+        "email": "admin@attributics.com",
+        "role": "superadmin",
+        "tenant_id": "all",
+    }
     client = TestClient(app)
 
     fake_csv = io.BytesIO(b"template_name,body\ntpl_1,hello")

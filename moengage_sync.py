@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 import requests
+
 from config import _account_prefix, _load_env_file
 
 logger = logging.getLogger(__name__)
@@ -36,9 +37,7 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
     prefix = _account_prefix(account)
 
     base_url = (
-        os.environ.get(f"{prefix}_MOENGAGE_BASE_URL")
-        or os.environ.get("MOENGAGE_BASE_URL")
-        or MOENGAGE_API_BASE
+        os.environ.get(f"{prefix}_MOENGAGE_BASE_URL") or os.environ.get("MOENGAGE_BASE_URL") or MOENGAGE_API_BASE
     ).rstrip("/")
 
     token = (
@@ -49,11 +48,7 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
         or ""
     ).strip()
 
-    cookie = (
-        os.environ.get(f"{prefix}_MOENGAGE_COOKIE")
-        or os.environ.get("MOENGAGE_COOKIE")
-        or ""
-    )
+    cookie = os.environ.get(f"{prefix}_MOENGAGE_COOKIE") or os.environ.get("MOENGAGE_COOKIE") or ""
 
     sender_id = (
         os.environ.get(f"{prefix}_MOENGAGE_SENDER_ID")
@@ -151,15 +146,11 @@ def get_moengage_auth_headers(account: str = "tata") -> dict[str, str]:
     token = cfg["bearer_token"]
 
     if not token:
-        raise OSError(
-            f"Missing MoEngage Bearer token for {account}. Configure it in Settings -> MoEngage."
-        )
+        raise OSError(f"Missing MoEngage Bearer token for {account}. Configure it in Settings -> MoEngage.")
 
     expiry = decode_moengage_token_expiry(token)
     if expiry.get("expired") is True:
-        raise OSError(
-            f"MoEngage Bearer token for {account} has expired. Paste a fresh token (Settings -> MoEngage)."
-        )
+        raise OSError(f"MoEngage Bearer token for {account} has expired. Paste a fresh token (Settings -> MoEngage).")
 
     auth_val = token if token.lower().startswith("bearer ") else f"Bearer {token}"
     headers = {
@@ -209,16 +200,20 @@ def create_moengage_rcs_template(
 
     suggestions = []
     if cta_url:
-        suggestions.append({
-            "type": "OPEN_URL",
-            "text": (cta_text or "Check Offer")[:25],
-            "postback_data": (cta_text or "Check Offer")[:120],
-            "url": cta_url.strip(),
-            "application": "BROWSER",
-            "webview_view_mode": "",
-        })
+        suggestions.append(
+            {
+                "type": "OPEN_URL",
+                "text": (cta_text or "Check Offer")[:25],
+                "postback_data": (cta_text or "Check Offer")[:120],
+                "url": cta_url.strip(),
+                "application": "BROWSER",
+                "webview_view_mode": "",
+            }
+        )
 
-    clean_media_url = media_url.strip() if media_url else "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
+    clean_media_url = (
+        media_url.strip() if media_url else "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
+    )
 
     payload = {
         "template_type": "rcs",
@@ -319,14 +314,8 @@ def sync_karix_rcs_to_moengage(
         }
 
     existing = list_moengage_rcs_templates(account)
-    existing_names = {
-        str(t.get("name", "")).strip().lower()
-        for t in existing
-    }
-    existing_ids = {
-        str(t.get("meta_data", {}).get("template_id", "")).strip().lower()
-        for t in existing
-    }
+    existing_names = {str(t.get("name", "")).strip().lower() for t in existing}
+    existing_ids = {str(t.get("meta_data", {}).get("template_id", "")).strip().lower() for t in existing}
 
     created: list[dict[str, Any]] = []
     skipped: list[str] = []
@@ -408,12 +397,14 @@ def sync_karix_rcs_to_moengage(
                 cta_url=cta_url,
                 account=account,
             )
-            created.append({
-                "template_name": name,
-                "template_id": template_id,
-                "moengage_id": res.get("moengage_id"),
-                "resolved_description": card_description,
-            })
+            created.append(
+                {
+                    "template_name": name,
+                    "template_id": template_id,
+                    "moengage_id": res.get("moengage_id"),
+                    "resolved_description": card_description,
+                }
+            )
         except Exception as exc:
             logger.warning("Failed to sync RCS template %s to MoEngage: %s", name, exc)
             errors.append({"template_name": name, "error": str(exc)})
