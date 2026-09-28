@@ -35,12 +35,16 @@ def _fmt_ts(iso_str: str) -> str:
 def sync_remote_errors(server_url: str = "https://whitelisting-agent.onrender.com"):
     """Silently pull newly logged errors from production server into local error_log.jsonl."""
     try:
-        import urllib.request
+        import requests
 
-        api_endpoint = f"{server_url.rstrip('/')}/api/system/errors?limit=50"
-        req = urllib.request.Request(api_endpoint, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            remote_errs = json.loads(resp.read().decode("utf-8")).get("errors", [])
+        clean_base = server_url.rstrip("/")
+        if not clean_base.lower().startswith(("http://", "https://")):
+            return
+        api_endpoint = f"{clean_base}/api/system/errors?limit=50"
+        resp = requests.get(api_endpoint, headers={"User-Agent": "Mozilla/5.0"}, timeout=4)
+        if not resp.ok:
+            return
+        remote_errs = resp.json().get("errors", [])
         if not remote_errs:
             return
         from error_tracker import ERROR_LOG_PATH, load_errors

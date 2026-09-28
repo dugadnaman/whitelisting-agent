@@ -25,7 +25,6 @@ import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
-from urllib.request import urlretrieve
 
 import requests
 
@@ -527,20 +526,30 @@ def _prepare_local_media_bytes(
 def _download_remote_media(cformat: str, media_url: str) -> tuple[str, str]:
     import tempfile
 
-    suffix = Path(media_url.split("?")[0]).suffix if media_url else ""
+    clean_url = (media_url or "").strip()
+    if not clean_url.lower().startswith(("http://", "https://")):
+        raise ValueError(f"Invalid media URL: only http:// and https:// schemes are permitted, got '{clean_url}'")
+
+    suffix = Path(clean_url.split("?")[0]).suffix if clean_url else ""
     if not suffix:
         suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         media_file = tmp.name
     file_type = "video/mp4" if cformat == "VIDEO" else ("application/pdf" if cformat == "DOCUMENT" else "image/png")
 
-    logger.info("Downloading header %s from %s", cformat.lower(), media_url)
+    logger.info("Downloading header %s from %s", cformat.lower(), clean_url)
     try:
-        urlretrieve(media_url, media_file)
+        resp = requests.get(clean_url, stream=True, timeout=20)
+        resp.raise_for_status()
+        with open(media_file, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=65536):
+                if chunk:
+                    f.write(chunk)
+
         if cformat == "IMAGE":
             media_file, file_type = normalize_image_16_9(media_file)
     except Exception as e:
-        logger.warning("Could not download media_url %s: %s; using default sample", media_url, e)
+        logger.warning("Could not download media_url %s: %s; using default sample", clean_url, e)
         if cformat == "VIDEO":
             media_file = _ensure_default_sample_video()
         elif cformat == "DOCUMENT":
