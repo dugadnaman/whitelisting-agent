@@ -976,6 +976,34 @@ def get_templates(
         return []
 
 
+class TemplateContentSearchRequest(BaseModel):
+    content: str
+    client: str = "bajaj"
+    channel: str = "whatsapp"
+    min_similarity: float = 0.85
+
+
+@app.post("/api/templates/search-by-content")
+def search_template_by_content_endpoint(
+    body: TemplateContentSearchRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Search Karix / Meta live template inventory by message body copy.
+    Returns whether the template exists, its exact name, Meta/Karix ID, and approval status.
+    """
+    require_tenant_access(body.client, current_user)
+    from template_identifier import find_template_by_content
+
+    result = find_template_by_content(
+        content=body.content,
+        client=body.client,
+        channel=body.channel,
+        min_similarity=body.min_similarity,
+    )
+    return _json_safe(result.to_dict())
+
+
 def _inspect_image_aspect_ratio(comp: dict, aspect_warnings: list[dict]) -> None:
     img_bytes = comp.get("image_bytes")
     if not img_bytes:

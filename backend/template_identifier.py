@@ -407,5 +407,171 @@ def identify_from_file(file_path: str | Path, client: str = "bajaj") -> Identifi
         submissions = load_from_json(str(p), client=client)
     else:
         raise ValueError(f"Unsupported file format '{ext}'. Must be .csv, .xlsx, or .json")
-
     return identify_master_templates(submissions, client=client)
+
+
+@dataclass
+class ContentSearchResult:
+    """Outcome of searching Karix template inventory by body copy / content."""
+
+    found: bool
+    template_name: str | None = None
+    template_id: str | None = None
+    status: str | None = None
+    category: str | None = None
+    language: str | None = None
+    match_type: str = "NONE"  # EXACT, FUZZY, SEMANTIC, NONE
+    similarity_score: float = 0.0
+    matched_live_body: str = ""
+    candidate_matches: list[dict[str, Any]] = field(default_factory=list)
+    message: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def find_template_by_content(
+    content: str,
+    client: str = "bajaj",
+    channel: str = "whatsapp",
+    min_similarity: float = 0.85,
+    live_templates: list[dict[str, Any]] | None = None,
+) -> ContentSearchResult:
+    """
+    Search Karix / WABA live inventory to detect if the given body text or content
+    already exists in any registered template, returning its template name and template ID.
+    """
+    if not content or not content.strip():
+        return ContentSearchResult(
+            found=False,
+            message="No content provided to search.",
+        )
+
+    query_text = content.strip()
+    query_norm = normalize_template_text(query_text)
+
+    # 1. Fetch live template list if not provided
+    if live_templates is None:
+        chan = (channel or "whatsapp").lower().strip()
+        if chan == "whatsapp":
+            from submission_client import fetch_template_list
+
+            fetched, err = fetch_template_list(client)
+            if err:
+                logger.warning("Error fetching live WhatsApp templates for %s: %s", client, err)
+            live_templates = fetched or []
+        elif chan == "rcs":
+            from rcs_client import fetch_rcs_templates
+
+            live_templates = fetch_rcs_templates(client=client) or []
+        else:
+            from sms_tracker import load_sms_submissions
+
+            live_templates = load_sms_submissions(client=client) or []
+
+    candidates: list[dict[str, Any]] = []
+
+    for lt in live_templates:
+        t_name = str(
+            lt.get("template_name")
+            or lt.get("name")
+            or lt.get("element_name")
+            or lt.get("viTemplate", {}).get("name")
+            or ""
+        ).strip()
+        t_id = str(
+            lt.get("id")
+            or lt.get("fb_template_id")
+            or lt.get("meta_id")
+            or lt.get("template_id")
+            or lt.get("dlt_template_id")
+            or lt.get("sno")
+            or ""
+        ).strip()
+        t_status = (
+            str(lt.get("status") or lt.get("template_create_status") or lt.get("approval_status") or "UNKNOWN")
+            .strip()
+            .upper()
+        )
+        t_cat = str(lt.get("category") or "MARKETING").strip().upper()
+        t_lang = str(lt.get("language") or "en").strip()
+
+        raw_comps = lt.get("components") or lt.get("body") or lt.get("text") or []
+        live_body = (
+            _extract_body_text(raw_comps) if isinstance(raw_comps, (list, dict)) else str(raw_comps or "").strip()
+        )
+        if not live_body:
+            continue
+
+        live_norm = normalize_template_text(live_body)
+
+        # Level 1: Exact Normalized Match
+        if live_norm == query_norm:
+            score = 1.0
+            match_type = "EXACT"
+        else:
+            # Level 2: Fuzzy Token Similarity
+            sim = compute_text_similarity(query_text, live_body)
+            if sim >= 0.90:
+                score = sim
+                match_type = "FUZZY"
+            elif sim >= 0.70:
+                # Level 3: Semantic Equivalence check
+                is_eq, prob, method = evaluate_semantic_equivalence_typesafe(query_text, live_body)
+                if is_eq and prob >= 0.88:
+                    score = prob
+                    match_type = method
+                else:
+                    score = sim
+                    match_type = "PARTIAL"
+            else:
+                score = sim
+                match_type = "LOW"
+
+        if score >= min_similarity:
+            candidates.append(
+                {
+                    "template_name": t_name,
+                    "template_id": t_id or None,
+                    "status": t_status,
+                    "category": t_cat,
+                    "language": t_lang,
+                    "similarity_score": round(score, 3),
+                    "match_type": match_type,
+                    "body": live_body,
+                }
+            )
+
+    candidates.sort(
+        key=lambda c: (
+            1 if c["status"] in ("APPROVED", "WHITELISTED") else 0,
+            c["similarity_score"],
+        ),
+        reverse=True,
+    )
+
+    if candidates:
+        best = candidates[0]
+        return ContentSearchResult(
+            found=True,
+            template_name=best["template_name"],
+            template_id=best["template_id"],
+            status=best["status"],
+            category=best["category"],
+            language=best["language"],
+            match_type=best["match_type"],
+            similarity_score=best["similarity_score"],
+            matched_live_body=best["body"],
+            candidate_matches=candidates,
+            message=(
+                f"Match found! Template '{best['template_name']}' (ID: {best['template_id'] or 'N/A'}) "
+                f"matches with {int(best['similarity_score'] * 100)}% confidence ({best['match_type']}). "
+                f"Current Karix Status: {best['status']}."
+            ),
+        )
+
+    return ContentSearchResult(
+        found=False,
+        candidate_matches=[],
+        message="No existing template in Karix matched this content copy. The template does not exist and is safe to submit.",
+    )

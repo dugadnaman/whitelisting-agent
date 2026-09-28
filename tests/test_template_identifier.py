@@ -251,3 +251,106 @@ def test_api_identify_json_endpoint():
             assert data["missing_templates"][0]["template_name"] == "demo_missing_tpl"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_find_template_by_content_exact_and_fuzzy():
+    """Verify find_template_by_content returns template name and ID when content exists."""
+    from template_identifier import find_template_by_content
+
+    mock_live = [
+        {
+            "name": "bajaj_emi_reminder_v1",
+            "id": "109823908123901",
+            "status": "APPROVED",
+            "category": "UTILITY",
+            "language": "en",
+            "components": [
+                {"type": "HEADER", "format": "TEXT", "text": "EMI Alert"},
+                {
+                    "type": "BODY",
+                    "text": "Dear {{1}}, your EMI of Rs. {{2}} is due on {{3}}. Pay now to avoid charges.",
+                },
+            ],
+        },
+        {
+            "name": "bajaj_festival_promo",
+            "id": "209823908123902",
+            "status": "APPROVED",
+            "category": "MARKETING",
+            "components": [
+                {"type": "BODY", "text": "Celebrate this Diwali with zero processing fee on personal loans!"},
+            ],
+        },
+    ]
+
+    # 1. Exact match (with identical variables)
+    res_exact = find_template_by_content(
+        content="Dear {{1}}, your EMI of Rs. {{2}} is due on {{3}}. Pay now to avoid charges.",
+        client="bajaj",
+        live_templates=mock_live,
+    )
+    assert res_exact.found is True
+    assert res_exact.template_name == "bajaj_emi_reminder_v1"
+    assert res_exact.template_id == "109823908123901"
+    assert res_exact.status == "APPROVED"
+    assert res_exact.match_type == "EXACT"
+    assert res_exact.similarity_score == 1.0
+
+    # 2. Fuzzy match (named variables instead of numbers)
+    res_fuzzy = find_template_by_content(
+        content="Dear <name>, your EMI of Rs. {#amount#} is due on {#date#}. Pay now to avoid charges.",
+        client="bajaj",
+        live_templates=mock_live,
+    )
+    assert res_fuzzy.found is True
+    assert res_fuzzy.template_name == "bajaj_emi_reminder_v1"
+    assert res_fuzzy.template_id == "109823908123901"
+    assert res_fuzzy.similarity_score >= 0.95
+
+    # 3. Not found for brand new copy
+    res_missing = find_template_by_content(
+        content="Apply for your medical insurance coverage starting at only Rs 499 per month.",
+        client="bajaj",
+        live_templates=mock_live,
+    )
+    assert res_missing.found is False
+    assert res_missing.template_name is None
+    assert res_missing.template_id is None
+
+
+def test_api_search_template_by_content_endpoint():
+    """Verify POST /api/templates/search-by-content endpoint returns matching template name and id."""
+    from api import app, get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {"email": "tester@attributics.com", "name": "Tester"}
+    client = TestClient(app)
+
+    try:
+        mock_templates = [
+            {
+                "template_name": "tata_quick_loan_v3",
+                "fb_template_id": "99887766554433",
+                "status": "APPROVED",
+                "components": [
+                    {"type": "BODY", "text": "Need instant funds? Get approved in 5 minutes with Tata Capital."},
+                ],
+            }
+        ]
+        with patch("submission_client.fetch_template_list", return_value=(mock_templates, None)):
+            resp = client.post(
+                "/api/templates/search-by-content",
+                json={
+                    "content": "Need instant funds? Get approved in 5 minutes with Tata Capital.",
+                    "client": "tata",
+                    "channel": "whatsapp",
+                },
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["found"] is True
+            assert data["template_name"] == "tata_quick_loan_v3"
+            assert data["template_id"] == "99887766554433"
+            assert data["status"] == "APPROVED"
+            assert data["match_type"] == "EXACT"
+    finally:
+        app.dependency_overrides.clear()
