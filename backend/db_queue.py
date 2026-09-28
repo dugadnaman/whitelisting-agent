@@ -63,16 +63,14 @@ def create_job_with_tasks(
     total_count = len(tasks_data)
 
     with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO ingestion_jobs (
-                id, tenant_id, channel, filename, total_count,
-                submitted_count, duplicate_count, failed_count,
-                status, submitted_by, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 'QUEUED', ?, ?, ?)
-            """,
-            (jid, tenant_id, channel, filename, total_count, submitted_by, now, now),
+        insert_job_sql = (
+            "INSERT INTO ingestion_jobs ("
+            "id, tenant_id, channel, filename, total_count, "
+            "submitted_count, duplicate_count, failed_count, "
+            "status, submitted_by, created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, 0, 0, 0, 'QUEUED', ?, ?, ?)"
         )
+        conn.execute(insert_job_sql, (jid, tenant_id, channel, filename, total_count, submitted_by, now, now))
 
         task_rows = []
         for idx, t in enumerate(tasks_data):

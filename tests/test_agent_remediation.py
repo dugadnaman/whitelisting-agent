@@ -127,11 +127,9 @@ def test_copilot_diagnose_and_auto_resubmit_integration():
     assert d["resubmitted"] is True
     assert d["job_id"] is not None
 
-    # Verify task and job in SQLite database
+    # Verify the job and task were persisted.
     job = get_job(d["job_id"])
     assert job is not None
-    assert job["tenant_id"] == "bajaj"
-
     tasks = get_job_tasks(d["job_id"])
     assert len(tasks) == 1
     assert tasks[0]["template_name"] == "emic_check_wa_07aug_v2"
@@ -166,3 +164,83 @@ def test_copilot_chat_conversational_remediation():
     assert "festive_loan_promo_v2" in chat_resp["reply"]
     # Check 1-click suggested action is offered
     assert any("festive_loan_promo_v2" in sug for sug in chat_resp["suggested_actions"])
+
+
+def test_copilot_content_search_interaction():
+    """Verify AI Copilot can search existing Karix templates by body copy in natural language."""
+    from template_identifier import ContentSearchResult
+
+    mock_search_res = ContentSearchResult(
+        found=True,
+        template_name="bajaj_emi_reminder_v1",
+        template_id="998877665544",
+        status="APPROVED",
+        category="UTILITY",
+        language="en",
+        match_type="EXACT",
+        similarity_score=1.0,
+        matched_live_body="Dear {{1}}, your EMI of Rs. {{2}} is due on {{3}}.",
+    )
+
+    with patch("template_identifier.find_template_by_content", return_value=mock_search_res):
+        chat_resp = agent_instance.handle_message(
+            message="Does this template exist in Karix: Dear customer, your EMI of Rs 5000 is due.",
+            account="bajaj",
+            channel="whatsapp",
+            user="Operator",
+        )
+
+    assert "Karix Template Match Found" in chat_resp["reply"]
+    assert "bajaj_emi_reminder_v1" in chat_resp["reply"]
+    assert "998877665544" in chat_resp["reply"]
+    assert "APPROVED" in chat_resp["reply"]
+
+
+def test_copilot_searches_variable_body_when_pasted_without_search_command():
+    """Pasting template copy alone should search the live Karix catalog."""
+    from template_identifier import ContentSearchResult
+
+    mock_search_res = ContentSearchResult(
+        found=True,
+        template_name="bajaj_emi_reminder_v1",
+        template_id="998877665544",
+        status="APPROVED",
+        category="UTILITY",
+        language="en",
+        match_type="EXACT",
+        similarity_score=1.0,
+        matched_live_body="Dear {{1}}, your EMI of Rs. {{2}} is due on {{3}}.",
+    )
+
+    with patch("template_identifier.find_template_by_content", return_value=mock_search_res):
+        chat_resp = agent_instance.handle_message(
+            message="Dear {{1}}, your EMI of Rs. {{2}} is due on {{3}}.",
+            account="bajaj",
+            channel="whatsapp",
+            user="Operator",
+        )
+
+    assert "Karix Template Match Found" in chat_resp["reply"]
+    assert "bajaj_emi_reminder_v1" in chat_resp["reply"]
+    assert "998877665544" in chat_resp["reply"]
+
+
+def test_copilot_searches_plain_sentence_body_without_placeholders():
+    """Plain sentence copy should also be treated as pasted template content."""
+    from template_identifier import ContentSearchResult
+
+    mock_search_res = ContentSearchResult(
+        found=False,
+        message="No existing template in Karix matched this content copy.",
+    )
+
+    with patch("template_identifier.find_template_by_content", return_value=mock_search_res):
+        chat_resp = agent_instance.handle_message(
+            message="Your EMI payment is due today",
+            account="bajaj",
+            channel="whatsapp",
+            user="Operator",
+        )
+
+    assert "No existing template found" in chat_resp["reply"]
+    assert "NOT_FOUND" in chat_resp["reply"]

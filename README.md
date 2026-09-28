@@ -58,7 +58,7 @@ karix/
 │   ├── api.py                 # Core FastAPI REST routes and lifecycle handlers
 │   ├── auth.py                # Multi-tenant authentication, RBAC, and JWT tokens
 │   ├── db.py                  # Dual SQLite / PostgreSQL database adapters
-│   ├── db_queue.py            # SQLite monotonic queue engine
+│   ├── db_queue.py            # Persistent SQLite / PostgreSQL ingestion queue engine
 │   ├── queue_manager.py       # Background worker and rate governor
 │   ├── work_manager.py        # Jira workflow dispatcher & task balancer
 │   │
@@ -107,6 +107,9 @@ Copy the example environment configuration:
 cp .env.example .env
 ```
 Fill in the credentials for your tenant (`BAJAJ_*` or `TATA_*`). Non-secret defaults allow local development out of the box with SQLite.
+When a workflow uses file-backed credentials, load `.env` before creating queue
+records so all queue writes and result updates use the same active database
+backend. The application handles this for autonomous remediation flows.
 
 ### 2. Local Development
 

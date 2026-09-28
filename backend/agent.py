@@ -12,6 +12,8 @@ import time
 from typing import Any
 
 from activity_tracker import log_activity
+from config import _load_env_file
+from db import init_database
 from db_queue import create_job_with_tasks, record_task_result
 from grammar_checker import lint_and_fix_body
 from loader import _row_to_submission
@@ -419,7 +421,13 @@ def tool_diagnose_and_fix(
             if fixed_buttons:
                 comp_list.append({"type": "BUTTONS", "buttons": fixed_buttons})
 
-            # 1. Enqueue persistently into SQLite ingestion_jobs & job_tasks
+            # Resolve file-backed credentials before any queue operation. Some
+            # submission helpers load .env lazily; doing it here prevents the
+            # queue create and result update from selecting different databases.
+            _load_env_file()
+            init_database()
+
+            # 1. Enqueue persistently into the active database.
             job = create_job_with_tasks(
                 tenant_id=account,
                 channel="whatsapp",
@@ -458,8 +466,7 @@ def tool_diagnose_and_fix(
                 "provider_ref_id": res.provider_ref_id,
                 "error": res.error,
             }
-
-            # 3. Update task result in SQLite
+            # 3. Update the task result in the same active database.
             record_task_result(
                 task_id=f"task_{job_id}_0000",
                 status=res.status.value,
@@ -708,6 +715,7 @@ class WhitelistingAgent:
             lambda: _handle_agent_session_refresh(text, account, user),
             lambda: _handle_agent_copy_lint(text),
             lambda: _handle_agent_status_poll(text, account, channel),
+            lambda: _handle_agent_content_search(text, account, channel),
             lambda: _handle_agent_list_templates(text, account, channel),
             lambda: _handle_agent_rejection_diagnosis(text, account, channel, user),
         ]
@@ -1165,6 +1173,171 @@ def _handle_agent_status_poll(text: str, account: str, channel: str) -> dict | N
     }
 
 
+def _looks_like_template_body(text: str) -> bool:
+    """Recognize pasted template copy when no search command is provided."""
+    candidate = text.strip()
+    if not candidate:
+        return False
+
+    # Placeholder syntax, line breaks, and URLs are strong template-copy signals.
+    if re.search(r"\{\{[^{}]+\}\}|\{#[^#]+#\}|https?://|www\.", candidate, re.IGNORECASE):
+        return True
+    if "\n" in candidate:
+        return True
+
+    words = re.findall(r"\b[\w']+\b", candidate)
+    if len(words) < 5:
+        return False
+
+    # Avoid stealing short natural-language commands that later handlers handle.
+    command_prefixes = {
+        "can",
+        "check",
+        "create",
+        "do",
+        "does",
+        "find",
+        "fix",
+        "get",
+        "give",
+        "how",
+        "is",
+        "list",
+        "poll",
+        "please",
+        "search",
+        "show",
+        "submit",
+        "sync",
+        "tell",
+        "what",
+        "where",
+        "why",
+        "will",
+    }
+    if words[0].lower() in command_prefixes or candidate.endswith("?"):
+        return False
+    return True
+
+
+def _handle_agent_content_search(text: str, account: str, channel: str) -> dict[str, Any] | None:
+    t_lower = text.lower().strip()
+    is_search_intent = any(
+        phrase in t_lower
+        for phrase in [
+            "does this exist",
+            "does this template exist",
+            "already exists",
+            "exists in karix",
+            "exist in karix",
+            "find template",
+            "search template",
+            "search by body",
+            "search by content",
+            "check if this copy",
+            "check if this body",
+            "check if this template",
+            "is this registered",
+            "already registered",
+            "check copy in karix",
+            "match template",
+        ]
+    )
+    is_body_only = not is_search_intent and _looks_like_template_body(text)
+    if not (is_search_intent or is_body_only):
+        return None
+
+    if is_body_only:
+        # Preserve the entire pasted body, including colons in the copy.
+        candidate_content = text.strip()
+    else:
+        candidate_content = ""
+        if ":" in text:
+            parts = text.split(":", 1)
+            candidate_content = parts[1].strip()
+        elif '"' in text:
+            m = re.search(r'"([^"]+)"', text)
+            if m:
+                candidate_content = m.group(1).strip()
+        elif "'" in text:
+            m = re.search(r"'([^']+)'", text)
+            if m:
+                candidate_content = m.group(1).strip()
+
+        if not candidate_content or len(candidate_content.split()) < 3:
+            cleaned = re.sub(
+                r"^(please\s+)?(can\s+you\s+)?(check\s+if\s+|find\s+|search\s+|does\s+)(this\s+)?(body\s+|template\s+|content\s+|copy\s+)?(already\s+)?(exists?\s+in\s+karix|exists?\s+on\s+waba|exists?|registered)?(:|\?|\s+)*",
+                "",
+                text,
+                flags=re.IGNORECASE,
+            ).strip()
+            candidate_content = cleaned or text
+
+    from template_identifier import find_template_by_content
+
+    search_res = find_template_by_content(
+        content=candidate_content,
+        client=account,
+        channel=channel,
+        min_similarity=0.85,
+    )
+
+    if search_res.found:
+        status_badge = (
+            "✅ **APPROVED (Whitelisted)**" if search_res.status == "APPROVED" else f"🟡 **{search_res.status}**"
+        )
+        reply = (
+            f"### 🔍 Karix Template Match Found\n\n"
+            f"A matching template **already exists** in Karix for **{account.title()} ({channel.upper()})**:\n\n"
+            f"• **Template Name:** `{search_res.template_name}`\n"
+            f"• **Template ID:** `{search_res.template_id or 'N/A'}`\n"
+            f"• **Live Status:** {status_badge}\n"
+            f"• **Category:** `{search_res.category}` • **Language:** `{search_res.language}`\n"
+            f"• **Match Confidence:** `{int(search_res.similarity_score * 100)}% ({search_res.match_type})`\n\n"
+            f"**Matched Live Copy:**\n"
+            f"> {search_res.matched_live_body}\n\n"
+            f"💡 **Recommendation:** You do **not** need to create or submit a new template. You can directly dispatch using `{search_res.template_name}`."
+        )
+        actions = [
+            {
+                "tool": "find_template_by_content",
+                "template_name": search_res.template_name,
+                "template_id": search_res.template_id,
+                "confidence": search_res.similarity_score,
+                "match_type": search_res.match_type,
+            }
+        ]
+        suggested = [
+            f"Show details for {search_res.template_name}",
+            "List approved templates",
+            "Poll approval status",
+        ]
+    else:
+        reply = (
+            f"### 🔍 Karix Template Search Result\n\n"
+            f"❌ **No existing template found** in Karix matching this content on **{account.title()} ({channel.upper()})**.\n\n"
+            f"• **Input Analyzed:** \"{candidate_content[:150]}{'...' if len(candidate_content) > 150 else ''}\"\n"
+            f"• **Match Status:** `NOT_FOUND`\n\n"
+            f"💡 **Recommendation:** This copy is completely new and has not been submitted yet. It is safe to create and submit as a new template."
+        )
+        actions = [
+            {
+                "tool": "find_template_by_content",
+                "result": "NOT_FOUND",
+            }
+        ]
+        suggested = [
+            "Check copy compliance and grammar",
+            "Submit this template",
+            "List pending templates",
+        ]
+
+    return {
+        "reply": reply,
+        "actions_taken": actions,
+        "suggested_actions": suggested,
+        "data": search_res.to_dict(),
+    }
 def _handle_agent_list_templates(text: str, account: str, channel: str) -> dict | None:
     if not (
         any(w in text.lower() for w in ["list", "show", "get", "fetch", "all"])

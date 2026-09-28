@@ -17,6 +17,7 @@ type ChatMessage = {
 };
 
 const DEFAULT_SUGGESTED_PROMPTS = [
+  'Check if template exists: Dear customer, your EMI is due.',
   'Brief TCN-524 (LAP GST Content)',
   'Brief TCN-523 (Ganesh Chaturthi)',
   'Show recent Jira briefs',
@@ -410,6 +411,13 @@ export default function ChatWidget() {
 
           {/* Quick Prompt Bar */}
           <div className="px-4 py-2 bg-gray-50 border-t border-gray-200/80 flex gap-1.5 overflow-x-auto text-nowrap scrollbar-none">
+            <button
+              onClick={() => handleSend('Check if template exists: Dear customer, your EMI is due.')}
+              disabled={loading}
+              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] border border-emerald-200 font-medium transition shrink-0"
+            >
+              🔍 Find Template by Body
+            </button>
             <button
               onClick={() => handleSend('How do I submit templates?')}
               disabled={loading}
