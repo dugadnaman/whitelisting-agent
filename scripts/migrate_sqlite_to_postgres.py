@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import _load_env_file
-from db import DEFAULT_SQLITE_PATH, get_database_url, migrate_sqlite_to_postgres
+from db import DEFAULT_SQLITE_PATH, VALID_TABLES, get_database_url, migrate_sqlite_to_postgres
 
 _load_env_file()
 
@@ -56,9 +56,21 @@ def main() -> int:
         conn = sqlite3.connect(str(sqlite_file))
         c = conn.cursor()
         print("\n📊 Source SQLite Row Counts (Dry Run):")
-        for table in ["users", "activities", "ingestion_jobs", "job_tasks", "operational_assignments"]:
+        for table in [
+            "users",
+            "activities",
+            "ingestion_jobs",
+            "job_tasks",
+            "operational_assignments",
+            "sms_submissions",
+            "sms_dlrs",
+            "sms_clicks",
+            "system_errors",
+        ]:
+            if table not in VALID_TABLES:
+                raise ValueError(f"Invalid table name: {table}")
             try:
-                c.execute(f"SELECT COUNT(*) FROM {table}")
+                c.execute(f"SELECT COUNT(*) FROM {table}")  # nosec B608  # nosemgrep
                 cnt = c.fetchone()[0]
                 print(f"  • {table:<25}: {cnt:>6} rows")
             except Exception as e:

@@ -20,6 +20,18 @@ logger = logging.getLogger(__name__)
 DEFAULT_SQLITE_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
 DB_PATH = DEFAULT_SQLITE_PATH
 
+VALID_TABLES: set[str] = {
+    "users",
+    "activities",
+    "ingestion_jobs",
+    "job_tasks",
+    "operational_assignments",
+    "sms_submissions",
+    "sms_dlrs",
+    "sms_clicks",
+    "system_errors",
+}
+
 
 def get_database_url() -> str:
     """Retrieve normalized PostgreSQL database URL or empty string if using SQLite."""
@@ -52,13 +64,15 @@ def translate_query_for_postgres(sql: str) -> str:
         re.IGNORECASE | re.DOTALL,
     )
     if m_replace:
-        tbl = m_replace.group(1)
+        tbl = m_replace.group(1).lower()
+        if tbl not in VALID_TABLES:
+            raise ValueError(f"Invalid table name for upsert: {tbl}")
         cols = [c.strip() for c in m_replace.group(2).split(",")]
         pk = cols[0]
         update_clauses = [f"{c} = EXCLUDED.{c}" for c in cols if c != pk]
         cols_str = ", ".join(cols)
         up_str = ", ".join(update_clauses)
-        sql = f"INSERT INTO {tbl} ({cols_str}) VALUES ({m_replace.group(3)}) ON CONFLICT ({pk}) DO UPDATE SET {up_str}"
+        sql = f"INSERT INTO {tbl} ({cols_str}) VALUES ({m_replace.group(3)}) ON CONFLICT ({pk}) DO UPDATE SET {up_str}"  # nosec B608
 
     # Quote reserved column name "user" if present as bare unquoted word in column lists
     sql = re.sub(r"\buser\b(?=\s*,|\s*\))", '"user"', sql, flags=re.IGNORECASE)
@@ -538,11 +552,23 @@ def migrate_sqlite_to_postgres(
     dest_conn.commit()
 
     migration_report: dict[str, int] = {}
-    tables_to_migrate = ["users", "activities", "ingestion_jobs", "job_tasks", "operational_assignments"]
+    tables_to_migrate = [
+        "users",
+        "activities",
+        "ingestion_jobs",
+        "job_tasks",
+        "operational_assignments",
+        "sms_submissions",
+        "sms_dlrs",
+        "sms_clicks",
+        "system_errors",
+    ]
 
     for table in tables_to_migrate:
+        if table not in VALID_TABLES:
+            raise ValueError(f"Invalid table name for migration: {table}")
         src_cur = src_conn.cursor()
-        src_cur.execute(f"SELECT * FROM {table}")
+        src_cur.execute(f"SELECT * FROM {table}")  # nosec B608  # nosemgrep
         rows = src_cur.fetchall()
         if not rows:
             migration_report[table] = 0
@@ -554,7 +580,7 @@ def migrate_sqlite_to_postgres(
         placeholders = ", ".join(["%s"] * len(col_names))
         pk = col_names[0]
 
-        insert_sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders}) ON CONFLICT ({pk}) DO NOTHING"
+        insert_sql = f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders}) ON CONFLICT ({pk}) DO NOTHING"  # nosec B608
 
         with dest_conn.cursor() as dest_cur:
             psycopg2.extras.execute_batch(
