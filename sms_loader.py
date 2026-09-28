@@ -197,6 +197,8 @@ def load_sms_from_csv(
 ) -> list[SmsMessage]:
     """Read SMS messages from a CSV file."""
     path = Path(csv_path)
+    if not path.exists() and (Path("samples") / csv_path).exists():
+        path = Path("samples") / csv_path
     if not path.exists():
         raise FileNotFoundError(f"SMS CSV file not found: {csv_path}")
 

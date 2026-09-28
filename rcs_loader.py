@@ -458,8 +458,11 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
 
 def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
     """Load RCS templates from a CSV file."""
+    p = Path(path)
+    if not p.exists() and (Path("samples") / path).exists():
+        p = Path("samples") / path
     rows = []
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(p, newline="", encoding="utf-8") as f:
         for idx, raw_row in enumerate(csv.DictReader(f), 1):
             if not any(raw_row.values()):
                 continue

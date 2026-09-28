@@ -2941,21 +2941,22 @@ def test_credentials(
 def get_sample_csv(channel: str = Query("whatsapp")):
     chan = channel.lower()
     if chan == "sms":
-        sample_path = Path("sms_sample.csv")
+        candidates = [Path("samples/sms_sample.csv"), Path("sms_sample.csv")]
         filename = "sms_templates_sample.csv"
     elif chan == "rcs":
-        sample_path = Path("rcs_templates_sample.csv")
+        candidates = [Path("samples/rcs_templates_sample.csv"), Path("rcs_templates_sample.csv")]
         filename = "rcs_templates_sample.csv"
     else:
-        sample_path = Path("templates_sample.csv")
+        candidates = [Path("samples/templates_sample.csv"), Path("templates_sample.csv")]
         filename = "whatsapp_templates_sample.csv"
 
-    if sample_path.exists():
-        return FileResponse(
-            str(sample_path),
-            media_type="text/csv",
-            filename=filename,
-        )
+    for sample_path in candidates:
+        if sample_path.exists():
+            return FileResponse(
+                str(sample_path),
+                media_type="text/csv",
+                filename=filename,
+            )
     return PlainTextResponse("template_name,body\nexample_1,Sample message text\n")
 
 

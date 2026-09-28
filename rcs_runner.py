@@ -117,5 +117,5 @@ if __name__ == "__main__":
         run_rcs_file(target_file)
     else:
         print("Usage:")
-        print("  python3 rcs_runner.py rcs_templates_sample.csv")
+        print("  python3 rcs_runner.py samples/rcs_templates_sample.csv")
         print("  python3 rcs_runner.py rcs_templates.xlsx")

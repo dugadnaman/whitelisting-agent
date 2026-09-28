@@ -356,12 +356,23 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
     raise RuntimeError(f"Could not upload media creative to Karix/Meta for {client} (WABA {w_id}). Details: {detail}")
 
 
+def _resolve_default_media_path(filename: str) -> Path:
+    mc = Path("media_cache")
+    if (mc / filename).exists():
+        return mc / filename
+    if Path(filename).exists():
+        return Path(filename)
+    if mc.is_dir():
+        return mc / filename
+    return Path(filename)
+
+
 def _ensure_default_sample_image() -> str:
     """
     Ensure a default sample PNG image exists locally to use as a placeholder for
     IMAGE headers during template whitelisting/submission.
     """
-    default_path = Path("default_sample_header.png")
+    default_path = _resolve_default_media_path("default_sample_header.png")
     if not default_path.exists():
         import struct
         import zlib
@@ -393,7 +404,7 @@ def _ensure_default_sample_image() -> str:
 
 def _ensure_default_sample_video() -> str:
     """Ensure a default sample MP4 video exists for VIDEO headers."""
-    default_path = Path("default_sample_header.mp4")
+    default_path = _resolve_default_media_path("default_sample_header.mp4")
     if not default_path.exists():
         import base64
 
@@ -409,7 +420,7 @@ def _ensure_default_sample_video() -> str:
 
 def _ensure_default_sample_pdf() -> str:
     """Ensure a default sample PDF exists for DOCUMENT headers."""
-    default_path = Path("default_sample_header.pdf")
+    default_path = _resolve_default_media_path("default_sample_header.pdf")
     if not default_path.exists():
         pdf_content = (
             b"%PDF-1.4\n"
@@ -421,6 +432,7 @@ def _ensure_default_sample_pdf() -> str:
         )
         default_path.write_bytes(pdf_content)
         logger.info("Created default sample document at %s", default_path.resolve())
+    return str(default_path.resolve())
 
 
 def check_whatsapp_image_aspect_ratio(

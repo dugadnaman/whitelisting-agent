@@ -377,5 +377,5 @@ if __name__ == "__main__":
     else:
         print("Usage:")
         print("  python3 runner.py templates.xlsx          # Submit templates from Excel")
-        print("  python3 runner.py templates_sample.csv   # Submit templates from CSV")
+        print("  python3 runner.py samples/templates_sample.csv   # Submit templates from CSV")
         print("  python3 runner.py --poll                 # Poll approval status of pending templates")

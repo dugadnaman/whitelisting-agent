@@ -585,11 +585,14 @@ def _resolve_row_waba(row_client: str, cache: dict[str, str]) -> str:
 
 def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     """Load standard or dynamically structured WhatsApp rows from CSV."""
+    p = Path(path)
+    if not p.exists() and (Path("samples") / path).exists():
+        p = Path("samples") / path
     waba_cache: dict[str, str] = {}
     rows = []
     dynamic_submissions: list[TemplateSubmission] = []
-    source_name = Path(path).name
-    with open(path, newline="", encoding="utf-8") as f:
+    source_name = p.name
+    with open(p, newline="", encoding="utf-8") as f:
         for row_number, raw_row in enumerate(csv.DictReader(f), 2):
             clean_row = {k.strip(): (v.strip() if v else "") for k, v in raw_row.items() if k}
             has_standard_components = bool(clean_row.get("components"))
