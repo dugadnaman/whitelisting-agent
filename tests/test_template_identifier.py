@@ -318,6 +318,31 @@ def test_find_template_by_content_exact_and_fuzzy():
     assert res_missing.template_id is None
 
 
+
+
+def test_find_template_by_content_handles_karix_raw_template_fields():
+    """Search must understand the field names returned by Karix getAllTemplates."""
+    from template_identifier import find_template_by_content
+
+    res = find_template_by_content(
+        content="Dear {{1}}, your EMI payment of {{2}} is due today.",
+        client="tcl_promo",
+        live_templates=[
+            {
+                "templateName": "tcl_emi_due_v1",
+                "templateId": "karix-123",
+                "template_create_status": "APPROVED",
+                "template_category": "UTILITY",
+                "language_code": "en_US",
+                "template_message": "Dear {{1}}, your EMI payment of {{2}} is due today.",
+            }
+        ],
+    )
+
+    assert res.found is True
+    assert res.template_name == "tcl_emi_due_v1"
+    assert res.template_id == "karix-123"
+    assert res.status == "APPROVED"
 def test_api_search_template_by_content_endpoint():
     """Verify POST /api/templates/search-by-content endpoint returns matching template name and id."""
     from api import app, get_current_user

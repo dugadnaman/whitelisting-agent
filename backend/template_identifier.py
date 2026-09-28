@@ -80,28 +80,69 @@ class IdentificationReport:
         }
 
 
-def _extract_body_text(components: list | dict | str | None) -> str:
-    """Extract the primary body text from template components."""
-    if not components:
+def _extract_body_text(value: Any, _depth: int = 0) -> str:
+    """Extract template body text from normalized or raw Karix response data."""
+    if value is None or _depth > 6:
         return ""
-    if isinstance(components, str):
-        return components.strip()
-    if isinstance(components, dict):
-        if components.get("type") == "BODY":
-            return str(components.get("text") or "").strip()
-        return str(components.get("text") or components.get("body") or "").strip()
+    if isinstance(value, str):
+        return value.strip()
 
-    for comp in components:
-        if isinstance(comp, dict) and comp.get("type") == "BODY":
-            return str(comp.get("text") or "").strip()
-        if hasattr(comp, "type") and comp.type == "BODY":
-            return str(getattr(comp, "text", "") or "").strip()
+    if isinstance(value, (list, tuple)):
+        # Prefer the explicit BODY component over headers, footers, or buttons.
+        for item in value:
+            item_type = item.get("type", "") if isinstance(item, dict) else getattr(item, "type", "")
+            if str(item_type).upper() == "BODY":
+                body = _extract_body_text(item, _depth + 1)
+                if body:
+                    return body
+        for item in value:
+            body = _extract_body_text(item, _depth + 1)
+            if body:
+                return body
+        return ""
 
-    # Fallback to first component with text
-    for comp in components:
-        txt = comp.get("text") if isinstance(comp, dict) else getattr(comp, "text", "")
-        if txt:
-            return str(txt).strip()
+    if not isinstance(value, dict):
+        body = getattr(value, "text", None)
+        return str(body).strip() if body else ""
+
+    if str(value.get("type", "")).upper() == "BODY":
+        for key in ("text", "body_text", "template_text", "content", "body", "message"):
+            body = _extract_body_text(value.get(key), _depth + 1)
+            if body:
+                return body
+
+    # Karix responses have appeared with both snake_case and camelCase/nested
+    # body fields. Inspect structured body containers before generic metadata.
+    for key in (
+        "components",
+        "body",
+        "body_text",
+        "bodyText",
+        "template_body",
+        "templateBody",
+        "template",
+        "data",
+        "payload",
+    ):
+        if key in value:
+            body = _extract_body_text(value[key], _depth + 1)
+            if body:
+                return body
+
+    for key in (
+        "text",
+        "template_text",
+        "templateText",
+        "text_message",
+        "textMessage",
+        "content",
+        "template_message",
+        "templateMessage",
+        "message",
+    ):
+        body = _extract_body_text(value.get(key), _depth + 1)
+        if body:
+            return body
     return ""
 
 
@@ -425,6 +466,7 @@ class ContentSearchResult:
     matched_live_body: str = ""
     candidate_matches: list[dict[str, Any]] = field(default_factory=list)
     message: str = ""
+    error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -450,15 +492,15 @@ def find_template_by_content(
     query_text = content.strip()
     query_norm = normalize_template_text(query_text)
 
-    # 1. Fetch live template list if not provided
+    fetch_error: str | None = None
     if live_templates is None:
         chan = (channel or "whatsapp").lower().strip()
         if chan == "whatsapp":
             from submission_client import fetch_template_list
 
-            fetched, err = fetch_template_list(client)
-            if err:
-                logger.warning("Error fetching live WhatsApp templates for %s: %s", client, err)
+            fetched, fetch_error = fetch_template_list(client)
+            if fetch_error:
+                logger.warning("Error fetching live WhatsApp templates for %s: %s", client, fetch_error)
             live_templates = fetched or []
         elif chan == "rcs":
             from rcs_client import fetch_rcs_templates
@@ -472,11 +514,13 @@ def find_template_by_content(
     candidates: list[dict[str, Any]] = []
 
     for lt in live_templates:
+        vi_template = lt.get("viTemplate") if isinstance(lt.get("viTemplate"), dict) else {}
         t_name = str(
             lt.get("template_name")
+            or lt.get("templateName")
             or lt.get("name")
             or lt.get("element_name")
-            or lt.get("viTemplate", {}).get("name")
+            or vi_template.get("name")
             or ""
         ).strip()
         t_id = str(
@@ -484,22 +528,29 @@ def find_template_by_content(
             or lt.get("fb_template_id")
             or lt.get("meta_id")
             or lt.get("template_id")
+            or lt.get("templateId")
             or lt.get("dlt_template_id")
             or lt.get("sno")
             or ""
         ).strip()
         t_status = (
-            str(lt.get("status") or lt.get("template_create_status") or lt.get("approval_status") or "UNKNOWN")
+            str(
+                lt.get("status")
+                or lt.get("template_create_status")
+                or lt.get("templateStatus")
+                or lt.get("approval_status")
+                or "UNKNOWN"
+            )
             .strip()
             .upper()
         )
-        t_cat = str(lt.get("category") or "MARKETING").strip().upper()
-        t_lang = str(lt.get("language") or "en").strip()
-
-        raw_comps = lt.get("components") or lt.get("body") or lt.get("text") or []
-        live_body = (
-            _extract_body_text(raw_comps) if isinstance(raw_comps, (list, dict)) else str(raw_comps or "").strip()
-        )
+        t_cat = str(
+            lt.get("category") or lt.get("template_category") or lt.get("categoryName") or "MARKETING"
+        ).strip().upper()
+        t_lang = str(
+            lt.get("language") or lt.get("language_code") or lt.get("languageCode") or "en"
+        ).strip()
+        live_body = _extract_body_text(lt)
         if not live_body:
             continue
 
@@ -570,6 +621,13 @@ def find_template_by_content(
             ),
         )
 
+    if fetch_error:
+        return ContentSearchResult(
+            found=False,
+            candidate_matches=[],
+            message=f"Karix catalog lookup failed for {client}: {fetch_error}",
+            error=fetch_error,
+        )
     return ContentSearchResult(
         found=False,
         candidate_matches=[],

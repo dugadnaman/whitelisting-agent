@@ -244,3 +244,26 @@ def test_copilot_searches_plain_sentence_body_without_placeholders():
 
     assert "No existing template found" in chat_resp["reply"]
     assert "NOT_FOUND" in chat_resp["reply"]
+
+
+def test_copilot_does_not_claim_missing_when_karix_lookup_fails():
+    """A catalog/API failure must not be presented as a missing template."""
+    from template_identifier import ContentSearchResult
+
+    mock_search_res = ContentSearchResult(
+        found=False,
+        message="Karix catalog lookup failed for tcl_promo: Missing WABA ID",
+        error="Missing WABA ID",
+    )
+
+    with patch("template_identifier.find_template_by_content", return_value=mock_search_res):
+        chat_resp = agent_instance.handle_message(
+            message="Dear customer, your EMI payment is due today",
+            account="tcl_promo",
+            channel="whatsapp",
+            user="Operator",
+        )
+
+    assert "Search Unavailable" in chat_resp["reply"]
+    assert "not** a confirmation" in chat_resp["reply"]
+    assert "No existing template found" not in chat_resp["reply"]

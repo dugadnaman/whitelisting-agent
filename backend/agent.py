@@ -1313,24 +1313,43 @@ def _handle_agent_content_search(text: str, account: str, channel: str) -> dict[
             "Poll approval status",
         ]
     else:
-        reply = (
-            f"### 🔍 Karix Template Search Result\n\n"
-            f"❌ **No existing template found** in Karix matching this content on **{account.title()} ({channel.upper()})**.\n\n"
-            f"• **Input Analyzed:** \"{candidate_content[:150]}{'...' if len(candidate_content) > 150 else ''}\"\n"
-            f"• **Match Status:** `NOT_FOUND`\n\n"
-            f"💡 **Recommendation:** This copy is completely new and has not been submitted yet. It is safe to create and submit as a new template."
-        )
-        actions = [
-            {
-                "tool": "find_template_by_content",
-                "result": "NOT_FOUND",
-            }
-        ]
-        suggested = [
-            "Check copy compliance and grammar",
-            "Submit this template",
-            "List pending templates",
-        ]
+        if search_res.error:
+            reply = (
+                f"### ⚠️ Karix Template Search Unavailable\n\n"
+                f"Copilot could not verify whether this content exists in Karix for "
+                f"**{account.title()} ({channel.upper()})**.\n\n"
+                f"• **Input Analyzed:** \"{candidate_content[:150]}{'...' if len(candidate_content) > 150 else ''}\"\n"
+                f"• **Reason:** `{search_res.error}`\n\n"
+                "Check the selected account's Karix/WABA credentials and try again. "
+                "This result is **not** a confirmation that the template is missing."
+            )
+            actions = [
+                {
+                    "tool": "find_template_by_content",
+                    "result": "LOOKUP_FAILED",
+                    "error": search_res.error,
+                }
+            ]
+            suggested = ["Open account settings", "Retry template search", "List templates"]
+        else:
+            reply = (
+                f"### 🔍 Karix Template Search Result\n\n"
+                f"❌ **No existing template found** in Karix matching this content on **{account.title()} ({channel.upper()})**.\n\n"
+                f"• **Input Analyzed:** \"{candidate_content[:150]}{'...' if len(candidate_content) > 150 else ''}\"\n"
+                f"• **Match Status:** `NOT_FOUND`\n\n"
+                f"💡 **Recommendation:** This copy is completely new and has not been submitted yet. It is safe to create and submit as a new template."
+            )
+            actions = [
+                {
+                    "tool": "find_template_by_content",
+                    "result": "NOT_FOUND",
+                }
+            ]
+            suggested = [
+                "Check copy compliance and grammar",
+                "Submit this template",
+                "List pending templates",
+            ]
 
     return {
         "reply": reply,

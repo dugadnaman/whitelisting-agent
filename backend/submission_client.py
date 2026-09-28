@@ -1500,7 +1500,7 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     Returns (templates_list, error_str_if_any).
     """
     c = (client or "bajaj").lower().strip()
-
+    errors: list[str] = []
     # 1. Primary: Portal API getAllTemplates with pagination
     try:
         waba_id = get_waba_id(c)
@@ -1525,7 +1525,11 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
                 )
                 if templates or "Success" in data or "response" in data:
                     return templates, None
+            errors.append("Portal API returned an unrecognized response")
+        else:
+            errors.append(f"Portal API returned HTTP {resp.status_code}")
     except Exception as exc:
+        errors.append(f"Portal API: {exc}")
         logger.debug("Portal fetch_template_list notice for %s: %s", c, exc)
 
     # 2. Official API Fallback
@@ -1539,12 +1543,19 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
         )
         if response.ok:
             data = _parse_karix_json(response)
+            if isinstance(data, list):
+                return data, None
             if isinstance(data, dict):
-                return data.get("response", {}).get("templates", []), None
+                templates = data.get("response", {}).get("templates") or data.get("templates") or []
+                return templates, None
+            errors.append("Official API returned an unrecognized response")
+        else:
+            errors.append(f"Official API returned HTTP {response.status_code}")
     except Exception as exc:
+        errors.append(f"Official API: {exc}")
         logger.debug("Official fetch_template_list notice for %s: %s", c, exc)
 
-    return [], None
+    return [], "; ".join(errors) if errors else None
 
 
 def _match_template(templates: list[dict], provider_ref_id: str) -> dict | None:
