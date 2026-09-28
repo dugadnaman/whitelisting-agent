@@ -70,4 +70,11 @@ EXPOSE 3000 8000
 
 VOLUME ["/app/data"]
 
+# Create and switch to non-privileged system user for container security
+RUN useradd -m -u 1000 -s /bin/bash appuser && \
+    mkdir -p /app/data /app/media_cache /var/log/supervisor /var/run && \
+    chown -R appuser:appuser /app /var/log/supervisor /var/run
+
+USER appuser
+
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
