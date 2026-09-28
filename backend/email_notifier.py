@@ -18,11 +18,12 @@ from __future__ import annotations
 import asyncio
 import email.mime.multipart
 import email.mime.text
+import json
 import logging
 import os
 import smtplib
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from config import _load_env_file
@@ -42,21 +43,60 @@ def get_current_ist_time() -> datetime:
     return datetime.now(UTC) + IST_OFFSET
 
 
+STAGE_SCHEDULE: dict[str, dict[str, Any]] = {
+    "MORNING": {
+        "title": "10:00 AM SLA Kickoff • Daily Workload",
+        "scheduled_time": "10:00 AM IST",
+        "window_start_minutes": 9 * 60 + 30,  # 09:30 AM
+        "window_end_minutes": 11 * 60 + 30,  # 11:30 AM
+        "window_label": "09:30 AM – 11:30 AM IST",
+    },
+    "MIDDAY": {
+        "title": "1:00 PM SLA Checkpoint • Midday Status",
+        "scheduled_time": "01:00 PM IST",
+        "window_start_minutes": 12 * 60 + 30,  # 12:30 PM
+        "window_end_minutes": 14 * 60 + 30,  # 02:30 PM
+        "window_label": "12:30 PM – 02:30 PM IST",
+    },
+    "EOD": {
+        "title": "4:00 PM Urgent SLA Escalation • Attention Required",
+        "scheduled_time": "04:00 PM IST",
+        "window_start_minutes": 15 * 60 + 30,  # 03:30 PM
+        "window_end_minutes": 18 * 60 + 0,  # 06:00 PM
+        "window_label": "03:30 PM – 06:00 PM IST",
+    },
+}
+
+
+def is_stage_within_window(stage: str, ist_now: datetime | None = None) -> tuple[bool, str]:
+    """Check whether the requested stage is currently within its scheduled delivery window."""
+    now = ist_now or get_current_ist_time()
+    s = stage.upper()
+    if s not in STAGE_SCHEDULE:
+        return False, f"Unknown stage '{stage}'"
+    info = STAGE_SCHEDULE[s]
+    total_minutes = now.hour * 60 + now.minute
+    in_window = info["window_start_minutes"] <= total_minutes <= info["window_end_minutes"]
+    if in_window:
+        return True, ""
+    return False, (
+        f"Off-schedule dispatch rejected: {info['title']} is scheduled for {info['scheduled_time']} "
+        f"(allowed window: {info['window_label']}). Current time is {now.strftime('%I:%M %p IST')}."
+    )
+
+
 def determine_current_stage(ist_now: datetime | None = None) -> str:
     """
     Determine the appropriate stage based on current IST time:
-    - Before 12:00 PM IST -> MORNING (10:00 AM Kickoff)
-    - 12:00 PM to 3:30 PM IST -> MIDDAY (1:00 PM Progress Check)
-    - 3:30 PM IST onward -> EOD (4:00 PM Urgent Escalation)
+    - Before 11:30 AM IST -> MORNING (10:00 AM Kickoff)
+    - 11:30 AM to 2:30 PM IST -> MIDDAY (1:00 PM Progress Check)
+    - 2:30 PM IST onward -> EOD (4:00 PM Urgent Escalation)
     """
     now = ist_now or get_current_ist_time()
-    hour = now.hour
-    minute = now.minute
-
-    total_minutes = hour * 60 + minute
-    if total_minutes < 12 * 60:
+    total_minutes = now.hour * 60 + now.minute
+    if total_minutes < 11 * 60 + 30:
         return "MORNING"
-    elif total_minutes < 15 * 60 + 30:
+    elif total_minutes < 14 * 60 + 30:
         return "MIDDAY"
     else:
         return "EOD"
@@ -91,31 +131,91 @@ class AlertEmailDraft:
 
 
 class AlertSchedulerState:
-    """In-memory state of the automated daily alert scheduler."""
+    """Persistent state of the automated daily alert scheduler backed by SQLite/PostgreSQL."""
 
     def __init__(self) -> None:
         self.enabled: bool = True
         self.last_sent: dict[str, str] = {}  # key: "YYYY-MM-DD_STAGE" -> timestamp
         self.history: list[dict[str, Any]] = []
         self.task: asyncio.Task | None = None
+        self._load_from_db()
+
+    def _load_from_db(self) -> None:
+        try:
+            from db import get_db, init_database
+
+            init_database()
+            with get_db() as conn:
+                rows = conn.execute(
+                    "SELECT slot_key, day_str, stage, dispatched_at, details_json "
+                    "FROM alert_scheduler_runs ORDER BY dispatched_at DESC LIMIT 100"
+                ).fetchall()
+                for r in rows:
+                    key = r["slot_key"]
+                    self.last_sent[key] = r["dispatched_at"]
+                    try:
+                        details = json.loads(r["details_json"])
+                    except Exception:
+                        details = {}
+                    self.history.append(
+                        {
+                            "slot_key": key,
+                            "stage": r["stage"],
+                            "date": r["day_str"],
+                            "dispatched_at": r["dispatched_at"],
+                            **details,
+                        }
+                    )
+        except Exception as exc:
+            logger.warning("Could not load alert scheduler state from database: %s", exc)
 
     def mark_sent(self, day_str: str, stage: str, details: dict[str, Any]) -> None:
         key = f"{day_str}_{stage}"
-        self.last_sent[key] = datetime.now(UTC).isoformat()
+        now_ts = datetime.now(UTC).isoformat()
+        self.last_sent[key] = now_ts
         self.history.append(
             {
                 "slot_key": key,
                 "stage": stage,
                 "date": day_str,
-                "dispatched_at": datetime.now(UTC).isoformat(),
+                "dispatched_at": now_ts,
                 **details,
             }
         )
         if len(self.history) > 100:
             self.history = self.history[-100:]
 
+        try:
+            from db import get_db
+
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO alert_scheduler_runs "
+                    "(slot_key, day_str, stage, dispatched_at, details_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (key, day_str, stage, now_ts, json.dumps(details)),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.warning("Could not persist alert scheduler state to database: %s", exc)
+
     def is_already_sent_today(self, day_str: str, stage: str) -> bool:
-        return f"{day_str}_{stage}" in self.last_sent
+        if f"{day_str}_{stage}" in self.last_sent:
+            return True
+        try:
+            from db import get_db
+
+            with get_db() as conn:
+                r = conn.execute(
+                    "SELECT 1 FROM alert_scheduler_runs WHERE slot_key = ?",
+                    (f"{day_str}_{stage}",),
+                ).fetchone()
+                if r:
+                    self.last_sent[f"{day_str}_{stage}"] = datetime.now(UTC).isoformat()
+                    return True
+        except Exception:
+            pass
+        return False
 
 
 SCHEDULER_STATE = AlertSchedulerState()
@@ -388,8 +488,9 @@ def preview_due_today_alerts(
     """
     Generate drafts of all alert emails that would be sent right now.
     """
-    resolved_stage = determine_current_stage() if stage == "AUTO" else stage.upper()
-    today_str = date.today().isoformat()
+    ist_now = get_current_ist_time()
+    today_str = ist_now.date().isoformat()
+    resolved_stage = determine_current_stage(ist_now) if stage == "AUTO" else stage.upper()
     tickets = get_due_today_incomplete_tickets(project=project)
     operators = group_tickets_by_operator(tickets)
     sender_info = get_smtp_sender_info()
@@ -398,12 +499,32 @@ def preview_due_today_alerts(
         build_stage_email(op, resolved_stage, today_str, project=project) for op in operators
     ]
 
-    ist_now = get_current_ist_time()
+    is_valid_win, win_warn = is_stage_within_window(resolved_stage, ist_now)
+    already_sent = SCHEDULER_STATE.is_already_sent_today(today_str, resolved_stage)
+
+    slots_status: dict[str, Any] = {}
+    for s_name, s_meta in STAGE_SCHEDULE.items():
+        s_valid, _ = is_stage_within_window(s_name, ist_now)
+        slots_status[s_name] = {
+            "title": s_meta["title"],
+            "scheduled_time": s_meta["scheduled_time"],
+            "window_label": s_meta["window_label"],
+            "already_sent": SCHEDULER_STATE.is_already_sent_today(today_str, s_name),
+            "is_current_window": s_valid,
+        }
+
     return {
         "ok": True,
         "project": project,
         "stage": resolved_stage,
+        "requested_stage": stage,
         "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
+        "scheduled_time": STAGE_SCHEDULE.get(resolved_stage, {}).get("scheduled_time", "Unknown"),
+        "window_label": STAGE_SCHEDULE.get(resolved_stage, {}).get("window_label", ""),
+        "is_valid_window": is_valid_win,
+        "window_warning": win_warn,
+        "already_sent_today": already_sent,
+        "slots_status": slots_status,
         "sender_info": sender_info,
         "total_due_today_incomplete": len(tickets),
         "recipient_count": len(drafts),
@@ -807,17 +928,48 @@ def dispatch_due_today_alerts(
     send_google_chat: bool = True,
     send_email: bool = True,
     google_chat_webhook_url: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """
     Dispatch SLA alerts strictly via Google Chat Space and/or Direct Email.
+    Enforces strict time-window boundaries unless force=True or dry_run=True.
     Jira remains strictly READ-ONLY (no comments or writes to Jira).
     """
+    ist_now = get_current_ist_time()
+    today_str = ist_now.date().isoformat()
     preview = preview_due_today_alerts(project=project, stage=stage)
     resolved_stage = preview["stage"]
     draft_dicts = preview["drafts"]
     tickets = get_due_today_incomplete_tickets(project=project)
     operators = group_tickets_by_operator(tickets)
-    today_str = date.today().isoformat()
+
+    # 1. Enforce strict time window validation for real sends
+    if not dry_run and not force:
+        is_valid_win, win_warn = is_stage_within_window(resolved_stage, ist_now)
+        if not is_valid_win:
+            logger.warning("Rejected off-schedule SLA alert dispatch: %s", win_warn)
+            return {
+                "ok": False,
+                "error": win_warn,
+                "rejected_off_schedule": True,
+                "stage": resolved_stage,
+                "current_time_ist": ist_now.strftime("%I:%M %p IST"),
+            }
+
+        # 2. Prevent duplicate sends on the same day for this stage
+        if SCHEDULER_STATE.is_already_sent_today(today_str, resolved_stage):
+            logger.warning(
+                "SLA alert for stage '%s' has already been dispatched today (%s). Skipping to prevent duplicates.",
+                resolved_stage,
+                today_str,
+            )
+            return {
+                "ok": False,
+                "error": f"SLA alert for stage '{resolved_stage}' has already been dispatched today ({today_str}). Pass force=True to re-dispatch.",
+                "already_dispatched_today": True,
+                "stage": resolved_stage,
+                "dispatched_by": operator_name,
+            }
 
     # 1. Google Chat Space Broadcast
     google_chat_res: dict[str, Any] = {}
@@ -858,20 +1010,21 @@ def dispatch_due_today_alerts(
     simulated_count = sum(1 for r in results if r.get("simulated"))
 
     # Mark sent in scheduler state
-    SCHEDULER_STATE.mark_sent(
-        day_str=today_str,
-        stage=resolved_stage,
-        details={
-            "delivered_count": delivered_count,
-            "real_sent_count": real_sent_count,
-            "simulated_count": simulated_count,
-            "failed_count": failed_count,
-            "google_chat_delivered": google_chat_res.get("delivered", False),
-            "recipients": [d["recipient_email"] for d in draft_dicts],
-            "operator_name": operator_name,
-            "dry_run": dry_run,
-        },
-    )
+    if not dry_run:
+        SCHEDULER_STATE.mark_sent(
+            day_str=today_str,
+            stage=resolved_stage,
+            details={
+                "delivered_count": delivered_count,
+                "real_sent_count": real_sent_count,
+                "simulated_count": simulated_count,
+                "failed_count": failed_count,
+                "google_chat_delivered": google_chat_res.get("delivered", False),
+                "recipients": [d["recipient_email"] for d in draft_dicts],
+                "operator_name": operator_name,
+                "dry_run": dry_run,
+            },
+        )
 
     return {
         "ok": True,

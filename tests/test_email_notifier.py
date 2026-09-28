@@ -4,10 +4,10 @@ Verifies stage determination (10am, 1pm, 4pm IST), recipient resolution,
 progressive email copy generation, dry-run simulation, and REST endpoints.
 """
 
+import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from email_notifier import (
@@ -140,8 +140,7 @@ def test_dispatch_due_today_alerts_dry_run():
 def test_scheduler_state_deduplication():
     """Verify AlertSchedulerState prevents duplicate sends for the same slot on the same day."""
     state = AlertSchedulerState()
-    today_str = "2026-09-23"
-
+    today_str = f"2099-09-23_{uuid.uuid4().hex[:8]}"
     assert state.is_already_sent_today(today_str, "MORNING") is False
 
     state.mark_sent(today_str, "MORNING", {"delivered_count": 3})
@@ -241,3 +240,59 @@ def test_api_alerts_endpoints():
 
     finally:
         app.dependency_overrides.clear()
+
+
+def test_off_schedule_rejection():
+    """Verify that dispatching MORNING at 1:12 PM IST is rejected when force=False."""
+    from email_notifier import is_stage_within_window
+
+    dt_1pm = datetime(2026, 9, 28, 13, 12, tzinfo=UTC)
+    is_valid, reason = is_stage_within_window("MORNING", dt_1pm)
+    assert is_valid is False
+    assert "Off-schedule" in reason
+    assert "10:00 AM" in reason
+
+    # MIDDAY at 13:12 IST is valid
+    is_valid_midday, _ = is_stage_within_window("MIDDAY", dt_1pm)
+    assert is_valid_midday is True
+
+    # EOD at 13:12 IST is off-schedule
+    is_valid_eod, reason_eod = is_stage_within_window("EOD", dt_1pm)
+    assert is_valid_eod is False
+    assert "04:00 PM" in reason_eod
+
+
+def test_dispatch_time_window_enforcement():
+    """Verify dispatch_due_today_alerts rejects out-of-window requests unless force=True."""
+    dt_1pm = datetime(2026, 9, 28, 13, 12, tzinfo=UTC)
+
+    with (
+        patch("email_notifier.get_current_ist_time", return_value=dt_1pm),
+        patch("email_notifier.get_due_today_incomplete_tickets", return_value=[{"key": "SWCM-1", "summary": "t"}]),
+    ):
+        # Trying to send MORNING at 1:12 PM without force
+        res = dispatch_due_today_alerts(project="SWCM", stage="MORNING", dry_run=False, force=False)
+        assert res["ok"] is False
+        assert res["rejected_off_schedule"] is True
+        assert "Off-schedule" in res["error"]
+
+        # With force=True, it is permitted
+        with patch("email_notifier.send_google_chat_sla_alert", return_value={"delivered": True}):
+            res_forced = dispatch_due_today_alerts(
+                project="SWCM", stage="MORNING", dry_run=False, force=True, send_email=False
+            )
+            assert res_forced["ok"] is True
+            assert res_forced["stage"] == "MORNING"
+
+
+def test_scheduler_db_persistence_deduplication():
+    """Verify AlertSchedulerState persists to DB and prevents duplicate dispatch on same day."""
+    state1 = AlertSchedulerState()
+    test_day = f"2099-09-28_{uuid.uuid4().hex[:8]}"
+    test_stage = "TEST_SLOT"
+    state1.mark_sent(test_day, test_stage, {"delivered_count": 1})
+    assert state1.is_already_sent_today(test_day, test_stage) is True
+
+    # Create new instance (simulating server reboot)
+    state2 = AlertSchedulerState()
+    assert state2.is_already_sent_today(test_day, test_stage) is True

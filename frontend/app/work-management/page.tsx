@@ -284,6 +284,7 @@ export default function WorkManagementPage() {
   const [activePreviewEmail, setActivePreviewEmail] = useState<AlertEmailDraft | null>(null);
   const [sendGoogleChat, setSendGoogleChat] = useState<boolean>(true);
   const [sendDirectEmail, setSendDirectEmail] = useState<boolean>(true);
+  const [forceOffSchedule, setForceOffSchedule] = useState<boolean>(false);
   const DEFAULT_GCHAT_WEBHOOK =
     'https://chat.googleapis.com/v1/spaces/AAQAsqKm6oQ/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=er00Zc1ZFnDfrmthvXlRvtkWQHXDd862nhHl9TlguLk';
   const [googleChatWebhookUrl, setGoogleChatWebhookUrl] = useState<string>(DEFAULT_GCHAT_WEBHOOK);
@@ -355,6 +356,7 @@ export default function WorkManagementPage() {
         send_google_chat: sendGoogleChat,
         send_email: sendDirectEmail,
         google_chat_webhook_url: googleChatWebhookUrl || undefined,
+        force: forceOffSchedule,
       });
 
       let summary = `${dryRun ? 'Dry Run' : 'Dispatch'} Complete!\nStage: ${res.stage}\n\n`;
@@ -2610,6 +2612,54 @@ export default function WorkManagementPage() {
               ))}
             </div>
 
+            {/* Stage Timing & Status Banner */}
+            {alertsPreview && (
+              <div
+                className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                  !alertsPreview.is_valid_window
+                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                    : alertsPreview.already_sent_today
+                    ? 'bg-blue-50 border-blue-200 text-blue-900'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                }`}
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm">
+                      {!alertsPreview.is_valid_window
+                        ? '⚠️ Off-Schedule Slot'
+                        : alertsPreview.already_sent_today
+                        ? 'ℹ️ Already Sent Today'
+                        : '✅ Active Scheduled Slot'}
+                    </span>
+                    <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-white/80 border">
+                      Scheduled: {alertsPreview.scheduled_time || alertsPreview.stage} ({alertsPreview.window_label || 'Current Window'})
+                    </span>
+                  </div>
+                  <p className="text-[11px] opacity-90">
+                    {!alertsPreview.is_valid_window
+                      ? `It is currently ${alertsPreview.ist_time}. The ${alertsPreview.stage} alert is designated for ${alertsPreview.scheduled_time}. Sending now may result in out-of-order messages in Google Chat.`
+                      : alertsPreview.already_sent_today
+                      ? `This alert was already dispatched earlier today. Duplicate dispatches are blocked by default.`
+                      : `Current time is within the active delivery window for ${alertsPreview.stage}. Ready to dispatch.`}
+                  </p>
+                </div>
+
+                {(!alertsPreview.is_valid_window || alertsPreview.already_sent_today) && (
+                  <label className="flex items-center gap-2 shrink-0 bg-white/80 px-2.5 py-1.5 rounded-lg border cursor-pointer hover:bg-white transition-all self-start sm:self-auto">
+                    <input
+                      type="checkbox"
+                      checked={forceOffSchedule}
+                      onChange={(e) => setForceOffSchedule(e.target.checked)}
+                      className="rounded text-amber-600 focus:ring-amber-500"
+                    />
+                    <span className="text-[11px] font-bold text-gray-800">
+                      Allow Force Override
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
             {/* Multi-Channel Dispatch Selector */}
             <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 space-y-2.5 shrink-0 text-xs">
               <div className="flex items-center justify-between">
@@ -2791,11 +2841,25 @@ export default function WorkManagementPage() {
               <button
                 type="button"
                 onClick={() => handleDispatchAlerts(false)}
-                disabled={alertsDispatching || alertsPreview?.recipient_count === 0}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95"
+                disabled={
+                  alertsDispatching ||
+                  alertsPreview?.recipient_count === 0 ||
+                  ((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule)
+                }
+                className={`px-5 py-2 rounded-lg text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95 ${
+                  (!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule
+                    ? 'bg-gray-400 text-white cursor-not-allowed'
+                    : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                }`}
               >
                 <span>⚡</span>
-                <span>{alertsDispatching ? 'Dispatching...' : `Dispatch Live Alerts (${alertsPreview?.recipient_count || 0})`}</span>
+                <span>
+                  {alertsDispatching
+                    ? 'Dispatching...'
+                    : (!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule
+                    ? `Blocked: Off-Schedule (Check Force Override)`
+                    : `Dispatch Live Alerts (${alertsPreview?.recipient_count || 0})`}
+                </span>
               </button>
             </div>
           </div>

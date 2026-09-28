@@ -1344,13 +1344,28 @@ export type AlertsPreviewResponse = {
   ok: boolean;
   project: string;
   stage: string;
+  requested_stage?: string;
   ist_time: string;
+  scheduled_time?: string;
+  window_label?: string;
+  is_valid_window?: boolean;
+  window_warning?: string;
+  already_sent_today?: boolean;
+  slots_status?: Record<
+    string,
+    {
+      title: string;
+      scheduled_time: string;
+      window_label: string;
+      already_sent: boolean;
+      is_current_window: boolean;
+    }
+  >;
   sender_info?: SmtpSenderInfo;
   total_due_today_incomplete: number;
   recipient_count: number;
   drafts: AlertEmailDraft[];
 };
-
 export type AlertsDispatchResponse = {
   ok: boolean;
   stage: string;
@@ -1382,7 +1397,9 @@ export type AlertsDispatchOptions = {
   send_google_chat?: boolean;
   send_email?: boolean;
   google_chat_webhook_url?: string;
+  force?: boolean;
 };
+
 export type AlertSchedulerStatusResponse = {
   enabled: boolean;
   ist_time: string;

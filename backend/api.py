@@ -4523,6 +4523,7 @@ class DispatchAlertsRequest(BaseModel):
     send_google_chat: bool = True
     send_email: bool = True
     google_chat_webhook_url: str | None = None
+    force: bool = False
 
 
 class SchedulerToggleRequest(BaseModel):
@@ -4568,6 +4569,7 @@ def dispatch_alerts_endpoint(
         send_google_chat=body.send_google_chat,
         send_email=body.send_email,
         google_chat_webhook_url=body.google_chat_webhook_url,
+        force=body.force,
     )
     return _json_safe(data)
 

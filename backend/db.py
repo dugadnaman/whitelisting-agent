@@ -44,6 +44,7 @@ VALID_TABLES: set[str] = {
     "sms_dlrs",
     "sms_clicks",
     "system_errors",
+    "alert_scheduler_runs",
 }
 
 
@@ -370,6 +371,16 @@ SQLITE_SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_sys_err_ts ON system_errors(timestamp DESC);",
     "CREATE INDEX IF NOT EXISTS idx_sys_err_cat ON system_errors(category, severity);",
+    """
+    CREATE TABLE IF NOT EXISTS alert_scheduler_runs (
+        slot_key TEXT PRIMARY KEY,
+        day_str TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        dispatched_at TEXT NOT NULL,
+        details_json TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_alert_sched_day ON alert_scheduler_runs(day_str);",
 ]
 
 POSTGRES_SCHEMA_DDL = [
@@ -517,6 +528,16 @@ POSTGRES_SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_sys_err_ts ON system_errors(timestamp DESC);",
     "CREATE INDEX IF NOT EXISTS idx_sys_err_cat ON system_errors(category, severity);",
+    """
+    CREATE TABLE IF NOT EXISTS alert_scheduler_runs (
+        slot_key VARCHAR(100) PRIMARY KEY,
+        day_str VARCHAR(50) NOT NULL,
+        stage VARCHAR(50) NOT NULL,
+        dispatched_at VARCHAR(100) NOT NULL,
+        details_json TEXT NOT NULL
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_alert_sched_day ON alert_scheduler_runs(day_str);",
 ]
 
 
