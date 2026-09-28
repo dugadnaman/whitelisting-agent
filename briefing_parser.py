@@ -1556,12 +1556,12 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
     # 2. Robust zero-dependency fallback using built-in zipfile + XML
     if not paras:
         try:
-            import xml.etree.ElementTree as ET
+            import xml.etree.ElementTree as ET  # nosec B405  # nosemgrep
             import zipfile
 
             with zipfile.ZipFile(docx_path) as z:
                 xml_content = z.read("word/document.xml")
-            tree = ET.fromstring(xml_content)
+            tree = ET.fromstring(xml_content)  # nosec B314  # nosemgrep
             for p in tree.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p"):
                 texts = [
                     node.text

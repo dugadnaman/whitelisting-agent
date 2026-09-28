@@ -22,9 +22,10 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
 def _derive_aes_key(password_str: str, salt: bytes) -> bytes:
-    """Derive 256-bit AES key using PBKDF2 with HMAC-SHA1 and 11 iterations."""
+    # Carrier Mandate: Karix Send SMS API specification explicitly mandates
+    # PBKDF2WithHmacSHA1 with 11 iterations for payload encryption/decryption.
     kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA1(),
+        algorithm=hashes.SHA1(),  # nosec B303  # nosemgrep: python.cryptography.security.insecure-hash-algorithms.insecure-hash-algorithm-sha1
         length=32,  # 256 bits
         salt=salt,
         iterations=11,

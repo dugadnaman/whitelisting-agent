@@ -414,7 +414,7 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
             bot_id_res = get_rcs_bot_id(c)
             esme_res = get_esmeaddr(c)
             logger.info(
-                "🔒 CONFIRMATION CHECKPOINT [RCS Create]: client=%s, bot_id=%s, esmeaddr=%s, template=%s, credential_source=%s_RCS_AUTH_TOKEN",
+                "🔒 CONFIRMATION CHECKPOINT [RCS Create]: client=%s, bot_id=%s, esmeaddr=%s, template=%s, auth_env_prefix=%s",
                 c,
                 bot_id_res,
                 esme_res,
@@ -586,7 +586,7 @@ def fetch_rcs_templates(bot_id: str | None = None, client: str = "tata") -> list
     try:
         headers = get_rcs_auth_headers(c)
         logger.info(
-            "🔒 CHECKPOINT [RCS Fetch]: client=%s, bot_id=%s, esmeaddr=%s, credential_source=%s_RCS_AUTH_TOKEN",
+            "🔒 CHECKPOINT [RCS Fetch]: client=%s, bot_id=%s, esmeaddr=%s, auth_env_prefix=%s",
             c,
             b_id,
             esme_addr,

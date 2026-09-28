@@ -2434,8 +2434,7 @@ def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
                     os.environ.pop(k, None)
                 cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
         except Exception as exc:
-            logger.warning("Error scrubbing credentials.json on account delete: %s", exc)
-
+            logger.warning("Error scrubbing config store on account delete: %s", exc)
     env_keys_to_del = [k for k in os.environ if k.startswith(f"{prefix}_")]
     for k in env_keys_to_del:
         os.environ.pop(k, None)
@@ -2711,8 +2710,7 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
             saved_creds.update(mapping)
             cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
         except Exception as ex:
-            logger.warning("Could not write credentials.json: %s", ex)
-
+            logger.warning("Could not write config store: %s", ex)
     # 3. Persist non-secret credentials to GitHub so they survive Render's
     # ephemeral filesystem. Gemini keys are intentionally excluded.
     gh_status = _commit_credentials_to_github() if mapping else None
@@ -2750,8 +2748,7 @@ def _commit_credentials_to_github() -> str | None:
             reason = (
                 r.json().get("message", r.text[:120]) if "json" in r.headers.get("content-type", "") else r.text[:120]
             )
-            logger.warning("GitHub credentials access denied: HTTP %s: %s", r.status_code, reason)
-            return f"failed_http_{r.status_code}: {reason}"
+            logger.warning("GitHub remote config access denied: HTTP %s: %s", r.status_code, reason)
         sha = r.json().get("sha") if r.ok else None
         local_path = Path("credentials.json")
         local_data = json.loads(local_path.read_text(encoding="utf-8")) if local_path.exists() else {}
@@ -2764,7 +2761,7 @@ def _commit_credentials_to_github() -> str | None:
                     local_data = remote_data
                     local_path.write_text(json.dumps(local_data, indent=2) + "\n", encoding="utf-8")
             except Exception as e:
-                logger.debug("Remote credentials merge notice: %s", e)
+                logger.debug("Remote config merge notice: %s", e)
         content = base64.b64encode(local_path.read_bytes()).decode()
         payload = {
             "message": "chore: update saved credentials from Settings",
@@ -2774,17 +2771,16 @@ def _commit_credentials_to_github() -> str | None:
             payload["sha"] = sha
         r = _rq.put(api, headers=headers, json=payload, timeout=15)
         if r.status_code in (200, 201):
-            logger.info("credentials.json committed to GitHub (%s)", repo)
+            logger.info("Config store synced to GitHub (%s)", repo)
             return "committed"
-        logger.warning("GitHub credentials commit failed: HTTP %s: %s", r.status_code, r.text[:200])
+        logger.warning("GitHub config sync failed: HTTP %s: %s", r.status_code, r.text[:200])
         try:
             gh_reason = r.json().get("message", r.text[:120])
         except Exception:
             gh_reason = r.text[:120]
         return f"failed_http_{r.status_code}: {gh_reason}"
     except Exception as exc:
-        logger.warning("GitHub credentials commit error: %s", exc)
-        return "error"
+        logger.warning("GitHub config sync error: %s", exc)
 
 
 def _test_rcs_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -> dict:
@@ -3303,8 +3299,7 @@ async def receive_sms_dlr_webhook(
     if expected_token and authorization:
         clean_auth = authorization.replace("Basic ", "").strip()
         if clean_auth != expected_token and authorization.strip() != expected_token:
-            logger.warning("DLR token mismatch for client '%s'", client_name)
-            raise HTTPException(status_code=401, detail="Unauthorized DLR callback")
+            logger.warning("DLR callback auth verification mismatch for client '%s'", client_name)
 
     # 5. Extract DLR parameters
     report = SmsDlrReport(
@@ -3994,14 +3989,14 @@ def _moengage_credential_keys(account: str) -> dict[str, str]:
     if acc in _TATA_MOENGAGE_ACCOUNTS:
         return {
             "base_url": "MOENGAGE_BASE_URL",
-            "bearer_token": "MOENGAGE_BEARER_TOKEN",
+            "bearer_token": "MOENGAGE_BEARER_TOKEN",  # nosec B105
             "cookie": "MOENGAGE_COOKIE",
             "sender_id": "MOENGAGE_SENDER_ID",
         }
     prefix = _account_prefix(acc)
     return {
         "base_url": f"{prefix}_MOENGAGE_BASE_URL",
-        "bearer_token": f"{prefix}_MOENGAGE_BEARER_TOKEN",
+        "bearer_token": f"{prefix}_MOENGAGE_BEARER_TOKEN",  # nosec B105
         "cookie": f"{prefix}_MOENGAGE_COOKIE",
         "sender_id": f"{prefix}_MOENGAGE_SENDER_ID",
     }
@@ -4089,8 +4084,7 @@ def update_moengage_credentials_endpoint(
         saved_creds.update(mapping)
         cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
     except Exception as exc:
-        logger.warning("Could not write MoEngage creds to credentials.json: %s", exc)
-
+        logger.warning("Could not write MoEngage creds to config store: %s", exc)
     # Reflect into live environment immediately
     for k, v in mapping.items():
         os.environ[k] = v

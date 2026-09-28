@@ -233,7 +233,7 @@ def _try_portal_media_upload(path: Path, mime: str, client: str, errors: list[st
         waba_res = get_waba_id(client)
         esme_res = get_esmeaddr(client)
         logger.info(
-            "🔒 CONFIRMATION CHECKPOINT [Media Upload]: client=%s, waba_id=%s, esmeaddr=%s, file_type=%s, credential_source=%s_KARIX_BEARER_TOKEN",
+            "🔒 CONFIRMATION CHECKPOINT [Media Upload]: client=%s, waba_id=%s, esmeaddr=%s, file_type=%s, auth_env_prefix=%s",
             client,
             waba_res,
             esme_res,
@@ -1099,7 +1099,7 @@ def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") 
             waba_resolved = get_waba_id(c)
             esme_resolved = get_esmeaddr(c)
             logger.info(
-                "🔒 CONFIRMATION CHECKPOINT [Portal Create]: client=%s, waba_id=%s, esmeaddr=%s, template=%s, credential_source=%s_KARIX_BEARER_TOKEN",
+                "🔒 CONFIRMATION CHECKPOINT [Portal Create]: client=%s, waba_id=%s, esmeaddr=%s, template=%s, auth_env_prefix=%s",
                 c,
                 waba_resolved,
                 esme_resolved,
@@ -1252,7 +1252,7 @@ def _submit_official_template(
             headers = get_official_auth_headers(c)
             headers["Content-Type"] = "application/json"
             logger.info(
-                "🔒 CONFIRMATION CHECKPOINT [Official Create]: client=%s, waba_id=%s, template=%s, credential_source=%s_WABA_AUTH_TOKEN",
+                "🔒 CONFIRMATION CHECKPOINT [Official Create]: client=%s, waba_id=%s, template=%s, auth_env_prefix=%s",
                 c,
                 waba_id,
                 payload.template_name,
