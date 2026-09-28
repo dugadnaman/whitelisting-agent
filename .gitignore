@@ -1,7 +1,8 @@
 # Secrets
 .env
 credentials.json
-
+credentials*.json
+!credentials.example.json
 # Node.js
 node_modules/
 **/node_modules/
