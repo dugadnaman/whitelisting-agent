@@ -265,3 +265,206 @@ def test_screenshot_exact_channel_reconciliation():
     assert chans["RCS"] == 4
     assert chans["Push"] == 3
     assert chans["Email"] == 2
+
+
+def test_parse_moengage_export_zip_with_multiple_csvs():
+    """Verify parse_moengage_export_file extracts and parses all CSVs in a MoEngage export ZIP."""
+    import csv
+    import io
+    import tempfile
+    import zipfile
+
+    from moengage_ops_client import parse_moengage_export_file
+
+    tcl_campaigns = [
+        {"Channel": "WhatsApp", "Campaign Name": "TCLMOE_WA_Promo_1", "Created By": "soham.das@attributics.com", "Date": "2026-09-22"},
+        {"Channel": "SMS", "Campaign Name": "TCLMOE_SMS_Alert_1", "Created By": "neel.shah@attributics.com", "Date": "2026-09-23"},
+    ]
+    wealth_campaigns = [
+        {"Channel": "Email", "Campaign Name": "Wealth_AUM_Email_1", "Created By": "mrunalini.gawande@attributics.com", "Date": "2026-09-24"},
+        {"Channel": "RCS", "Campaign Name": "Wealth_AUM_RCS_1", "Created By": "mrunalini.gawande@attributics.com", "Date": "2026-09-24"},
+    ]
+    flow_nodes = [
+        {"Flow Name": "Onboarding_Journey_V1", "Node Name": "Welcome_WhatsApp_Node", "Channel": "WhatsApp", "Created By": "neel.shah@attributics.com", "Date": "2026-09-25"},
+        {"Flow Name": "Onboarding_Journey_V1", "Node Name": "Reminder_SMS_Node", "Channel": "SMS", "Created By": "soham.das@attributics.com", "Date": "2026-09-26"},
+    ]
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as zip_tmp:
+        zip_path = zip_tmp.name
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        # 1. TCL CSV
+        buf_tcl = io.StringIO()
+        w = csv.DictWriter(buf_tcl, fieldnames=["Channel", "Campaign Name", "Created By", "Date"])
+        w.writeheader()
+        w.writerows(tcl_campaigns)
+        zf.writestr("TCL_Campaigns.csv", buf_tcl.getvalue())
+
+        # 2. Wealth CSV
+        buf_wealth = io.StringIO()
+        w = csv.DictWriter(buf_wealth, fieldnames=["Channel", "Campaign Name", "Created By", "Date"])
+        w.writeheader()
+        w.writerows(wealth_campaigns)
+        zf.writestr("reports/Wealth_Campaigns.csv", buf_wealth.getvalue())
+
+        # 3. Flow Nodes CSV
+        buf_nodes = io.StringIO()
+        w = csv.DictWriter(buf_nodes, fieldnames=["Flow Name", "Node Name", "Channel", "Created By", "Date"])
+        w.writeheader()
+        w.writerows(flow_nodes)
+        zf.writestr("flows/Flow_Nodes.csv", buf_nodes.getvalue())
+
+    try:
+        records = parse_moengage_export_file(zip_path, default_vertical="TCL")
+        assert len(records) == 6
+
+        # Verify types
+        campaigns = [r for r in records if r.type == "Campaign"]
+        nodes = [r for r in records if r.type == "Node"]
+        assert len(campaigns) == 4
+        assert len(nodes) == 2
+
+        # Verify verticals inferred from filenames / campaign names
+        tcl_records = [r for r in records if r.vertical == "TCL"]
+        wealth_records = [r for r in records if r.vertical == "Wealth"]
+        assert len(tcl_records) == 4  # 2 campaigns + 2 flow nodes defaulted to TCL
+        assert len(wealth_records) == 2  # 2 wealth campaigns
+
+        # Verify channels
+        channels_found = {r.channel for r in records}
+        assert channels_found == {"WhatsApp", "SMS", "Email", "RCS"}
+
+        # Verify metric calculation
+        metrics = compute_ops_dashboard_metrics(records, mode="custom", custom_start="2026-09-20", custom_end="2026-09-27")
+        overview = metrics["account_overview"]
+        assert overview["total_campaigns"] == 4
+        assert overview["total_flow_nodes"] == 2
+        assert overview["total_touchpoints"] == 6
+    finally:
+        Path(zip_path).unlink(missing_ok=True)
+
+
+def test_parse_moengage_export_zip_skips_mac_metadata_and_hidden_files():
+    """Verify zip parsing skips __MACOSX, .DS_Store, and non-CSV files."""
+    import csv
+    import io
+    import tempfile
+    import zipfile
+
+    from moengage_ops_client import parse_moengage_export_file
+
+    valid_data = [
+        {"Channel": "Push", "Campaign Name": "Services_Loan_PN", "Created By": "soham.das@attributics.com", "Date": "2026-09-20"},
+    ]
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as zip_tmp:
+        zip_path = zip_tmp.name
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        # Resource fork and hidden files
+        zf.writestr("__MACOSX/._Services.csv", b"junk resource fork")
+        zf.writestr(".DS_Store", b"junk ds_store")
+        zf.writestr("README.txt", "Some read me text")
+
+        # Valid CSV
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=["Channel", "Campaign Name", "Created By", "Date"])
+        w.writeheader()
+        w.writerows(valid_data)
+        zf.writestr("exports/Services.csv", buf.getvalue())
+
+    try:
+        records = parse_moengage_export_file(zip_path, default_vertical="Services")
+        assert len(records) == 1
+        assert records[0].name == "Services_Loan_PN"
+        assert records[0].channel == "Push"
+        assert records[0].vertical == "Services"
+    finally:
+        Path(zip_path).unlink(missing_ok=True)
+
+
+def test_ingest_moengage_export_file_zip():
+    """Verify ingest_moengage_export_file processes zip archive and updates cache/Excel."""
+    import csv
+    import io
+    import tempfile
+    import zipfile
+
+    from moengage_ops_client import ingest_moengage_export_file
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as zip_tmp:
+        zip_path = zip_tmp.name
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        buf1 = io.StringIO()
+        w1 = csv.DictWriter(buf1, fieldnames=["Channel", "Campaign Name", "Created By", "Date"])
+        w1.writeheader()
+        w1.writerow({"Channel": "SMS", "Campaign Name": "Zip_Ingest_SMS_1", "Created By": "neel.shah@attributics.com", "Date": "2026-09-21"})
+        zf.writestr("part_1.csv", buf1.getvalue())
+
+        buf2 = io.StringIO()
+        w2 = csv.DictWriter(buf2, fieldnames=["Channel", "Campaign Name", "Created By", "Date"])
+        w2.writeheader()
+        w2.writerow({"Channel": "WhatsApp", "Campaign Name": "Zip_Ingest_WA_2", "Created By": "neel.shah@attributics.com", "Date": "2026-09-22"})
+        zf.writestr("part_2.csv", buf2.getvalue())
+
+    try:
+        res = ingest_moengage_export_file(zip_path, default_vertical="TCL")
+        assert res["ok"] is True
+        assert res["new_records_parsed"] >= 2
+        assert res["files_parsed"] == 2
+        assert res["campaigns_count"] >= 2
+    finally:
+        Path(zip_path).unlink(missing_ok=True)
+
+
+def test_upload_moengage_export_endpoint_zip():
+    """Verify POST /api/moengage/ops/upload-export accepts ZIP file and returns accurate metrics."""
+    import csv
+    import io
+    import tempfile
+    import zipfile
+
+    from fastapi.testclient import TestClient
+
+    from api import app, get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: {
+        "email": "tester@attributics.com",
+        "name": "Tester",
+        "tenant_id": "all",
+        "role": "superadmin",
+    }
+    client = TestClient(app)
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as zip_tmp:
+        zip_path = zip_tmp.name
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=["Channel", "Campaign Name", "Created By", "Date"])
+        w.writeheader()
+        w.writerow({
+            "Channel": "RCS",
+            "Campaign Name": "TCLMOE_Endpoint_RCS_1",
+            "Created By": "neel.shah@attributics.com",
+            "Date": "2026-09-22",
+        })
+        zf.writestr("TCL_RCS.csv", buf.getvalue())
+
+    try:
+        with open(zip_path, "rb") as f:
+            resp = client.post(
+                "/api/moengage/ops/upload-export?mode=custom&custom_start=2026-09-20&custom_end=2026-09-27",
+                files={"file": ("moengage_export.zip", f, "application/zip")},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["result"]["files_parsed"] >= 1
+        assert data["result"]["new_records_parsed"] >= 1
+        assert "metrics" in data
+        assert data["metrics"]["account_overview"]["total_campaigns"] >= 1
+    finally:
+        app.dependency_overrides.clear()
+        Path(zip_path).unlink(missing_ok=True)

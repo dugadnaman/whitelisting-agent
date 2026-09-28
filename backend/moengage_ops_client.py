@@ -18,6 +18,7 @@ import base64
 import json
 import logging
 import os
+import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -709,83 +710,334 @@ def export_ops_dashboard_excel(
     return output_path
 
 
-def parse_moengage_export_file(file_path: Path | str, default_vertical: str = "TCL") -> list[NormalizedOpsRecord]:
-    """
-    Parse a CSV or XLSX campaign export file downloaded directly from the MoEngage UI.
-    Automatically infers channels (SMS, RCS, WhatsApp, Email, Push) and Attributics scope.
-    """
-    import csv
+def _parse_flex_date(date_val: Any) -> date:
+    """Parse various date formats from MoEngage exports into a datetime.date."""
+    if isinstance(date_val, datetime):
+        return date_val.date()
+    if isinstance(date_val, date):
+        return date_val
 
-    import openpyxl
+    if isinstance(date_val, (int, float)):
+        # Unix timestamp (> 1e9) vs Excel serial number (30000 - 60000)
+        if date_val > 1_000_000_000:
+            try:
+                return datetime.fromtimestamp(date_val, UTC).date()
+            except Exception:
+                pass
+        elif 30_000 < date_val < 70_000:
+            try:
+                return (datetime(1899, 12, 30, tzinfo=UTC) + timedelta(days=date_val)).date()
+            except Exception:
+                pass
 
-    path = Path(file_path)
+    if isinstance(date_val, str) and date_val.strip():
+        clean = date_val.strip()
+        # Strip trailing timezone indicators like 'Z' or '+05:30' or '.000'
+        clean_no_tz = clean.replace("Z", "").split("+")[0].split(".")[0].strip()
+        try:
+            return datetime.fromisoformat(clean_no_tz).date()
+        except Exception:
+            pass
+
+        # Standard date format patterns
+        formats = (
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%d-%m-%Y",
+            "%m/%d/%Y",
+            "%Y/%m/%d",
+            "%d %b %Y",
+            "%d %B %Y",
+            "%b %d, %Y",
+            "%B %d, %Y",
+            "%d-%b-%Y",
+            "%d-%b-%y",
+            "%d %b %y",
+            "%Y-%m-%d %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+            "%d/%m/%Y %I:%M:%S %p",
+            "%d/%m/%Y %I:%M %p",
+            "%d-%m-%Y %I:%M %p",
+            "%Y-%m-%d %I:%M %p",
+            "%d %b %Y %H:%M",
+            "%d %b %Y, %I:%M %p",
+        )
+        for fmt in formats:
+            try:
+                return datetime.strptime(clean_no_tz, fmt).date()
+            except Exception:
+                pass
+
+        # Regex fallback for embedded dates: e.g. YYYY-MM-DD
+        m_iso = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", clean)
+        if m_iso:
+            try:
+                return date(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3)))
+            except Exception:
+                pass
+
+        # Regex fallback for DD/MM/YYYY or DD-MM-YYYY
+        m_dmy = re.search(r"\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b", clean)
+        if m_dmy:
+            try:
+                return date(int(m_dmy.group(3)), int(m_dmy.group(2)), int(m_dmy.group(1)))
+            except Exception:
+                pass
+
+    return datetime.now(UTC).date()
+
+
+def _is_attributics_author(c_by: str) -> bool:
+    """Check if author is Attributics operator or unspecified default."""
+    if not c_by:
+        return True
+    cb = c_by.lower().strip()
+    if "@attributics.com" in cb:
+        return True
+    team_names = [
+        "mrunalini", "gawande",
+        "soham", "das",
+        "neel", "shah",
+        "aalya", "mulla",
+        "naman", "dugad",
+        "attributics",
+    ]
+    return any(name in cb for name in team_names)
+
+
+def _infer_vertical_from_context(name: str, source_name: str, default_vertical: str) -> str:
+    """Infer vertical from item name or source filename (e.g. Wealth_Campaigns.csv)."""
+    # 1. From item name
+    n_lower = name.lower()
+    if "tclmoe" in n_lower:
+        return "TCL"
+    if "tchfl" in n_lower:
+        return "TCHFL"
+    if "service" in n_lower:
+        return "Services"
+    if "wealth" in n_lower:
+        return "Wealth"
+    if "moneyfy" in n_lower:
+        return "Moneyfy"
+    if "collection" in n_lower:
+        return "Collections"
+
+    # 2. From filename / folder
+    s_lower = source_name.lower()
+    if "tchfl" in s_lower:
+        return "TCHFL"
+    if "tcl" in s_lower:
+        return "TCL"
+    if "service" in s_lower:
+        return "Services"
+    if "wealth" in s_lower:
+        return "Wealth"
+    if "moneyfy" in s_lower:
+        return "Moneyfy"
+    if "collection" in s_lower:
+        return "Collections"
+
+    return default_vertical
+
+
+def _parse_single_moengage_data_rows(
+    rows_data: list[dict[str, Any]],
+    source_name: str = "export.csv",
+    default_vertical: str = "TCL",
+) -> list[NormalizedOpsRecord]:
+    """Convert raw dictionary rows from one CSV or Excel file into NormalizedOpsRecord objects."""
     records: list[NormalizedOpsRecord] = []
-    rows_data = []
-
-    if path.suffix.lower() in (".xlsx", ".xls"):
-        wb = openpyxl.load_workbook(str(path), data_only=True)
-        ws = wb.active
-        headers = [str(ws.cell(1, c).value or "").strip() for c in range(1, ws.max_column + 1)]
-        for r in range(2, ws.max_row + 1):
-            row_dict = {headers[c - 1]: ws.cell(r, c).value for c in range(1, len(headers) + 1)}
-            if any(row_dict.values()):
-                rows_data.append(row_dict)
-    else:
-        with open(path, encoding="utf-8-sig", errors="replace") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if any(row.values()):
-                    rows_data.append(row)
+    s_lower = Path(source_name).name.lower()
 
     for row in rows_data:
-        name = str(
-            row.get("Campaign Name")
-            or row.get("Campaign name")
-            or row.get("campaign_name")
-            or row.get("Name")
-            or row.get("name")
+        # 1. Determine Record Type (Node, Flow, or Campaign)
+        t_val = str(
+            row.get("Type")
+            or row.get("type")
+            or row.get("Record Type")
+            or row.get("record_type")
             or ""
-        ).strip()
+        ).lower()
+
+        if "node" in t_val or "action" in t_val:
+            rec_type = "Node"
+        elif "flow" in t_val:
+            rec_type = "Flow"
+        elif "campaign" in t_val:
+            rec_type = "Campaign"
+        elif "node" in s_lower or "action" in s_lower:
+            rec_type = "Node"
+        elif "flow" in s_lower and "campaign" not in s_lower:
+            if any(
+                k in row
+                for k in (
+                    "Node Name",
+                    "node_name",
+                    "Action Name",
+                    "action_name",
+                    "Step Name",
+                    "step_name",
+                    "Node Label",
+                    "node_label",
+                    "Message Name",
+                    "message_name",
+                )
+            ):
+                rec_type = "Node"
+            else:
+                rec_type = "Flow"
+        else:
+            if any(
+                k in row
+                for k in (
+                    "Node Name",
+                    "node_name",
+                    "Action Name",
+                    "action_name",
+                    "Step Name",
+                    "step_name",
+                    "Node Label",
+                )
+            ):
+                rec_type = "Node"
+            elif any(k in row for k in ("Flow Name", "flow_name", "Flow ID", "flow_id")) and not any(
+                k in row for k in ("Campaign Name", "campaign_name", "Campaign")
+            ):
+                rec_type = "Flow"
+            else:
+                rec_type = "Campaign"
+
+        # 2. Extract Name, Flow ID, and Flow Name
+        flow_id = str(row.get("Flow ID") or row.get("flow_id") or row.get("Flow Id") or "").strip() or None
+        flow_name = str(row.get("Flow Name") or row.get("flow_name") or row.get("Flow") or "").strip() or None
+
+        if rec_type == "Node":
+            name = str(
+                row.get("Node Name")
+                or row.get("node_name")
+                or row.get("Action Name")
+                or row.get("action_name")
+                or row.get("Step Name")
+                or row.get("step_name")
+                or row.get("Node Label")
+                or row.get("Label")
+                or row.get("label")
+                or row.get("Message Name")
+                or row.get("message_name")
+                or row.get("Campaign Name")
+                or row.get("Campaign name")
+                or row.get("campaign_name")
+                or row.get("Name")
+                or row.get("name")
+                or ""
+            ).strip()
+        elif rec_type == "Flow":
+            name = str(
+                row.get("Flow Name")
+                or row.get("flow_name")
+                or row.get("Flow")
+                or row.get("Name")
+                or row.get("name")
+                or row.get("Title")
+                or ""
+            ).strip()
+            flow_name = None
+        else:
+            name = str(
+                row.get("Campaign Name")
+                or row.get("Campaign name")
+                or row.get("campaign_name")
+                or row.get("Campaign")
+                or row.get("Name")
+                or row.get("name")
+                or row.get("Campaign Title")
+                or ""
+            ).strip()
+            flow_name = None
+            flow_id = None
+
         if not name:
             continue
 
-        raw_chan = str(row.get("Channel") or row.get("channel") or "").strip()
-        chan = infer_channel_from_name_or_raw(raw_chan, name=name)
+        # 3. Channel resolution
+        if rec_type == "Flow":
+            chan = ""
+        else:
+            raw_chan = str(
+                row.get("Channel")
+                or row.get("channel")
+                or row.get("Delivery Channel")
+                or row.get("delivery_channel")
+                or row.get("Channel Name")
+                or row.get("channel_name")
+                or row.get("Action Type")
+                or row.get("action_type")
+                or row.get("Sub Type")
+                or row.get("sub_type")
+                or row.get("Message Type")
+                or row.get("message_type")
+                or ""
+            ).strip()
+            chan = infer_channel_from_name_or_raw(raw_chan, name=name, label=row.get("Label") or s_lower)
+            if not raw_chan:
+                if "sms" in s_lower:
+                    chan = "SMS"
+                elif "whatsapp" in s_lower or "wa" in s_lower.split("_"):
+                    chan = "WhatsApp"
+                elif "rcs" in s_lower:
+                    chan = "RCS"
+                elif "email" in s_lower or "mail" in s_lower:
+                    chan = "Email"
+                elif "push" in s_lower or "pn" in s_lower.split("_"):
+                    chan = "Push"
 
+        # 4. Author & Status
         c_by = str(
-            row.get("Created By") or row.get("Created by") or row.get("created_by") or row.get("Author") or ""
+            row.get("Created By")
+            or row.get("Created by")
+            or row.get("created_by")
+            or row.get("Author")
+            or row.get("author")
+            or row.get("Owner")
+            or row.get("owner")
+            or ""
         ).strip()
 
-        date_val = (
-            row.get("Date")
-            or row.get("Created")
-            or row.get("Created At")
-            or row.get("Created at")
-            or row.get("created_at")
-            or row.get("Sent Time")
-            or row.get("sent_time")
-        )
+        status = str(
+            row.get("Status")
+            or row.get("status")
+            or row.get("Campaign Status")
+            or row.get("campaign_status")
+            or row.get("Flow Status")
+            or "Sent"
+        ).strip().title()
 
-        dt = datetime.now(UTC).date()
-        if isinstance(date_val, (datetime, date)):
-            dt = date_val.date() if isinstance(date_val, datetime) else date_val
-        elif isinstance(date_val, str) and date_val.strip():
-            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%Y-%m-%d %H:%M:%S"):
-                try:
-                    dt = datetime.strptime(date_val.split(".")[0].strip(), fmt).date()
-                    break
-                except Exception:
-                    pass
+        # 5. Date resolution
+        date_val = None
+        for date_key in (
+            "Date", "date", "Created", "created", "Created At", "Created at", "created_at",
+            "Sent Time", "sent_time", "Send Date", "send_date", "Send Time", "send_time",
+            "Start Time", "start_time", "Campaign Start Time", "Published At", "published_at",
+            "Execution Time", "execution_time", "Schedule Time", "schedule_time",
+            "Date Created", "date_created", "Trigger Time", "trigger_time",
+            "Modified At", "modified_at", "Updated At", "updated_at",
+        ):
+            if row.get(date_key):
+                date_val = row[date_key]
+                break
 
+        dt = _parse_flex_date(date_val)
+
+        # 6. Vertical and Scope resolution
+        vertical = _infer_vertical_from_context(name, source_name, default_vertical)
         is_test = _is_test_campaign(name)
-        is_attributics = "@attributics.com" in c_by.lower() if c_by else True
-        vertical = _infer_vertical_from_name(name, default_vertical)
-        in_scope = is_attributics and not is_test
+        is_attributics = _is_attributics_author(c_by)
+        in_scope = (status.lower() == "active") if vertical == "Collections" else (is_attributics and not is_test)
 
         records.append(
             NormalizedOpsRecord(
                 vertical=vertical,
-                type="Campaign",
+                type=rec_type,
                 channel=chan,
                 date=dt.isoformat(),
                 week_start=_compute_week_start(dt),
@@ -794,16 +1046,152 @@ def parse_moengage_export_file(file_path: Path | str, default_vertical: str = "T
                 is_test=is_test,
                 name=name,
                 created_by=c_by,
-                source=f"{vertical} / Export",
-                status=str(row.get("Status") or row.get("status") or "Sent"),
+                source=f"{vertical} / {Path(source_name).name}",
+                status=status,
+                flow_name=flow_name,
+                flow_id=flow_id,
             )
         )
 
     return records
 
 
+def _extract_rows_from_file_bytes(content_bytes: bytes, filename: str) -> list[dict[str, Any]]:
+    """Extract row dictionaries from CSV or Excel file bytes."""
+    import csv
+    import io
+
+    import openpyxl
+
+    ext = Path(filename).suffix.lower()
+    rows: list[dict[str, Any]] = []
+
+    if ext in (".xlsx", ".xls"):
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(content_bytes), data_only=True)
+            ws = wb.active
+            headers = [str(ws.cell(1, c).value or "").strip() for c in range(1, ws.max_column + 1)]
+            for r in range(2, ws.max_row + 1):
+                row_dict = {headers[c - 1]: ws.cell(r, c).value for c in range(1, len(headers) + 1)}
+                if any(row_dict.values()):
+                    rows.append(row_dict)
+        except Exception as exc:
+            logger.warning("Could not parse excel file %s: %s", filename, exc)
+    else:
+        # CSV / TSV
+        try:
+            text = content_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            try:
+                text = content_bytes.decode("latin-1", errors="replace")
+            except Exception:
+                text = content_bytes.decode("utf-8", errors="replace")
+
+        delimiter = "\t" if ext == ".tsv" or ("\t" in text.splitlines()[0] if text.splitlines() else False) else ","
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+        for row in reader:
+            if any(row.values()):
+                rows.append(row)
+
+    return rows
+
+
+def parse_moengage_export_file(file_path: Path | str, default_vertical: str = "TCL") -> list[NormalizedOpsRecord]:
+    """
+    Parse a campaign export file downloaded directly from MoEngage.
+    Supports:
+    - ZIP archives containing multiple CSV / XLSX files across workspaces or date batches
+    - Single CSV / TSV / XLSX / XLS files
+    - Subdirectories inside zip archives (skips __MACOSX and hidden files)
+    """
+    import io
+    import zipfile
+
+    path = Path(file_path)
+    if not path.exists():
+        logger.warning("MoEngage export file not found: %s", path)
+        return []
+
+    records: list[NormalizedOpsRecord] = []
+
+    # 1. Handle ZIP Archive (either extension or zip magic bytes)
+    if path.suffix.lower() == ".zip" or zipfile.is_zipfile(path):
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    fname = info.filename
+                    base_name = Path(fname).name
+                    # Skip macOS metadata and hidden files
+                    if "__MACOSX" in fname or base_name.startswith("."):
+                        continue
+
+                    ext = Path(fname).suffix.lower()
+                    if ext in (".csv", ".tsv", ".xlsx", ".xls"):
+                        content = zf.read(fname)
+                        rows = _extract_rows_from_file_bytes(content, fname)
+                        file_recs = _parse_single_moengage_data_rows(
+                            rows, source_name=fname, default_vertical=default_vertical
+                        )
+                        records.extend(file_recs)
+                    elif ext == ".zip":
+                        # Handle nested ZIP archive
+                        try:
+                            nested_bytes = zf.read(fname)
+                            with zipfile.ZipFile(io.BytesIO(nested_bytes), "r") as nzf:
+                                for ninfo in nzf.infolist():
+                                    if ninfo.is_dir():
+                                        continue
+                                    nfname = ninfo.filename
+                                    nbase = Path(nfname).name
+                                    if "__MACOSX" in nfname or nbase.startswith("."):
+                                        continue
+                                    next_ext = Path(nfname).suffix.lower()
+                                    if next_ext in (".csv", ".tsv", ".xlsx", ".xls"):
+                                        nrows = _extract_rows_from_file_bytes(nzf.read(nfname), nfname)
+                                        records.extend(
+                                            _parse_single_moengage_data_rows(
+                                                nrows, source_name=nfname, default_vertical=default_vertical
+                                            )
+                                        )
+                        except Exception as n_err:
+                            logger.warning("Could not unpack nested zip %s: %s", fname, n_err)
+            return records
+        except Exception as exc:
+            logger.warning("Error unpacking MoEngage export zip %s: %s", path, exc)
+            return []
+
+    # 2. Handle Single CSV / XLSX file
+    content = path.read_bytes()
+    rows = _extract_rows_from_file_bytes(content, path.name)
+    return _parse_single_moengage_data_rows(rows, source_name=path.name, default_vertical=default_vertical)
+
+
 def ingest_moengage_export_file(file_path: Path | str, default_vertical: str = "TCL") -> dict[str, Any]:
-    """Ingest a MoEngage export file, merge with cached records, update live Excel, and return metrics."""
+    """
+    Ingest a MoEngage export file (ZIP or CSV), merge with cached records,
+    update live Excel, and return accurate metrics.
+    """
+    import zipfile
+
+    path = Path(file_path)
+    files_count = 1
+    if path.suffix.lower() == ".zip" or (path.exists() and zipfile.is_zipfile(path)):
+        try:
+            with zipfile.ZipFile(path, "r") as zf:
+                valid_files = [
+                    info.filename
+                    for info in zf.infolist()
+                    if not info.is_dir()
+                    and "__MACOSX" not in info.filename
+                    and not Path(info.filename).name.startswith(".")
+                    and Path(info.filename).suffix.lower() in (".csv", ".tsv", ".xlsx", ".xls", ".zip")
+                ]
+                files_count = max(len(valid_files), 1)
+        except Exception:
+            files_count = 1
+
     new_records = parse_moengage_export_file(file_path, default_vertical=default_vertical)
     cached = load_cached_ops_records()
 
@@ -824,7 +1212,11 @@ def ingest_moengage_export_file(file_path: Path | str, default_vertical: str = "
 
     return {
         "ok": True,
+        "files_parsed": files_count,
         "new_records_parsed": len(new_records),
         "new_records_added": added_count,
+        "campaigns_count": sum(1 for r in new_records if r.type == "Campaign"),
+        "flows_count": sum(1 for r in new_records if r.type == "Flow"),
+        "nodes_count": sum(1 for r in new_records if r.type == "Node"),
         "total_records_now": len(merged),
     }

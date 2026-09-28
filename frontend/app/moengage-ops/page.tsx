@@ -78,13 +78,32 @@ export default function MoEngageOpsPage() {
       setError(null);
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch('/api/moengage/ops/upload-export', {
+
+      const qs = new URLSearchParams();
+      if (mode) qs.set('mode', mode);
+      if (customStart) qs.set('custom_start', customStart);
+      if (customEnd) qs.set('custom_end', customEnd);
+      if (workspaceFilter) qs.set('workspace_filter', workspaceFilter);
+
+      const res = await fetch(`/api/moengage/ops/upload-export?${qs.toString()}`, {
         method: 'POST',
         body: formData,
       });
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.detail || 'Upload failed');
+      }
       const json = await res.json();
-      alert(`Successfully imported ${json.result?.new_records_parsed || 0} campaigns from ${file.name}!`);
+      const filesCount = json.result?.files_parsed || 1;
+      const count = json.result?.new_records_parsed || 0;
+      const camps = json.result?.campaigns_count || 0;
+      const flows = json.result?.flows_count || 0;
+      const nodes = json.result?.nodes_count || 0;
+      const partsSummary =
+        filesCount > 1
+          ? `across ${filesCount} CSV files (${camps} campaigns, ${flows} flows, ${nodes} action nodes)`
+          : `(${camps} campaigns, ${flows} flows, ${nodes} action nodes)`;
+      alert(`Successfully imported ${count} items ${partsSummary} from ${file.name}!`);
       await loadDashboard();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -204,7 +223,7 @@ export default function MoEngageOpsPage() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileUpload}
-            accept=".csv,.xlsx,.xls"
+            accept=".zip,.csv,.xlsx,.xls"
             className="hidden"
           />
           <button
@@ -217,7 +236,7 @@ export default function MoEngageOpsPage() {
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            {uploading ? 'Importing...' : 'Import MoEngage Export CSV'}
+            {uploading ? 'Importing...' : 'Import MoEngage Export (ZIP / CSV)'}
           </button>
 
           <button

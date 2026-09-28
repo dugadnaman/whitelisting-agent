@@ -4329,11 +4329,16 @@ def update_moengage_ops_workspace(
 async def upload_moengage_export_endpoint(
     file: UploadFile = File(...),
     vertical: str = Query("TCL"),
+    mode: str = Query("last_week"),
+    custom_start: str | None = Query(None),
+    custom_end: str | None = Query(None),
+    workspace_filter: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Upload and ingest a raw campaign export file (CSV/XLSX) downloaded directly
+    Upload and ingest a raw campaign export file (ZIP/CSV/XLSX) downloaded directly
     from the MoEngage Dashboard (Export button). Instantly updates the ops metrics.
+    Supports single CSV/XLSX files or ZIP archives containing multiple CSV files.
     """
     from moengage_ops_client import compute_ops_dashboard_metrics, ingest_moengage_export_file, load_cached_ops_records
 
@@ -4345,7 +4350,13 @@ async def upload_moengage_export_endpoint(
     try:
         res = ingest_moengage_export_file(tmp_path, default_vertical=vertical)
         records = load_cached_ops_records()
-        metrics = compute_ops_dashboard_metrics(records, mode="last_week")
+        metrics = compute_ops_dashboard_metrics(
+            records,
+            mode=mode,
+            custom_start=custom_start,
+            custom_end=custom_end,
+            workspace_filter=workspace_filter,
+        )
         return _json_safe(
             {
                 "ok": True,
@@ -4357,7 +4368,6 @@ async def upload_moengage_export_endpoint(
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
-
 
 class TicketTransferRequest(BaseModel):
     issue_key: str
