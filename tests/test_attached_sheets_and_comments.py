@@ -122,3 +122,52 @@ def test_comments_and_revision_parsing():
     # 2. Verify revised copy from comment was parsed into WhatsApp templates
     assert len(brief.comment_updates) >= 1
     assert any("Diwali loan offer" in w["body"] for w in brief.whatsapp_templates)
+
+
+def test_targeting_sheet_does_not_hallucinate_whatsapp_and_rcs_templates(tmp_path: Path):
+    """Verify campaign targeting/cohort sheets do not hallucinate audience segment names into templates.
+
+    Specifically reproduces TCN-534 where segment names were misread as 200+ WhatsApp/RCS templates:
+    - 'WA Utility Regional DND + Non Clickers ( exclude World tourism day users)'
+    - 'Email (Remove previous rounds Openers + Past 60 Days Open + Capping 60k) + WA Utility Regional ( DND & Non clickers)'
+    - 'PN English App Users - Non Clickers of Durga Pooja/ Dussehra'
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Targeting Matrix"
+
+    # Header row describing campaign planner segments
+    ws.append(["Date", "Channel", "Segment Name", "Targeting Criteria", "Base Count"])
+
+    # Targeting rows (cohorts, exclusions, caps, under 25 words)
+    ws.append(["2026-09-28", "WA", "Seg_1", "WA Utility Regional DND + Non Clickers ( exclude World tourism day users)", "45000"])
+    ws.append(["2026-09-28", "WA", "Seg_2", "Email (Remove previous rounds Openers + Past 60 Days Open + Capping 60k) + WA Utility Regional ( DND & Non clickers)", "60000"])
+    ws.append(["2026-09-28", "PN", "Seg_3", "PN English App Users - Non Clickers of Durga Pooja/ Dussehra", "120000"])
+    ws.append(["2026-09-28", "RCS", "Seg_4", "Regional DND Non Clickers of Gandhi Jayanti exclusion list", "35000"])
+
+    # Sheet 2: The actual real campaign copy (30+ words)
+    ws2 = wb.create_sheet(title="Campaign Copies")
+    ws2.append(["Channel", "Content"])
+    real_wa_copy = (
+        "Dear {#CustomerName#}, Celebrate this festive season with Tata Capital Personal Loan of up to ₹5 Lakhs "
+        "at attractive interest rates starting from 10.99% p.a. Flexible repayment tenure up to 60 months with zero foreclosure charges. "
+        "Apply online in 2 minutes: https://u3.mnge.co/festive. T&C Apply. - Tata Capital Limited"
+    )
+    ws2.append(["WhatsApp", real_wa_copy])
+
+    file_path = tmp_path / "tcn_534_planner.xlsx"
+    wb.save(file_path)
+
+    items = extract_templates_from_excel_file(file_path)
+
+    # NONE of the 4 targeting cohort rows should be extracted as templates
+    for item in items:
+        assert "Non Clickers" not in item["text"]
+        assert "Openers" not in item["text"]
+        assert "App Users" not in item["text"]
+        assert "DND" not in item["text"]
+
+    # Only the genuine campaign copy should be extracted
+    assert len(items) == 1
+    assert items[0]["channel"] == "WA"
+    assert "Tata Capital Personal Loan" in items[0]["text"]

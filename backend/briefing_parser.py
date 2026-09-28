@@ -911,7 +911,8 @@ def is_pure_cta_cell(s: str) -> bool:
 def is_valid_template_copy(text: str) -> bool:
     """
     Validate that a spreadsheet cell contains genuine customer-facing template copy,
-    rejecting campaign tracking codes, operational notes, counts, and metadata.
+    rejecting audience targeting criteria, cohort descriptions, tracking codes,
+    operational notes, counts, and metadata.
     """
     if not text:
         return False
@@ -922,12 +923,33 @@ def is_valid_template_copy(text: str) -> bool:
     # 0. Reject pure CTA button cells (they are buttons, not message bodies)
     if is_pure_cta_cell(s):
         return False
+
+    s_low = s.lower()
+
     # 1. Reject internal tracking codes / campaign IDs (e.g. TCLMOE_..., PAPL_..., etc.)
     if "\n" not in s and re.match(r"^(?:TCLMOE|TCL|PAPL|PQPL|UCL|TCF|MOE|SEG)_[A-Za-z0-9_\'-]+$", s, re.IGNORECASE):
         return False
 
-    # 2. Reject internal operational notes, file manifests, and count tables
-    s_low = s.lower()
+    # 2. Reject audience targeting criteria, cohort names, exclusion lists, and caps
+    targeting_markers = (
+        "non clicker", "non-clicker", "non clickers", "non-clickers", "non click", "non-click",
+        "non opener", "non-opener", "non openers", "non-openers", "openers", "opener",
+        "regional dnd", "utility regional", "non dnd", "dnd &", "dnd +",
+        "app users", "web users", "app user", "web user",
+        "previous rounds", "previous round", "past 60 days", "past 30 days", "past 90 days",
+        "last 60 days", "last 30 days", "last 90 days",
+        "capping", "exclusion list", "suppression", "target base", "base seg",
+        "segment count", "segment name", "cohort", "dnd & non clicker", "dnd + non clicker",
+        "tourism day users", "world tourism day", "durga pooja", "dussehra", "gandhi jayanti",
+    )
+    if any(m in s_low for m in targeting_markers):
+        return False
+
+    # Reject parenthetical exclusion syntax e.g. "( exclude ... )" or "( remove ... )"
+    if re.search(r"\(\s*(?:exclude|remove|capping)\b", s_low):
+        return False
+
+    # 3. Reject internal operational notes, file manifests, and count tables
     if any(
         p in s_low
         for p in [
@@ -952,11 +974,11 @@ def is_valid_template_copy(text: str) -> bool:
     ):
         return False
 
-    # 3. Reject pipe-separated database / tracking headers
+    # 4. Reject pipe-separated database / tracking headers
     if "|" in s and ("created_at" in s_low or "valid_until" in s_low or "grand total" in s_low):
         return False
 
-    # 4. Reject section headers that masquerade as copy
+    # 5. Reject section headers that masquerade as copy
     if "\n" not in s and len(s) < 60:
         if any(
             h in s_low
@@ -964,68 +986,55 @@ def is_valid_template_copy(text: str) -> bool:
         ):
             return False
 
-    # 5. Must contain at least 4 whitespace-separated words
+    # 6. Word count validation:
+    # Candidate templates under 25 words are rejected UNLESS they start with an explicit
+    # customer greeting ("Dear ...", "Hi ...", "Hey ...") AND contain genuine banking/loan offers.
     words = s.split()
+    has_greeting = bool(re.search(r"\b(dear|hi|hello|hey|namaste|congratulations)\b", s_low))
+    has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
+    has_link = bool(re.search(r"(?:https?://|www\.|<link>|u3\.mnge\.co)", s_low))
+    has_structured = ("body:" in s_low) or ("title:" in s_low)
+    has_brand = ("tata capital" in s_low) or ("tatacapital" in s_low) or ("bajaj" in s_low)
+    has_action_offer = bool(re.search(r"\b(apply|get|enjoy|switch|transfer|repay|check)\b", s_low)) and bool(
+        re.search(r"\b(loan|loans|emi|emis|fund|funds|interest|offer|offers)\b", s_low)
+    )
+
+    has_customer_offer = bool(
+        re.search(
+            r"\b(loan|loans|emi|emis|offer|offers|interest|apply|pay|disburs|pre-approved|approved|card|account|tenure|roi|funds?)\b|"
+            r"(?:₹|rs\.?\s*\d+|inr\s*\d+)",
+            s_low,
+        )
+    )
+    if len(words) < 25:
+        valid_feature = (
+            has_greeting
+            or has_placeholder
+            or has_link
+            or has_structured
+            or (has_brand and has_customer_offer)
+            or has_action_offer
+        )
+        if not valid_feature:
+            return False
+        if not has_customer_offer:
+            return False
+
+    # Must contain at least 4 whitespace-separated words in any case
     if len(words) < 4:
         return False
 
-    # 6. Must contain human customer messaging vocabulary or placeholders
+    # 7. Must contain human customer messaging vocabulary or placeholders
     has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
-    has_greeting = bool(re.search(r"\b(dear|hi|hello|hey|namaste|greeting|welcome|congratulations)\b", s_low))
-    has_messaging_keywords = any(
-        k in s_low
-        for k in [
-            "loan",
-            "offer",
-            "tata",
-            "capital",
-            "emi",
-            "fund",
-            "funds",
-            "interest",
-            "rate",
-            "roi",
-            "apply",
-            "pay",
-            "tap",
-            "click",
-            "₹",
-            "rs.",
-            "rs ",
-            "inr",
-            "lakh",
-            "lacs",
-            "crore",
-            "card",
-            "account",
-            "disbursal",
-            "bank",
-            "due",
-            "cashback",
-            "voucher",
-            "disclaimer",
-            "t&c",
-            "terms",
-            "journey",
-            "benefit",
-            "saving",
-            "savings",
-            "travel",
-            "trip",
-            "holiday",
-            "upgrade",
-            "repayment",
-            "debt",
-            "debts",
-            "eligibility",
-            "pre-approved",
-            "pre approved",
-            "approved",
-            "pre-qualified",
-            "instant",
-            "quick",
-            "flexible",
-        ]
+    has_messaging_keywords = bool(
+        re.search(
+            r"\b(loan|loans|offer|offers|tata|capital|emi|emis|interest|rate|roi|apply|pay|"
+            r"lakh|lakhs|lacs|crore|card|cards|account|disbursal|bank|due|cashback|voucher|"
+            r"disclaimer|t&c|terms|benefit|benefits|saving|savings|travel|trip|holiday|"
+            r"upgrade|repayment|debt|debts|eligibility|pre-approved|approved|instant|quick|flexible)\b|"
+            r"(?:₹|rs\.?\s*\d+|inr\s*\d+)",
+            s_low,
+        )
     )
 
     return has_placeholder or has_greeting or has_messaging_keywords
@@ -1035,7 +1044,12 @@ def _normalize_channel_tag(tag: str) -> str | None:
     """Normalize any string (e.g. 'WhatsApp', 'WA', 'RCS', 'SMS Promotional') to canonical channel."""
     if not tag:
         return None
-    t = re.sub(r"[^a-zA-Z0-9]", " ", str(tag)).upper()
+    s_str = str(tag).strip()
+    # Channel tags are concise labels (e.g. 'WA', 'RCS', 'WhatsApp Content').
+    # Reject full cohort sentences like 'WA Utility Regional DND + Non Clickers...'.
+    if len(s_str.split()) > 4 or len(s_str) > 30:
+        return None
+    t = re.sub(r"[^a-zA-Z0-9]", " ", s_str).upper()
     words = t.split()
     if "WHATSAPP" in words or "WA" in words or "WHATSAPP" in t:
         return "WA"
@@ -1048,7 +1062,6 @@ def _normalize_channel_tag(tag: str) -> str | None:
     if "EMAIL" in words or "MAILER" in words:
         return "EMAIL"
     return None
-
 
 def _match_sheet_channel(sname: str) -> str | None:
     norm = re.sub(r"[^A-Za-z0-9]", " ", sname).strip().upper()
@@ -1140,6 +1153,20 @@ def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
     return sheets
 
 
+def _is_targeting_or_planner_row(row: list[str]) -> bool:
+    """Detect if a row is describing audience targeting cohorts rather than creative copy."""
+    row_text = " ".join(row).lower()
+    targeting_markers = (
+        "non clicker", "non-clicker", "non clickers", "non-clickers", "non click", "non-click",
+        "non opener", "non-opener", "non openers", "non-openers", "openers", "opener",
+        "regional dnd", "utility regional", "non dnd", "app users", "web users",
+        "previous rounds", "previous round", "past 60 days", "past 30 days", "past 90 days",
+        "last 60 days", "last 30 days", "last 90 days",
+        "capping", "exclusion list", "suppression", "target base", "base seg",
+        "segment name", "cohort", "dnd & non clicker", "dnd + non clicker",
+        "tourism day users", "world tourism day", "durga pooja", "dussehra", "gandhi jayanti",
+    )
+    return any(marker in row_text for marker in targeting_markers)
 def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[str, str]]:
     """
     Universally parse template content from 2D raw string rows of any sheet.
@@ -1202,7 +1229,20 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
     )
     btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
 
+    targeting_header_keywords = (
+        "segment", "targeting", "cohort", "audience", "base", "count",
+        "volume", "capping", "dnd", "exclusion", "criteria", "sftp",
+        "remarks", "comments", "planner", "schedule", "execution",
+    )
+    targeting_col_indices = {
+        idx for idx, h in enumerate(header_row) if any(th in h for th in targeting_header_keywords)
+    }
+
     for r_num, row in enumerate(raw_rows[start_idx:], start=start_idx + 1):
+        # Skip rows describing audience targeting cohorts rather than creative copy
+        if _is_targeting_or_planner_row(row):
+            continue
+
         # 1. Section header (only when ALL cells are short and no long copy exists)
         has_long_copy = any(len(c) > 25 for c in row)
         if not has_long_copy:
@@ -1215,7 +1255,6 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                     current_channel = c_norm
                     break
             continue
-
         # 2. Check channel column
         if chan_col_idx is not None and chan_col_idx < len(row):
             row_chan = _normalize_channel_tag(row[chan_col_idx])
@@ -1247,6 +1286,7 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                 item_dict: dict[str, str] = {
                     "channel": active_chan,
                     "text": body_val,
+                    "raw_text": body_val,
                     "variant": f"Variant {r_num}",
                     "source": f"excel_{sname}_r{r_num}",
                 }
@@ -1274,6 +1314,7 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
 
         # 4. Otherwise scan non-channel columns for copy (multilingual, multi-column, or row lists)
         skip_indices = {chan_col_idx} if chan_col_idx is not None else set()
+        skip_indices.update(targeting_col_indices)
         for c_idx, cell in enumerate(row):
             if c_idx in skip_indices:
                 continue
@@ -1290,6 +1331,7 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                 item_dict = {
                     "channel": active_chan,
                     "text": clean_cell,
+                    "raw_text": clean_cell,
                     "variant": variant,
                     "source": f"excel_{sname}_r{r_num}",
                 }
@@ -1684,7 +1726,7 @@ def extract_templates_from_excel_file(filepath: Path, target_month: str | None =
         else:
             sheet_items = _parse_raw_sheet_rows(raw_rows, sname)
         for item in sheet_items:
-            raw_t = item.get("text", "")
+            raw_t = item.get("raw_text") or item.get("text", "")
             if not is_valid_template_copy(raw_t):
                 continue
             norm_key = re.sub(r"\s+", " ", raw_t).strip().lower()
@@ -2196,6 +2238,22 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 existing_footer=item.get("footer"),
             )
 
+            # Strict 25-word validation for WhatsApp campaign drafts:
+            # Unwanted cohort descriptions, audience criteria, and notes (< 25 words)
+            # must not be counted or emitted unless starting with an explicit customer greeting.
+            words = clean_body.split()
+            has_greeting = bool(re.search(r"^(?:dear|hi|hello|hey|namaste)\b", clean_body.lower()))
+            has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\})", clean_body))
+            has_link = bool(re.search(r"(?:https?://|www\.|<link>|u3\.mnge\.co)", clean_body.lower()))
+            has_brand_offer = (
+                ("tata capital" in clean_body.lower() or "tatacapital" in clean_body.lower() or "bajaj" in clean_body.lower())
+                and bool(re.search(r"\b(loan|emi|offer|interest|apply|disburs|pre-approved)\b", clean_body.lower()))
+            )
+            has_action_offer = bool(re.search(r"\b(apply|get|enjoy|switch|transfer|repay|check)\b", clean_body.lower())) and bool(
+                re.search(r"\b(loan|loans|emi|emis|fund|funds|interest|offer|offers)\b", clean_body.lower())
+            )
+            if len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_brand_offer or has_action_offer):
+                continue
             # Apply ticket intent instructions (e.g. No CTA, Utility category)
             if ticket_intent.get("no_cta"):
                 b_type = "NONE"
@@ -2248,8 +2306,22 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 existing_btn_text=item.get("button_text"),
                 existing_btn_url=item.get("button_url"),
             )
-            var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
 
+            # Strict 25-word validation for RCS campaign drafts
+            words = clean_body.split()
+            has_greeting = bool(re.search(r"^(?:dear|hi|hello|hey|namaste)\b", clean_body.lower()))
+            has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\})", clean_body))
+            has_link = bool(re.search(r"(?:https?://|www\.|<link>|u3\.mnge\.co)", clean_body.lower()))
+            has_structured = ("body:" in clean_body.lower()) or ("title:" in clean_body.lower())
+            has_brand_offer = (
+                ("tata capital" in clean_body.lower() or "tatacapital" in clean_body.lower() or "bajaj" in clean_body.lower())
+                and bool(re.search(r"\b(loan|emi|offer|interest|apply|disburs|pre-approved)\b", clean_body.lower()))
+            )
+            has_action_offer = bool(re.search(r"\b(apply|get|enjoy|switch|transfer|repay|check)\b", clean_body.lower())) and bool(
+                re.search(r"\b(loan|loans|emi|emis|fund|funds|interest|offer|offers)\b", clean_body.lower())
+            )
+            if len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_structured or has_brand_offer or has_action_offer):
+                continue
             raw_rcs_title = item.get("title") or item.get("header") or ""
             if raw_rcs_title and not is_internal_identifier(raw_rcs_title, summary=summary):
                 rcs_card_title = raw_rcs_title
