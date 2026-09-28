@@ -380,7 +380,60 @@ def extract_and_strip_cta(
             if not extracted_footer:
                 extracted_footer = "T&C apply"
             sline = sline[: m_tail.start()].strip()
-        # 2. Check for inline or standalone CTA
+        # 2. Check for CTA with variable (e.g. 'CTA {{4}}', 'CTA: {{1}}', 'Button: {{2}}')
+        m_cta_var = re.match(
+            r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*Button|CTA|Button|Link|Apply)\s*[:\-–]?\s*(\{\{[^{}]+\}\}|\{#[^#]+#\}|\[[^\[\]]+\])\s*$",
+            sline,
+            re.IGNORECASE,
+        )
+        if m_cta_var:
+            var_token = m_cta_var.group(1).strip()
+            if not extracted_url or extracted_url == DEFAULT_CTA_URL:
+                extracted_url = f"https://u3.mnge.co/{var_token}"
+            if not extracted_btn_text or extracted_btn_text == "Check Offer":
+                extracted_btn_text = "Apply Now"
+            continue
+
+        # 3. Check for CTA with label and URL/variable (e.g. 'CTA: Apply Now -> https://...' or 'CTA: Apply Now (https://...)')
+        m_cta_arrow = re.match(
+            r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*Button|CTA|Button)\s*[:\-–]?\s*(.*?)\s*(?:->|=>|–|—|\||\()\s*(https?://[^\s()]+|<link>|\{\{[^{}]+\}\}|\{#[^#]+#\})(?:\))?\s*$",
+            sline,
+            re.IGNORECASE,
+        )
+        if m_cta_arrow:
+            lbl = m_cta_arrow.group(1).strip("*_~ ")
+            target_val = m_cta_arrow.group(2).strip()
+            if lbl and len(lbl) <= 25:
+                extracted_btn_text = lbl.title()
+            if target_val.startswith("http"):
+                extracted_url = target_val
+            elif target_val.startswith(("{", "<", "[")):
+                extracted_url = f"https://u3.mnge.co/{target_val}"
+            continue
+
+        # 4. Check for CTA label only (e.g. 'CTA: Apply Now', 'CTA Button: Check Eligibility', 'Button: Explore Offers')
+        m_cta_lbl = re.match(
+            r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*Button|CTA|Button)\s*[:\-–]\s*(.+)$",
+            sline,
+            re.IGNORECASE,
+        )
+        if m_cta_lbl:
+            raw_val = m_cta_lbl.group(1).strip("*_~ ")
+            m_u = re.search(url_pat, raw_val)
+            if m_u:
+                extracted_url = m_u.group(1)
+                lbl = re.sub(url_pat, "", raw_val).strip("*_~ :-–")
+                if lbl and len(lbl) <= 25:
+                    extracted_btn_text = lbl.title()
+            elif len(raw_val) <= 25 and not any(k in raw_val.lower() for k in ("none", "n/a", "no cta")):
+                extracted_btn_text = raw_val.title()
+            continue
+
+        # 5. Check for standalone empty CTA tag
+        if re.match(r"^\s*CTA\s*[:\-–]?\s*$", sline, re.IGNORECASE):
+            continue
+
+        # 6. Check for inline or standalone CTA with URL
         has_url = re.search(url_pat, sline)
         inline_m = cta_inline_pat.search(sline)
         is_url_only = bool(re.match(r"^\s*(?:" + url_pat + r")\s*$", sline))
@@ -427,7 +480,6 @@ def extract_and_strip_cta(
                 elif c_url.startswith("http"):
                     extracted_url = c_url
             continue
-
         cleaned_lines.append(line)
 
     clean_body = "\n".join(cleaned_lines)

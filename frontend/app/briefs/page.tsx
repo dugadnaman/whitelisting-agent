@@ -1284,7 +1284,7 @@ export default function JiraBriefsPage() {
                               )}
 
                               {isEditing ? (
-                                <div className="space-y-2">
+                                <div className="space-y-2.5">
                                   <div>
                                     <label className="block text-[11px] text-gray-500 mb-1">Card Title:</label>
                                     <input
@@ -1303,13 +1303,43 @@ export default function JiraBriefsPage() {
                                       className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded bg-white"
                                     />
                                   </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <div>
+                                      <label className="block text-[11px] text-gray-500 mb-1">Button Label (CTA):</label>
+                                      <input
+                                        type="text"
+                                        value={rcs.action_label || ''}
+                                        onChange={(e) => updateRcsField(idx, 'action_label', e.target.value)}
+                                        placeholder="e.g. Apply Now"
+                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-medium"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[11px] text-gray-500 mb-1">Button Destination URL:</label>
+                                      <input
+                                        type="text"
+                                        value={rcs.action_url || ''}
+                                        onChange={(e) => updateRcsField(idx, 'action_url', e.target.value)}
+                                        placeholder="https://u3.mnge.co/"
+                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
+                                      />
+                                    </div>
+                                  </div>
                                 </div>
                               ) : (
-                                <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 space-y-1">
+                                <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 space-y-2.5">
                                   <h4 className="font-bold text-xs text-gray-900">{rcs.card_title}</h4>
                                   <p className="font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
                                     {rcs.body}
                                   </p>
+                                  {(rcs.action_label || rcs.action_url) && (
+                                    <div className="pt-2 border-t border-gray-100 flex items-center gap-2 text-xs">
+                                      <span className="text-gray-400">CTA Button:</span>
+                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
+                                        🔗 {rcs.action_label || 'Apply Now'} ({rcs.action_url || 'https://u3.mnge.co/'})
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>

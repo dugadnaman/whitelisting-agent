@@ -113,3 +113,48 @@ def test_parse_jira_brief_end_to_end_removes_cta_from_wa_body():
     assert wa["button_type"] == "URL"
     assert wa["button_text"] == "Check Your Offer"
     assert wa["button_url"] == "https://u3.mnge.co/"
+
+
+def test_cta_variable_extraction_and_stripping():
+    """Verify CTA line with variable (e.g. 'CTA {{4}}') is extracted and stripped from body."""
+    body = (
+        "⚡ Funds in 24 Hours!\n"
+        "Hi {{1}}, your Tata Capital {{2}} offer up to ₹{{3}} is ready.\n"
+        "Need quick funds for medical needs, travel, bills, or urgent expenses?\n"
+        "💰 Amount credited within 24 hours*\n"
+        "✅ Minimal paperwork\n"
+        "⚡ Instant approval\n\n"
+        "CTA {{4}}"
+    )
+    clean_body, btn_text, btn_url, footer = extract_and_strip_cta(body)
+    assert "CTA {{4}}" not in clean_body
+    assert btn_text == "Apply Now"
+    assert btn_url == "https://u3.mnge.co/{{4}}"
+
+
+def test_cta_label_with_arrow_syntax():
+    """Verify 'CTA: Apply Online -> https://tatacapital.com/pl' extracts label and URL."""
+    body = (
+        "Consolidate your outstanding loans into a single flexible EMI.\n"
+        "CTA: Apply Online -> https://tatacapital.com/pl\n"
+        "T&C apply."
+    )
+    clean_body, btn_text, btn_url, footer = extract_and_strip_cta(body)
+    assert "CTA: Apply Online" not in clean_body
+    assert "https://tatacapital.com/pl" not in clean_body
+    assert btn_text == "Apply Online"
+    assert btn_url == "https://tatacapital.com/pl"
+    assert footer == "T&C apply"
+
+
+def test_cta_label_without_url():
+    """Verify 'CTA: Apply Now' without URL extracts label and uses default URL."""
+    body = (
+        "Special pre-approved loan of up to ₹5 Lakhs is waiting for you.\n"
+        "CTA: Apply Now\n"
+        "T&C apply."
+    )
+    clean_body, btn_text, btn_url, footer = extract_and_strip_cta(body)
+    assert "CTA: Apply Now" not in clean_body
+    assert btn_text == "Apply Now"
+    assert btn_url == "https://u3.mnge.co/"
