@@ -393,8 +393,45 @@ def extract_and_strip_cta(
             if not extracted_btn_text or extracted_btn_text == "Check Offer":
                 extracted_btn_text = "Apply Now"
             continue
+        # 3. 'Tap to proceed ⬇' or 'Click to proceed' or 'Tap to apply 📲' or 'Tap to know more'
+        m_tap = re.match(
+            r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:tap|click|press)\s+(?:here\s+)?(?:to\s+|on\s+)?(?:proceed|apply|continue|check|explore|avail|know\s+more|view|visit|register)\b(?:\s*[:\-–]?\s*(.*?))?(?:\s*[⬇️👇📲👉🔗▶️])?\s*$",
+            sline,
+            re.IGNORECASE,
+        )
+        if m_tap:
+            tail = (m_tap.group(1) or "").strip("*_~ ")
+            m_u = re.search(url_pat, tail)
+            if m_u:
+                extracted_url = m_u.group(1)
+            elif not extracted_url or extracted_url == DEFAULT_CTA_URL:
+                extracted_url = DEFAULT_CTA_URL
 
-        # 3. Check for CTA with label and URL/variable (e.g. 'CTA: Apply Now -> https://...' or 'CTA: Apply Now (https://...)')
+            if "proceed" in lower_line:
+                extracted_btn_text = "Proceed"
+            elif "apply" in lower_line:
+                extracted_btn_text = "Apply Now"
+            elif "explore" in lower_line:
+                extracted_btn_text = "Explore Now"
+            elif "know more" in lower_line:
+                extracted_btn_text = "Know More"
+            else:
+                extracted_btn_text = "Apply Now"
+            continue
+
+        # 3b. Standalone emoji CTA (e.g. '👉 Apply Now' or '👉 Proceed ⬇')
+        m_emoji_cta = re.match(
+            r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)+\s*(apply\s*now|proceed|check\s*offer|explore\s*now|know\s*more)\s*(?:[⬇️👇📲👉🔗▶️\s])*$",
+            sline,
+            re.IGNORECASE,
+        )
+        if m_emoji_cta:
+            extracted_btn_text = m_emoji_cta.group(1).title()
+            if not extracted_url or extracted_url == DEFAULT_CTA_URL:
+                extracted_url = DEFAULT_CTA_URL
+            continue
+
+        # 4. Check for CTA with label and URL/variable (e.g. 'CTA: Apply Now -> https://...' or 'CTA: Apply Now (https://...)')
         m_cta_arrow = re.match(
             r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*Button|CTA|Button)\s*[:\-–]?\s*(.*?)\s*(?:->|=>|–|—|\||\()\s*(https?://[^\s()]+|<link>|\{\{[^{}]+\}\}|\{#[^#]+#\})(?:\))?\s*$",
             sline,
@@ -2022,7 +2059,16 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         att_id = att.get("id")
         mime = att.get("mimeType", "")
         local_path: str | None = None
-        if download_creatives and att_id:
+        if att.get("local_path") and Path(att["local_path"]).exists():
+            local_path = str(att["local_path"])
+            p = Path(local_path)
+            if fn.lower().endswith((".xlsx", ".xls", ".csv")):
+                excel_attachment_paths.append(p)
+            elif fn.lower().endswith((".docx", ".doc")):
+                docx_attachment_paths.append(p)
+            elif fn.lower().endswith(".zip"):
+                zip_creative_paths.extend(_extract_images_from_zip(p))
+        elif download_creatives and att_id:
             try:
                 p = download_jira_attachment(att_id, fn)
                 local_path = str(p)
@@ -2034,7 +2080,6 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     zip_creative_paths.extend(_extract_images_from_zip(p))
             except Exception as e:
                 logger.warning("Could not download attachment %s for %s: %s", att_id, key, e)
-
         fn_lower = fn.lower()
         if fn_lower.endswith((".xlsx", ".xls", ".csv")):
             target_chan = "SPREADSHEET_BRIEF"
@@ -2315,7 +2360,16 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             wa_header = item.get("header")
             if wa_header and is_internal_identifier(wa_header, summary=summary):
                 wa_header = None
+            if not wa_header and not img:
+                wa_header = derive_clean_card_title(clean_body, account=issue_data.get("account"))
 
+            # Strip the extracted header from clean_body so it is never repeated in both header and body
+            if wa_header and clean_body:
+                lines = clean_body.strip().splitlines()
+                if len(lines) > 1:
+                    first_clean = lines[0].strip().strip("*_#~ ")
+                    if first_clean.lower() == wa_header.lower() or wa_header.lower().startswith(first_clean.lower()[:30]):
+                        clean_body = "\n".join(lines[1:]).strip()
             wa_drafts.append(
                 WhatsAppTemplateDraft(
                     template_name=tname,
@@ -2368,6 +2422,13 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             else:
                 rcs_card_title = derive_clean_card_title(clean_body, account=issue_data.get("account"))
 
+            # Strip the extracted card title from clean_body so it is never repeated in both title and body
+            if rcs_card_title and clean_body:
+                lines = clean_body.strip().splitlines()
+                if len(lines) > 1:
+                    first_clean = lines[0].strip().strip("*_#~ ")
+                    if first_clean.lower() == rcs_card_title.lower() or rcs_card_title.lower().startswith(first_clean.lower()[:30]):
+                        clean_body = "\n".join(lines[1:]).strip()
             rcs_drafts.append(
                 RcsTemplateDraft(
                     template_name=tname,

@@ -158,3 +158,70 @@ def test_cta_label_without_url():
     assert "CTA: Apply Now" not in clean_body
     assert btn_text == "Apply Now"
     assert btn_url == "https://u3.mnge.co/"
+
+
+def test_tap_to_proceed_cta_extraction_and_stripping():
+    """Verify 'Tap to proceed ⬇' is stripped from body and populates button."""
+    body = (
+        "Dear {{1}}, ✨\n\n"
+        "Big plans on your mind? From home upgrades to education or lifestyle goals—don't let finances slow you down.\n"
+        "✔ Enjoy {{2}} offer up to ₹{{3}} and bring your plans to life today.\n\n"
+        "Tap to proceed ⬇"
+    )
+    clean_body, btn_text, btn_url, footer = extract_and_strip_cta(body)
+    assert "Tap to proceed" not in clean_body
+    assert "⬇" not in clean_body
+    assert btn_text == "Proceed"
+    assert btn_url == "https://u3.mnge.co/"
+
+
+def test_card_title_and_body_deduplication(tmp_path):
+    """Verify parse_jira_brief does not repeat the title as the first line of the body."""
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "RCS Copies"
+    ws.append(["Channel", "Content"])
+    ws.append([
+        "RCS",
+        "⚡ Funds in 24 Hours!\n\n"
+        "Hi {{1}}, your Tata Capital {{2}} offer up to ₹{{3}} is ready.\n\n"
+        "Need quick funds for medical needs, travel, bills, or urgent expenses?\n"
+        "💰 Amount credited within 24 hours*\n"
+        "✅ Minimal paperwork\n"
+        "⚡ Instant approval\n\n"
+        "CTA {{4}}",
+    ])
+
+    file_path = tmp_path / "campaign_templates.xlsx"
+    wb.save(file_path)
+
+    mock_issue = {
+        "key": "TCN-534",
+        "summary": "PAPL Oct Campaign | Seg 1-5",
+        "status": "In Progress",
+        "assignee": "Neel Shah",
+        "reporter": "Apurva Mohite",
+        "description_raw": None,
+        "description_text": "See attached spreadsheet",
+        "attachments": [
+            {
+                "id": "1001",
+                "filename": "campaign_templates.xlsx",
+                "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "local_path": str(file_path),
+            }
+        ],
+    }
+    brief = parse_jira_brief(mock_issue, download_creatives=False)
+    assert len(brief.rcs_templates) >= 1
+    rcs = brief.rcs_templates[0]
+    assert rcs["card_title"] == "⚡ Funds in 24 Hours!"
+    # Title must NOT be repeated in the body!
+    assert not rcs["body"].startswith("⚡ Funds in 24 Hours!")
+    assert rcs["body"].startswith("Hi {{1}}")
+    # CTA {{4}} must be extracted into button and NOT in body
+    assert "CTA {{4}}" not in rcs["body"]
+    assert rcs["action_label"] == "Apply Now"
+    assert rcs["action_url"] == "https://u3.mnge.co/{{4}}"
