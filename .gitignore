@@ -35,6 +35,8 @@ queue.db*
 media_cache/jira_*
 # Scratch/Local configs
 scratch/
+# Agent skills temporary directory
+agent/
 .DS_Store
 omp-session-*.html
 *.xlsx
