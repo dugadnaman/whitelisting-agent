@@ -54,14 +54,20 @@ def is_internal_identifier(name: str | None, summary: str = "", sheet_name: str 
     if re.search(r"^[A-Z]{2,6}[-_]\d+", clean):
         return True
 
-    # 3. Known internal operational and workflow terms
+    # 3. Known internal operational, project, and workflow terms
     internal_keywords = (
         "whitelisting",
-        "campaign execution",
+        "campaign",
+        "seg ",
+        "seg_",
+        "seg-",
+        "segment",
+        "cohort",
+        "execution",
         "pos refill",
         "sep base",
+        "oct base",
         "standalone card",
-        "execution format",
         "creative_",
         "card_",
         "cell_",
@@ -69,17 +75,25 @@ def is_internal_identifier(name: str | None, summary: str = "", sheet_name: str 
         "draft_",
         "sheet1",
         "sheet2",
+        "papl",
+        "pqpl",
+        "ucl",
+        "tclmoe",
     )
     if any(k in lower for k in internal_keywords):
         return True
 
-    # 4. Matches ticket summary or creative base name (internal campaign label)
+    # 4. Pipe-separated internal metadata (e.g. '... | Seg 1-5')
+    if "|" in clean:
+        return True
+
+    # 5. Matches ticket summary or creative base name (internal campaign label)
     if summary:
         s_clean = summary.strip().lower()
-        if lower == s_clean or (len(clean) >= 6 and clean.lower() in s_clean and "_" in clean):
+        if lower == s_clean or s_clean in lower or lower in s_clean:
             return True
 
-    # 5. Matches sheet name exactly
+    # 6. Matches sheet name exactly
     if sheet_name:
         sh_clean = sheet_name.strip().lower()
         if lower == sh_clean:

@@ -2222,7 +2222,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         from gemini_intelligence import is_internal_identifier
 
         variant = item.get("variant", "General")
-        title = item.get("title") or (summary[:32] if not is_internal_identifier(summary) else "")
+        title = item.get("title") or item.get("header") or ""
+        if title and is_internal_identifier(title, summary=summary):
+            title = ""
         source_origin = item.get("source", "jira")
         norm_text, norm_samples = normalize_placeholders(clean_content)
         var_tags = re.findall(r"\{\{(\d+)\}\}", norm_text)
@@ -2325,8 +2327,6 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             raw_rcs_title = item.get("title") or item.get("header") or ""
             if raw_rcs_title and not is_internal_identifier(raw_rcs_title, summary=summary):
                 rcs_card_title = raw_rcs_title
-            elif summary and not is_internal_identifier(summary):
-                rcs_card_title = summary[:32]
             else:
                 rcs_card_title = derive_clean_card_title(clean_body, account=issue_data.get("account"))
 

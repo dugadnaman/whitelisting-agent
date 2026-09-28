@@ -93,7 +93,8 @@ def test_las_whitelisting_detected_as_internal_identifier():
     assert is_internal_identifier("Sep_Base_Refill") is True
     assert is_internal_identifier("Whitelisting_Batch") is True
     assert is_internal_identifier("Sheet1") is True
-
+    assert is_internal_identifier("PAPL Oct Campaign | Seg 1-5") is True
+    assert is_internal_identifier("TCN-534 PAPL Oct Campaign") is True
     # Real customer headings must not be marked internal
     assert is_internal_identifier("Important Notice: Revision in LTV") is False
     assert is_internal_identifier("Special Festive Personal Loan Offer") is False
