@@ -1199,6 +1199,36 @@ export async function updateMoEngageWorkspace(data: {
   return res.json();
 }
 
+export async function uploadMoEngageExportFile(
+  file: File,
+  options?: {
+    vertical?: string;
+    mode?: string;
+    customStart?: string;
+    customEnd?: string;
+    workspaceFilter?: string;
+  }
+) {
+  const form = new FormData();
+  form.append("file", file);
+
+  const qs = new URLSearchParams();
+  if (options?.vertical) qs.set("vertical", options.vertical);
+  if (options?.mode) qs.set("mode", options.mode);
+  if (options?.customStart) qs.set("custom_start", options.customStart);
+  if (options?.customEnd) qs.set("custom_end", options.customEnd);
+  if (options?.workspaceFilter && options.workspaceFilter !== "all") {
+    qs.set("workspace_filter", options.workspaceFilter);
+  }
+
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/upload-export?${qs.toString()}`), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
 export async function fetchWorkManagementDashboard(project: string = "TCN", limit: number = 100) {
   const qs = new URLSearchParams({ project, limit: limit.toString() });
   const res = await fetchWithRetry(getApiUrl(`/api/work-management/dashboard?${qs.toString()}`));

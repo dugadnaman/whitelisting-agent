@@ -44,6 +44,7 @@ agent/
 omp-session-*.html
 *.xlsx
 *.xls
+!samples/MoEngage_Ops_Dashboard.xlsx
 moengage_ops_cache.json
 .claude/
 .agents/skills/

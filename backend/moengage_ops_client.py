@@ -676,18 +676,28 @@ def export_ops_dashboard_excel(
     t_path = Path(template_path)
     if not t_path.exists() and (Path("samples") / template_path).exists():
         t_path = Path("samples") / template_path
-    if not t_path.exists():
-        raise FileNotFoundError(f"Template workbook '{template_path}' not found.")
 
     if records is None:
         records = load_cached_ops_records()
 
-    wb = openpyxl.load_workbook(str(t_path))
+    if t_path.exists():
+        wb = openpyxl.load_workbook(str(t_path))
+    else:
+        logger.warning("Template workbook '%s' not found. Creating dynamic Master Data workbook.", template_path)
+        wb = openpyxl.Workbook()
+        if "Sheet" in wb.sheetnames:
+            wb["Sheet"].title = "Master Data"
+
     if "Master Data" not in wb.sheetnames:
-        raise ValueError("Workbook missing 'Master Data' sheet.")
+        ws = wb.create_sheet("Master Data")
+    else:
+        ws = wb["Master Data"]
 
-    ws = wb["Master Data"]
-
+    # Ensure header row (row 5) exists
+    headers = ["Vertical", "Type", "Channel", "Date", "Week Start", "Month", "In Scope", "Is Test", "Source"]
+    for c_idx, h in enumerate(headers, start=1):
+        if not ws.cell(5, c_idx).value:
+            ws.cell(5, c_idx).value = h
     # Clear existing rows starting from row 6
     for r in range(6, min(ws.max_row + 1, 10000)):
         for c in range(1, 10):
@@ -1070,11 +1080,18 @@ def _extract_rows_from_file_bytes(content_bytes: bytes, filename: str) -> list[d
         try:
             wb = openpyxl.load_workbook(io.BytesIO(content_bytes), data_only=True)
             ws = wb.active
-            headers = [str(ws.cell(1, c).value or "").strip() for c in range(1, ws.max_column + 1)]
-            for r in range(2, ws.max_row + 1):
-                row_dict = {headers[c - 1]: ws.cell(r, c).value for c in range(1, len(headers) + 1)}
-                if any(row_dict.values()):
-                    rows.append(row_dict)
+            header_row_idx = 1
+            for r in range(1, min(ws.max_row + 1, 15)):
+                row_vals = " ".join([str(ws.cell(r, c).value or "").strip().lower() for c in range(1, ws.max_column + 1)])
+                if any(kw in row_vals for kw in ("campaign", "flow", "channel", "created by", "status", "name")):
+                    header_row_idx = r
+                    break
+            headers = [str(ws.cell(header_row_idx, c).value or "").strip() for c in range(1, ws.max_column + 1)]
+            for r in range(header_row_idx + 1, ws.max_row + 1):
+                row_dict = {headers[c - 1]: ws.cell(r, c).value for c in range(1, len(headers) + 1) if headers[c - 1]}
+                clean_row = {str(k).strip(): v for k, v in row_dict.items() if k}
+                if any(clean_row.values()):
+                    rows.append(clean_row)
         except Exception as exc:
             logger.warning("Could not parse excel file %s: %s", filename, exc)
     else:
@@ -1087,12 +1104,28 @@ def _extract_rows_from_file_bytes(content_bytes: bytes, filename: str) -> list[d
             except Exception:
                 text = content_bytes.decode("utf-8", errors="replace")
 
-        delimiter = "\t" if ext == ".tsv" or ("\t" in text.splitlines()[0] if text.splitlines() else False) else ","
-        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-        for row in reader:
-            if any(row.values()):
-                rows.append(row)
+        lines = [line for line in text.splitlines() if line.strip()]
+        if not lines:
+            return []
 
+        header_line_idx = 0
+        for idx, line in enumerate(lines[:15]):
+            line_lower = line.lower()
+            if ("," in line or "\t" in line) and any(
+                kw in line_lower
+                for kw in ("campaign name", "flow name", "channel", "created by", "sent time", "status", "campaign", "flow", "name")
+            ):
+                header_line_idx = idx
+                break
+
+        csv_text = "\n".join(lines[header_line_idx:])
+        first_line = lines[header_line_idx] if lines else ""
+        delimiter = "\t" if ext == ".tsv" or ("\t" in first_line and "," not in first_line) else ","
+        reader = csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
+        for row in reader:
+            clean_row = {str(k).strip(): v for k, v in row.items() if k is not None and str(k).strip()}
+            if any(clean_row.values()):
+                rows.append(clean_row)
     return rows
 
 

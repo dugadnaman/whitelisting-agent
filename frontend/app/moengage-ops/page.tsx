@@ -6,6 +6,7 @@ import {
   syncMoEngageOps,
   fetchMoEngageWorkspaces,
   updateMoEngageWorkspace,
+  uploadMoEngageExportFile,
 } from '@/lib/api';
 
 type ChannelCounts = {
@@ -76,24 +77,14 @@ export default function MoEngageOpsPage() {
     try {
       setUploading(true);
       setError(null);
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const qs = new URLSearchParams();
-      if (mode) qs.set('mode', mode);
-      if (customStart) qs.set('custom_start', customStart);
-      if (customEnd) qs.set('custom_end', customEnd);
-      if (workspaceFilter) qs.set('workspace_filter', workspaceFilter);
-
-      const res = await fetch(`/api/moengage/ops/upload-export?${qs.toString()}`, {
-        method: 'POST',
-        body: formData,
+      const json = await uploadMoEngageExportFile(file, {
+        vertical: 'TCL',
+        mode,
+        customStart,
+        customEnd,
+        workspaceFilter,
       });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => null);
-        throw new Error(errJson?.detail || 'Upload failed');
-      }
-      const json = await res.json();
+
       const filesCount = json.result?.files_parsed || 1;
       const count = json.result?.new_records_parsed || 0;
       const camps = json.result?.campaigns_count || 0;
