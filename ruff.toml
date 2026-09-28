@@ -1,7 +1,7 @@
 # Ruff configuration for Karix WhatsApp & RCS Whitelisting
 target-version = "py311"
 line-length = 120
-
+src = ["backend", "."]
 [lint]
 select = [
     "E",    # pycodestyle errors
@@ -23,3 +23,4 @@ ignore = [
 "tests/*.py" = ["B011", "F401", "E402"]
 "test_*.py" = ["B011", "F401", "E402"]
 "api.py" = ["E402"]
+"backend/api.py" = ["E402"]

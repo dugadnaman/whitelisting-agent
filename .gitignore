@@ -33,6 +33,8 @@ sms_click_log.jsonl
 
 karix_store.db*
 queue.db*
+data/*.db*
+data/*.json
 media_cache/jira_*
 # Scratch/Local configs
 scratch/

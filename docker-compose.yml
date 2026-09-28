@@ -13,6 +13,7 @@ services:
         required: false
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app/backend:/app
       - BACKEND_INTERNAL_URL=http://127.0.0.1:8000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
       - KARIX_DB_PATH=/app/data/karix_store.db

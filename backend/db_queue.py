@@ -20,7 +20,11 @@ from db import get_db, init_database
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
+DB_PATH = Path(
+    os.environ.get(
+        "KARIX_DB_PATH", "data/karix_store.db" if (Path("data") / "karix_store.db").exists() else "karix_store.db"
+    )
+)
 SUBMISSION_LOG_PATH = Path("submission_log.jsonl")
 RCS_SUBMISSION_LOG_PATH = Path("rcs_submission_log.jsonl")
 

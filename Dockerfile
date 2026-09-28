@@ -18,7 +18,7 @@ RUN npm run build
 # ==========================================
 FROM python:3.11-slim
 WORKDIR /app
-
+ENV PYTHONPATH=/app/backend:/app
 # Install Node.js runtime for Next.js and process supervisor
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -32,8 +32,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 # Copy Python backend code and static assets. Runtime secrets, SQLite, and JSONL
 # logs are supplied through environment variables/volumes at deployment time.
-COPY *.py ./
-COPY accounts.json credentials*.json* ./
+COPY backend/ ./backend/
 COPY media_cache/ ./media_cache/
 COPY samples/ ./samples/
 COPY tests/ ./tests/
@@ -48,7 +47,7 @@ pidfile=/var/run/supervisord.pid\n\
 \n\
 [program:fastapi]\n\
 directory=/app\n\
-command=python3 -m uvicorn api:app --host 0.0.0.0 --port 8000\n\
+command=python3 -m uvicorn api:app --app-dir /app/backend --host 0.0.0.0 --port 8000\n\
 autostart=true\n\
 autorestart=true\n\
 stderr_logfile=/var/log/supervisor/fastapi.err.log\n\

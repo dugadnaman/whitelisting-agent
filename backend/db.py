@@ -17,7 +17,21 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SQLITE_PATH = Path(os.environ.get("KARIX_DB_PATH", "karix_store.db"))
+
+def _resolve_default_db_path() -> Path:
+    env_p = os.environ.get("KARIX_DB_PATH")
+    if env_p:
+        return Path(env_p)
+    if (Path("data") / "karix_store.db").exists():
+        return Path("data") / "karix_store.db"
+    if Path("karix_store.db").exists():
+        return Path("karix_store.db")
+    if Path("data").is_dir():
+        return Path("data") / "karix_store.db"
+    return Path("karix_store.db")
+
+
+DEFAULT_SQLITE_PATH = _resolve_default_db_path()
 DB_PATH = DEFAULT_SQLITE_PATH
 
 VALID_TABLES: set[str] = {

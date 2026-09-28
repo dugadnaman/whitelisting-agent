@@ -11,9 +11,9 @@ import argparse
 import sys
 from pathlib import Path
 
-# Add project root to sys.path
+# Add project root and backend to sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from config import _load_env_file
 from db import DEFAULT_SQLITE_PATH, VALID_TABLES, get_database_url, migrate_sqlite_to_postgres
 

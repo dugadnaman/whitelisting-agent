@@ -1,0 +1,15 @@
+{
+  "files.exclude": {
+    "**/.git": true,
+    "**/.DS_Store": true,
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.next": true,
+    "**/*.tsbuildinfo": true,
+    "**/*.db-shm": true,
+    "**/*.db-wal": true,
+    "omp-session-*.html": true
+  }
+}

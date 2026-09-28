@@ -54,67 +54,46 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 
 ```
 karix/
-├── api.py                     # FastAPI core backend service and routing endpoints
-├── auth.py                    # Multi-tenant authentication, RBAC, and JWT tokens
-├── db.py                      # Database models (SQLite / PostgreSQL dual adapter)
-├── db_queue.py                # Persistent task queue implementation
-├── queue_manager.py           # Background queue workers, retry logic, rate governor
-├── work_manager.py            # Jira workflow dispatcher & operational balancer
-├── activity_tracker.py        # Audit logging engine
-├── error_tracker.py           # Real-time error telemetry and classification
+├── backend/                   # FastAPI Python backend service and multi-channel modules
+│   ├── api.py                 # Core FastAPI REST routes and lifecycle handlers
+│   ├── auth.py                # Multi-tenant authentication, RBAC, and JWT tokens
+│   ├── db.py                  # Dual SQLite / PostgreSQL database adapters
+│   ├── db_queue.py            # SQLite monotonic queue engine
+│   ├── queue_manager.py       # Background worker and rate governor
+│   ├── work_manager.py        # Jira workflow dispatcher & task balancer
+│   │
+│   ├── config.py              # WhatsApp Karix configuration & credential loaders
+│   ├── models.py              # WhatsApp dataclasses & schemas
+│   ├── loader.py              # WhatsApp CSV & dynamic spreadsheet parser
+│   ├── submission_client.py   # WhatsApp Karix API HTTP client & media upload
+│   ├── runner.py              # WhatsApp CLI runner
+│   │
+│   ├── rcs_config.py          # RCS carrier endpoints and account configuration
+│   ├── rcs_models.py          # RCS Rich Card and Carousel models
+│   ├── rcs_client.py          # RCS Karix API client
+│   ├── rcs_loader.py          # RCS spreadsheet parser
+│   │
+│   ├── sms_config.py          # SMS DLT entity configuration
+│   ├── sms_client.py          # SMS submission API client
+│   ├── sms_crypto.py          # AES-256-CBC PII encryption engine
+│   │
+│   ├── jira_client.py         # Jira Cloud REST client
+│   ├── moengage_sync.py       # MoEngage catalog sync engine
+│   └── gemini_intelligence.py # Gemini AI extractor and validator
 │
-├── config.py                  # WhatsApp Karix configuration & credential loaders
-├── models.py                  # WhatsApp template data models
-├── loader.py                  # WhatsApp CSV/Excel/dynamic spreadsheet parser
-├── submission_client.py       # WhatsApp Karix API HTTP client & media upload
-├── tracker.py                 # WhatsApp JSONL submission logging
-├── runner.py                  # WhatsApp CLI batch runner
-├── template_identifier.py     # WhatsApp Phase 1 catalog diffing engine
-├── template_validator.py      # Meta WhatsApp pre-submission compliance validator
-│
-├── rcs_config.py              # RCS carrier endpoints and account configuration
-├── rcs_models.py              # RCS Rich Card and Carousel dataclasses
-├── rcs_loader.py              # RCS spreadsheet ingestion parser
-├── rcs_client.py              # RCS Karix API client
-├── rcs_runner.py              # RCS CLI runner
-├── rcs_tracker.py             # RCS submission log manager
-│
-├── sms_config.py              # SMS endpoints, DLT entity IDs, and headers
-├── sms_models.py              # SMS message and DLR models
-├── sms_loader.py              # SMS batch message loader
-├── sms_client.py              # SMS submission API client
-├── sms_crypto.py              # AES-256-CBC PII encryption engine (Karix spec)
-├── sms_runner.py              # SMS batch delivery CLI runner
-├── sms_tracker.py             # SMS delivery outcome tracker
-│
-├── jira_client.py             # Atlassian Jira Cloud REST API client
-├── jira_extractor.py          # Jira ticket content & document extractor
-├── briefing_parser.py         # DOCX/Excel campaign briefing document parser
-├── moengage_ops_client.py     # MoEngage campaign operations client
-├── moengage_resolver.py       # MoEngage parameter mapping engine
-├── moengage_sync.py           # MoEngage template synchronization engine
-├── gemini_intelligence.py     # Gemini AI brief extraction & category classification
-│
-├── frontend/                  # Next.js 14 Web Application (Tailwind CSS, React 18)
+├── frontend/                  # Next.js 14 App Router Web Application
 │   ├── app/                   # App Router pages (Submit, Work Mgmt, Briefs, Settings)
 │   ├── components/            # Reusable UI components (AppShell, Nav, ChatWidget)
 │   └── lib/                   # API client, Auth Context, Formatters
 │
-├── samples/                   # Standard sample template spreadsheets
-│   ├── templates_sample.csv   # WhatsApp sample template catalog
-│   ├── rcs_templates_sample.csv # RCS sample Rich Card & Carousel templates
-│   └── sms_sample.csv         # SMS sample DLT messages
-│
-├── docs/                      # Technical documentation & vendor carrier guides
-│   ├── vendor/                # Karix, DLT, RCS, and SMS official PDF & docx specifications
-│   ├── frontend.md            # Frontend application design & route specs
-│   └── karpathy-guidelines.md # Engineering guidelines
-│
-├── media_cache/               # Local cache for sample headers (PNG, MP4, PDF)
-├── scripts/                   # Utility scripts (e.g. SQLite to PostgreSQL migration)
+├── data/                      # Local persistent SQLite databases (karix_store.db)
+├── docs/                      # Documentation and official carrier PDF/docx specifications
+├── samples/                   # Sample template catalogs, spreadsheets, and test data
+├── scripts/                   # Migration & administration scripts
 ├── tests/                     # 25+ automated Pytest test suites
+├── media_cache/               # Local cache for sample headers (PNG, MP4, PDF)
 ├── Dockerfile                 # Multi-stage production container (FastAPI + Next.js)
-└── docker-compose.yml         # Local and production container orchestration
+└── docker-compose.yml         # Container orchestration
 ```
 
 ---
@@ -139,7 +118,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Start backend on http://localhost:8000
-python3 -m uvicorn api:app --reload --port 8000
+python3 -m uvicorn api:app --app-dir backend --reload --port 8000
 ```
 
 **Frontend (Next.js):**

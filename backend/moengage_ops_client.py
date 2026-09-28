@@ -673,6 +673,8 @@ def export_ops_dashboard_excel(
     import openpyxl
 
     t_path = Path(template_path)
+    if not t_path.exists() and (Path("samples") / template_path).exists():
+        t_path = Path("samples") / template_path
     if not t_path.exists():
         raise FileNotFoundError(f"Template workbook '{template_path}' not found.")
 
