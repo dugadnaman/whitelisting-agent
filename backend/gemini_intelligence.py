@@ -103,26 +103,16 @@ def is_internal_identifier(name: str | None, summary: str = "", sheet_name: str 
 
 
 def _derive_clean_card_title_heuristic(text: str) -> str:
-    """Derive a professional, customer-facing card title from message body content."""
+    """Derive card title directly from the first line of the content body without fallback strings."""
     if not text or not text.strip():
-        return "Important Notice"
-    low = text.lower()
-    if "ltv" in low or "loan against" in low or "mutual fund" in low or "pledge" in low or "shares" in low:
-        return "Notice: Revision in LTV"
-    if "personal loan" in low or "pre-approved" in low or "instant funds" in low:
-        return "Special Personal Loan Offer"
-    if "home loan" in low or "property" in low:
-        return "Special Home Loan Offer"
-    if "business loan" in low:
-        return "Business Loan Opportunity"
-    if "emi" in low or "due date" in low or "overdue" in low or "payment" in low:
-        return "Important Payment Reminder"
-    if "otp" in low or "verification code" in low or "security" in low:
-        return "Account Security Alert"
-    if "credit card" in low or "card" in low:
-        return "Exclusive Card Offer"
-    return "Important Customer Notice"
-
+        return ""
+    lines = [line.strip().strip("*_#~ ") for line in text.strip().splitlines() if line.strip()]
+    if not lines:
+        return ""
+    first_line = lines[0]
+    if len(first_line) > 60:
+        first_line = first_line[:57].rstrip() + "..."
+    return first_line
 
 def analyze_template_semantics(
     text: str,
@@ -337,8 +327,8 @@ def _heuristic_decision(
     )
 
     has_min_len = len(text.strip()) >= 30
-    ends_cleanly = text.strip()[-1] in (".", "!", "?", "-", "}", ">", ")", "।") if text.strip() else False
     has_signoff = any(k in text.lower() for k in ("-tata capital", "-bajaj", "tata capital", "bajaj finserv"))
+    ends_cleanly = (text.strip()[-1] in (".", "!", "?", "-", "}", ">", ")", "।")) or has_signoff if text.strip() else False
     missing: list[str] = []
     if not has_signoff and "tata" not in text.lower() and "bajaj" not in text.lower():
         missing.append("brand_signoff")

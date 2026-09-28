@@ -102,6 +102,7 @@ def test_las_whitelisting_detected_as_internal_identifier():
 
 
 def test_las_whitelisting_rejected_from_template_heading(monkeypatch):
+    monkeypatch.setattr(gemini_intelligence, "get_gemini_api_key", lambda: "")
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     gemini_intelligence._DECISION_CACHE.clear()
@@ -139,12 +140,28 @@ def test_rcs_card_title_derived_cleanly_from_body_topic():
     title_1 = derive_clean_card_title(swcm_body_1, account="tata")
     title_2 = derive_clean_card_title(swcm_body_2, account="tata")
     title_promo = derive_clean_card_title(promo_body, account="tata")
-
-    assert title_1 == "Notice: Revision in LTV"
-    assert title_2 == "Notice: Revision in LTV"
-    assert title_promo == "Special Personal Loan Offer"
+    assert title_1.startswith("Your Loan Against Mutual Funds")
+    assert title_promo.startswith("Dear Customer, get instant Personal Loan")
+    assert "Special Personal Loan Offer" not in (title_1, title_2, title_promo)
+    assert "Notice: Revision in LTV" not in (title_1, title_2, title_promo)
     assert "LAS_Whitelisting" not in (title_1, title_2, title_promo)
+    assert "PAPL Oct Campaign" not in (title_1, title_2, title_promo)
 
+
+def test_rcs_card_title_uses_first_line_headline_without_fallback():
+    """Verify first line headline (e.g. '⚡ Funds in 24 Hours!') is used directly as card title."""
+    body_with_headline = (
+        "⚡ Funds in 24 Hours!\n"
+        "Hi {{1}}, your Tata Capital {{2}} offer up to ₹{{3}} is ready.\n"
+        "Need quick funds for medical needs, travel, bills, or urgent expenses?\n"
+        "💰 Amount credited within 24 hours*\n"
+        "✅ Minimal paperwork\n"
+        "⚡ Instant approval"
+    )
+    title = derive_clean_card_title(body_with_headline, account="tcl_promo")
+    assert title == "⚡ Funds in 24 Hours!"
+    assert "Special Personal Loan Offer" not in title
+    assert "PAPL" not in title
 
 def test_parser_ignores_any_model_generated_text(monkeypatch):
     monkeypatch.setattr(

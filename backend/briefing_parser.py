@@ -310,6 +310,12 @@ def detect_category(summary: str, text: str = "", sheet_name: str = "") -> str:
             "not banked",
             "short banked",
             "status update",
+            "ltv",
+            "regularise",
+            "regulatory",
+            "rbi",
+            "revision in ltv",
+            "facility is above",
         ]
     ):
         return "UTILITY"
@@ -568,7 +574,7 @@ def decompose_content(
             cat = ai_res["category"]
         if ai_res.get("language") and lang == "en":
             lang = ai_res["language"]
-        if ai_res.get("is_candidate_header_genuine") is False or ai_res.get("is_internal_name") is True:
+        if (ai_res.get("is_candidate_header_genuine") is False or ai_res.get("is_internal_name") is True) and is_internal_identifier(header_text, summary=summary):
             header_text = None
         is_complete = bool(ai_res.get("is_complete", True))
         completeness_score = float(ai_res.get("completeness_score", 1.0))
@@ -602,42 +608,22 @@ def _clean_template_name(base: str, channel: str, idx: int) -> str:
 
 def derive_clean_card_title(body_text: str, account: str | None = None) -> str:
     """
-    Derive a clean, customer-facing card title for RCS from the content body,
-    ensuring that internal operational identifiers (e.g. 'LAS_Whitelisting', 'SWCM-59')
-    never appear in customer-facing UI.
+    Derive card title / header title directly from the first line of the content body,
+    without artificial fallback strings like 'Special Personal Loan Offer'.
     """
     if not body_text or not body_text.strip():
-        return "Important Notice"
+        return ""
 
-    low = body_text.lower()
-    if "ltv" in low or "loan against" in low or "mutual fund" in low or "pledge" in low or "shares" in low:
-        return "Notice: Revision in LTV"
-    if "personal loan" in low or "pre-approved" in low or "instant funds" in low:
-        return "Special Personal Loan Offer"
-    if "home loan" in low or "property" in low:
-        return "Special Home Loan Offer"
-    if "business loan" in low:
-        return "Business Loan Opportunity"
-    if "emi" in low or "due date" in low or "overdue" in low or "payment" in low:
-        return "Important Payment Reminder"
-    if "otp" in low or "verification code" in low or "security" in low:
-        return "Account Security Alert"
-    if "credit card" in low or "card" in low:
-        return "Exclusive Card Offer"
+    lines = [line.strip().strip("*_#~ ") for line in body_text.strip().splitlines() if line.strip()]
+    if not lines:
+        return ""
 
-    first_line = body_text.strip().split("\n")[0].strip("*_# ")
-    if 5 <= len(first_line) <= 45 and not any(
-        p in first_line.lower() for p in ("dear", "hi", "hello", "{{", "http", "pursuant")
-    ):
-        return first_line
+    first_line = lines[0]
+    # Trim to 60 chars maximum (RCS card title / WhatsApp header limit)
+    if len(first_line) > 60:
+        first_line = first_line[:57].rstrip() + "..."
 
-    brand = (
-        "Tata Capital"
-        if (account and "tata" in account.lower()) or "tata" in low
-        else ("Bajaj Finserv" if "bajaj" in low else "Customer Update")
-    )
-    return f"Important Notice from {brand}"
-
+    return first_line
 
 def _extract_text_from_adf_node(node: dict[str, Any] | None, preserve_formatting: bool = True) -> str:
     if not node or not isinstance(node, dict):
