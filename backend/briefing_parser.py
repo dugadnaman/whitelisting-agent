@@ -481,30 +481,31 @@ def extract_and_strip_cta(
             before_part = sline[: inline_m.start()].strip()
             cta_part = sline[inline_m.start() :].strip()
 
-            m_url = re.search(url_pat, cta_part)
-            if m_url:
-                c_url = m_url.group(1).rstrip('.,_*_`"').strip()
-                if c_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
-                    extracted_url = DEFAULT_CTA_URL
-                elif c_url.startswith("http"):
-                    extracted_url = c_url
+            if not existing_btn_url or existing_btn_url == DEFAULT_CTA_URL:
+                m_url = re.search(url_pat, cta_part)
+                if m_url:
+                    c_url = m_url.group(1).rstrip('.,_*_`"').strip()
+                    if c_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
+                        extracted_url = DEFAULT_CTA_URL
+                    elif c_url.startswith("http"):
+                        extracted_url = c_url
 
-            btn_raw = re.sub(url_pat, "", cta_part)
-            clean_btn = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", btn_raw)
-            clean_btn = re.sub(
-                r"^(?:CTA\s*|Click\s*here\s*to\s*|Tap\s*to\s*)", "", clean_btn, flags=re.IGNORECASE
-            ).strip()
-            clean_btn = re.sub(r"\s+", " ", clean_btn).strip()
-            if clean_btn and len(clean_btn) <= 25 and len(clean_btn) >= 3:
-                extracted_btn_text = clean_btn.title()
-            elif not extracted_btn_text or extracted_btn_text == "Check Offer":
-                if "apply" in cta_part.lower():
-                    extracted_btn_text = "Apply Now"
-                elif "explore" in cta_part.lower():
-                    extracted_btn_text = "Explore Now"
-                elif "offer" in cta_part.lower():
-                    extracted_btn_text = "Check Offer"
-
+            if not existing_btn_text:
+                btn_raw = re.sub(url_pat, "", cta_part)
+                clean_btn = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", btn_raw)
+                clean_btn = re.sub(
+                    r"^(?:CTA\s*|Click\s*here\s*to\s*|Tap\s*to\s*)", "", clean_btn, flags=re.IGNORECASE
+                ).strip()
+                clean_btn = re.sub(r"\s+", " ", clean_btn).strip()
+                if clean_btn and len(clean_btn) <= 25 and len(clean_btn) >= 3:
+                    extracted_btn_text = clean_btn.title()
+                elif not extracted_btn_text or extracted_btn_text == "Check Offer":
+                    if "apply" in cta_part.lower():
+                        extracted_btn_text = "Apply Now"
+                    elif "explore" in cta_part.lower():
+                        extracted_btn_text = "Explore Now"
+                    elif "offer" in cta_part.lower():
+                        extracted_btn_text = "Check Offer"
             if before_part:
                 cleaned_lines.append(before_part)
             continue
@@ -1040,7 +1041,7 @@ def is_valid_template_copy(text: str) -> bool:
         "last 60 days", "last 30 days", "last 90 days",
         "capping", "exclusion list", "suppression", "target base", "base seg",
         "segment count", "segment name", "cohort", "dnd & non clicker", "dnd + non clicker",
-        "tourism day users", "world tourism day", "durga pooja", "dussehra", "gandhi jayanti",
+        "tourism day users", "non clickers of", "non-clickers of", "openers of",
     )
     if any(m in s_low for m in targeting_markers):
         return False
@@ -1225,9 +1226,17 @@ def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
             ws = wb[sname]
             rows: list[list[str]] = []
             for r in range(1, ws.max_row + 1):
-                vals = [str(ws.cell(row=r, column=c).value or "").strip() for c in range(1, ws.max_column + 1)]
-                if any(vals):
-                    rows.append(vals)
+                row_vals: list[str] = []
+                for c in range(1, ws.max_column + 1):
+                    cell = ws.cell(row=r, column=c)
+                    val = str(cell.value or "").strip()
+                    if cell.hyperlink and cell.hyperlink.target:
+                        target = str(cell.hyperlink.target).strip()
+                        if target and target.startswith("http") and not val.startswith("http"):
+                            val = f"{val} ({target})" if val else target
+                    row_vals.append(val)
+                if any(row_vals):
+                    rows.append(row_vals)
             if rows:
                 sheets[sname] = rows
         return sheets
@@ -1264,9 +1273,89 @@ def _is_targeting_or_planner_row(row: list[str]) -> bool:
         "last 60 days", "last 30 days", "last 90 days",
         "capping", "exclusion list", "suppression", "target base", "base seg",
         "segment name", "cohort", "dnd & non clicker", "dnd + non clicker",
-        "tourism day users", "world tourism day", "durga pooja", "dussehra", "gandhi jayanti",
+        "tourism day users", "non clickers of", "non-clickers of", "openers of",
     )
     return any(marker in row_text for marker in targeting_markers)
+def _identify_sheet_columns(header_row: list[str]) -> dict[str, Any]:
+    """
+    Robustly identify column indexes for any client spreadsheet header row.
+    Handles space-separated, underscore-separated, and uppercase/lowercase variations.
+    """
+    headers = [re.sub(r"[\s_]+", " ", str(h or "").lower()).strip() for h in header_row]
+    mapping: dict[str, Any] = {}
+
+    for idx, h in enumerate(headers):
+        if not h:
+            continue
+
+        # 1. URL / Link column (checked first to prevent collisions with button text)
+        if any(k in h for k in ["button url", "cta url", "cta link", "destination url", "landing page", "target url", "btn url", "button link"]):
+            mapping.setdefault("button_url", idx)
+        elif h in ("url", "link", "website") or (("url" in h or "link" in h) and not any(k in h for k in ["text", "type", "name", "header", "media", "image", "creative"])):
+            mapping.setdefault("button_url", idx)
+
+        # 2. Button Type
+        if any(k in h for k in ["button type", "btn type", "action type", "cta type"]):
+            mapping.setdefault("button_type", idx)
+
+        # 3. Button Text / CTA Label
+        if any(k in h for k in ["button text", "cta text", "cta button", "button label", "btn text", "action label", "cta label", "button name"]):
+            mapping.setdefault("button_text", idx)
+        elif h in ("cta", "button", "action") or (("cta" in h or "button" in h) and not any(k in h for k in ["url", "link", "type"])):
+            mapping.setdefault("button_text", idx)
+
+        # 4. Header Type
+        if any(k in h for k in ["header type", "media type"]):
+            mapping.setdefault("header_type", idx)
+
+        # 5. Header Text / Title
+        if any(k in h for k in ["header text", "card title", "headline", "heading"]):
+            mapping.setdefault("header", idx)
+        elif h in ("header", "title") or (("header" in h or "title" in h) and "type" not in h and "url" not in h and "link" not in h):
+            mapping.setdefault("header", idx)
+
+        # 6. Footer Text
+        if any(k in h for k in ["footer", "footer text", "disclaimer"]):
+            mapping.setdefault("footer", idx)
+
+        # 7. Category
+        if any(k in h for k in ["category", "template category", "waba category"]):
+            mapping.setdefault("category", idx)
+
+        # 8. Media / Creative URL
+        if any(k in h for k in ["media url", "image url", "creative url", "image link", "media link"]):
+            mapping.setdefault("media_url", idx)
+        elif h in ("media", "image", "creative"):
+            mapping.setdefault("media_url", idx)
+
+        # 9. Language
+        if h in ("language", "lang"):
+            mapping.setdefault("language", idx)
+
+        # 10. Channel
+        if h in ("channel", "channel name", "platform", "medium", "mode"):
+            mapping.setdefault("channel", idx)
+
+        # 11. Template Name / ID
+        if any(k in h for k in ["template name", "template id", "waba name", "waba template", "template code", "template title"]):
+            mapping.setdefault("template_name", idx)
+        elif h in ("template", "name") and "channel" not in h:
+            mapping.setdefault("template_name", idx)
+
+    # 12. Content / Copy columns (can be multiple, e.g. multi-channel or multilingual)
+    content_cols: list[int] = []
+    claimed_indices = set(mapping.values())
+    for idx, h in enumerate(headers):
+        if idx in claimed_indices:
+            continue
+        if any(k in h for k in ["body", "content", "copy", "message", "text", "communication", "whatsapp", "sms", "rcs", "english", "hindi"]):
+            if not any(k in h for k in ["header", "footer", "button", "cta", "url", "link", "type", "channel", "name", "id"]):
+                content_cols.append(idx)
+        elif not mapping and ("copy" in h or "content" in h or "message" in h or "text" in h):
+            content_cols.append(idx)
+
+    mapping["content_cols"] = content_cols
+    return mapping
 def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[str, str]]:
     """
     Universally parse template content from 2D raw string rows of any sheet.
@@ -1282,62 +1371,58 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
     if not raw_rows:
         return items
 
-    # Detect channel column or header row
-    chan_col_idx = None
-    header_row_idx = None
+    # 1. Detect candidate header row index
+    def _is_real_header_row(row: list[str]) -> bool:
+        if not row:
+            return False
+        if any(len(str(c or "").strip()) > 60 for c in row):
+            return False
+        header_keywords = ("channel", "content", "body", "copy", "template", "message", "text", "header", "button", "cta", "url", "category", "footer", "status", "date")
+        row_low = " ".join(str(c or "").lower() for c in row)
+        return any(k in row_low for k in header_keywords)
 
+    header_row_idx = None
     for r_idx, row in enumerate(raw_rows[:5]):
-        for c_idx, val in enumerate(row):
-            v_low = val.lower()
-            if v_low in ("channel", "channel name", "platform", "medium", "mode"):
-                chan_col_idx = c_idx
-                header_row_idx = r_idx
-                break
-        if chan_col_idx is not None:
+        if _is_real_header_row(row):
+            header_row_idx = r_idx
             break
 
-    # If no explicit 'Channel' header, check if column 0 contains channel tags
-    if chan_col_idx is None:
+    if header_row_idx is None:
         chan_tags_in_col0 = sum(1 for row in raw_rows if row and _normalize_channel_tag(row[0]) is not None)
         if chan_tags_in_col0 >= 1:
-            chan_col_idx = 0
             header_row_idx = 0 if _normalize_channel_tag(raw_rows[0][0]) is None else -1
 
-    current_channel = sheet_chan
-    start_idx = (header_row_idx + 1) if header_row_idx is not None and header_row_idx >= 0 else 0
     header_row = (
-        [c.lower() for c in raw_rows[header_row_idx]]
-        if header_row_idx is not None and header_row_idx >= 0 and header_row_idx < len(raw_rows)
+        [str(c or "").strip() for c in raw_rows[header_row_idx]]
+        if header_row_idx is not None and 0 <= header_row_idx < len(raw_rows)
         else []
     )
 
-    # Check for columnar headers (e.g. template_name | body | header | button...)
-    body_col_idx = None
-    if header_row:
-        for idx, h in enumerate(header_row):
-            if "header" in h or "title" in h or "type" in h or "name" in h:
-                continue
-            if any(k in h for k in ["body", "content", "copy", "message", "text"]):
-                body_col_idx = idx
-                break
+    col_map = _identify_sheet_columns(header_row) if header_row else {}
+    chan_col_idx = col_map.get("channel")
+    template_name_col_idx = col_map.get("template_name")
+    header_col_idx = col_map.get("header")
+    header_type_col_idx = col_map.get("header_type")
+    footer_col_idx = col_map.get("footer")
+    btn_text_col_idx = col_map.get("button_text")
+    btn_url_col_idx = col_map.get("button_url")
+    btn_type_col_idx = col_map.get("button_type")
+    category_col_idx = col_map.get("category")
+    media_url_col_idx = col_map.get("media_url")
+    language_col_idx = col_map.get("language")
+    content_cols = col_map.get("content_cols", [])
 
-    header_col_idx = next((i for i, h in enumerate(header_row) if "header" in h and "type" not in h), None)
-    footer_col_idx = next((i for i, h in enumerate(header_row) if "footer" in h), None)
-    btn_text_col_idx = next((i for i, h in enumerate(header_row) if "button_text" in h or "cta" in h), None)
-    btn_url_col_idx = next(
-        (i for i, h in enumerate(header_row) if "button_url" in h or "url" in h or "link" in h), None
-    )
-    btn_type_col_idx = next((i for i, h in enumerate(header_row) if "button_type" in h), None)
+    has_columnar_structure = bool(header_row_idx is not None and (any(col_map.values()) or chan_col_idx is not None))
+    start_idx = (header_row_idx + 1) if (has_columnar_structure and header_row_idx >= 0) else len(raw_rows)
+    current_channel = sheet_chan
 
     targeting_header_keywords = (
-        "segment", "targeting", "cohort", "audience", "base", "count",
-        "volume", "capping", "dnd", "exclusion", "criteria", "sftp",
-        "remarks", "comments", "planner", "schedule", "execution",
+        "segment", "targeting", "cohort", "audience", "volume", "capping", "dnd",
+        "exclusion", "criteria", "sftp", "remarks", "comments", "planner", "schedule", "execution",
     )
     targeting_col_indices = {
-        idx for idx, h in enumerate(header_row) if any(th in h for th in targeting_header_keywords)
+        idx for idx, h in enumerate(header_row) if any(th in str(h).lower() for th in targeting_header_keywords)
     }
-
     for r_num, row in enumerate(raw_rows[start_idx:], start=start_idx + 1):
         # Skip rows describing audience targeting cohorts rather than creative copy
         if _is_targeting_or_planner_row(row):
@@ -1350,11 +1435,12 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                 c_norm = _normalize_channel_tag(cell)
                 if c_norm and any(
                     k in cell.lower()
-                    for k in ["promotional", "retargeting", "utility", "content", "whatsapp", "sms", "rcs"]
+                    for k in ["promotional", "retargeting", "utility", "content", "whatsapp", "sms", "rcs", "email"]
                 ):
                     current_channel = c_norm
                     break
             continue
+
         # 2. Check channel column
         if chan_col_idx is not None and chan_col_idx < len(row):
             row_chan = _normalize_channel_tag(row[chan_col_idx])
@@ -1370,81 +1456,74 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                     current_channel = c_norm
                     break
 
-        if not active_chan:
-            continue
-
-        # Skip header rows
+        # Skip header rows repeated mid-sheet
         row_joined = " ".join(row).lower()
-        if any(h in row_joined for h in ["channel", "gujarati", "punjabi", "created_at", "valid_until"]):
+        if any(h in row_joined for h in ["created_at", "valid_until", "tracking_id"]):
             if not any(len(cell) > 40 for cell in row):
                 continue
 
-        # 3. If explicit body column was detected, extract from that column
-        if body_col_idx is not None and body_col_idx < len(row) and len(row[body_col_idx]) > 15:
-            body_val = row[body_col_idx]
-            if is_valid_template_copy(body_val):
-                item_dict: dict[str, str] = {
-                    "channel": active_chan,
-                    "text": body_val,
-                    "raw_text": body_val,
-                    "variant": f"Variant {r_num}",
-                    "source": f"excel_{sname}_r{r_num}",
-                }
-                if header_col_idx is not None and header_col_idx < len(row) and row[header_col_idx]:
-                    item_dict["header"] = row[header_col_idx]
-                if footer_col_idx is not None and footer_col_idx < len(row) and row[footer_col_idx]:
-                    item_dict["footer"] = row[footer_col_idx]
-                if btn_text_col_idx is not None and btn_text_col_idx < len(row) and row[btn_text_col_idx]:
-                    item_dict["button_text"] = row[btn_text_col_idx]
-                if btn_url_col_idx is not None and btn_url_col_idx < len(row) and row[btn_url_col_idx]:
-                    item_dict["button_url"] = row[btn_url_col_idx]
-                if btn_type_col_idx is not None and btn_type_col_idx < len(row) and row[btn_type_col_idx]:
-                    item_dict["button_type"] = row[btn_type_col_idx]
-
-                if "Title:" in body_val and "Body:" in body_val:
-                    title_m = re.search(r"Title:\s*([^\n]+)", body_val)
-                    body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", body_val, re.DOTALL)
-                    if title_m:
-                        item_dict["title"] = title_m.group(1).strip()
-                    if body_m:
-                        item_dict["text"] = body_m.group(1).strip()
-
-                items.append(item_dict)
-                continue
-
-        # 4. Otherwise scan non-channel columns for copy (multilingual, multi-column, or row lists)
-        skip_indices = {chan_col_idx} if chan_col_idx is not None else set()
+        # 3. Extract content columns
+        target_cols = content_cols if content_cols else [c_idx for c_idx in range(len(row))]
+        skip_indices = {chan_col_idx, template_name_col_idx, header_col_idx, header_type_col_idx, footer_col_idx, btn_text_col_idx, btn_url_col_idx, btn_type_col_idx, category_col_idx, media_url_col_idx, language_col_idx}
+        skip_indices.discard(None)
         skip_indices.update(targeting_col_indices)
-        for c_idx, cell in enumerate(row):
-            if c_idx in skip_indices:
+
+        for c_idx in target_cols:
+            if c_idx in skip_indices and content_cols:
                 continue
-            clean_cell = cell.strip()
-            if is_valid_template_copy(clean_cell):
-                variant = "General"
-                if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
-                    variant = row[0].upper()
-                elif header_row and c_idx < len(header_row):
-                    col_hdr = header_row[c_idx]
-                    if col_hdr and col_hdr not in ("content", "message", "copy", "text", "body"):
-                        variant = col_hdr.title()
+            if c_idx >= len(row):
+                continue
+            body_val = row[c_idx].strip()
+            if not is_valid_template_copy(body_val):
+                continue
 
-                item_dict = {
-                    "channel": active_chan,
-                    "text": clean_cell,
-                    "raw_text": clean_cell,
-                    "variant": variant,
-                    "source": f"excel_{sname}_r{r_num}",
-                }
-                if "Title:" in clean_cell and "Body:" in clean_cell:
-                    title_m = re.search(r"Title:\s*([^\n]+)", clean_cell)
-                    body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", clean_cell, re.DOTALL)
-                    if title_m:
-                        item_dict["title"] = title_m.group(1).strip()
-                    if body_m:
-                        item_dict["text"] = body_m.group(1).strip()
+            # Determine specific channel for this column if applicable
+            col_hdr = header_row[c_idx] if c_idx < len(header_row) else ""
+            item_chan = _normalize_channel_tag(col_hdr) or active_chan or ("WA" if _normalize_channel_tag(sname) is None else _normalize_channel_tag(sname))
 
-                items.append(item_dict)
+            variant = "General"
+            if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
+                variant = row[0].upper()
+            elif col_hdr and col_hdr not in ("content", "message", "copy", "text", "body"):
+                variant = col_hdr.title()
 
+            item_dict: dict[str, str] = {
+                "channel": item_chan,
+                "text": body_val,
+                "raw_text": body_val,
+                "variant": variant,
+                "source": f"excel_{sname}_r{r_num}_c{c_idx + 1}",
+            }
+            if template_name_col_idx is not None and template_name_col_idx < len(row) and row[template_name_col_idx]:
+                item_dict["template_name"] = row[template_name_col_idx].strip()
+            if header_col_idx is not None and header_col_idx < len(row) and row[header_col_idx]:
+                item_dict["header"] = row[header_col_idx].strip()
+            if header_type_col_idx is not None and header_type_col_idx < len(row) and row[header_type_col_idx]:
+                item_dict["header_type"] = row[header_type_col_idx].strip().upper()
+            if footer_col_idx is not None and footer_col_idx < len(row) and row[footer_col_idx]:
+                item_dict["footer"] = row[footer_col_idx].strip()
+            if btn_text_col_idx is not None and btn_text_col_idx < len(row) and row[btn_text_col_idx]:
+                item_dict["button_text"] = row[btn_text_col_idx].strip()
+            if btn_url_col_idx is not None and btn_url_col_idx < len(row) and row[btn_url_col_idx]:
+                item_dict["button_url"] = row[btn_url_col_idx].strip()
+            if btn_type_col_idx is not None and btn_type_col_idx < len(row) and row[btn_type_col_idx]:
+                item_dict["button_type"] = row[btn_type_col_idx].strip().upper()
+            if category_col_idx is not None and category_col_idx < len(row) and row[category_col_idx]:
+                item_dict["category"] = row[category_col_idx].strip().upper()
+            if media_url_col_idx is not None and media_url_col_idx < len(row) and row[media_url_col_idx]:
+                item_dict["media_url"] = row[media_url_col_idx].strip()
+            if language_col_idx is not None and language_col_idx < len(row) and row[language_col_idx]:
+                item_dict["language"] = row[language_col_idx].strip()
+
+            if "Title:" in body_val and "Body:" in body_val:
+                title_m = re.search(r"Title:\s*([^\n]+)", body_val)
+                body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", body_val, re.DOTALL)
+                if title_m:
+                    item_dict["title"] = title_m.group(1).strip()
+                if body_m:
+                    item_dict["text"] = body_m.group(1).strip()
+
+            items.append(item_dict)
     # 3. Pass 3: Universal Spatial Matrix Scanner (The "Arrive Anyhow" Engine)
     # If no templates were extracted from Pass 1 or Pass 2 (e.g. unformatted A1/A2/B1/B2 layouts)
     if not items:
@@ -2494,10 +2573,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 b_text = cta_btn_text
                 b_url = cta_btn_url
 
-            lang = detect_language(clean_body, variant)
-            cat = ticket_intent.get("wa_category") or detect_category(summary, clean_body, item.get("source", ""))
-            tname = _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", wa_counter)
-
+            lang = item.get("language") or detect_language(clean_body, variant)
+            cat = item.get("category") or ticket_intent.get("wa_category") or detect_category(summary, clean_body, item.get("source", ""))
+            tname = item.get("template_name") or _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", wa_counter)
             var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
             resolved_vars = var_tags
             if len(resolved_samples) > len(var_tags):
@@ -2513,7 +2591,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 lines = clean_body.strip().splitlines()
                 if len(lines) > 1:
                     first_clean = lines[0].strip().strip("*_#~ ")
-                    if first_clean.lower() == wa_header.lower() or wa_header.lower().startswith(first_clean.lower()[:30]):
+                    if first_clean.lower() == wa_header.lower():
                         clean_body = "\n".join(lines[1:]).strip()
             wa_drafts.append(
                 WhatsAppTemplateDraft(
@@ -2521,7 +2599,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     category=cat,
                     language=lang,
                     body=clean_body,
-                    header_type="IMAGE" if img else ("TEXT" if wa_header else "TEXT"),
+                    header_type=item.get("header_type") or ("IMAGE" if img else ("TEXT" if wa_header else "TEXT")),
                     header_text=wa_header,
                     footer_text=cta_footer or item.get("footer"),
                     media_file=img.get("local_path") if img else None,
@@ -2539,7 +2617,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
 
         elif chan == "RCS":
             img = rcs_creatives[(rcs_counter - 1) % len(rcs_creatives)] if rcs_creatives else None
-            tname = _clean_template_name(base_name, "rcs", rcs_counter)
+            tname = item.get("template_name") or _clean_template_name(base_name, "rcs", rcs_counter)
             clean_body, cta_btn_text, cta_btn_url, _ = extract_and_strip_cta(
                 norm_text,
                 existing_btn_text=item.get("button_text"),
@@ -2572,7 +2650,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 lines = clean_body.strip().splitlines()
                 if len(lines) > 1:
                     first_clean = lines[0].strip().strip("*_#~ ")
-                    if first_clean.lower() == rcs_card_title.lower() or rcs_card_title.lower().startswith(first_clean.lower()[:30]):
+                    if first_clean.lower() == rcs_card_title.lower():
                         clean_body = "\n".join(lines[1:]).strip()
             rcs_drafts.append(
                 RcsTemplateDraft(

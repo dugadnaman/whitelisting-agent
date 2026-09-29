@@ -171,3 +171,93 @@ def test_targeting_sheet_does_not_hallucinate_whatsapp_and_rcs_templates(tmp_pat
     assert len(items) == 1
     assert items[0]["channel"] == "WA"
     assert "Tata Capital Personal Loan" in items[0]["text"]
+def test_attached_spreadsheet_comprehensive_content_mapping(tmp_path: Path):
+    """Verify attached spreadsheets cleanly map template names, categories, headers, buttons, footers, and multi-channel columns."""
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "Diwali Blast"
+
+    ws1.append(["Template Name", "Channel", "Category", "Header", "Body", "Footer", "Button Text", "Button URL"])
+    ws1.append([
+        "diwali_lap_special_v1",
+        "WhatsApp",
+        "MARKETING",
+        "Festive Loan Dhamaka",
+        "Happy Dussehra & Diwali! Dear Customer, get instant Personal Loan up to Rs. 5 Lakhs from Tata Capital. Apply now: <link>",
+        "T&C apply",
+        "Claim Loan",
+        "https://u3.mnge.co/diwali",
+    ])
+    ws1.append([
+        "diwali_home_loan_rcs",
+        "RCS",
+        "PROMOTIONAL",
+        "Durga Pooja Special",
+        "Dear Customer, celebrate Durga Pooja with pre-approved Home Loans starting at 8.45% ROI.",
+        "",
+        "Check Rates",
+        "https://u3.mnge.co/home",
+    ])
+
+    # Sheet 2: Multi-channel copy columns in single row
+    ws2 = wb.create_sheet(title="Multi-Channel Row")
+    ws2.append(["Campaign Name", "Channel", "WhatsApp Text", "SMS Content", "CTA URL"])
+    ws2.append([
+        "Festive Top Up",
+        "Multi-Channel",
+        "Dear Customer, unlock exclusive top-up funds on your loan this Diwali from Tata Capital. Apply: <link>",
+        "Dear Customer, festive top-up offer ready. Apply: <link>",
+        "https://u3.mnge.co/topup",
+    ])
+
+    file_path = tmp_path / "comprehensive_mapping.xlsx"
+    wb.save(file_path)
+
+    items = extract_templates_from_excel_file(file_path)
+    assert len(items) == 4, f"Expected 4 items, got {len(items)}"
+
+    # 1. Verify Sheet 1 WhatsApp mapping
+    wa_item = next(i for i in items if i.get("template_name") == "diwali_lap_special_v1")
+    assert wa_item["channel"] == "WA"
+    assert wa_item["category"] == "MARKETING"
+    assert wa_item["header"] == "Festive Loan Dhamaka"
+    assert wa_item["footer"] == "T&C apply"
+    assert wa_item["button_text"] == "Claim Loan"
+    assert wa_item["button_url"] == "https://u3.mnge.co/diwali"
+
+    # 2. Verify Sheet 1 RCS mapping
+    rcs_item = next(i for i in items if i.get("template_name") == "diwali_home_loan_rcs")
+    assert rcs_item["channel"] == "RCS"
+    assert rcs_item["category"] == "PROMOTIONAL"
+    assert rcs_item["header"] == "Durga Pooja Special"
+    assert rcs_item["button_text"] == "Check Rates"
+    assert rcs_item["button_url"] == "https://u3.mnge.co/home"
+
+    # 3. Verify Sheet 2 multi-channel column extraction
+    wa_multi = next(i for i in items if i["channel"] == "WA" and "top-up funds" in i["text"])
+    sms_multi = next(i for i in items if i["channel"] == "SMS" and "festive top-up" in i["text"])
+    assert wa_multi["button_url"] == "https://u3.mnge.co/topup"
+    assert sms_multi is not None
+
+    # 4. Verify parse_jira_brief retains mapped fields in drafts
+    mock_issue = {
+        "key": "TCN-888",
+        "summary": "Diwali Festival Campaign",
+        "attachments": [{"id": "1", "filename": "test.xlsx", "local_path": str(file_path)}],
+    }
+    brief = parse_jira_brief(mock_issue, download_creatives=False)
+    assert len(brief.whatsapp_templates) == 2
+    assert len(brief.rcs_templates) == 1
+    assert len(brief.sms_templates) == 1
+
+    wa_draft = next(w for w in brief.whatsapp_templates if w["template_name"] == "diwali_lap_special_v1")
+    assert wa_draft["category"] == "MARKETING"
+    assert wa_draft["header_text"] == "Festive Loan Dhamaka"
+    assert wa_draft["button_text"] == "Claim Loan"
+    assert wa_draft["button_url"] == "https://u3.mnge.co/diwali"
+
+    rcs_draft = brief.rcs_templates[0]
+    assert rcs_draft["template_name"] == "diwali_home_loan_rcs"
+    assert rcs_draft["card_title"] == "Durga Pooja Special"
+    assert rcs_draft["action_label"] == "Check Rates"
+    assert rcs_draft["action_url"] == "https://u3.mnge.co/home"
