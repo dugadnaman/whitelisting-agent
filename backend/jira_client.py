@@ -46,6 +46,20 @@ def get_jira_auth_headers() -> dict[str, str]:
         "User-Agent": "Karix-Briefing-Agent/1.0",
     }
 
+def is_explicit_push(text: str) -> bool:
+    """Return True only if text explicitly describes an app push notification campaign."""
+    if not text:
+        return False
+    t = text.lower()
+    push_patterns = [
+        r"\b(?:app|in-app|web|mobile)\s+push\b",
+        r"\bpush\s+(?:notification|campaign|message|alert|copy|title|body)\b",
+        r"\b(?:apn|in-app\s+notification|app\s+notification)\b",
+        r"\bpush\b.*\bnotification\b",
+        r"\bnotification\b.*\bpush\b",
+    ]
+    return any(re.search(p, t) for p in push_patterns)
+
 
 def adf_to_text(node: dict[str, Any] | None) -> str:
     """Recursively convert Atlassian Document Format (ADF) into readable text with tables."""
@@ -192,27 +206,27 @@ def list_jira_issues(
             and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv"))
         )
         has_wa = (
-            "whatsapp" in desc_low
-            or "whatsapp" in sum_low
+            bool(re.search(r"\b(wa|whatsapp)\b", desc_low))
+            or bool(re.search(r"\b(wa|whatsapp)\b", sum_low))
             or wa_att_count > 0
-            or any(fn.endswith((".docx", ".doc")) for fn in fn_lowers)
+            or any(fn.endswith((".docx", ".doc")) and ("wa" in fn or "whatsapp" in fn) for fn in fn_lowers)
         )
-        ch_wa = wa_att_count if wa_att_count > 0 else (1 if has_wa and not is_email else 0)
+        ch_wa = wa_att_count if wa_att_count > 0 else (1 if has_wa else 0)
 
         rcs_att_count = sum(
             1 for fn in fn_lowers if "rcs" in fn and fn.endswith((".jpg", ".png", ".webp", ".jpeg", ".xlsx", ".csv"))
         )
-        has_rcs = "rcs" in desc_low or "rcs" in sum_low or rcs_att_count > 0
-        ch_rcs = rcs_att_count if rcs_att_count > 0 else (1 if has_rcs and not is_email else 0)
+        has_rcs = bool(re.search(r"\b(rcs)\b", desc_low)) or bool(re.search(r"\b(rcs)\b", sum_low)) or rcs_att_count > 0
+        ch_rcs = rcs_att_count if rcs_att_count > 0 else (1 if has_rcs else 0)
 
         sms_att_count = sum(1 for fn in fn_lowers if "sms" in fn and fn.endswith((".xlsx", ".xls", ".csv", ".txt")))
-        has_sms = "sms" in desc_low or "sms" in sum_low or sms_att_count > 0
-        ch_sms = sms_att_count if sms_att_count > 0 else (1 if has_sms and not is_email else 0)
+        has_sms = bool(re.search(r"\b(sms)\b", desc_low)) or bool(re.search(r"\b(sms)\b", sum_low)) or sms_att_count > 0
+        ch_sms = sms_att_count if sms_att_count > 0 else (1 if has_sms else 0)
 
         has_email_files = any("mailer" in fn or fn.endswith((".zip", ".html")) for fn in fn_lowers)
-        ch_email = 1 if is_email or has_email_files or "email text" in desc_low else 0
+        ch_email = 1 if is_email or has_email_files or "email text" in desc_low or bool(re.search(r"\b(email|mailer)\b", desc_low)) else 0
 
-        ch_push = 1 if any(k in desc_low or k in sum_low for k in ("push", "moengage", "notification")) else 0
+        ch_push = 1 if is_explicit_push(desc_val) or is_explicit_push(summary_val) else 0
         total_channels = ch_wa + ch_rcs + ch_sms + ch_email + ch_push
 
         channel_counts = {

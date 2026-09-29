@@ -404,3 +404,81 @@ def test_swcm_85_service_table_extracts_whatsapp_template():
     assert "https://teams.microsoft.com/meet/12345" in wa["button_url"]
     assert parsed.channel_counts["whatsapp"] == 1
     assert parsed.channel_counts["push"] == 0
+def test_multi_channel_ticket_with_email_and_whatsapp_extracts_correct_channels_and_no_false_push():
+    """Verify that a ticket with both Email and WhatsApp identifies both channels accurately and emits 0 push."""
+    from briefing_parser import parse_jira_brief
+    from jira_client import list_jira_issues
+
+    ticket_data = {
+        "key": "SWCM-200",
+        "id": "20200",
+        "fields": {
+            "summary": "Festival Campaign - Email and WhatsApp Blast",
+            "description": {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": "Hi Team, please execute the Email and WhatsApp campaigns for festival season. Send notification to eligible users."}],
+                    },
+                    {
+                        "type": "table",
+                        "content": [
+                            {
+                                "type": "tableRow",
+                                "content": [
+                                    {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Channel"}]}]},
+                                    {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Content"}]}]},
+                                ],
+                            },
+                            {
+                                "type": "tableRow",
+                                "content": [
+                                    {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "WA"}]}]},
+                                    {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Dear Customer, celebrate Diwali with instant personal loans up to Rs. 5 Lakhs! Click here to claim your offer."}]}]},
+                                ],
+                            },
+                            {
+                                "type": "tableRow",
+                                "content": [
+                                    {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "EMAIL"}]}]},
+                                    {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Subject: Exclusive Diwali Offers for You!\nDear Valued Customer, this festive season enjoy special interest rates."}]}]},
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+            "attachment": [
+                {"id": "att-1", "filename": "Diwali_Mailer_Package.zip", "size": 1024, "mimeType": "application/zip"}
+            ],
+        },
+    }
+
+    # 1. list_jira_issues check
+    with patch("requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        mock_post.return_value.json.return_value = {"issues": [ticket_data]}
+        issues = list_jira_issues(project="SWCM")
+        counts = issues[0]["channel_counts"]
+        assert counts["whatsapp"] == 1
+        assert counts["email"] == 1
+        assert counts["push"] == 0
+        assert counts["total"] == 2
+
+    # 2. parse_jira_brief check
+    issue_for_brief = {
+        "key": ticket_data["key"],
+        "summary": ticket_data["fields"]["summary"],
+        "description_raw": ticket_data["fields"]["description"],
+        "description_text": "Hi Team, please execute the Email and WhatsApp campaigns for festival season. Send notification to eligible users.",
+        "attachments": ticket_data["fields"]["attachment"],
+    }
+    brief = parse_jira_brief(issue_for_brief, download_creatives=False)
+    assert len(brief.whatsapp_templates) == 1
+    assert len(brief.email_templates) >= 1
+    assert brief.channel_counts["whatsapp"] == 1
+    assert brief.channel_counts["email"] >= 1
+    assert brief.channel_counts["push"] == 0
+    assert brief.moengage_campaign["push_title"] is None

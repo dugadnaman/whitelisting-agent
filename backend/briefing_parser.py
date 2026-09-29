@@ -809,6 +809,10 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                 ("sms content", "SMS"),
                 ("rcs text", "RCS"),
                 ("rcs content", "RCS"),
+                ("email text", "EMAIL"),
+                ("email content", "EMAIL"),
+                ("email html code", "EMAIL"),
+                ("mailer copy", "EMAIL"),
             ]:
                 val = kv_dict.get(k_prefix, "")
                 if (
@@ -827,14 +831,32 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
             continue
 
         # Check Pattern B (Row-based channel tags)
+        start_idx = 0
         first_row = raw_rows[0]
-        first_col_val = first_row[0].strip().upper() if first_row else ""
-        is_row_based = first_col_val in ("SMS", "WA", "RCS", "WHATSAPP", "EMAIL") and len(first_row) >= 2
+        first_col_0 = first_row[0].strip().upper() if first_row else ""
+        if first_col_0 in ("CHANNEL", "CHANNELS", "PLATFORM", "TYPE", "MEDIUM") and len(raw_rows) > 1:
+            start_idx = 1
+            first_col_val = raw_rows[1][0].strip().upper() if raw_rows[1] else ""
+        else:
+            first_col_val = first_col_0
+
+        is_row_based = (
+            first_col_val in ("SMS", "WA", "RCS", "WHATSAPP", "EMAIL", "MAIL", "MAILER", "PUSH", "APN")
+            and len(raw_rows[start_idx]) >= 2
+        )
 
         if is_row_based:
-            for r in raw_rows:
+            for r in raw_rows[start_idx:]:
                 if len(r) >= 2:
-                    chan_tag = r[0].strip().upper()
+                    chan_raw = r[0].strip().upper()
+                    if chan_raw in ("WA", "WHATSAPP"):
+                        chan_tag = "WA"
+                    elif chan_raw in ("EMAIL", "MAIL", "MAILER"):
+                        chan_tag = "EMAIL"
+                    elif chan_raw in ("PUSH", "APN"):
+                        chan_tag = "PUSH"
+                    else:
+                        chan_tag = chan_raw
                     body_content = r[1].strip()
                     if body_content and len(body_content) > 10 and is_valid_template_copy(body_content):
                         extracted_items.append(
@@ -846,7 +868,6 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                             }
                         )
             continue
-
         # Pattern A (Columnar headers in row 0)
         if len(raw_rows) >= 2:
             header_cells = raw_rows[0]
@@ -863,6 +884,10 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                                 chan_type = "RCS"
                             elif re.search(r"\b(sms)\b", header_lower):
                                 chan_type = "SMS"
+                            elif re.search(r"\b(email|mailer|mail)\b", header_lower):
+                                chan_type = "EMAIL"
+                            elif re.search(r"\b(push|apn)\b", header_lower):
+                                chan_type = "PUSH"
                             else:
                                 continue
 
@@ -2241,8 +2266,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         items = extract_templates_from_excel_file(excel_path, target_month=target_month)
         if items:
             extracted_items.extend(items)
-    if not extracted_items:
-        extracted_items = _parse_tables_from_adf(desc_raw)
+    adf_items = _parse_tables_from_adf(desc_raw)
+    if adf_items:
+        extracted_items.extend(adf_items)
 
     if not extracted_items:
         # Pipe blocks fallback (e.g. SMS | ... or WA | ...)
@@ -2600,17 +2626,27 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     "source_origin": source_origin,
                 }
             )
-    if (
-        not wa_drafts
-        and not sms_drafts
-        and not rcs_drafts
-        and (email_drafts or "email" in desc_text.lower() or "mail" in desc_text.lower() or "email" in summary.lower())
-    ):
-        is_email_campaign = True
+    from jira_client import is_explicit_push
+
     has_push = bool(
-        ("push" in summary.lower() or "apn" in summary.lower() or "app notification" in summary.lower() or "push" in desc_text.lower())
-        or (not wa_drafts and not rcs_drafts and not sms_drafts and not email_drafts and not is_email_campaign)
+        any(item.get("channel") == "PUSH" for item in extracted_items)
+        or is_explicit_push(summary)
+        or is_explicit_push(desc_text)
     )
+
+    is_email = bool(
+        len(email_drafts) > 0
+        or has_mailers_zip
+        or "mailer" in summary.lower()
+        or "mailers" in summary.lower()
+        or ("email" in summary.lower() and not wa_drafts)
+        or "email text" in desc_text.lower()
+    )
+    is_email_campaign = is_email and not wa_drafts and not rcs_drafts and not sms_drafts
+
+    email_count = len(email_drafts) if email_drafts else (1 if is_email else 0)
+    push_count = 1 if has_push else 0
+
     # 5. Build MoEngage Campaign Staging payload
     moengage_campaign = {
         "campaign_name": f"{key} - {summary}",
@@ -2623,16 +2659,22 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         "status": "DRAFT",
     }
 
-
-    campaign_type_label = "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"
+    if is_email_campaign:
+        campaign_type_label = "Email Mailer Campaign"
+    elif wa_drafts and is_email:
+        campaign_type_label = "Multi-Channel (WhatsApp & Email)"
+    elif wa_drafts and rcs_drafts:
+        campaign_type_label = "Multi-Channel (WhatsApp & RCS)"
+    else:
+        campaign_type_label = "Multi-Channel Whitelisting Brief"
 
     ch_counts = {
-        "total": len(wa_drafts) + len(rcs_drafts) + len(sms_drafts) + len(email_drafts) + (1 if has_push else 0),
+        "total": len(wa_drafts) + len(rcs_drafts) + len(sms_drafts) + email_count + push_count,
         "whatsapp": len(wa_drafts),
         "rcs": len(rcs_drafts),
         "sms": len(sms_drafts),
-        "email": len(email_drafts),
-        "push": 1 if has_push else 0,
+        "email": email_count,
+        "push": push_count,
     }
 
     return ParsedJiraBrief(
