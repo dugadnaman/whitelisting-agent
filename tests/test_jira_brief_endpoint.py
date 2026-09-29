@@ -270,3 +270,107 @@ def test_channel_counts_in_brief_and_issues():
     assert "rcs" in counts
     assert "email" in counts
     assert "push" in counts
+
+
+def test_swcm_85_service_table_extracts_whatsapp_template():
+    """Verify SWCM-85 single-header execution table extracts WhatsApp template even when copy is in Template ID cell."""
+    from briefing_parser import parse_jira_brief
+
+    mock_issue = {
+        "key": "SWCM-85",
+        "summary": "TCLService_HR_WhatsApp Campaign – “MANDATORY – TCL HR and TCOC Orientation – October 2026 ” - 01-10-2026 @ 09:00",
+        "status": "New Ticket",
+        "assignee": "Dnyanesh Khawas",
+        "reporter": "Anish Nagpal",
+        "description_raw": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "table",
+                    "content": [
+                        {
+                            "type": "tableRow",
+                            "content": [
+                                {
+                                    "type": "tableHeader",
+                                    "content": [
+                                        {
+                                            "type": "paragraph",
+                                            "content": [{"type": "text", "text": "WhatsApp Campaign execution format"}],
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        {
+                            "type": "tableRow",
+                            "content": [
+                                {
+                                    "type": "tableCell",
+                                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Campaign Name"}]}],
+                                },
+                                {
+                                    "type": "tableCell",
+                                    "content": [
+                                        {"type": "paragraph", "content": [{"type": "text", "text": "WhatsApp Campaign - MANDATORY Orientation"}]}
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "type": "tableRow",
+                            "content": [
+                                {
+                                    "type": "tableCell",
+                                    "content": [{"type": "paragraph", "content": [{"type": "text", "text": "WhatsApp Text"}]}],
+                                },
+                                {"type": "tableCell", "content": [{"type": "paragraph", "content": []}]},
+                            ],
+                        },
+                        {
+                            "type": "tableRow",
+                            "content": [
+                                {
+                                    "type": "tableCell",
+                                    "content": [
+                                        {"type": "paragraph", "content": [{"type": "text", "text": "Template ID (If available)"}]}
+                                    ],
+                                },
+                                {
+                                    "type": "tableCell",
+                                    "content": [
+                                        {
+                                            "type": "paragraph",
+                                            "content": [
+                                                {
+                                                    "type": "text",
+                                                    "text": (
+                                                        "Dear Colleague,\n\n"
+                                                        "You are invited to attend the virtual TCL HR and TCOC Orientation – 2026 scheduled on 01-Oct-26.\n\n"
+                                                        "This is a mandatory session so kindly ensure 100% attendance & participation.\n\n"
+                                                        "👉 Link to Join: https://teams.microsoft.com/meet/12345\n\n"
+                                                        "Regards,\nFunctional L&D – Tata Capital Ltd."
+                                                    ),
+                                                }
+                                            ],
+                                        }
+                                    ],
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ],
+        },
+        "description_text": "SWCM-85 Orientation",
+        "attachments": [],
+    }
+
+    parsed = parse_jira_brief(mock_issue, download_creatives=False)
+    assert len(parsed.whatsapp_templates) == 1
+    wa = parsed.whatsapp_templates[0]
+    assert "Dear Colleague" in wa["body"]
+    assert "https://teams.microsoft.com/meet/12345" in wa["button_url"]
+    assert parsed.channel_counts["whatsapp"] == 1
+    assert parsed.channel_counts["push"] == 0

@@ -1836,11 +1836,12 @@ def _extract_images_from_zip(zip_path: Path) -> list[str]:
     return images
 
 
-def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None, summary: str = "") -> list[dict[str, Any]]:
     """
-    Parse SWCM 'Campaign execution format N | WA N' key-value tables into WhatsApp campaigns.
-    Preserves bold markdown (*bold*), variable placeholders, and extracts real destination URLs
-    from hyperlinked CTA text.
+    Parse SWCM campaign execution format tables (WhatsApp, RCS, SMS) into campaign items.
+    Handles single-cell header tables (e.g. SWCM-85, SWCM-84, SWCM-79, SWCM-78) as well as
+    multi-cell execution format tables (SWCM-59).
+    Preserves bold markdown (*bold*), variable placeholders, and extracts real destination URLs.
     """
     if not adf_doc:
         return []
@@ -1853,39 +1854,110 @@ def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None) -> list[dict[str
         if not rows:
             continue
 
-        header = [_extract_text_from_adf_node(c, preserve_formatting=False).strip() for c in rows[0].get("content", [])]
-        if len(header) < 2:
-            continue
-        if "campaign execution format" not in header[0].lower():
-            continue
-        if not header[1].strip().upper().startswith("WA"):
+        raw_rows = []
+        for r in rows:
+            cells = [_extract_text_from_adf_node(c, preserve_formatting=True).strip() for c in r.get("content", [])]
+            raw_rows.append(cells)
+
+        if not raw_rows:
             continue
 
-        fields: dict[str, dict[str, Any]] = {}
-        for r in rows[1:]:
-            cells = r.get("content", [])
-            if len(cells) >= 2:
-                raw_label = _extract_text_from_adf_node(cells[0], preserve_formatting=False).strip().replace("*", "")
-                val_text = _extract_text_from_adf_node(cells[1], preserve_formatting=True).strip()
-                val_links = _extract_links_from_adf_node(cells[1])
-                fields[raw_label] = {"text": val_text, "links": val_links}
+        header_c0 = raw_rows[0][0].lower().strip() if raw_rows and raw_rows[0] else ""
+        header_c1 = raw_rows[0][1].strip() if len(raw_rows[0]) > 1 else ""
+        is_swcm_table = "campaign execution format" in header_c0 or any(
+            "campaign execution format" in (r[0].lower() if r else "") for r in raw_rows
+        )
+        if not is_swcm_table:
+            continue
 
-        wa_content = fields.get("WA Content", {}).get("text", "")
-        if wa_content:
-            cta_info = fields.get("CTA / LINK", {})
-            campaigns.append(
-                {
-                    "wa_label": header[1].strip(),
-                    "campaign_name": fields.get("Campaign Name", {}).get("text", ""),
-                    "body": wa_content,
-                    "cta_text": cta_info.get("text", ""),
-                    "cta_links": cta_info.get("links", []),
-                    "schedule": fields.get("Date & Time of execution", {}).get("text", ""),
-                }
-            )
+        chan = None
+        if header_c1.upper().startswith("WA"):
+            chan = "WA"
+        elif header_c1.upper().startswith("RCS"):
+            chan = "RCS"
+        elif header_c1.upper().startswith("SMS"):
+            chan = "SMS"
+        elif "whatsapp" in header_c0 or "wa " in header_c0 or header_c0.startswith("wa"):
+            chan = "WA"
+        elif "rcs" in header_c0:
+            chan = "RCS"
+        elif "sms" in header_c0:
+            chan = "SMS"
+        elif "email" in header_c0:
+            chan = "EMAIL"
+
+        fields: dict[str, str] = {}
+        fields_links: dict[str, list[str]] = {}
+        start_r = 1 if ("campaign execution format" in header_c0 or len(raw_rows) > 1) else 0
+        for r_node in rows[start_r:]:
+            cells_node = r_node.get("content", [])
+            if len(cells_node) >= 2:
+                raw_k = _extract_text_from_adf_node(cells_node[0], preserve_formatting=False).strip().replace("*", "").strip(":")
+                val_text = _extract_text_from_adf_node(cells_node[1], preserve_formatting=True).strip()
+                val_links = _extract_links_from_adf_node(cells_node[1])
+                k_norm = raw_k.lower().strip()
+                fields[k_norm] = val_text
+                fields_links[k_norm] = val_links
+
+        body_val = None
+        candidate_keys = [
+            "whatsapp text", "wa text", "whatsapp content", "wa content",
+            "rcs text", "rcs content",
+            "sms text", "sms content",
+            "content", "message", "copy", "text",
+            "template id (if available)", "template id",
+        ]
+        for k in candidate_keys:
+            if k in fields:
+                val = fields[k]
+                if is_valid_template_copy(val):
+                    body_val = val
+                    if not chan:
+                        if "whatsapp" in k or "wa " in k:
+                            chan = "WA"
+                        elif "rcs" in k:
+                            chan = "RCS"
+                        elif "sms" in k:
+                            chan = "SMS"
+                    break
+
+        if not body_val:
+            continue
+
+        if not chan:
+            s_low = summary.lower()
+            if "whatsapp" in s_low or "wa " in s_low:
+                chan = "WA"
+            elif "rcs" in s_low:
+                chan = "RCS"
+            elif "sms" in s_low:
+                chan = "SMS"
+            else:
+                chan = "WA"
+
+        camp_name = (
+            fields.get("campaign name")
+            or fields.get("campaign name 1")
+            or fields.get("campaign name 2")
+            or summary
+        )
+        cta_text = fields.get("cta / link") or fields.get("cta") or fields.get("link") or ""
+        cta_links = fields_links.get("cta / link") or fields_links.get("cta") or []
+        sched = fields.get("date & time of execution") or fields.get("date & time") or ""
+
+        campaigns.append(
+            {
+                "channel": chan,
+                "wa_label": header_c1 or chan,
+                "campaign_name": camp_name,
+                "body": body_val,
+                "cta_text": cta_text,
+                "cta_links": cta_links,
+                "schedule": sched,
+            }
+        )
 
     return campaigns
-
 
 def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[str, str]:
     """
@@ -2219,9 +2291,13 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
 
     if comment_updates:
         extracted_items.extend(comment_updates)
-    # 3b. SWCM WhatsApp campaign tables ("Campaign execution format N | WA N")
-    swcm_campaigns = _parse_swcm_campaign_tables(desc_raw)
+    wa_counter = 1
+    rcs_counter = 1
+    sms_counter = 1
+    # 3b. SWCM campaign tables (WhatsApp, RCS, SMS)
+    swcm_campaigns = _parse_swcm_campaign_tables(desc_raw, summary=summary)
     for idx, campaign in enumerate(swcm_campaigns, start=1):
+        c_chan = campaign.get("channel", "WA").upper()
         cta_text, cta_url = _parse_swcm_cta(campaign.get("cta_text", ""), campaign.get("cta_links", []))
         norm_text, samples = normalize_placeholders(campaign["body"])
         clean_body, swcm_btn_text, swcm_btn_url, swcm_footer = extract_and_strip_cta(
@@ -2232,33 +2308,79 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
         if len(samples) > len(var_tags):
             samples = samples[: len(var_tags)]
-        media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
-        if media is None and zip_creative_paths:
-            media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
-        tname = _clean_template_name(base_name, "wa", idx)
         lang = detect_language(clean_body)
         cat = detect_category(summary, clean_body)
-        tname = _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", idx)
-        wa_drafts.append(
-            WhatsAppTemplateDraft(
-                template_name=tname,
-                category=cat,
-                language=lang,
-                body=clean_body,
-                header_type="IMAGE" if media else "TEXT",
-                media_file=media,
-                media_filename=Path(media).name if media else None,
-                button_type="URL",
-                button_text=swcm_btn_text,
-                button_url=swcm_btn_url,
-                footer_text=swcm_footer,
-                variables=var_tags,
-                sample_values=samples,
-                raw_source=campaign["body"],
-                source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
-            )
-        )
 
+        if c_chan in ("WA", "WHATSAPP"):
+            media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
+            if media is None and zip_creative_paths:
+                media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
+            tname = _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", wa_counter)
+            wa_drafts.append(
+                WhatsAppTemplateDraft(
+                    template_name=tname,
+                    category=cat,
+                    language=lang,
+                    body=clean_body,
+                    header_type="IMAGE" if media else "TEXT",
+                    header_text=None,
+                    footer_text=swcm_footer,
+                    media_file=media,
+                    media_filename=Path(media).name if media else None,
+                    button_type="URL",
+                    button_text=swcm_btn_text,
+                    button_url=swcm_btn_url,
+                    variables=var_tags,
+                    sample_values=samples,
+                    raw_source=campaign["body"],
+                    source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
+                )
+            )
+            wa_counter += 1
+
+        elif c_chan == "RCS":
+            media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
+            if media is None and zip_creative_paths:
+                media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
+            tname = _clean_template_name(base_name, "rcs", rcs_counter)
+            rcs_card_title = derive_clean_card_title(clean_body, account=issue_data.get("account"))
+            if rcs_card_title and clean_body:
+                lines = clean_body.strip().splitlines()
+                if len(lines) > 1:
+                    first_clean = lines[0].strip().strip("*_#~ ")
+                    if first_clean.lower() == rcs_card_title.lower() or rcs_card_title.lower().startswith(first_clean.lower()[:30]):
+                        clean_body = "\n".join(lines[1:]).strip()
+            rcs_drafts.append(
+                RcsTemplateDraft(
+                    template_name=tname,
+                    card_title=rcs_card_title,
+                    body=clean_body,
+                    media_file=media,
+                    media_filename=Path(media).name if media else None,
+                    action_type="URL",
+                    action_label=swcm_btn_text,
+                    action_url=swcm_btn_url,
+                    variables=var_tags,
+                    sample_values=samples,
+                    raw_source=campaign["body"],
+                    source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
+                )
+            )
+            rcs_counter += 1
+
+        elif c_chan == "SMS":
+            tname = _clean_template_name(base_name, "sms", sms_counter)
+            sms_drafts.append(
+                SmsTemplateDraft(
+                    template_name=tname,
+                    text=clean_body,
+                    char_count=len(clean_body),
+                    variant=f"SWCM {campaign['wa_label']}",
+                    variables=var_tags,
+                    raw_source=campaign["body"],
+                )
+            )
+            sms_counter += 1
     # 3c. TypeSafe AI Semantic Extraction fallback for free-form Jira descriptions
     desc_low = desc_text.lower()
     is_metadata_brief = any(k in desc_low for k in ("campaign name |", "sftp path", "date & time of execution"))
@@ -2295,9 +2417,6 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             logger.warning("TypeSafe semantic Jira extraction skipped: %s", ex)
 
     # 4. Assemble template drafts
-    wa_counter = 1
-    rcs_counter = 1
-    sms_counter = 1
     seen_sms_texts: dict[str, int] = {}
     for item in extracted_items:
         chan = item["channel"].upper()
@@ -2503,7 +2622,10 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
 
     campaign_type_label = "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"
 
-    has_push = bool(moengage_campaign and (moengage_campaign.get("push_body") or moengage_campaign.get("push_title")))
+    has_push = bool(
+        ("push" in summary.lower() or "apn" in summary.lower() or "app notification" in summary.lower() or "push" in desc_text.lower())
+        or (not wa_drafts and not rcs_drafts and not sms_drafts and not email_drafts and not is_email_campaign)
+    )
     ch_counts = {
         "total": len(wa_drafts) + len(rcs_drafts) + len(sms_drafts) + len(email_drafts) + (1 if has_push else 0),
         "whatsapp": len(wa_drafts),
