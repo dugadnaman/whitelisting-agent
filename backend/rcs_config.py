@@ -51,6 +51,15 @@ DEFAULT_RCS_ESMEADDRS: dict[str, str] = {
     "apparel": "71189600000000",
 }
 
+DEFAULT_RCS_AUTH_TOKENS: dict[str, str] = {
+    "tcl_promo": "EcLwxXg5cE7XYSbvx5rQRQ==",
+    "tcl_trans": "EcLwxXg5cE7XYSbvx5rQRQ==",
+    "tchfl": "eneXEZn4OVb0eqj3jT7JtA==",
+    "wealth": "MvL8v1ofIKrxhLMVbICrbw==",
+    "moneyfy": "eneXEZn4OVb0eqj3jT7JtA==",
+    "apparel": "yzHtsfT8v5DZ6XV3stK4YQ==",
+    "bajaj": "af2vdbyFh3RX8eee",
+}
 TATA_RCS_BOT_ID = "Uv9tdd0KNADbq3pX"
 BAJAJ_RCS_BOT_ID = "af2vdbyFh3RX8eee"
 # Legacy Lounge URLs
@@ -188,11 +197,10 @@ def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
             or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
             or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
             or os.environ.get(f"{prefix}_AUTH_TOKEN")
-            or ("yzHtsfT8v5DZ6XV3stK4YQ==" if c == "apparel" else None)
+            or DEFAULT_RCS_AUTH_TOKENS.get(c)
         )
         session = os.environ.get(f"{prefix}_KARIX_SESSION")
         user = os.environ.get(f"{prefix}_KARIX_USER")
-
     if not bearer:
         raise OSError(
             f"Missing required RCS Bearer token for {client} ({prefix}_KARIX_BEARER_TOKEN or {prefix}_RCS_AUTH_TOKEN). "

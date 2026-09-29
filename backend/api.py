@@ -52,6 +52,10 @@ from config import (
     BAJAJ_WABA_ID,
     DEFAULT_ENTITY_IDS,
     DEFAULT_ESMEADDRS,
+    DEFAULT_PORTAL_BEARER_TOKENS,
+    DEFAULT_PORTAL_SESSIONS,
+    DEFAULT_PORTAL_USERS,
+    DEFAULT_WABA_AUTH_TOKENS,
     DEFAULT_WABA_IDS,
     GLOBAL_TEMPLATE_NAMESPACE_ID,
     OFFICIAL_TEMPLATE_BASE_URL,
@@ -69,6 +73,7 @@ from rcs_client import fetch_rcs_templates
 
 # RCS pipeline imports
 from rcs_config import (
+    DEFAULT_RCS_AUTH_TOKENS,
     DEFAULT_RCS_BOT_IDS,
     DEFAULT_RCS_BOT_NAMES,
     DEFAULT_RCS_ESMEADDRS,
@@ -2543,10 +2548,26 @@ def get_credentials(
     account_obj = next((a for a in load_accounts() if a.get("id") == acc), {})
 
     waba_id = os.environ.get(w_id_key) or DEFAULT_WABA_IDS.get(acc) or (BAJAJ_WABA_ID if is_bajaj else "")
-    waba_auth_token = os.environ.get(w_tok_key) or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else "")
-    bearer_token = os.environ.get(b_tok_key) or (os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else "")
-    session = os.environ.get(s_key) or (os.environ.get("KARIX_SESSION") if is_bajaj else "")
-    user = os.environ.get(u_key) or (os.environ.get("KARIX_USER") if is_bajaj else "")
+    waba_auth_token = (
+        os.environ.get(w_tok_key)
+        or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else "")
+        or DEFAULT_WABA_AUTH_TOKENS.get(acc, "")
+    )
+    bearer_token = (
+        os.environ.get(b_tok_key)
+        or (os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else "")
+        or DEFAULT_PORTAL_BEARER_TOKENS.get(acc, "")
+    )
+    session = (
+        os.environ.get(s_key)
+        or (os.environ.get("KARIX_SESSION") if is_bajaj else "")
+        or DEFAULT_PORTAL_SESSIONS.get(acc, "")
+    )
+    user = (
+        os.environ.get(u_key)
+        or (os.environ.get("KARIX_USER") if is_bajaj else "")
+        or DEFAULT_PORTAL_USERS.get(acc, "")
+    )
     entity_id = (
         os.environ.get(e_id_key)
         or DEFAULT_ENTITY_IDS.get(acc)
@@ -2575,7 +2596,7 @@ def get_credentials(
     )
 
     rcs_bot_id = os.environ.get(f"{prefix}_RCS_BOT_ID") or account_obj.get("rcs_bot_id") or get_rcs_bot_id(acc) or ""
-    rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or ""
+    rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or DEFAULT_RCS_AUTH_TOKENS.get(acc, "")
     rcs_esmeaddr = (
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
         or os.environ.get(f"{prefix}_ESMEADDR")

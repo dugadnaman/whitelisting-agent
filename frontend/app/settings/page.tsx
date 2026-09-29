@@ -948,9 +948,16 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Official WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                    Official WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
+                  </label>
+                  {wabaAuthToken ? (
+                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      ✓ Permanent API Token Configured
+                    </span>
+                  ) : null}
+                </div>
                 <input
                   id="waba_auth_token"
                   type="password"
@@ -960,7 +967,7 @@ export default function SettingsPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Static token generated from Karix Lounge for {accountTitle}. Does not expire with browser sessions.
+                  Static token generated from Karix Lounge for {accountTitle}. Pre-configured and permanent.
                 </p>
               </div>
 
@@ -1300,9 +1307,16 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Karix RCS Permanent API Token ({envPrefix}_RCS_AUTH_TOKEN)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
+                    Karix RCS Permanent API Token ({envPrefix}_RCS_AUTH_TOKEN)
+                  </label>
+                  {rcsAuthToken ? (
+                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                      ✓ Permanent API Token Configured
+                    </span>
+                  ) : null}
+                </div>
                 <input
                   id="rcs_auth_token"
                   type="password"

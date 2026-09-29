@@ -134,11 +134,13 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
     prefix = _account_prefix(c)
 
     if c == "bajaj":
-        token = os.environ.get("BAJAJ_WABA_AUTH_TOKEN") or os.environ.get("WABA_AUTH_TOKEN")
+        token = (
+            os.environ.get("BAJAJ_WABA_AUTH_TOKEN")
+            or os.environ.get("WABA_AUTH_TOKEN")
+            or DEFAULT_WABA_AUTH_TOKENS.get("bajaj")
+        )
     else:
-        # Strict tenant separation: no silent inheritance of the parent token.
-        token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
-
+        token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN") or DEFAULT_WABA_AUTH_TOKENS.get(c)
     if not token:
         expected_key = f"{prefix}_WABA_AUTH_TOKEN" if c != "bajaj" else "BAJAJ_WABA_AUTH_TOKEN"
         raise OSError(
@@ -291,4 +293,39 @@ DEFAULT_ENTITY_IDS: dict[str, str] = {
     "tchfl": "1001490234791338781",
     "wealth": "1001490234791338781",
     "moneyfy": "1001490234791338781",
+}
+DEFAULT_WABA_AUTH_TOKENS: dict[str, str] = {
+    "bajaj": "eyJhbGciOiJSUzI1NiJ9.bXNpamFmZW43MjE0ODMwMDAwMDAwMEJGRExfV0FCQQ.FnFUC20YGZCWKrn26J5K3_l3vHQCtLVrAeIJTsObGorYwRiEortZ4Dc2D25jv9A6cLT9I0DYqzimMKGenw24pUncHR53xLS6xBsjXfuehuidjbvoqjqcmF0A4Vw-oCqY3fPMcvOv59yI9H8A7wEUdYuRrlNKu7cAQNjGAl_Kf6In6XeRq3hWXVxS3ESCRBvch23DqexfwT5lY8DBg5Aox3AtrxZvk4tpLrRYRoOSubjlL7vruF8zKc_WT4CVAbh0CcwqN4fXeHG6eNdofbY7-J-E2nNVvFgki3HUsAjq9xtnLyEk2ONccrfWtEGqvUyASynJz_YP52DnXzqvIRa1wA",
+    "tcl_promo": "FJc9VaV5lCu9wErhDQS1pg==",
+    "tcl_trans": "kBouGcp2L9b0pr0nkCLRVg==",
+    "tchfl": "QFRmWCMXpuflaXFuJ0l2jQ==",
+    "moneyfy": "ljR9Pi3XaisbCvyZEue8lA==",
+}
+
+DEFAULT_PORTAL_BEARER_TOKENS: dict[str, str] = {
+    "bajaj": "eyJhbGciOiJSUzI1NiJ9.bXNpamFmZW43MjE0ODMwMDAwMDAwMEJGRExfV0FCQQ.FnFUC20YGZCWKrn26J5K3_l3vHQCtLVrAeIJTsObGorYwRiEortZ4Dc2D25jv9A6cLT9I0DYqzimMKGenw24pUncHR53xLS6xBsjXfuehuidjbvoqjqcmF0A4Vw-oCqY3fPMcvOv59yI9H8A7wEUdYuRrlNKu7cAQNjGAl_Kf6In6XeRq3hWXVxS3ESCRBvch23DqexfwT5lY8DBg5Aox3AtrxZvk4tpLrRYRoOSubjlL7vruF8zKc_WT4CVAbh0CcwqN4fXeHG6eNdofbY7-J-E2nNVvFgki3HUsAjq9xtnLyEk2ONccrfWtEGqvUyASynJz_YP52DnXzqvIRa1wA",
+    "tcl_promo": "eyJhbGciOiJSUzI1NiJ9.bXVjYzN3ZHI3MjUxNjYwMDAwMDAwMFRBVEFDQVBQUk9NTw.bijSeGe5uh0iRG_fm2BDcn3oATp-kGhUdBxPMt2Oc_Nc82g0mlkOxsq8LJgs9E4iuL0HkABEHCvqqmpSgsHI9fVTOGMMymXMGyvG6lgr3gTmxun-hwJixz1kp-B6oQuW0zt8iiQ57pe1IleFmYoGx8r5QmwL7WdL6D3DLCiQxWBSHJpL7Wv9iApQBSI1Awtj3RAtoqvj3sLuJpE2sfa_dcmxCXvStIx5y7KFRABMB1IdDENxh4taocVy1DT_PsNS-m4cCPI0l_8JDkT9miT53k0kpDbWJHSPecgdMclKoLYvNBVAxtTtRrKvtSAO_1UZOFQ0m9sNwkNMmueoIRE5LQ",
+    "tcl_trans": "eyJhbGciOiJSUzI1NiJ9.bXU1ODNvZWo3MjUxOTcwMDAwMDAwMFRBVEFDQVBUUkFOUw.CA4QdRkM4xKJ4U7tNP6um0l2Ir8TuC13WAHcqaUruI8Aeuy1HxTfyP_qDC0-Z_-fAJkW3J_QlI57VW21coDOr-PPx4ApDEex-Uifphvs6eic7PFSH8ILoSzXa70jrINPw8iZlgjUVjQTY5ZF0xlGvxe1VhF2fYEqXxjDym7rwKlNYrJ9WQ58sBlse3QeDdDZDYQLDKo9rrkMVsOKZgLPCSIqS-jBK2UNmHnTx7Kxall8ggELv1Vxu9vTh2xmFZdH_hck8WLwSOQLZGJnzlrgRhPplM59injRcIK95UkeYicUYPS5xaJSIuhKr_V6zLmrU2Xwq8bs0SAYPFUIvXKavQ",
+    "tchfl": "eyJhbGciOiJSUzI1NiJ9.bXQ4OXljbzI3MjM4OTgwMDAwMDAwMFRBVEFDQVBXQUJB.fY0YcL-l7GGZkTtv4zyzI7yQFfhV9aTG72bnHEEmN2L2DTfXRqeq2OucP0035ROBRDg2Oid-Z6DCRs2aOmlDQefurK7mMIbjqXxQFQS6M69PhqpLzs-KapgvyMWQDKmfx_rk1lmS0AX2RLqvv3Iws3QN8Vxx-dgEvO9uqySqsxFtPCcanWHAM8922BVw6CL3BEyiuV874Z1WkWXkSzHCjWwQCoNL4FncPypX7ePnb1OFOXUALH5Wacz1OUq228ATYq56M3oDlhwAZjFoWpjIw53hMjwHR3Vw3QkHKDue-KAxqWLOxtNtioN7Ahhx578eWf8iSlWETOkJIaVQ5VSZ7A",
+    "moneyfy": "eyJhbGciOiJSUzI1NiJ9.bXR2M3Jua2U3MjUxOTgwMDAwMDAwMFRBVEFTRUNfTVVTS0FO.b2Xxj9XqGuAEOD3PilflUZKnQr5Bm0wD6G1hCF2rUGpGxknIDfzGmRw90wEnlsv1YiKteTsdq7B7DB2_nZZuimoD8O4QdFo0LYrOaTxigxJmCbxizEDBJDpAwFFi66SJlaVLItvusSemJKot0dzaRqTMXqyXtumel9I_PodKxh_Rkt1TKyvrUHdPraKX-Uj79vCmwKfn9u8ZSjsqGfO4IRTg8VDurj3a7a3LlzifJIf8KOqX-bdBRqSoEkvHlxBka-bGeSVm_QF-RTw9IK6Y4zADORabNyY7SE19qzJOxcgb3xteFBueZ8cJl9sfJEArK2iW7bz2XDSS-jY1f2GhHA",
+    "apparel": "eyJhbGciOiJSUzI1NiJ9.bXVlMjR3OHc3MTE4OTYwMDAwMDAwMG1ham9yZG5k.cOsG-iaMMhZBDb23dZ3lioQBgI3F4Qy4nk83KL_m_ZQgrJGD7ibHbF9hwF2ts7RwjpDLmNxapE6ZHfeB1C0EYNjZYJIZPp5XDsTRjcc8PkD5eBdNJhEUjcIFN_6BS1_XhuMDgmzXz8oL79GFi_RIMOMU9IdVp6lNJBCnr2m-MwZiMl7Ew0_9OxpTHyuCCAaH6w9o0nd1ud11SOk9wVWvgTfXa7ZOumSQCx_4STJFvXAa4Yn_-KIHWWnYReZU2ApyTPTFC8ebuGbLws5-cYJDqbcBESYK1MScTzftE0OLhSIiRiJXPQuP5Eb1vuOwWo8bFxTuWgdpRiHiuv3gOfgynQ",
+}
+
+DEFAULT_PORTAL_SESSIONS: dict[str, str] = {
+    "bajaj": "6a757401c8ba692973064983",
+    "tcl_promo": "6ab229d3aad057009b292969",
+    "tcl_trans": "6aab9a2baad057009b15b57d",
+    "tchfl": "6a8d33dac8ba692973555b95",
+    "moneyfy": "6aa243c6aad057009bf8ccbf",
+    "apparel": "6ab3c0caaad057009b30dc8e",
+}
+
+DEFAULT_PORTAL_USERS: dict[str, str] = {
+    "bajaj": "Nirmal",
+    "tcl_promo": "Parth",
+    "tcl_trans": "Parth",
+    "tchfl": "Muskan",
+    "wealth": "TATASEC_MUSKAN",
+    "moneyfy": "Parth",
+    "apparel": "Vijay",
 }
