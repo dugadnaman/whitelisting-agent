@@ -2600,18 +2600,6 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     "source_origin": source_origin,
                 }
             )
-    # 5. Build MoEngage Campaign Staging payload
-    moengage_campaign = {
-        "campaign_name": f"{key} - {summary}",
-        "target_account": sub_account,
-        "scheduled_date": issue_data.get("duedate"),
-        "whatsapp_template": wa_drafts[0].template_name if wa_drafts else None,
-        "sms_content": sms_drafts[0].text if sms_drafts else None,
-        "push_title": f"Tata Capital: {summary[:30]}",
-        "push_body": (sms_drafts[0].text if sms_drafts else (wa_drafts[0].body if wa_drafts else summary))[:120],
-        "status": "DRAFT",
-    }
-
     if (
         not wa_drafts
         and not sms_drafts
@@ -2619,13 +2607,25 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         and (email_drafts or "email" in desc_text.lower() or "mail" in desc_text.lower() or "email" in summary.lower())
     ):
         is_email_campaign = True
-
-    campaign_type_label = "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"
-
     has_push = bool(
         ("push" in summary.lower() or "apn" in summary.lower() or "app notification" in summary.lower() or "push" in desc_text.lower())
         or (not wa_drafts and not rcs_drafts and not sms_drafts and not email_drafts and not is_email_campaign)
     )
+    # 5. Build MoEngage Campaign Staging payload
+    moengage_campaign = {
+        "campaign_name": f"{key} - {summary}",
+        "target_account": sub_account,
+        "scheduled_date": issue_data.get("duedate"),
+        "whatsapp_template": wa_drafts[0].template_name if wa_drafts else None,
+        "sms_content": sms_drafts[0].text if sms_drafts else None,
+        "push_title": f"Tata Capital: {summary[:30]}" if has_push else None,
+        "push_body": (sms_drafts[0].text if sms_drafts else (wa_drafts[0].body if wa_drafts else summary))[:120] if has_push else None,
+        "status": "DRAFT",
+    }
+
+
+    campaign_type_label = "Email Mailer Campaign" if is_email_campaign else "Multi-Channel Whitelisting Brief"
+
     ch_counts = {
         "total": len(wa_drafts) + len(rcs_drafts) + len(sms_drafts) + len(email_drafts) + (1 if has_push else 0),
         "whatsapp": len(wa_drafts),

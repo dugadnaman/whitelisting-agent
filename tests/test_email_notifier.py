@@ -137,6 +137,59 @@ def test_dispatch_due_today_alerts_dry_run():
         assert len(result["results"]) == 1
 
 
+def test_client_pending_tickets_are_not_attributed_in_sla_webhook():
+    """Client-owned blockers must not count against an operator at any SLA checkpoint."""
+    issues = [
+        {"key": "SWCM-79", "status": "Base Pending", "status_category": "BLOCKED",
+         "timeline_bucket": "TODAY", "assignee_name": "Dnyanesh Khawas"},
+        {"key": "SWCM-80", "status": "Content Pending", "status_category": "BLOCKED",
+         "timeline_bucket": "TODAY", "assignee_name": "Mrunalini Gawande"},
+        {"key": "SWCM-75", "status": "Test Sent", "status_category": "PENDING",
+         "timeline_bucket": "TODAY", "assignee_name": "Dnyanesh Khawas"},
+    ]
+    with (
+        patch("email_notifier.get_work_management_dashboard", return_value={"work_items": issues}),
+        patch("requests.post") as post,
+    ):
+        post.return_value.ok = True
+        preview = preview_due_today_alerts(project="SWCM", stage="MIDDAY")
+        assert preview["total_due_today_incomplete"] == 1
+        assert preview["recipient_count"] == 1
+        assert preview["drafts"][0]["ticket_keys"] == ["SWCM-75"]
+
+        result = dispatch_due_today_alerts(
+            project="SWCM", stage="MIDDAY", dry_run=True, send_email=False,
+            google_chat_webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages",
+        )
+        payload = post.call_args.kwargs["json"]
+        assert result["total_tickets"] == 1
+        assert "SWCM-75" in payload["text"]
+        assert "SWCM-79" not in payload["text"]
+        assert "SWCM-80" not in payload["text"]
+        assert "Mrunalini" not in payload["text"]
+        assert "1 campaigns remain pending" in payload["text"]
+
+
+def test_only_client_pending_tickets_do_not_trigger_webhook():
+    issues = [
+        {"key": "SWCM-79", "status": "Base Pending", "status_category": "BLOCKED",
+         "timeline_bucket": "TODAY", "assignee_name": "Dnyanesh Khawas"},
+        {"key": "SWCM-80", "status": "Content Pending", "status_category": "BLOCKED",
+         "timeline_bucket": "TODAY", "assignee_name": "Mrunalini Gawande"},
+    ]
+    with (
+        patch("email_notifier.get_work_management_dashboard", return_value={"work_items": issues}),
+        patch("requests.post") as post,
+    ):
+        result = dispatch_due_today_alerts(
+            project="SWCM", stage="MIDDAY", dry_run=True, send_email=False,
+            google_chat_webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages",
+        )
+        assert result["total_tickets"] == 0
+        assert result["recipients_count"] == 0
+        assert result["google_chat_result"]["skipped"] is True
+        post.assert_not_called()
+
 def test_scheduler_state_deduplication():
     """Verify AlertSchedulerState prevents duplicate sends for the same slot on the same day."""
     state = AlertSchedulerState()

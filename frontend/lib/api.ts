@@ -955,8 +955,8 @@ export type JiraBriefData = {
     scheduled_date?: string | null;
     whatsapp_template?: string | null;
     sms_content?: string | null;
-    push_title?: string;
-    push_body?: string;
+    push_title?: string | null;
+    push_body?: string | null;
     status: string;
   };
   attachments_mapped: Array<{

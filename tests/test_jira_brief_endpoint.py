@@ -272,6 +272,36 @@ def test_channel_counts_in_brief_and_issues():
     assert "push" in counts
 
 
+def test_email_brief_does_not_stage_push_but_explicit_push_brief_does():
+    from briefing_parser import parse_jira_brief
+
+    email_issue = {
+        "key": "SWCM-83",
+        "summary": "TCHFLService_Welcome NC - Sept 2026",
+        "description_text": "Email and SMS campaign",
+        "attachments": [{"id": "mail-zip", "filename": "TCHFL_Welcome_Call_Non_Contactable_Communication.zip"}],
+    }
+    email_brief = parse_jira_brief(email_issue, download_creatives=False)
+    assert email_brief.channel_counts["email"] == 1
+    assert email_brief.channel_counts["push"] == 0
+    assert email_brief.channel_counts["total"] == sum(
+        email_brief.channel_counts[channel] for channel in ("whatsapp", "rcs", "sms", "email", "push")
+    )
+    assert email_brief.moengage_campaign["push_title"] is None
+    assert email_brief.moengage_campaign["push_body"] is None
+
+    push_issue = {
+        "key": "SWCM-84",
+        "summary": "App Notification - Welcome",
+        "description_text": "",
+        "attachments": [],
+    }
+    push_brief = parse_jira_brief(push_issue, download_creatives=False)
+    assert push_brief.channel_counts["push"] == 1
+    assert push_brief.moengage_campaign["push_title"]
+    assert push_brief.moengage_campaign["push_body"]
+
+
 def test_swcm_85_service_table_extracts_whatsapp_template():
     """Verify SWCM-85 single-header execution table extracts WhatsApp template even when copy is in Template ID cell."""
     from briefing_parser import parse_jira_brief

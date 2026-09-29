@@ -50,7 +50,9 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 
 3. **Phase 3 — Operational Work Management & Sync**:
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
+   - Jira Briefs counts Push / App only when the parsed brief identifies a Push campaign (`channel_counts.push`). MoEngage staging metadata may exist for SMS or Email tickets and does not imply a Push campaign; Push title/body are empty when no Push campaign was identified.
    - MoEngage attribute resolver and automated template catalog sync.
+   - SLA kickoff/checkpoint/escalation alerts omit due-today tickets in **Base Pending** or **Content Pending**: these are client-side dependencies, not operator-owned pending work. They are excluded from Google Chat mentions/counts and operator emails until the status changes; if no operator-owned work remains, no Chat webhook is sent. The alert dispatcher does not change Jira assignees.
 
 ---
 

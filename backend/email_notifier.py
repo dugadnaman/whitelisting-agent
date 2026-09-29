@@ -222,15 +222,15 @@ SCHEDULER_STATE = AlertSchedulerState()
 
 
 def get_due_today_incomplete_tickets(project: str = "ALL") -> list[dict[str, Any]]:
-    """
-    Query work items due today (timeline_bucket == 'TODAY') and not done (status_category != 'DONE').
-    """
+    """Return due-today operator work, excluding client-owned base/content blockers."""
     dash = get_work_management_dashboard(project=project, limit=100)
-    items = dash.get("work_items", [])
-    incomplete_today = [
-        item for item in items if item.get("timeline_bucket") == "TODAY" and item.get("status_category") != "DONE"
+    return [
+        item
+        for item in dash.get("work_items", [])
+        if item.get("timeline_bucket") == "TODAY"
+        and item.get("status_category") != "DONE"
+        and not any(status in str(item.get("status") or "").lower() for status in ("base pending", "content pending"))
     ]
-    return incomplete_today
 
 
 def group_tickets_by_operator(tickets: list[dict[str, Any]]) -> list[OperatorTicketSummary]:
@@ -973,10 +973,17 @@ def dispatch_due_today_alerts(
 
     # 1. Google Chat Space Broadcast
     google_chat_res: dict[str, Any] = {}
-    if send_google_chat:
+    if send_google_chat and operators:
         google_chat_res = send_google_chat_sla_alert(
             resolved_stage, operators, preview["ist_time"], webhook_url=google_chat_webhook_url
         )
+    elif send_google_chat:
+        google_chat_res = {
+            "delivered": False,
+            "skipped": True,
+            "channel": "Google Chat",
+            "message": "No operator-owned pending campaigns due today.",
+        }
 
     # 2. Direct Email Dispatch
     results: list[dict[str, Any]] = []

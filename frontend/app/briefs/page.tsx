@@ -599,7 +599,7 @@ export default function JiraBriefsPage() {
                             📊 Total Campaigns in Ticket:
                           </span>
                           <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-blue-600 text-white shadow-2xs">
-                            {brief.channel_counts?.total ?? (waTemplates.length + rcsTemplates.length + (brief.sms_templates?.length || 0) + (brief.email_templates?.length || 0) + (brief.moengage_campaign ? 1 : 0))}
+                            {brief.channel_counts?.total ?? (waTemplates.length + rcsTemplates.length + (brief.sms_templates?.length || 0) + (brief.email_templates?.length || 0) + (brief.channel_counts?.push ?? 0))}
                           </span>
                         </div>
                         <span className="text-[11px] text-gray-500 font-medium">Channel-wise Breakdown</span>
@@ -634,10 +634,10 @@ export default function JiraBriefsPage() {
                           <div className="text-[9px] text-gray-500">{(brief.email_templates?.length || 0) === 1 ? 'campaign' : 'campaigns'}</div>
                         </div>
 
-                        {/* Push / MoEngage */}
-                        <div className={`p-2 rounded-lg border text-center transition ${brief.moengage_campaign ? 'bg-indigo-50/90 border-indigo-200 text-indigo-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
+                        {/* Push / App is a channel count, not the presence of a MoEngage staging draft. */}
+                        <div className={`p-2 rounded-lg border text-center transition ${(brief.channel_counts?.push ?? 0) > 0 ? 'bg-indigo-50/90 border-indigo-200 text-indigo-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
                           <div className="text-[10px] font-bold uppercase tracking-wider">📱 Push / App</div>
-                          <div className="text-base font-extrabold">{brief.moengage_campaign ? 1 : 0}</div>
+                          <div className="text-base font-extrabold">{brief.channel_counts?.push ?? 0}</div>
                           <div className="text-[9px] text-gray-500">campaign</div>
                         </div>
                       </div>
