@@ -57,6 +57,7 @@ export default function SettingsPage() {
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [geminiTesting, setGeminiTesting] = useState(false);
   const [banner, setBanner] = useState<Banner>(null);
+  const [editPermanent, setEditPermanent] = useState(false);
 
   // MoEngage form state
   const [showMoEngage, setShowMoEngage] = useState(false);
@@ -930,98 +931,199 @@ export default function SettingsPage() {
           <>
         {isWhatsApp ? (
           <>
-            {/* WABA Auth Token */}
-            <div>
-              <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Official WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
-              </label>
-              <input
-                id="waba_auth_token"
-                type="password"
-                value={wabaAuthToken}
-                onChange={(e) => setWabaAuthToken(e.target.value)}
-                placeholder="Enter static Bearer token from Karix Lounge..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Static token generated from Karix Lounge for {accountTitle}. Does not expire with browser sessions.
-              </p>
+            {/* Active / Expiring Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>⚡ Active API Credentials</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Required for Submissions
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-gray-500">
+                    Official static Bearer token used for template submissions and status checks.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Official WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
+                </label>
+                <input
+                  id="waba_auth_token"
+                  type="password"
+                  value={wabaAuthToken}
+                  onChange={(e) => setWabaAuthToken(e.target.value)}
+                  placeholder="Paste static Bearer token from Karix Lounge..."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Static token generated from Karix Lounge for {accountTitle}. Does not expire with browser sessions.
+                </p>
+              </div>
+
+              {/* Optional Portal Session Credentials */}
+              <div className="pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowPortalCreds((prev) => !prev)}
+                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 font-medium"
+                >
+                  <span>{showPortalCreds ? '▾ Hide' : '▸ Show'} Portal Session Tokens</span>
+                  <span className="text-[10px] text-gray-400">(Required only for image/video media-header uploads; update when expired)</span>
+                </button>
+
+                {showPortalCreds && (
+                  <div className="mt-3 space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                    <div>
+                      <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                        Current Portal Bearer Token ({envPrefix}_KARIX_BEARER_TOKEN)
+                      </label>
+                      <input
+                        id="bearer_token"
+                        type="password"
+                        value={bearerToken}
+                        onChange={(e) => setBearerToken(e.target.value)}
+                        placeholder="e.g. eyJhbGciOi..."
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="session" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                          Session ID ({envPrefix}_KARIX_SESSION)
+                        </label>
+                        <input
+                          id="session"
+                          type="password"
+                          value={session}
+                          onChange={(e) => setSession(e.target.value)}
+                          placeholder="Session header from DevTools..."
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="user" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                          User Header ({envPrefix}_KARIX_USER)
+                        </label>
+                        <input
+                          id="user"
+                          type="text"
+                          value={user}
+                          onChange={(e) => setUser(e.target.value)}
+                          placeholder="User header from DevTools..."
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* WABA ID */}
-            <div>
-              <label htmlFor="waba_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                WhatsApp Business Account ID ({envPrefix}_WABA_ID)
-              </label>
-              <input
-                id="waba_id"
-                type="text"
-                value={wabaId}
-                onChange={(e) => setWabaId(e.target.value)}
-                placeholder="e.g. 1064104141771475"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                The numeric WhatsApp Business Account ID assigned to {accountTitle} by Meta / Karix.
-              </p>
-            </div>
+            {/* Permanent Account Identifiers (Pre-Configured) */}
+            <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>🔒 Permanent Account Constants</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                      Pre-configured
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-gray-500">
+                    Fixed account parameters. Operators do not need to re-enter these.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditPermanent((prev) => !prev)}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
+                >
+                  {editPermanent ? 'Done' : '✏️ Override'}
+                </button>
+              </div>
 
-            {/* Optional Portal Session Credentials */}
-            <div className="pt-2 border-t border-gray-100">
-              <button
-                type="button"
-                onClick={() => setShowPortalCreds((prev) => !prev)}
-                className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 font-medium"
-              >
-                <span>{showPortalCreds ? 'Hide' : 'Show'} Portal Session Tokens</span>
-                <span className="text-[10px] text-gray-400">(Required for media-header templates; update when expired)</span>
-              </button>
-
-              {showPortalCreds && (
-                <div className="mt-4 space-y-5 p-4 bg-gray-50 rounded-xl border border-gray-200">
-
+              {!editPermanent ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">WABA ID</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{wabaId || 'Pre-configured'}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Pre-configured</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Entity ID</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || '1001490234791338781'}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Namespace ID</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{templateNamespaceId || '42eec6e7_6287...'}</div>
+                    <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Account-wide</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Portal User</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{portalUsername || 'Standard'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Karix Workspace</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div>
-                    <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      Current Portal Bearer Token ({envPrefix}_KARIX_BEARER_TOKEN)
+                    <label htmlFor="waba_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      WABA ID
                     </label>
                     <input
-                      id="bearer_token"
-                      type="password"
-                      value={bearerToken}
-                      onChange={(e) => setBearerToken(e.target.value)}
-                      placeholder="e.g. eyJhbGciOi..."
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                      id="waba_id"
+                      type="text"
+                      value={wabaId}
+                      onChange={(e) => setWabaId(e.target.value)}
+                      placeholder="e.g. 286109054585247"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                     />
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label htmlFor="session" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                        Session ID ({envPrefix}_KARIX_SESSION)
-                      </label>
-                      <input
-                        id="session"
-                        type="password"
-                        value={session}
-                        onChange={(e) => setSession(e.target.value)}
-                        placeholder="Session header from DevTools..."
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
-                      />
-                    </div>
-
-                    <div>
-                      <label htmlFor="user" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                        User Header ({envPrefix}_KARIX_USER)
-                      </label>
-                      <input
-                        id="user"
-                        type="text"
-                        value={user}
-                        onChange={(e) => setUser(e.target.value)}
-                        placeholder="User header from DevTools..."
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
-                      />
-                    </div>
+                  <div>
+                    <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      DLT Principal Entity ID
+                    </label>
+                    <input
+                      id="entity_id"
+                      type="text"
+                      value={entityId}
+                      onChange={(e) => setEntityId(e.target.value)}
+                      placeholder="e.g. 1001490234791338781"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="template_namespace_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Template Namespace ID
+                    </label>
+                    <input
+                      id="template_namespace_id"
+                      type="text"
+                      value={templateNamespaceId}
+                      onChange={(e) => setTemplateNamespaceId(e.target.value)}
+                      placeholder="e.g. 42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="portal_username" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Portal Username
+                    </label>
+                    <input
+                      id="portal_username"
+                      type="text"
+                      value={portalUsername}
+                      onChange={(e) => setPortalUsername(e.target.value)}
+                      placeholder="e.g. TATACAPPROMO"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
                   </div>
                 </div>
               )}
@@ -1029,113 +1131,137 @@ export default function SettingsPage() {
           </>
         ) : isSms ? (
           <>
-            {/* Karix SMS Access Key */}
-            <div>
-              <label htmlFor="sms_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Karix SMS Access Key ({envPrefix}_SMS_KEY)
-              </label>
-              <input
-                id="sms_key"
-                type="password"
-                value={smsKey}
-                onChange={(e) => setSmsKey(e.target.value)}
-                placeholder="e.g. ZOucgqXGgGSfKfNWqQdYJA=="
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Authorization key provided by Karix for JsonReceiver API requests (passed as <code>key</code> in payload).
-              </p>
+            {/* Active / Expiring Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>⚡ Active SMS Access Key</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Authorization Key
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-gray-500">
+                    JsonReceiver API authorization key provided by Karix.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="sms_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Karix SMS Access Key ({envPrefix}_SMS_KEY)
+                </label>
+                <input
+                  id="sms_key"
+                  type="password"
+                  value={smsKey}
+                  onChange={(e) => setSmsKey(e.target.value)}
+                  placeholder="e.g. ZOucgqXGgGSfKfNWqQdYJA=="
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Authorization key provided by Karix for JsonReceiver API requests (passed as <code>key</code> in payload).
+                </p>
+              </div>
             </div>
 
-            {/* Karix SMS Username */}
-            <div>
-              <label htmlFor="sms_username" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                SMS Account Username ({envPrefix}_SMS_USERNAME)
-              </label>
-              <input
-                id="sms_username"
-                type="text"
-                value={smsUsername}
-                onChange={(e) => setSmsUsername(e.target.value)}
-                placeholder="e.g. bajaj_sms_prod"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Account username used for Basic HTTP Authorization header (<code>Authorization: Basic Base64(User:Key)</code>).
-              </p>
-            </div>
+            {/* Permanent SMS Identifiers (Pre-Configured) */}
+            <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>🔒 Permanent SMS Identifiers</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                      Pre-configured
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-gray-500">
+                    Sender ID header, telecom username, and DLT Entity ID for {accountTitle}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditPermanent((prev) => !prev)}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
+                >
+                  {editPermanent ? 'Done' : '✏️ Override'}
+                </button>
+              </div>
 
-            {/* Default Approved Sender ID */}
-            <div>
-              <label htmlFor="sms_sender_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Default Sender ID / Header ({envPrefix}_SMS_SENDER_ID)
-              </label>
-              <input
-                id="sms_sender_id"
-                type="text"
-                value={smsSenderId}
-                onChange={(e) => setSmsSenderId(e.target.value)}
-                placeholder="e.g. BAJAJF"
-                maxLength={15}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Registered 6-character telecom sender ID / header approved for this account (max 15 chars).
-              </p>
-            </div>
-
-            {/* DLT Principal Entity ID */}
-            <div>
-              <label htmlFor="sms_entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                DLT Principal Entity ID ({envPrefix}_ENTITY_ID)
-              </label>
-              <input
-                id="sms_entity_id"
-                type="text"
-                value={entityId}
-                onChange={(e) => setEntityId(e.target.value)}
-                placeholder="e.g. 1001492930000010179"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Government DLT Principal Entity ID required by TRAI regulations for commercial SMS transmission.
-              </p>
-            </div>
-
-            {/* AES-256 PII Encryption Key */}
-            <div>
-              <label htmlFor="sms_encryption_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                AES-256 PII Encryption Key ({envPrefix}_SMS_ENCRYPTION_KEY)
-              </label>
-              <input
-                id="sms_encryption_key"
-                type="password"
-                value={smsEncryptionKey}
-                onChange={(e) => setSmsEncryptionKey(e.target.value)}
-                placeholder="Base64-encoded key, e.g. ODAyMjY5MDAwMDAwMDAmbUdQclNhbGU="
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Base64 encryption key used when <code>encrypt_pii=True</code> (encrpt=1) for encrypting mobile numbers and message content.
-              </p>
-            </div>
-
-            {/* DLR Callback Webhook Secret Token */}
-            <div>
-              <label htmlFor="sms_dlr_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                DLR Webhook Authorization Token ({envPrefix}_SMS_DLR_AUTH_TOKEN)
-              </label>
-              <input
-                id="sms_dlr_auth_token"
-                type="password"
-                value={smsDlrAuthToken}
-                onChange={(e) => setSmsDlrAuthToken(e.target.value)}
-                placeholder="Static authorization token for webhook verification..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Static token expected in incoming HTTP <code>Authorization: Basic &lt;token&gt;</code> headers from Karix.
-              </p>
+              {!editPermanent ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sender ID Header</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsSenderId || 'BAJAJF'}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ 6-char Header Approved</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">SMS Username</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsUsername || 'bajaj_sms_prod'}</div>
+                    <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Telecom Account</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{entityId || '1001492930000010179'}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label htmlFor="sms_sender_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Sender ID Header
+                    </label>
+                    <input
+                      id="sms_sender_id"
+                      type="text"
+                      value={smsSenderId}
+                      onChange={(e) => setSmsSenderId(e.target.value)}
+                      placeholder="e.g. BAJAJF"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="sms_username" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      SMS Username
+                    </label>
+                    <input
+                      id="sms_username"
+                      type="text"
+                      value={smsUsername}
+                      onChange={(e) => setSmsUsername(e.target.value)}
+                      placeholder="e.g. bajaj_sms_prod"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="sms_encryption_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      AES-256 PII Key
+                    </label>
+                    <input
+                      id="sms_encryption_key"
+                      type="password"
+                      value={smsEncryptionKey}
+                      onChange={(e) => setSmsEncryptionKey(e.target.value)}
+                      placeholder="Base64 AES key"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="sms_dlr_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      DLR Webhook Secret
+                    </label>
+                    <input
+                      id="sms_dlr_auth_token"
+                      type="password"
+                      value={smsDlrAuthToken}
+                      onChange={(e) => setSmsDlrAuthToken(e.target.value)}
+                      placeholder="Webhook secret"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Webhook Configuration Guide */}
@@ -1157,94 +1283,155 @@ export default function SettingsPage() {
           </>
         ) : (
           <>
-            {/* Karix RCS Bot ID */}
-            <div>
-              <label htmlFor="rcs_bot_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Karix RCS Bot ID ({envPrefix}_RCS_BOT_ID)
-              </label>
-              <input
-                id="rcs_bot_id"
-                type="text"
-                value={rcsBotId}
-                onChange={(e) => setRcsBotId(e.target.value)}
-                placeholder="e.g. P7hzkqCcW3x96I6T"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Your approved brand Bot ID / Sender ID in Karix RCS Bot Builder.
-              </p>
+            {/* Active / Expiring Section */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>⚡ Active RCS API Credentials</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      Required for Rich Card Submissions
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-gray-500">
+                    Karix RCS API token for fetching approved rich cards and submitting templates.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Karix RCS Permanent API Token ({envPrefix}_RCS_AUTH_TOKEN)
+                </label>
+                <input
+                  id="rcs_auth_token"
+                  type="password"
+                  value={rcsAuthToken}
+                  onChange={(e) => setRcsAuthToken(e.target.value)}
+                  placeholder="e.g. yzHtsfT8v5DZ6XV3stK4YQ=="
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Permanent Karix RCS API token for fetching approved rich cards and syncing to MoEngage.
+                </p>
+              </div>
+
+              {/* Optional Lounge Session Cookie */}
+              <div className="pt-2 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowPortalCreds((prev) => !prev)}
+                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 font-medium"
+                >
+                  <span>{showPortalCreds ? '▾ Hide' : '▸ Show'} Karix Lounge Session Cookie</span>
+                  <span className="text-[10px] text-gray-400">(Required only for automated DLT registration through Lounge)</span>
+                </button>
+
+                {showPortalCreds && (
+                  <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                    <label htmlFor="lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
+                    </label>
+                    <input
+                      id="lounge_cookie"
+                      type="password"
+                      value={loungeCookie}
+                      onChange={(e) => setLoungeCookie(e.target.value)}
+                      placeholder="PHPSESSID=... from lounge.karix.solutions"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Session cookie from browser when logged in to lounge.karix.solutions.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Karix RCS Permanent API Token */}
-            <div>
-              <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Karix RCS API Token ({envPrefix}_RCS_AUTH_TOKEN)
-              </label>
-              <input
-                id="rcs_auth_token"
-                type="password"
-                value={rcsAuthToken}
-                onChange={(e) => setRcsAuthToken(e.target.value)}
-                placeholder="e.g. yzHtsfT8v5DZ6XV3stK4YQ=="
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Permanent Karix RCS API token for fetching approved rich cards.
-              </p>
-            </div>
+            {/* Permanent Account Identifiers (Pre-Configured) */}
+            <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                    <span>🔒 Permanent RCS Identifiers</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                      Pre-configured
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-gray-500">
+                    Fixed Bot ID, ESME routing address, and DLT Entity ID for {accountTitle}.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditPermanent((prev) => !prev)}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
+                >
+                  {editPermanent ? 'Done' : '✏️ Override'}
+                </button>
+              </div>
 
-            {/* Karix ESME Address */}
-            <div>
-              <label htmlFor="esmeaddr" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Karix ESME Address ({envPrefix}_ESMEADDR)
-              </label>
-              <input
-                id="esmeaddr"
-                type="text"
-                value={esmeaddr}
-                onChange={(e) => setEsmeaddr(e.target.value)}
-                placeholder="e.g. 72148300000000"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Karix account ESME address used for routing RCS API requests.
-              </p>
-            </div>
-
-            {/* RCS DLT Entity ID */}
-            <div>
-              <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                DLT Principal Entity ID ({envPrefix}_ENTITY_ID)
-              </label>
-              <input
-                id="entity_id"
-                type="text"
-                value={entityId}
-                onChange={(e) => setEntityId(e.target.value)}
-                placeholder="e.g. 1001490234791338781"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Govt. DLT Registration Principal Entity ID (PE ID) registered on Vilpower / Jio / Airtel DLT portal.
-              </p>
-            </div>
-
-            {/* Karix Lounge Cookie */}
-            <div>
-              <label htmlFor="lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
-              </label>
-              <input
-                id="lounge_cookie"
-                type="password"
-                value={loungeCookie}
-                onChange={(e) => setLoungeCookie(e.target.value)}
-                placeholder="PHPSESSID=... from lounge.karix.solutions"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-              />
-              <p className="text-[11px] text-gray-400 mt-1">
-                Required for automated submission to Karix Lounge DLT Registration.
-              </p>
+              {!editPermanent ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">RCS Bot ID</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Pre-configured'}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Approved Brand Bot</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Karix ESME Address</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || '72516600000000'}</div>
+                    <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Routing Configured</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || '1001490234791338781'}</div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
+                  <div>
+                    <label htmlFor="rcs_bot_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Karix RCS Bot ID
+                    </label>
+                    <input
+                      id="rcs_bot_id"
+                      type="text"
+                      value={rcsBotId}
+                      onChange={(e) => setRcsBotId(e.target.value)}
+                      placeholder="e.g. Uv9tdd0KNADbq3pX"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="esmeaddr" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Karix ESME Address
+                    </label>
+                    <input
+                      id="esmeaddr"
+                      type="text"
+                      value={esmeaddr}
+                      onChange={(e) => setEsmeaddr(e.target.value)}
+                      placeholder="e.g. 72434700000000"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      DLT Entity ID
+                    </label>
+                    <input
+                      id="entity_id"
+                      type="text"
+                      value={entityId}
+                      onChange={(e) => setEntityId(e.target.value)}
+                      placeholder="e.g. 1001490234791338781"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

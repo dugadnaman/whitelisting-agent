@@ -50,10 +50,16 @@ from auth import (
 )
 from config import (
     BAJAJ_WABA_ID,
+    DEFAULT_ENTITY_IDS,
+    DEFAULT_ESMEADDRS,
+    DEFAULT_WABA_IDS,
+    GLOBAL_TEMPLATE_NAMESPACE_ID,
     OFFICIAL_TEMPLATE_BASE_URL,
     _account_prefix,
     _load_env_file,
     get_esmeaddr,
+    get_template_namespace_id,
+    get_waba_id,
 )
 from error_tracker import log_error
 from grammar_checker import lint_and_fix_body, validate_meta_technical_compliance
@@ -63,9 +69,13 @@ from rcs_client import fetch_rcs_templates
 
 # RCS pipeline imports
 from rcs_config import (
+    DEFAULT_RCS_BOT_IDS,
+    DEFAULT_RCS_BOT_NAMES,
+    DEFAULT_RCS_ESMEADDRS,
     get_rcs_auth_headers,
     get_rcs_bot_id,
     get_rcs_entity_id,
+    get_rcs_esmeaddr,
 )
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
 from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
@@ -2530,26 +2540,32 @@ def get_credentials(
         else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE")
     )
 
-    waba_id = os.environ.get(w_id_key) or (BAJAJ_WABA_ID if is_bajaj else "")
-    # Strict tenant separation: display ONLY this account's own tokens.
-    # Never surface the parent TATA_* session here — it belongs to a different
-    # portal login (e.g. TATACAPPROMO) and showing it under TCHFL made it look
-    # like TCHFL was configured when it wasn't.
+    account_obj = next((a for a in load_accounts() if a.get("id") == acc), {})
+
+    waba_id = os.environ.get(w_id_key) or DEFAULT_WABA_IDS.get(acc) or (BAJAJ_WABA_ID if is_bajaj else "")
     waba_auth_token = os.environ.get(w_tok_key) or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else "")
     bearer_token = os.environ.get(b_tok_key) or (os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else "")
     session = os.environ.get(s_key) or (os.environ.get("KARIX_SESSION") if is_bajaj else "")
     user = os.environ.get(u_key) or (os.environ.get("KARIX_USER") if is_bajaj else "")
-    entity_id = os.environ.get(e_id_key) or ("110100001654" if is_bajaj else "1001490234791338781")
+    entity_id = (
+        os.environ.get(e_id_key)
+        or DEFAULT_ENTITY_IDS.get(acc)
+        or ("110100001654" if is_bajaj else "1001490234791338781")
+    )
     lounge_cookie = os.environ.get(l_ck_key) or (os.environ.get("KARIX_LOUNGE_COOKIE") if is_bajaj else "")
-    portal_username = os.environ.get(f"{prefix}_PORTAL_USER") or ""
+    portal_username = os.environ.get(f"{prefix}_PORTAL_USER") or account_obj.get("portal_username") or ""
     portal_password = os.environ.get(f"{prefix}_PORTAL_PASSWORD") or ""
     template_namespace_id = (
         os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
         or (os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") if acc in TATA_SUB_ACCOUNTS else "")
-        or "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
+        or GLOBAL_TEMPLATE_NAMESPACE_ID
     )
     sms_key = os.environ.get(f"{prefix}_SMS_KEY") or os.environ.get("KARIX_SMS_KEY") or ""
-    sms_username = os.environ.get(f"{prefix}_SMS_USERNAME") or os.environ.get("KARIX_SMS_USERNAME") or ""
+    sms_username = (
+        os.environ.get(f"{prefix}_SMS_USERNAME")
+        or os.environ.get("KARIX_SMS_USERNAME")
+        or ("bajaj_sms_prod" if is_bajaj else "tatacap_sms_prod")
+    )
     sms_encryption_key = (
         os.environ.get(f"{prefix}_SMS_ENCRYPTION_KEY") or os.environ.get("KARIX_SMS_ENCRYPTION_KEY") or ""
     )
@@ -2558,19 +2574,30 @@ def get_credentials(
         os.environ.get(f"{prefix}_SMS_DLR_AUTH_TOKEN") or os.environ.get("KARIX_SMS_DLR_AUTH_TOKEN") or ""
     )
 
+    rcs_bot_id = os.environ.get(f"{prefix}_RCS_BOT_ID") or account_obj.get("rcs_bot_id") or get_rcs_bot_id(acc) or ""
+    rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or ""
+    rcs_esmeaddr = (
+        os.environ.get(f"{prefix}_RCS_ESMEADDR")
+        or os.environ.get(f"{prefix}_ESMEADDR")
+        or get_rcs_esmeaddr(acc)
+        or ""
+    )
+    esmeaddr = (
+        os.environ.get(f"{prefix}_ESMEADDR")
+        or DEFAULT_ESMEADDRS.get(acc)
+        or get_esmeaddr(acc)
+        or ""
+    )
+
     if chan == "sms":
         is_configured = bool(sms_key or sms_username)
     elif chan == "whatsapp":
-        is_configured = bool(waba_id and waba_auth_token)
+        is_configured = bool(waba_id and (waba_auth_token or bearer_token))
     elif chan == "rcs":
-        rcs_bot_id = os.environ.get(f"{prefix}_RCS_BOT_ID") or get_rcs_bot_id(acc)
-        rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or ""
-        rcs_esmeaddr = (
-            os.environ.get(f"{prefix}_RCS_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR") or get_esmeaddr(acc)
-        )
         is_configured = bool(rcs_bot_id and rcs_auth_token)
     else:
         is_configured = bool(entity_id)
+
     return {
         "account": acc,
         "channel": chan,
@@ -2581,7 +2608,7 @@ def get_credentials(
         "user": user or "",
         "portal_username": portal_username or "",
         "portal_password": portal_password or "",
-        "template_namespace_id": template_namespace_id or "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5",
+        "template_namespace_id": template_namespace_id or GLOBAL_TEMPLATE_NAMESPACE_ID,
         "entity_id": entity_id or "",
         "lounge_cookie": lounge_cookie or "",
         "sms_key": sms_key or "",
@@ -2589,19 +2616,33 @@ def get_credentials(
         "sms_encryption_key": sms_encryption_key or "",
         "sms_sender_id": sms_sender_id or "",
         "sms_dlr_auth_token": sms_dlr_auth_token or "",
-        "rcs_bot_id": os.environ.get(f"{prefix}_RCS_BOT_ID") or get_rcs_bot_id(acc) or "",
-        "rcs_auth_token": os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or "",
-        "rcs_esmeaddr": os.environ.get(f"{prefix}_RCS_ESMEADDR")
-        or os.environ.get(f"{prefix}_ESMEADDR")
-        or get_esmeaddr(acc)
-        or "",
+        "rcs_bot_id": rcs_bot_id,
+        "rcs_auth_token": rcs_auth_token,
+        "rcs_esmeaddr": rcs_esmeaddr,
+        "esmeaddr": esmeaddr,
         "gemini_api_key": os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "",
         "is_configured": is_configured,
+        "permanent_defaults": {
+            "waba_id": DEFAULT_WABA_IDS.get(acc, BAJAJ_WABA_ID if is_bajaj else ""),
+            "rcs_bot_id": DEFAULT_RCS_BOT_IDS.get(acc, ""),
+            "esmeaddr": DEFAULT_ESMEADDRS.get(acc, ""),
+            "rcs_esmeaddr": DEFAULT_RCS_ESMEADDRS.get(acc, ""),
+            "entity_id": DEFAULT_ENTITY_IDS.get(acc, "110100001654" if is_bajaj else "1001490234791338781"),
+            "template_namespace_id": GLOBAL_TEMPLATE_NAMESPACE_ID,
+            "portal_username": account_obj.get("portal_username", ""),
+        },
     }
 
 
-def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata: bool, is_bajaj: bool) -> dict:
+def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata: bool, is_bajaj: bool, acc: str = "") -> dict:
     mapping = {}
+    default_waba = DEFAULT_WABA_IDS.get(acc, BAJAJ_WABA_ID if is_bajaj else "")
+    waba_val = creds.waba_id.strip() if creds.waba_id and creds.waba_id.strip() else default_waba
+    default_entity = DEFAULT_ENTITY_IDS.get(acc, "110100001654" if is_bajaj else "1001490234791338781")
+    entity_val = creds.entity_id.strip() if creds.entity_id and creds.entity_id.strip() else default_entity
+    default_namespace = GLOBAL_TEMPLATE_NAMESPACE_ID
+    namespace_val = creds.template_namespace_id.strip() if creds.template_namespace_id and creds.template_namespace_id.strip() else default_namespace
+
     fields = [
         (
             creds.waba_auth_token,
@@ -2609,7 +2650,7 @@ def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata:
             if is_tata
             else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN"),
         ),
-        (creds.waba_id, "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")),
+        (waba_val, "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")),
         (
             creds.bearer_token,
             "TATA_KARIX_BEARER_TOKEN"
@@ -2623,8 +2664,8 @@ def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata:
         (creds.user, "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")),
         (creds.portal_username, f"{prefix}_PORTAL_USER"),
         (creds.portal_password, f"{prefix}_PORTAL_PASSWORD"),
-        (creds.template_namespace_id, f"{prefix}_TEMPLATE_NAMESPACE_ID"),
-        (creds.entity_id, "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")),
+        (namespace_val, f"{prefix}_TEMPLATE_NAMESPACE_ID"),
+        (entity_val, "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")),
         (
             creds.lounge_cookie,
             "TATA_KARIX_LOUNGE_COOKIE"
@@ -2633,8 +2674,8 @@ def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata:
         ),
     ]
     for val, key in fields:
-        if val is not None and val.strip():
-            v = val.strip()
+        if val is not None and str(val).strip():
+            v = str(val).strip()
             mapping[key] = v
             os.environ[key] = v
     return mapping
@@ -2650,24 +2691,31 @@ def _build_sms_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict
         (creds.sms_dlr_auth_token, f"{prefix}_SMS_DLR_AUTH_TOKEN"),
     ]
     for val, key in fields:
-        if val is not None and val.strip():
-            v = val.strip()
+        if val is not None and str(val).strip():
+            v = str(val).strip()
             mapping[key] = v
             os.environ[key] = v
     return mapping
 
 
-def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict:
+def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str, acc: str = "") -> dict:
     mapping = {}
+    default_bot = DEFAULT_RCS_BOT_IDS.get(acc, "")
+    bot_val = creds.rcs_bot_id.strip() if creds.rcs_bot_id and creds.rcs_bot_id.strip() else default_bot
+    default_esme = DEFAULT_RCS_ESMEADDRS.get(acc, DEFAULT_ESMEADDRS.get(acc, ""))
+    esme_val = creds.rcs_esmeaddr.strip() if creds.rcs_esmeaddr and creds.rcs_esmeaddr.strip() else default_esme
+    default_entity = DEFAULT_ENTITY_IDS.get(acc, "110100001654" if acc == "bajaj" else "1001490234791338781")
+    entity_val = creds.entity_id.strip() if creds.entity_id and creds.entity_id.strip() else default_entity
+
     fields = [
-        (creds.rcs_bot_id, f"{prefix}_RCS_BOT_ID"),
+        (bot_val, f"{prefix}_RCS_BOT_ID"),
         (creds.rcs_auth_token, f"{prefix}_RCS_AUTH_TOKEN"),
-        (creds.rcs_esmeaddr, f"{prefix}_RCS_ESMEADDR"),
-        (creds.entity_id, f"{prefix}_ENTITY_ID"),
+        (esme_val, f"{prefix}_RCS_ESMEADDR"),
+        (entity_val, f"{prefix}_ENTITY_ID"),
     ]
     for val, key in fields:
-        if val is not None and val.strip():
-            v = val.strip()
+        if val is not None and str(val).strip():
+            v = str(val).strip()
             mapping[key] = v
             os.environ[key] = v
     return mapping
@@ -2686,9 +2734,9 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     if chan == "sms":
         mapping = _build_sms_credentials_mapping(creds, prefix)
     elif chan == "whatsapp":
-        mapping = _build_wa_credentials_mapping(creds, prefix, is_tata, is_bajaj)
+        mapping = _build_wa_credentials_mapping(creds, prefix, is_tata, is_bajaj, acc)
     elif chan == "rcs":
-        mapping = _build_rcs_credentials_mapping(creds, prefix)
+        mapping = _build_rcs_credentials_mapping(creds, prefix, acc)
     else:
         mapping = {}
 

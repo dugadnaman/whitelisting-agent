@@ -160,7 +160,7 @@ def get_waba_id(client: str = "bajaj") -> str:
     if c == "bajaj":
         return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
     else:
-        waba = os.environ.get(f"{prefix}_WABA_ID")
+        waba = os.environ.get(f"{prefix}_WABA_ID") or DEFAULT_WABA_IDS.get(c)
         if not waba:
             raise OSError(
                 f"Missing WABA ID for {client} ({prefix}_WABA_ID). "
@@ -216,7 +216,11 @@ def get_esmeaddr(client: str = "bajaj") -> str:
             or BAJAJ_ESMEADDR
         )
     token = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
-    esme = _esmeaddr_from_session_token(token) or os.environ.get(f"{prefix}_ESMEADDR")
+    esme = (
+        _esmeaddr_from_session_token(token)
+        or os.environ.get(f"{prefix}_ESMEADDR")
+        or DEFAULT_ESMEADDRS.get(c)
+    )
     if not esme:
         raise OSError(
             f"Missing ESMEADDR for {client} ({prefix}_ESMEADDR or portal session token). "
@@ -236,7 +240,11 @@ def get_template_namespace_id(client: str = "bajaj") -> str:
             or os.environ.get("TEMPLATE_NAMESPACE_ID")
             or BAJAJ_TEMPLATE_NAMESPACE_ID
         )
-    return os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID") or os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") or ""
+    return (
+        os.environ.get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
+        or os.environ.get("TATA_TEMPLATE_NAMESPACE_ID")
+        or GLOBAL_TEMPLATE_NAMESPACE_ID
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,3 +260,35 @@ KARIX_REFERER = "https://rcmui.instaalerts.zone/"
 BAJAJ_WABA_ID = "286109054585247"
 BAJAJ_ESMEADDR = "72148300000000"
 BAJAJ_TEMPLATE_NAMESPACE_ID = "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
+# ---------------------------------------------------------------------------
+# Account-level permanent constants
+# ---------------------------------------------------------------------------
+GLOBAL_TEMPLATE_NAMESPACE_ID = "42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
+
+DEFAULT_WABA_IDS: dict[str, str] = {
+    "bajaj": "286109054585247",
+    "tcl_promo": "1064104141771475",
+    "tcl_trans": "1139151984921982",
+    "tchfl": "734197179371393",
+    "moneyfy": "575085772325234",
+}
+
+DEFAULT_ESMEADDRS: dict[str, str] = {
+    "bajaj": "72148300000000",
+    "tcl_promo": "72516600000000",
+    "tcl_trans": "72519700000000",
+    "tchfl": "72389800000000",
+    "wealth": "72516600000000",
+    "moneyfy": "72516600000000",
+    "apparel": "71189600000000",
+}
+
+DEFAULT_ENTITY_IDS: dict[str, str] = {
+    "bajaj": "110100001654",
+    "tata": "1001490234791338781",
+    "tcl_promo": "1001490234791338781",
+    "tcl_trans": "1001490234791338781",
+    "tchfl": "1001490234791338781",
+    "wealth": "1001490234791338781",
+    "moneyfy": "1001490234791338781",
+}

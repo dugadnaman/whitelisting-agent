@@ -22,6 +22,7 @@ KARIX_RCS_MEDIA_UPLOAD_URL = "https://rcsgui.karix.solutions/v1.0/templates/medi
 
 # Default Bot IDs / Sender IDs
 DEFAULT_RCS_BOT_IDS: dict[str, str] = {
+    "bajaj": "af2vdbyFh3RX8eee",
     "tcl_promo": "Uv9tdd0KNADbq3pX",
     "tcl_trans": "Uv9tdd0KNADbq3pX",
     "tchfl": "G0OedCS9mbsMYBq1",
@@ -39,6 +40,15 @@ DEFAULT_RCS_BOT_NAMES: dict[str, str] = {
     "moneyfy": "Moneyfy by Tata Capital",
     "tata": "Tata Capital Limited",
     "apparel": "Apparel Brand",
+}
+DEFAULT_RCS_ESMEADDRS: dict[str, str] = {
+    "bajaj": "72148300000000",
+    "tcl_promo": "72434700000000",
+    "tcl_trans": "72434700000000",
+    "tchfl": "72389800000000",
+    "wealth": "72516600000000",
+    "moneyfy": "72516600000000",
+    "apparel": "71189600000000",
 }
 
 TATA_RCS_BOT_ID = "Uv9tdd0KNADbq3pX"
@@ -119,10 +129,15 @@ def get_rcs_entity_id(client: str = "tata") -> str:
     _load_env_file()
     c = (client or "tata").lower().strip()
     prefix = _account_prefix(c)
-    if c == "tata":
-        return os.environ.get("TATA_ENTITY_ID") or os.environ.get("TATA_RCS_ENTITY_ID") or "1001490234791338781"
-    elif c == "bajaj":
+    if c == "bajaj":
         return os.environ.get("BAJAJ_ENTITY_ID") or os.environ.get("ENTITY_ID") or "110100001654"
+    elif c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"):
+        return (
+            os.environ.get(f"{prefix}_ENTITY_ID")
+            or os.environ.get("TATA_ENTITY_ID")
+            or os.environ.get("TATA_RCS_ENTITY_ID")
+            or "1001490234791338781"
+        )
     return os.environ.get(f"{prefix}_ENTITY_ID") or os.environ.get("ENTITY_ID") or ""
 
 
@@ -134,7 +149,7 @@ def get_rcs_esmeaddr(client: str = "tata") -> str:
     esme = (
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
         or os.environ.get(f"{prefix}_ESMEADDR")
-        or ("72148300000000" if c == "apparel" else None)
+        or DEFAULT_RCS_ESMEADDRS.get(c)
         or (
             os.environ.get("TATA_ESMEADDR")
             if c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy")
