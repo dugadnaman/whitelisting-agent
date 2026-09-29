@@ -486,17 +486,21 @@ def _json_safe(obj):
     return str(obj)
 
 
-def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
-    """Fetch live templates directly from Karix WhatsApp API (Portal & Official)."""
-    acc = client.lower().strip()
+def _fetch_whatsapp_inventory(client: str) -> tuple[list[dict], str | None]:
+    """Keep Karix's empty-inventory response distinct from a failed fetch."""
     try:
         from submission_client import fetch_template_list
 
-        templates, _ = fetch_template_list(client=acc)
-        return templates or []
-    except Exception as e:
-        logger.warning("Could not fetch live WhatsApp templates for %s: %s", acc, e)
-        return []
+        return fetch_template_list(client=client)
+    except Exception as exc:
+        logger.warning("Could not fetch live WhatsApp templates for %s: %s", client, exc)
+        return [], str(exc)
+
+
+def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
+    """Fetch live templates directly from Karix WhatsApp API (Portal & Official)."""
+    templates, _ = _fetch_whatsapp_inventory(client.lower().strip())
+    return templates
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +697,7 @@ def get_stats(
         local_entries = load_log(LOG_PATH)
         local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
 
-        live_templates = fetch_whatsapp_templates(client=acc)
+        live_templates, inventory_error = _fetch_whatsapp_inventory(acc)
         seen_names = set()
         merged = []
 
@@ -732,7 +736,7 @@ def get_stats(
             "approved": approved,
             "rejected": rejected,
             "duplicate": 0,
-            "error": None,
+            "error": inventory_error,
             "karix_health": _GOVERNOR.get_health_stats(),
             "sla_insights": get_pending_templates_sla_insights(LOG_PATH, client=acc),
         }
@@ -847,7 +851,7 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
 
 def _merge_wa_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
     local_entries = [e for e in load_log(LOG_PATH) if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-    live_templates = fetch_whatsapp_templates(client=acc)
+    live_templates, _ = _fetch_whatsapp_inventory(acc)
     seen_names = set()
     merged_entries = []
 
@@ -973,7 +977,7 @@ def get_templates(
         return [_json_safe(e) for e in entries]
     except Exception as exc:
         logger.exception("Error in get_templates for %s (%s): %s", acc, chan, exc)
-        return []
+        raise HTTPException(status_code=503, detail="Template history is temporarily unavailable.") from exc
 
 
 class TemplateContentSearchRequest(BaseModel):

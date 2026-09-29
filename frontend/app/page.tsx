@@ -87,6 +87,8 @@ export default function DashboardPage() {
   const [polling, setPolling] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [activityStats, setActivityStats] = useState<ActivityStats | null>(null);
@@ -137,6 +139,12 @@ export default function DashboardPage() {
   // Reset filters when switching account or channel
   useEffect(() => {
     requestVersionRef.current += 1;
+    setStats(null);
+    setTemplates([]);
+    setError(null);
+    setStatsError(null);
+    setTemplatesError(null);
+    setLastSynced(null);
     setStatusFilter('');
     setOperatorFilter('all');
     setSearch('');
@@ -153,13 +161,11 @@ export default function DashboardPage() {
       const data = await fetchStats(account, channel);
       if (requestVersion !== requestVersionRef.current) return;
       setStats(data);
-      setLastSynced(new Date().toISOString());
-      if (data.error) {
-        setError(`Karix sync degraded: ${formatError(data.error)}`);
-      }
+      setLastSynced(data.error ? null : new Date().toISOString());
+      setStatsError(data.error ? `Karix sync degraded: ${formatError(data.error)}` : null);
     } catch (err) {
       if (requestVersion === requestVersionRef.current) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch stats');
+        setStatsError(err instanceof Error ? err.message : 'Failed to fetch stats');
       }
     } finally {
       if (requestVersion === requestVersionRef.current) setStatsLoading(false);
@@ -177,10 +183,10 @@ export default function DashboardPage() {
       const data = await fetchTemplates({ account, channel, ...params });
       if (requestVersion !== requestVersionRef.current) return;
       setTemplates(data);
-      if (data.length > 0 || !debouncedSearch) setError(null);
+      setTemplatesError(null);
     } catch (err) {
       if (requestVersion === requestVersionRef.current) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch templates');
+        setTemplatesError(err instanceof Error ? err.message : 'Failed to fetch templates');
       }
     } finally {
       if (requestVersion === requestVersionRef.current) setTemplatesLoading(false);
@@ -387,16 +393,18 @@ export default function DashboardPage() {
               {accountLabel} &bull; {channelLabel}
             </span>
             {/* Connection status chip */}
-            {stats?.error ? (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200" title={formatError(stats.error)}>
+            {stats?.error || statsError || templatesError ? (
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200" title={formatError(statsError || templatesError || stats?.error || '')}>
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                Karix Degraded
+                {templatesError && !stats?.error && !statsError ? 'Dashboard Degraded' : 'Karix Degraded'}
               </span>
-            ) : (
+            ) : stats ? (
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 Karix Synced{lastSynced ? ` · ${relativeTime(lastSynced)}` : ''}
               </span>
+            ) : (
+              <span className="text-[11px] text-gray-500">Checking Karix connection…</span>
             )}
             {stats?.karix_health && (
               <span
@@ -561,13 +569,13 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-      {error && (
+      {(statsError || templatesError || error) && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 text-sm text-red-700">
           <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
           </svg>
-          <div className="flex-1">{formatError(error)}</div>
-          <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">&times;</button>
+          <div className="flex-1">{formatError(statsError || templatesError || error || '')}</div>
+          <button onClick={() => { setStatsError(null); setTemplatesError(null); setError(null); }} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">&times;</button>
         </div>
       )}
 
@@ -867,16 +875,20 @@ export default function DashboardPage() {
                             </svg>
                           </div>
                           <div className="text-sm font-semibold text-gray-700">
-                            {stats?.error
-                              ? 'Karix connection degraded — showing local history only'
-                              : `No ${channelLabel} templates found for ${accountLabel}.`}
+                            {templatesError
+                              ? 'Template history is unavailable.'
+                              : stats?.error
+                                ? 'Karix connection degraded — showing local history only'
+                                : `No ${channelLabel} templates found for ${accountLabel}.`}
                           </div>
                           <p className="text-xs text-gray-400 max-w-xs text-center">
-                            {stats?.error
-                              ? 'Check credentials in Settings, then refresh.'
-                              : 'Upload a spreadsheet on the Submit Templates page to whitelist your first template.'}
+                            {templatesError
+                              ? 'Refresh after the service recovers.'
+                              : stats?.error
+                                ? 'Check credentials in Settings, then refresh.'
+                                : 'Upload a spreadsheet on the Submit Templates page to whitelist your first template.'}
                           </p>
-                          {!stats?.error && (
+                          {!stats?.error && !templatesError && (
                             <a
                               href="/submit"
                               className="text-xs font-semibold text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center gap-1"

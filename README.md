@@ -43,6 +43,10 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - **WhatsApp**: Submits via Karix Portal API or Official WABA API with parameter checking and aspect-ratio validation.
    - **RCS**: Submits Rich Cards and Carousels (Google RCS / Jio) with compliant aspect ratio and button validation.
    - **SMS**: End-to-end DLT template compliance, AES-256 CBC PII encryption (`sms_crypto.py`), and real-time DLR forwarding callbacks.
+   - **Dashboard resilience**: When Karix's WhatsApp inventory is unavailable,
+     the dashboard keeps tenant-scoped local submission history visible and marks
+     the provider connection as degraded. An unavailable local history is reported
+     as an error rather than shown as an empty template catalog.
 
 3. **Phase 3 — Operational Work Management & Sync**:
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
