@@ -10,6 +10,7 @@ import {
   deleteTemplates,
   deleteTemplatesFromFile,
   syncKarixRcsToMoEngage,
+  syncRcsTemplateToMoEngage,
 } from '@/lib/api';
 import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -104,6 +105,33 @@ export default function DashboardPage() {
   const [fileDeleting, setFileDeleting] = useState(false);
   const [syncingRcs, setSyncingRcs] = useState(false);
   const [syncRcsFeedback, setSyncRcsFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [syncingSingleRcs, setSyncingSingleRcs] = useState<Record<string, boolean>>({});
+  const [syncedSingleRcs, setSyncedSingleRcs] = useState<Record<string, string>>({});
+
+  const handleSyncSingleRcsToMoEngage = async (t: Template) => {
+    const tName = t.template_name;
+    try {
+      setSyncingSingleRcs((prev) => ({ ...prev, [tName]: true }));
+      const res = await syncRcsTemplateToMoEngage({
+        template_name: tName,
+        template_id: t.template_id || tName,
+        card_title: t.template_name,
+        card_description: t.template_message || tName,
+      });
+      setSyncedSingleRcs((prev) => ({ ...prev, [tName]: res.moengage_id }));
+      setSyncRcsFeedback({
+        message: `Template '${tName}' successfully created in MoEngage Settings (MoEngage ID: ${res.moengage_id}). It is now available in MoEngage RCS campaigns.`,
+        type: 'success',
+      });
+    } catch (err) {
+      setSyncRcsFeedback({
+        message: `MoEngage Sync failed for '${tName}': ${err instanceof Error ? err.message : String(err)}`,
+        type: 'error',
+      });
+    } finally {
+      setSyncingSingleRcs((prev) => ({ ...prev, [tName]: false }));
+    }
+  };
 
   const handleSyncRcsToMoEngage = async () => {
     try {
@@ -1054,6 +1082,42 @@ export default function DashboardPage() {
                                       <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg text-[11px] font-mono overflow-x-auto max-h-48">
                                         {JSON.stringify(t.provider_response, null, 2)}
                                       </pre>
+                                    </div>
+                                  )}
+                                  {channel === 'rcs' && (
+                                    <div className="pt-3 mt-2 border-t border-gray-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                      <div className="text-[11px] text-gray-500">
+                                        Register this approved Karix RCS template into MoEngage Settings &rarr; RCS Template Management.
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSyncSingleRcsToMoEngage(t);
+                                        }}
+                                        disabled={syncingSingleRcs[t.template_name]}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto ${
+                                          syncedSingleRcs[t.template_name]
+                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                            : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-300'
+                                        }`}
+                                      >
+                                        {syncingSingleRcs[t.template_name] ? (
+                                          <>
+                                            <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
+                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                                            </svg>
+                                            <span>Syncing to MoEngage...</span>
+                                          </>
+                                        ) : syncedSingleRcs[t.template_name] ? (
+                                          <span>✓ In MoEngage</span>
+                                        ) : (
+                                          <>
+                                            <span>🔄 Sync to MoEngage</span>
+                                          </>
+                                        )}
+                                      </button>
                                     </div>
                                   )}
                                 </div>
