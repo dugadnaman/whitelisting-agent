@@ -155,6 +155,44 @@ export default function DashboardPage() {
       setSyncingRcs(false);
     }
   };
+  const handleSyncSelectedRcsToMoEngage = async () => {
+    if (selectedTemplates.size === 0) return;
+    try {
+      setSyncingRcs(true);
+      setSyncRcsFeedback(null);
+      let successCount = 0;
+      let failCount = 0;
+      const targets = templates.filter((t) => selectedTemplates.has(t.template_name));
+
+      for (const t of targets) {
+        try {
+          await syncRcsTemplateToMoEngage({
+            template_name: t.template_name,
+            template_id: t.template_id || t.template_name,
+            card_title: t.template_name,
+            card_description: t.template_message || t.template_name,
+          });
+          setSyncedSingleRcs((prev) => ({ ...prev, [t.template_name]: 'synced' }));
+          successCount++;
+        } catch {
+          failCount++;
+        }
+      }
+
+      setSyncRcsFeedback({
+        message: `Successfully synced ${successCount} selected RCS template(s) to MoEngage Settings${failCount > 0 ? ` (${failCount} failed)` : ''}.`,
+        type: successCount > 0 ? 'success' : 'error',
+      });
+      setSelectedTemplates(new Set());
+    } catch (err) {
+      setSyncRcsFeedback({
+        message: `Failed to sync selected templates: ${err instanceof Error ? err.message : String(err)}`,
+        type: 'error',
+      });
+    } finally {
+      setSyncingRcs(false);
+    }
+  };
 
 
 
@@ -779,7 +817,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {channel === 'whatsapp' && (
+          {(channel === 'whatsapp' || channel === 'rcs') && (
             <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-200/80 shadow-xs">
               <div className="flex items-center gap-2 text-xs text-gray-600">
                 <span className="font-bold text-gray-900">{selectedTemplates.size}</span>
@@ -796,7 +834,30 @@ export default function DashboardPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                {selectedTemplates.size > 0 && (
+                {selectedTemplates.size > 0 && channel === 'rcs' && (
+                  <button
+                    type="button"
+                    onClick={handleSyncSelectedRcsToMoEngage}
+                    disabled={syncingRcs}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {syncingRcs ? (
+                      <>
+                        <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                        </svg>
+                        <span>Syncing to MoEngage ({selectedTemplates.size})...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>🔄 Sync Selected to MoEngage ({selectedTemplates.size})</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {selectedTemplates.size > 0 && channel === 'whatsapp' && (
                   <button
                     type="button"
                     onClick={handleDeleteSelected}
@@ -822,19 +883,20 @@ export default function DashboardPage() {
                   </button>
                 )}
 
-                <button
-                  type="button"
-                  onClick={() => setShowFileDeleteModal(true)}
-                  disabled={deleting || fileDeleting}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
-                  title="Upload a spreadsheet (CSV/Excel) to delete all templates listed in it"
-                >
-                  <svg className="w-3.5 h-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                  </svg>
-                  Delete by File (CSV/Excel)
-                </button>
-
+                {channel === 'whatsapp' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFileDeleteModal(true)}
+                    disabled={deleting || fileDeleting}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                    title="Upload a spreadsheet (CSV/Excel) to delete all templates listed in it"
+                  >
+                    <svg className="w-3.5 h-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                    </svg>
+                    Delete by File (CSV/Excel)
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -845,7 +907,7 @@ export default function DashboardPage() {
               <table className="w-full text-left">
                 <thead>
                   <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                    {channel === 'whatsapp' && (
+                    {(channel === 'whatsapp' || channel === 'rcs') && (
                       <th className="w-10 px-3 py-3 text-center">
                         <input
                           type="checkbox"
@@ -883,7 +945,7 @@ export default function DashboardPage() {
                 <tbody className="divide-y divide-gray-200 text-xs text-gray-800">
                   {templatesLoading ? (
                     <tr>
-                      <td colSpan={channel === 'whatsapp' ? 9 : 8} className="px-6 py-12 text-center text-gray-400">
+                      <td colSpan={(channel === 'whatsapp' || channel === 'rcs') ? 9 : 8} className="px-6 py-12 text-center text-gray-400">
                         <div className="flex items-center justify-center gap-2">
                           <svg className="animate-spin h-4 w-4 text-blue-600" viewBox="0 0 24 24" fill="none">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -895,7 +957,7 @@ export default function DashboardPage() {
                     </tr>
                   ) : visibleTemplates.length === 0 ? (
                     <tr>
-                      <td colSpan={channel === 'whatsapp' ? 9 : 8} className="px-6 py-12 text-center">
+                      <td colSpan={(channel === 'whatsapp' || channel === 'rcs') ? 9 : 8} className="px-6 py-12 text-center">
                         <div className="flex flex-col items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
                             <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -948,7 +1010,7 @@ export default function DashboardPage() {
                             }}
                             className={`hover:bg-gray-50/70 transition-colors cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`}
                           >
-                            {channel === 'whatsapp' && (
+                            {(channel === 'whatsapp' || channel === 'rcs') && (
                               <td className="w-10 px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                                 <input
                                   type="checkbox"
@@ -1029,15 +1091,40 @@ export default function DashboardPage() {
                               {formatDate(t.submitted_at)}
                             </td>
 
-                            <td className="px-4 py-3 text-right font-medium text-blue-600 whitespace-nowrap">
-                              {isExpanded ? '▲ Hide' : '▼ Details'}
+                            <td className="px-4 py-3 text-right font-medium whitespace-nowrap">
+                              <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                                {channel === 'rcs' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSyncSingleRcsToMoEngage(t)}
+                                    disabled={syncingSingleRcs[t.template_name]}
+                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition flex items-center gap-1 cursor-pointer ${
+                                      syncedSingleRcs[t.template_name]
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                                        : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'
+                                    }`}
+                                    title="Sync this template to MoEngage Settings"
+                                  >
+                                    {syncingSingleRcs[t.template_name]
+                                      ? 'Syncing...'
+                                      : syncedSingleRcs[t.template_name]
+                                      ? '✓ Synced'
+                                      : '🔄 Sync'}
+                                  </button>
+                                )}
+                                <span
+                                  className="text-blue-600 hover:text-blue-800 cursor-pointer text-xs"
+                                  onClick={() => toggleRow(key)}
+                                >
+                                  {isExpanded ? '▲ Hide' : '▼ Details'}
+                                </span>
+                              </div>
                             </td>
                           </tr>
-
                           {/* Expandable detail panel */}
                           {isExpanded && (
                             <tr className="bg-gray-50/90 border-b border-gray-200">
-                              <td colSpan={channel === 'whatsapp' ? 9 : 8} className="px-6 py-4">
+                              <td colSpan={(channel === 'whatsapp' || channel === 'rcs') ? 9 : 8} className="px-6 py-4">
                                 <div className="space-y-3">
                                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
                                     <div>
