@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import {
   fetchWorkManagementDashboard,
   fetchTurnaroundAnalytics,
@@ -600,6 +601,18 @@ export default function WorkManagementPage() {
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto pb-16">
+      {/* Unified Operations & SLA Switcher */}
+      <div className="inline-flex items-center p-1 bg-gray-100 rounded-lg border border-gray-200 text-xs font-semibold">
+        <span className="px-3 py-1 rounded-md bg-white text-blue-700 shadow-2xs font-bold">
+          👥 Team SLA &amp; Workload
+        </span>
+        <Link href="/moengage-ops" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          📈 MoEngage Analytics
+        </Link>
+        <Link href="/activity" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          🕒 Submission Audit Logs
+        </Link>
+      </div>
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 pb-6">
         <div>

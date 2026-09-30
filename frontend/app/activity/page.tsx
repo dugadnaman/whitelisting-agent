@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { fetchActivityLogs, fetchActivityStats } from '@/lib/api';
 import type { ActivityLog, ActivityStats, Account, Channel } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -175,6 +176,18 @@ export default function ActivityLogsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Unified Operations & SLA Switcher */}
+      <div className="inline-flex items-center p-1 bg-gray-100 rounded-lg border border-gray-200 text-xs font-semibold">
+        <Link href="/work-management" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          👥 Team SLA &amp; Workload
+        </Link>
+        <Link href="/moengage-ops" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          📈 MoEngage Analytics
+        </Link>
+        <span className="px-3 py-1 rounded-md bg-white text-blue-700 shadow-2xs font-bold">
+          🕒 Submission Audit Logs
+        </span>
+      </div>
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>

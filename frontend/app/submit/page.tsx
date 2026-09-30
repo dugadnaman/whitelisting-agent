@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import Link from 'next/link';
 import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates } from '@/lib/api';
 import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -410,6 +411,18 @@ export default function SubmitPage() {
   return (
     <div className="space-y-6">
       {/* Page Header */}
+      {/* Unified Whitelisting Workspace Switcher */}
+      <div className="inline-flex items-center p-1 bg-gray-100 rounded-lg border border-gray-200 text-xs font-semibold">
+        <Link href="/briefs" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          📋 Jira Ticket Queue
+        </Link>
+        <span className="px-3 py-1 rounded-md bg-white text-blue-700 shadow-2xs font-bold">
+          📤 File / Paste Upload
+        </span>
+        <Link href="/" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          ✅ Live Inventory
+        </Link>
+      </div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
           <div className="flex items-center gap-3">

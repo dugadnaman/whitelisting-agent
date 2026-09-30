@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { useApp } from '@/lib/context';
 import {
   fetchJiraProjects,
@@ -10,6 +11,7 @@ import {
   syncRcsTemplateToMoEngage,
   getJiraCreativeDownloadUrl,
   uploadJiraCreative,
+  updateCredentials,
   type JiraProjectItem,
   type JiraIssueItem,
   type JiraBriefData,
@@ -87,8 +89,13 @@ export default function JiraBriefsPage() {
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
   const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
+  const [autoSyncRcsToMoEngage, setAutoSyncRcsToMoEngage] = useState<boolean>(true);
+  const [showSessionModal, setShowSessionModal] = useState<boolean>(false);
+  const [quickBearerToken, setQuickBearerToken] = useState<string>('');
+  const [quickSessionId, setQuickSessionId] = useState<string>('');
+  const [quickLoungeCookie, setQuickLoungeCookie] = useState<string>('');
+  const [savingQuickSession, setSavingQuickSession] = useState<boolean>(false);
   const activeRequestKey = useRef<string>('');
-
   const loadIssues = useCallback(async (queryParam?: string, bStatusParam?: string) => {
     try {
       setLoadingIssues(true);
@@ -265,13 +272,34 @@ export default function JiraBriefsPage() {
 
       const waCount = res.whatsapp_submitted?.length || 0;
       const rcsCount = res.rcs_submitted?.length || 0;
+
+      if (autoSyncRcsToMoEngage && rcsToSubmit.length > 0) {
+        for (const rcsItem of rcsToSubmit) {
+          try {
+            const syncRes = await syncRcsTemplateToMoEngage({
+              template_name: rcsItem.template_name,
+              template_id: rcsItem.template_name,
+              card_title: rcsItem.card_title || brief.summary || 'Tata Capital Offer',
+              card_description: rcsItem.body,
+              cta_text: rcsItem.action_label || 'Explore Now',
+              cta_url: rcsItem.action_url || 'https://u3.mnge.co/',
+            });
+            setSyncedRcs((prev) => ({ ...prev, [rcsItem.template_name]: syncRes.moengage_id }));
+          } catch {}
+        }
+      }
+
       setFeedback({
-        message: `Successfully submitted ${waCount} WhatsApp and ${rcsCount} RCS templates for ${brief.issue_key}. Jira ticket comment posted.`,
+        message: `Successfully submitted ${waCount} WhatsApp and ${rcsCount} RCS templates for ${brief.issue_key}${autoSyncRcsToMoEngage && rcsCount > 0 ? ' (and synced RCS to MoEngage)' : ''}.`,
         type: 'success',
       });
       loadBrief(brief.issue_key);
     } catch (err) {
-      setFeedback({ message: formatError(err), type: 'error' });
+      const errMsg = formatError(err);
+      setFeedback({ message: errMsg, type: 'error' });
+      if (/session|cookie|bearer|401|expired|unauthorized/i.test(errMsg)) {
+        setShowSessionModal(true);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -495,13 +523,37 @@ export default function JiraBriefsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center p-1 bg-gray-100 rounded-lg border border-gray-200 text-xs font-semibold">
+            <span className="px-2.5 py-1 rounded-md bg-white text-blue-700 shadow-2xs font-bold">
+              📋 Jira Ticket Queue
+            </span>
+            <Link
+              href="/submit"
+              className="px-2.5 py-1 rounded-md text-gray-600 hover:text-gray-900 transition"
+            >
+              📤 File / Paste Upload
+            </Link>
+            <Link
+              href="/"
+              className="px-2.5 py-1 rounded-md text-gray-600 hover:text-gray-900 transition"
+            >
+              ✅ Live Inventory
+            </Link>
+          </div>
+          <button
+            onClick={() => setShowSessionModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 shadow-2xs transition"
+            title="Paste fresh Karix Portal or Lounge session cookie without leaving this page"
+          >
+            🔑 Quick Session Paste
+          </button>
           <button
             onClick={() => loadIssues()}
             disabled={loadingIssues}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 shadow-2xs transition disabled:opacity-50"
           >
-            🔄 Refresh Tickets
+            🔄 Refresh
           </button>
         </div>
       </div>
@@ -1202,182 +1254,216 @@ export default function JiraBriefsPage() {
                                   </button>
                                 </div>
                               </div>
-
-                              {/* Header Creative (Image / Media) — Download & Replace */}
-                              <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="flex items-center gap-1.5 font-medium">
-                                    <span>🖼️ Header Creative:</span>
-                                    {wa.media_filename ? (
-                                      <strong className="text-gray-900 font-mono">{wa.media_filename}</strong>
-                                    ) : (
-                                      <span className="text-gray-400 italic">None attached</span>
-                                    )}
-                                  </span>
-                                  <div className="flex items-center gap-1.5">
-                                    {wa.media_file && (
-                                      <a
-                                        href={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename })}
-                                        download={wa.media_filename || 'creative.png'}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
-                                        title="Download creative to inspect or edit"
-                                      >
-                                        <span>⬇️</span>
-                                        <span>Download</span>
-                                      </a>
-                                    )}
-                                    <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
-                                      <span>{uploadingCreative[`wa_${idx}`] ? '⏳ Uploading...' : wa.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
-                                      <input
-                                        type="file"
-                                        accept="image/png,image/jpeg,image/webp,video/mp4,application/pdf"
-                                        className="hidden"
-                                        disabled={uploadingCreative[`wa_${idx}`]}
-                                        onChange={(e) => {
-                                          const f = e.target.files?.[0];
-                                          if (f) handleReplaceWaCreative(idx, f);
-                                          e.target.value = '';
-                                        }}
-                                      />
-                                    </label>
-                                  </div>
-                                </div>
-                                {wa.media_file && (
-                                  <div className="pt-1">
-                                    <img
-                                      src={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename, inline: true })}
-                                      alt={wa.media_filename || 'Creative preview'}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white"
-                                      onError={(e) => {
-                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                      }}
-                                    />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Text Header */}
-                              {wa.header_text && (
-                                <div className="text-xs font-bold text-gray-900 bg-gray-50 px-3 py-1.5 rounded border border-gray-200/80 flex items-center gap-1.5">
-                                  <span className="text-gray-400 text-[10px] font-semibold uppercase">Header:</span>
-                                  <span>{wa.header_text}</span>
-                                </div>
-                              )}
-
-                              {isEditing ? (
-                                <div className="space-y-2.5">
-                                  {/* Header text edit */}
-                                  <div>
-                                    <label className="block text-[11px] text-gray-500 mb-1">Header Text (optional):</label>
-                                    <input
-                                      type="text"
-                                      value={wa.header_text || ''}
-                                      onChange={(e) => updateWaField(idx, 'header_text', e.target.value)}
-                                      placeholder="e.g. Special Festive Offer"
-                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
-                                    />
-                                  </div>
-
-                                  <div className="flex items-center justify-between text-[11px] text-gray-500">
-                                    <span>Template Body (use {'{{1}}'}, {'{{2}}'} for variables):</span>
-                                    <span>{wa.body.length} chars</span>
-                                  </div>
-                                  <textarea
-                                    value={wa.body}
-                                    onChange={(e) => updateWaField(idx, 'body', e.target.value)}
-                                    rows={5}
-                                    className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
-                                  />
-
-                                  {/* Button controls */}
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Type:</label>
-                                      <select
-                                        value={wa.button_type || 'NONE'}
-                                        onChange={(e) => updateWaField(idx, 'button_type', e.target.value)}
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold cursor-pointer"
-                                      >
-                                        <option value="NONE">None</option>
-                                        <option value="URL">CTA URL Button</option>
-                                        <option value="QUICK_REPLY">Quick Reply Button</option>
-                                        <option value="PHONE_NUMBER">Call Phone Number</option>
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Text:</label>
-                                      <input
-                                        type="text"
-                                        value={wa.button_text || ''}
-                                        onChange={(e) => updateWaField(idx, 'button_text', e.target.value)}
-                                        placeholder="e.g. Check Offer"
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
-                                      />
-                                    </div>
-                                    <div>
-                                      {wa.button_type === 'PHONE_NUMBER' ? (
-                                        <>
-                                          <label className="block text-[11px] text-gray-500 mb-1">Phone (+91...):</label>
-                                          <input
-                                            type="text"
-                                            value={wa.button_phone || ''}
-                                            onChange={(e) => updateWaField(idx, 'button_phone', e.target.value)}
-                                            placeholder="+919876543210"
-                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
-                                          />
-                                        </>
+                              {/* Side-by-Side: Left = Quick Fix & Controls | Right = Live WhatsApp Phone Preview */}
+                              <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+                                {/* Left Column (7 cols): Controls & Editable Copy */}
+                                <div className="xl:col-span-7 space-y-2.5">
+                                  {/* Header Creative (Image / Media) — Download & Replace */}
+                                  <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 flex flex-wrap items-center justify-between gap-2">
+                                    <span className="flex items-center gap-1.5 font-medium">
+                                      <span>🖼️ Header Creative:</span>
+                                      {wa.media_filename ? (
+                                        <strong className="text-gray-900 font-mono">{wa.media_filename}</strong>
                                       ) : (
-                                        <>
-                                          <label className="block text-[11px] text-gray-500 mb-1">Destination URL:</label>
+                                        <span className="text-gray-400 italic">None (Text-only)</span>
+                                      )}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      {wa.media_file && (
+                                        <a
+                                          href={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename })}
+                                          download={wa.media_filename || 'creative.png'}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
+                                        >
+                                          <span>⬇️ Download</span>
+                                        </a>
+                                      )}
+                                      <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
+                                        <span>{uploadingCreative[`wa_${idx}`] ? '⏳ Uploading...' : wa.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
+                                        <input
+                                          type="file"
+                                          accept="image/png,image/jpeg,image/webp,video/mp4,application/pdf"
+                                          className="hidden"
+                                          disabled={uploadingCreative[`wa_${idx}`]}
+                                          onChange={(e) => {
+                                            const f = e.target.files?.[0];
+                                            if (f) handleReplaceWaCreative(idx, f);
+                                            e.target.value = '';
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
+                                  </div>
+
+                                  {/* Text Header (only shown if present or toggled in Edit mode) */}
+                                  {wa.header_text ? (
+                                    <div className="text-xs font-bold text-gray-900 bg-gray-50 px-3 py-1.5 rounded border border-gray-200/80 flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-gray-400 text-[10px] font-semibold uppercase">Text Header:</span>
+                                        <span>{wa.header_text}</span>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateWaField(idx, 'header_text', null)}
+                                        className="text-[10px] text-red-600 hover:underline font-medium"
+                                      >
+                                        ✕ Clear Header
+                                      </button>
+                                    </div>
+                                  ) : isEditing ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => updateWaField(idx, 'header_text', 'Important Update')}
+                                      className="text-[11px] text-emerald-700 hover:underline font-semibold"
+                                    >
+                                      + Add Optional Text Header
+                                    </button>
+                                  ) : null}
+
+                                  {isEditing ? (
+                                    <div className="space-y-2.5">
+                                      {wa.header_text !== null && wa.header_text !== undefined && (
+                                        <div>
+                                          <label className="block text-[11px] text-gray-500 mb-1">Text Header (optional — leave blank if none):</label>
                                           <input
                                             type="text"
-                                            value={wa.button_url || ''}
-                                            onChange={(e) => updateWaField(idx, 'button_url', e.target.value)}
-                                            placeholder="https://u3.mnge.co/"
-                                            disabled={wa.button_type === 'QUICK_REPLY' || wa.button_type === 'NONE'}
-                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100"
+                                            value={wa.header_text || ''}
+                                            onChange={(e) => updateWaField(idx, 'header_text', e.target.value || null)}
+                                            placeholder="Leave blank if no text header"
+                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
                                           />
-                                        </>
+                                        </div>
                                       )}
+
+                                      <div className="flex items-center justify-between text-[11px] text-gray-500">
+                                        <span>Template Body (T&amp;Cs apply stays in body):</span>
+                                        <span>{wa.body.length} chars</span>
+                                      </div>
+                                      <textarea
+                                        value={wa.body}
+                                        onChange={(e) => updateWaField(idx, 'body', e.target.value)}
+                                        rows={5}
+                                        className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                                      />
+
+                                      {/* Button controls */}
+                                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                                        <div>
+                                          <label className="block text-[11px] text-gray-500 mb-1">Button Type:</label>
+                                          <select
+                                            value={wa.button_type || 'NONE'}
+                                            onChange={(e) => updateWaField(idx, 'button_type', e.target.value)}
+                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold cursor-pointer"
+                                          >
+                                            <option value="NONE">None</option>
+                                            <option value="URL">CTA URL Button</option>
+                                            <option value="QUICK_REPLY">Quick Reply Button</option>
+                                            <option value="PHONE_NUMBER">Call Phone Number</option>
+                                          </select>
+                                        </div>
+                                        <div>
+                                          <label className="block text-[11px] text-gray-500 mb-1">Button Text:</label>
+                                          <input
+                                            type="text"
+                                            value={wa.button_text || ''}
+                                            onChange={(e) => updateWaField(idx, 'button_text', e.target.value)}
+                                            placeholder="e.g. Check Offer"
+                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
+                                          />
+                                        </div>
+                                        <div>
+                                          {wa.button_type === 'PHONE_NUMBER' ? (
+                                            <>
+                                              <label className="block text-[11px] text-gray-500 mb-1">Phone (+91...):</label>
+                                              <input
+                                                type="text"
+                                                value={wa.button_phone || ''}
+                                                onChange={(e) => updateWaField(idx, 'button_phone', e.target.value)}
+                                                placeholder="+919876543210"
+                                                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
+                                              />
+                                            </>
+                                          ) : (
+                                            <>
+                                              <label className="block text-[11px] text-gray-500 mb-1">Destination URL:</label>
+                                              <input
+                                                type="text"
+                                                value={wa.button_url || ''}
+                                                onChange={(e) => updateWaField(idx, 'button_url', e.target.value)}
+                                                placeholder="https://u3.mnge.co/"
+                                                disabled={wa.button_type === 'QUICK_REPLY' || wa.button_type === 'NONE'}
+                                                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100"
+                                              />
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
+                                  ) : (
+                                    <>
+                                      <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                        {wa.body}
+                                      </div>
+
+                                      {wa.variables && wa.variables.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                                          <span className="text-[10px] font-bold text-gray-400 uppercase">Variables:</span>
+                                          {wa.variables.map((v, vIdx) => (
+                                            <span key={`var-${vIdx}`} className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 font-mono text-[10px] border border-gray-200">
+                                              {`{{${v.replace(/[{}]/g, '')}}}`} = <strong>{wa.sample_values?.[vIdx] || 'Sample'}</strong>
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+
+                                {/* Right Column (5 cols): Live WhatsApp Phone Bubble Preview */}
+                                <div className="xl:col-span-5 rounded-xl p-3 border border-emerald-200/80 bg-[#efeae2] shadow-inner">
+                                  <div className="flex items-center justify-between mb-2 px-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-900/70 flex items-center gap-1">
+                                      <span>📱 Live WhatsApp Preview</span>
+                                    </span>
+                                    <span className="text-[10px] font-mono text-gray-500">{wa.body.length} chars</span>
+                                  </div>
+                                  <div className="bg-white rounded-xl shadow-xs overflow-hidden border border-gray-200/60 max-w-sm mx-auto">
+                                    {wa.media_file && (
+                                      <div className="bg-gray-100 border-b border-gray-100">
+                                        <img
+                                          src={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename, inline: true })}
+                                          alt={wa.media_filename || 'Header creative'}
+                                          className="w-full max-h-40 object-cover"
+                                          onError={(e) => {
+                                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                          }}
+                                        />
+                                      </div>
+                                    )}
+                                    <div className="p-3 space-y-1.5">
+                                      {wa.header_text && (
+                                        <div className="text-xs font-bold text-gray-900 leading-snug">
+                                          {wa.header_text}
+                                        </div>
+                                      )}
+                                      <div className="text-[11px] text-gray-800 whitespace-pre-wrap leading-relaxed font-sans">
+                                        {wa.body}
+                                      </div>
+                                      <div className="text-[9px] text-gray-400 text-right pt-0.5">
+                                        10:42 AM ✓✓
+                                      </div>
+                                    </div>
+                                    {wa.button_type && wa.button_type !== 'NONE' && (
+                                      <div className="border-t border-gray-100 py-2 px-3 text-center text-xs font-semibold text-blue-600 bg-gray-50/40 flex items-center justify-center gap-1.5">
+                                        <span>{wa.button_type === 'PHONE_NUMBER' ? '📞' : wa.button_type === 'QUICK_REPLY' ? '↩️' : '🔗'}</span>
+                                        <span>{wa.button_text || 'Check Offer'}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
-                              ) : (
-                                <>
-                                  <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                                    {wa.body}
-                                  </div>
-
-                                  {wa.button_type === 'URL' && (
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-gray-400">CTA Button:</span>
-                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
-                                        🔗 {wa.button_text || 'Check Offer'} ({wa.button_url || 'https://u3.mnge.co/'})
-                                      </span>
-                                    </div>
-                                  )}
-
-                                  {wa.button_type === 'QUICK_REPLY' && (
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-gray-400">Quick Reply:</span>
-                                      <span className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/60">
-                                        ⚡ {wa.button_text || 'Interested'}
-                                      </span>
-                                    </div>
-                                  )}
-
-                                  {wa.button_type === 'PHONE_NUMBER' && (
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-gray-400">Call Button:</span>
-                                      <span className="px-2.5 py-1 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200/60 font-mono">
-                                        📞 {wa.button_text || 'Call Us'} ({wa.button_phone || '+919876543210'})
-                                      </span>
-                                    </div>
-                                  )}
-                                </>
-                              )}
+                              </div>
                             </div>
                           );
                         })
@@ -1478,119 +1564,148 @@ export default function JiraBriefsPage() {
                                 </div>
                               </div>
 
-                              <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="flex items-center gap-1.5 font-medium">
-                                    <span>🖼️ Card Creative:</span>
-                                    {rcs.media_filename ? (
-                                      <strong className="text-gray-900 font-mono">{rcs.media_filename}</strong>
-                                    ) : (
-                                      <span className="text-gray-400 italic">None attached</span>
-                                    )}
-                                  </span>
-                                  <div className="flex items-center gap-1.5">
-                                    {rcs.media_file && (
-                                      <a
-                                        href={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename })}
-                                        download={rcs.media_filename || 'creative.png'}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
-                                        title="Download creative to inspect or edit"
-                                      >
-                                        <span>⬇️</span>
-                                        <span>Download</span>
-                                      </a>
-                                    )}
-                                    <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
-                                      <span>{uploadingCreative[`rcs_${idx}`] ? '⏳ Uploading...' : rcs.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
-                                      <input
-                                        type="file"
-                                        accept="image/png,image/jpeg,image/webp,video/mp4"
-                                        className="hidden"
-                                        disabled={uploadingCreative[`rcs_${idx}`]}
-                                        onChange={(e) => {
-                                          const f = e.target.files?.[0];
-                                          if (f) handleReplaceRcsCreative(idx, f);
-                                          e.target.value = '';
-                                        }}
-                                      />
-                                    </label>
+                              {/* Side-by-Side: Left = Quick Fix & Controls | Right = Live RCS Rich Card Preview */}
+                              <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+                                {/* Left Column (7 cols): Controls & Editable Copy */}
+                                <div className="xl:col-span-7 space-y-2.5">
+                                  <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 flex flex-wrap items-center justify-between gap-2">
+                                    <span className="flex items-center gap-1.5 font-medium">
+                                      <span>🖼️ Card Creative:</span>
+                                      {rcs.media_filename ? (
+                                        <strong className="text-gray-900 font-mono">{rcs.media_filename}</strong>
+                                      ) : (
+                                        <span className="text-gray-400 italic">None attached</span>
+                                      )}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      {rcs.media_file && (
+                                        <a
+                                          href={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename })}
+                                          download={rcs.media_filename || 'creative.png'}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
+                                        >
+                                          <span>⬇️ Download</span>
+                                        </a>
+                                      )}
+                                      <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
+                                        <span>{uploadingCreative[`rcs_${idx}`] ? '⏳ Uploading...' : rcs.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
+                                        <input
+                                          type="file"
+                                          accept="image/png,image/jpeg,image/webp,video/mp4"
+                                          className="hidden"
+                                          disabled={uploadingCreative[`rcs_${idx}`]}
+                                          onChange={(e) => {
+                                            const f = e.target.files?.[0];
+                                            if (f) handleReplaceRcsCreative(idx, f);
+                                            e.target.value = '';
+                                          }}
+                                        />
+                                      </label>
+                                    </div>
                                   </div>
-                                </div>
-                                {rcs.media_file && (
-                                  <div className="pt-1">
-                                    <img
-                                      src={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename, inline: true })}
-                                      alt={rcs.media_filename || 'Creative preview'}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white"
-                                      onError={(e) => {
-                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                      }}
-                                    />
-                                  </div>
-                                )}
-                              </div>
 
-                              {isEditing ? (
-                                <div className="space-y-2.5">
-                                  <div>
-                                    <label className="block text-[11px] text-gray-500 mb-1">Card Title:</label>
-                                    <input
-                                      type="text"
-                                      value={rcs.card_title}
-                                      onChange={(e) => updateRcsField(idx, 'card_title', e.target.value)}
-                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-[11px] text-gray-500 mb-1">Card Body Copy:</label>
-                                    <textarea
-                                      value={rcs.body}
-                                      onChange={(e) => updateRcsField(idx, 'body', e.target.value)}
-                                      rows={4}
-                                      className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded bg-white"
-                                    />
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Label (CTA):</label>
-                                      <input
-                                        type="text"
-                                        value={rcs.action_label || ''}
-                                        onChange={(e) => updateRcsField(idx, 'action_label', e.target.value)}
-                                        placeholder="e.g. Apply Now"
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-medium"
-                                      />
+                                  {isEditing ? (
+                                    <div className="space-y-2.5">
+                                      <div>
+                                        <label className="block text-[11px] text-gray-500 mb-1">Card Title:</label>
+                                        <input
+                                          type="text"
+                                          value={rcs.card_title}
+                                          onChange={(e) => updateRcsField(idx, 'card_title', e.target.value)}
+                                          className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[11px] text-gray-500 mb-1">Card Body Copy:</label>
+                                        <textarea
+                                          value={rcs.body}
+                                          onChange={(e) => updateRcsField(idx, 'body', e.target.value)}
+                                          rows={4}
+                                          className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded bg-white"
+                                        />
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div>
+                                          <label className="block text-[11px] text-gray-500 mb-1">Button Label (CTA):</label>
+                                          <input
+                                            type="text"
+                                            value={rcs.action_label || ''}
+                                            onChange={(e) => updateRcsField(idx, 'action_label', e.target.value)}
+                                            placeholder="e.g. Apply Now"
+                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-medium"
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="block text-[11px] text-gray-500 mb-1">Button Destination URL:</label>
+                                          <input
+                                            type="text"
+                                            value={rcs.action_url || ''}
+                                            onChange={(e) => updateRcsField(idx, 'action_url', e.target.value)}
+                                            placeholder="https://u3.mnge.co/"
+                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
+                                          />
+                                        </div>
+                                      </div>
                                     </div>
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Destination URL:</label>
-                                      <input
-                                        type="text"
-                                        value={rcs.action_url || ''}
-                                        onChange={(e) => updateRcsField(idx, 'action_url', e.target.value)}
-                                        placeholder="https://u3.mnge.co/"
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 space-y-2.5">
-                                  <h4 className="font-bold text-xs text-gray-900">{rcs.card_title}</h4>
-                                  <p className="font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                                    {rcs.body}
-                                  </p>
-                                  {(rcs.action_label || rcs.action_url) && (
-                                    <div className="pt-2 border-t border-gray-100 flex items-center gap-2 text-xs">
-                                      <span className="text-gray-400">CTA Button:</span>
-                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
-                                        🔗 {rcs.action_label || 'Apply Now'} ({rcs.action_url || 'https://u3.mnge.co/'})
-                                      </span>
+                                  ) : (
+                                    <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 space-y-2.5">
+                                      <h4 className="font-bold text-xs text-gray-900">{rcs.card_title}</h4>
+                                      <p className="font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                        {rcs.body}
+                                      </p>
+                                      {(rcs.action_label || rcs.action_url) && (
+                                        <div className="pt-2 border-t border-gray-100 flex items-center gap-2 text-xs">
+                                          <span className="text-gray-400">CTA Button:</span>
+                                          <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
+                                            🔗 {rcs.action_label || 'Apply Now'} ({rcs.action_url || 'https://u3.mnge.co/'})
+                                          </span>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </div>
-                              )}
+
+                                {/* Right Column (5 cols): Live RCS Rich Card Preview */}
+                                <div className="xl:col-span-5 rounded-xl p-3 border border-blue-200/80 bg-slate-100 shadow-inner">
+                                  <div className="flex items-center justify-between mb-2 px-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-blue-900/70">
+                                      📱 Live RCS Rich Card Preview
+                                    </span>
+                                    <span className="text-[10px] font-mono text-gray-500">{rcs.body.length} chars</span>
+                                  </div>
+                                  <div className="bg-white rounded-2xl shadow-xs overflow-hidden border border-gray-200/80 max-w-sm mx-auto">
+                                    {rcs.media_file && (
+                                      <div className="bg-gray-100 border-b border-gray-100">
+                                        <img
+                                          src={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename, inline: true })}
+                                          alt={rcs.media_filename || 'RCS card creative'}
+                                          className="w-full max-h-40 object-cover"
+                                          onError={(e) => {
+                                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                          }}
+                                        />
+                                      </div>
+                                    )}
+                                    <div className="p-3.5 space-y-1.5">
+                                      <h5 className="text-xs font-bold text-gray-900 leading-snug">
+                                        {rcs.card_title || 'Rich Card Title'}
+                                      </h5>
+                                      <div className="text-[11px] text-gray-700 whitespace-pre-wrap leading-relaxed font-sans">
+                                        {rcs.body}
+                                      </div>
+                                      {(rcs.action_label || rcs.action_url) && (
+                                        <div className="pt-2">
+                                          <div className="w-full py-1.5 px-3 rounded-full border border-blue-200 bg-blue-50/50 text-blue-700 text-xs font-semibold text-center">
+                                            🌐 {rcs.action_label || 'Apply Now'}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           );
                         })
@@ -1751,11 +1866,187 @@ export default function JiraBriefsPage() {
                   )}
                 </div>
               </div>
+
+              {/* Sticky Bottom 2-Click Whitelist Bar */}
+              {!brief.is_email_campaign && (waTemplates.length > 0 || rcsTemplates.length > 0) && (
+                <div className="sticky bottom-3 z-20 bg-gray-900/95 backdrop-blur-xs text-white rounded-2xl p-4 shadow-xl border border-gray-700 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-semibold text-gray-300">Target Account:</span>
+                      <select
+                        value={targetAccount}
+                        onChange={(e) => setTargetAccount(e.target.value)}
+                        className="text-xs font-bold bg-gray-800 border border-gray-600 text-white rounded-lg px-2.5 py-1.5 cursor-pointer"
+                      >
+                        {accounts.map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.name} ({acc.id.toUpperCase()})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+                        🟢 {selectedWa.size} WhatsApp
+                      </span>
+                      <span className="px-2.5 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold">
+                        🔵 {selectedRcs.size} RCS
+                      </span>
+                    </div>
+
+                    {rcsTemplates.length > 0 && (
+                      <label className="flex items-center gap-1.5 text-xs text-gray-300 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={autoSyncRcsToMoEngage}
+                          onChange={(e) => setAutoSyncRcsToMoEngage(e.target.checked)}
+                          className="rounded border-gray-600 text-emerald-500 focus:ring-0"
+                        />
+                        <span>+ Auto-sync RCS to MoEngage</span>
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowSessionModal(true)}
+                      className="px-3 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 text-xs font-semibold transition"
+                    >
+                      🔑 Paste Session
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => requestWhitelist('all')}
+                      disabled={submitting || totalSelectedCount === 0}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-700 text-white text-xs font-bold shadow-lg transition flex items-center gap-2"
+                    >
+                      <span>🚀 {submitting ? 'Whitelisting...' : `Whitelist ${totalSelectedCount} Template${totalSelectedCount === 1 ? '' : 's'} to Karix`}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
     </div>
+
+    {/* Inline Session Quick-Paste Modal */}
+    {showSessionModal && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-gray-900">🔑 Quick Karix Session Paste</h3>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Refresh expiring Portal or Lounge session credentials for <strong>{getAccountLabel(targetAccount)}</strong> without leaving this ticket.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSessionModal(false)}
+              className="text-gray-400 hover:text-gray-600 font-bold text-lg"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
+                WhatsApp Media Upload — Portal Bearer Token (Optional)
+              </label>
+              <input
+                type="password"
+                value={quickBearerToken}
+                onChange={(e) => setQuickBearerToken(e.target.value)}
+                placeholder="Authorization: Bearer eyJhbGci... from rcsgui.karix.solutions"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
+                WhatsApp Media Upload — Portal Session ID (Optional)
+              </label>
+              <input
+                type="password"
+                value={quickSessionId}
+                onChange={(e) => setQuickSessionId(e.target.value)}
+                placeholder="Session header from rcsgui.karix.solutions DevTools"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">
+                RCS / SMS DLT — Karix Lounge Session Cookie (Optional)
+              </label>
+              <input
+                type="password"
+                value={quickLoungeCookie}
+                onChange={(e) => setQuickLoungeCookie(e.target.value)}
+                placeholder="PHPSESSID=... from lounge.karix.solutions DevTools"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-100">
+            <button
+              type="button"
+              onClick={() => setShowSessionModal(false)}
+              className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={savingQuickSession}
+              onClick={async () => {
+                try {
+                  setSavingQuickSession(true);
+                  if (quickBearerToken.trim() || quickSessionId.trim()) {
+                    await updateCredentials({
+                      account: targetAccount,
+                      channel: 'whatsapp',
+                      bearer_token: quickBearerToken.trim() || undefined,
+                      session: quickSessionId.trim() || undefined,
+                    });
+                  }
+                  if (quickLoungeCookie.trim()) {
+                    await updateCredentials({
+                      account: targetAccount,
+                      channel: 'rcs',
+                      lounge_cookie: quickLoungeCookie.trim(),
+                    });
+                  }
+                  setShowSessionModal(false);
+                  setQuickBearerToken('');
+                  setQuickSessionId('');
+                  setQuickLoungeCookie('');
+                  setFeedback({
+                    message: `Session credentials updated for ${getAccountLabel(targetAccount)}. Ready to whitelist!`,
+                    type: 'success',
+                  });
+                } catch (err) {
+                  setFeedback({ message: formatError(err), type: 'error' });
+                } finally {
+                  setSavingQuickSession(false);
+                }
+              }}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold"
+            >
+              {savingQuickSession ? 'Saving...' : 'Save Session'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     {confirmationMode && brief && (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"

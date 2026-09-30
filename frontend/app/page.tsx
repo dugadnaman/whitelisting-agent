@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import Link from 'next/link';
 import {
   fetchStats,
   fetchTemplates,
@@ -444,6 +445,18 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Unified Whitelisting Workspace Switcher */}
+      <div className="inline-flex items-center p-1 bg-gray-100 rounded-lg border border-gray-200 text-xs font-semibold">
+        <Link href="/briefs" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          📋 Jira Ticket Queue
+        </Link>
+        <Link href="/submit" className="px-3 py-1 rounded-md text-gray-600 hover:text-gray-900 transition">
+          📤 File / Paste Upload
+        </Link>
+        <span className="px-3 py-1 rounded-md bg-white text-blue-700 shadow-2xs font-bold">
+          ✅ Live Inventory
+        </span>
+      </div>
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
