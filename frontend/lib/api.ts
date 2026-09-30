@@ -1066,6 +1066,37 @@ export async function submitJiraBrief(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+export function getJiraCreativeDownloadUrl(params: {
+  path?: string | null;
+  attachmentId?: string | null;
+  filename?: string | null;
+  inline?: boolean;
+}): string {
+  const qs = new URLSearchParams();
+  if (params.path) qs.set("path", params.path);
+  if (params.attachmentId) qs.set("attachment_id", params.attachmentId);
+  if (params.filename) qs.set("filename", params.filename);
+  if (params.inline) qs.set("inline", "true");
+  return getApiUrl(`/api/jira/creative/download?${qs.toString()}`);
+}
+
+export async function uploadJiraCreative(file: File): Promise<{
+  ok: boolean;
+  filename: string;
+  local_path: string;
+  size: number;
+  dimensions?: string | null;
+  aspect_ratio?: string | null;
+}> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetchWithRetry(getApiUrl("/api/jira/creative/upload"), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
 export async function syncRcsTemplateToMoEngage(params: {
   template_name: string;
   template_id: string;

@@ -8,6 +8,8 @@ import {
   fetchJiraBrief,
   submitJiraBrief,
   syncRcsTemplateToMoEngage,
+  getJiraCreativeDownloadUrl,
+  uploadJiraCreative,
   type JiraProjectItem,
   type JiraIssueItem,
   type JiraBriefData,
@@ -340,6 +342,68 @@ export default function JiraBriefsPage() {
 
   const selectAllRcs = (select: boolean) => {
     setSelectedRcs(select ? new Set(rcsTemplates.map((_, idx) => idx)) : new Set());
+  };
+  const [uploadingCreative, setUploadingCreative] = useState<Record<string, boolean>>({});
+
+  const handleReplaceWaCreative = async (idx: number, file: File) => {
+    const key = `wa_${idx}`;
+    try {
+      setUploadingCreative((prev) => ({ ...prev, [key]: true }));
+      const res = await uploadJiraCreative(file);
+      setWaTemplates((prev) =>
+        prev.map((w, i) =>
+          i === idx
+            ? {
+                ...w,
+                header_type: 'IMAGE',
+                media_file: res.local_path,
+                media_filename: res.filename,
+              }
+            : w
+        )
+      );
+      setFeedback({
+        message: `Replaced WhatsApp creative with '${res.filename}'${res.dimensions ? ` (${res.dimensions}${res.aspect_ratio ? `, ${res.aspect_ratio}` : ''})` : ''}.`,
+        type: 'success',
+      });
+    } catch (err) {
+      setFeedback({
+        message: `Failed to upload replacement creative: ${formatError(err)}`,
+        type: 'error',
+      });
+    } finally {
+      setUploadingCreative((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const handleReplaceRcsCreative = async (idx: number, file: File) => {
+    const key = `rcs_${idx}`;
+    try {
+      setUploadingCreative((prev) => ({ ...prev, [key]: true }));
+      const res = await uploadJiraCreative(file);
+      setRcsTemplates((prev) =>
+        prev.map((r, i) =>
+          i === idx
+            ? {
+                ...r,
+                media_file: res.local_path,
+                media_filename: res.filename,
+              }
+            : r
+        )
+      );
+      setFeedback({
+        message: `Replaced RCS creative with '${res.filename}'${res.dimensions ? ` (${res.dimensions})` : ''}.`,
+        type: 'success',
+      });
+    } catch (err) {
+      setFeedback({
+        message: `Failed to upload replacement creative: ${formatError(err)}`,
+        type: 'error',
+      });
+    } finally {
+      setUploadingCreative((prev) => ({ ...prev, [key]: false }));
+    }
   };
   const handleSyncRcsToMoEngage = async (rcs: JiraRcsDraft) => {
     try {
@@ -832,14 +896,26 @@ export default function JiraBriefsPage() {
                   <div className="pt-3 border-t border-gray-100 flex items-center gap-2 overflow-x-auto">
                     <span className="text-[11px] font-semibold text-gray-500 uppercase shrink-0">Creatives Mapped:</span>
                     {brief.attachments_mapped.map((att) => (
-                      <span
+                      <div
                         key={att.id || att.filename}
                         className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700 shrink-0"
                         title={att.filename}
                       >
                         <span>{att.target_channel === 'WHATSAPP' ? '🟢 WA' : att.target_channel === 'RCS' ? '🔵 RCS' : '📎'}</span>
                         <span className="max-w-[160px] truncate">{att.filename}</span>
-                      </span>
+                        {(att.local_path || att.id) && (
+                          <a
+                            href={getJiraCreativeDownloadUrl({ path: att.local_path, attachmentId: att.id, filename: att.filename })}
+                            download={att.filename}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="ml-1 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-sans font-bold transition"
+                            title={`Download ${att.filename}`}
+                          >
+                            ⬇️ Download
+                          </a>
+                        )}
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1127,18 +1203,60 @@ export default function JiraBriefsPage() {
                                 </div>
                               </div>
 
-                              {/* Header Creative (Image) */}
-                              {wa.header_type === 'IMAGE' && wa.media_filename && (
-                                <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-600 flex items-center justify-between">
+                              {/* Header Creative (Image / Media) — Download & Replace */}
+                              <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
                                   <span className="flex items-center gap-1.5 font-medium">
                                     <span>🖼️ Header Creative:</span>
-                                    <strong className="text-gray-900">{wa.media_filename}</strong>
+                                    {wa.media_filename ? (
+                                      <strong className="text-gray-900 font-mono">{wa.media_filename}</strong>
+                                    ) : (
+                                      <span className="text-gray-400 italic">None attached</span>
+                                    )}
                                   </span>
-                                  <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.2 rounded">
-                                    Aspect Ratio Verified (16:9)
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    {wa.media_file && (
+                                      <a
+                                        href={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename })}
+                                        download={wa.media_filename || 'creative.png'}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
+                                        title="Download creative to inspect or edit"
+                                      >
+                                        <span>⬇️</span>
+                                        <span>Download</span>
+                                      </a>
+                                    )}
+                                    <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
+                                      <span>{uploadingCreative[`wa_${idx}`] ? '⏳ Uploading...' : wa.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
+                                      <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp,video/mp4,application/pdf"
+                                        className="hidden"
+                                        disabled={uploadingCreative[`wa_${idx}`]}
+                                        onChange={(e) => {
+                                          const f = e.target.files?.[0];
+                                          if (f) handleReplaceWaCreative(idx, f);
+                                          e.target.value = '';
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
                                 </div>
-                              )}
+                                {wa.media_file && (
+                                  <div className="pt-1">
+                                    <img
+                                      src={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename, inline: true })}
+                                      alt={wa.media_filename || 'Creative preview'}
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white"
+                                      onError={(e) => {
+                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
 
                               {/* Text Header */}
                               {wa.header_text && (
@@ -1378,14 +1496,59 @@ export default function JiraBriefsPage() {
                                 </div>
                               </div>
 
-                              {rcs.media_filename && (
-                                <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-600 flex items-center justify-between">
+                              <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
                                   <span className="flex items-center gap-1.5 font-medium">
                                     <span>🖼️ Card Creative:</span>
-                                    <strong className="text-gray-900">{rcs.media_filename}</strong>
+                                    {rcs.media_filename ? (
+                                      <strong className="text-gray-900 font-mono">{rcs.media_filename}</strong>
+                                    ) : (
+                                      <span className="text-gray-400 italic">None attached</span>
+                                    )}
                                   </span>
+                                  <div className="flex items-center gap-1.5">
+                                    {rcs.media_file && (
+                                      <a
+                                        href={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename })}
+                                        download={rcs.media_filename || 'creative.png'}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
+                                        title="Download creative to inspect or edit"
+                                      >
+                                        <span>⬇️</span>
+                                        <span>Download</span>
+                                      </a>
+                                    )}
+                                    <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
+                                      <span>{uploadingCreative[`rcs_${idx}`] ? '⏳ Uploading...' : rcs.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
+                                      <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/webp,video/mp4"
+                                        className="hidden"
+                                        disabled={uploadingCreative[`rcs_${idx}`]}
+                                        onChange={(e) => {
+                                          const f = e.target.files?.[0];
+                                          if (f) handleReplaceRcsCreative(idx, f);
+                                          e.target.value = '';
+                                        }}
+                                      />
+                                    </label>
+                                  </div>
                                 </div>
-                              )}
+                                {rcs.media_file && (
+                                  <div className="pt-1">
+                                    <img
+                                      src={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename, inline: true })}
+                                      alt={rcs.media_filename || 'Creative preview'}
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white"
+                                      onError={(e) => {
+                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
 
                               {isEditing ? (
                                 <div className="space-y-2.5">

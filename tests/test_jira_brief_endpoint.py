@@ -555,3 +555,54 @@ def test_jira_brief_status_enrichment_and_filtering():
         not_gen_issues = list_jira_issues(project="TCN", brief_status="not_generated")
         assert len(not_gen_issues) == 1
         assert not_gen_issues[0]["key"] == "TCN-103"
+def test_jira_creative_upload_and_download():
+    """Verify users can upload a replacement creative and download/preview it via the Jira creative endpoints."""
+    import io
+    from pathlib import Path
+    from PIL import Image
+    from api import app, get_current_user
+
+    # Create a 1280x720 (16:9) PNG image in memory
+    img = Image.new("RGB", (1280, 720), color=(20, 90, 200))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+
+    app.dependency_overrides[get_current_user] = lambda: MOCK_USER
+    saved_path: Path | None = None
+    try:
+        # 1. Upload replacement creative
+        upload_resp = client.post(
+            "/api/jira/creative/upload",
+            files={"file": ("diwali_banner_16_9.png", png_bytes, "image/png")},
+        )
+        assert upload_resp.status_code == 200, upload_resp.text
+        data = upload_resp.json()
+        assert data["ok"] is True
+        assert data["filename"] == "diwali_banner_16_9.png"
+        assert data["dimensions"] == "1280x720"
+        assert "16:9" in (data.get("aspect_ratio") or "")
+        saved_path = Path(data["local_path"])
+        assert saved_path.is_file()
+
+        # 2. Download creative by path
+        dl_resp = client.get(
+            "/api/jira/creative/download",
+            params={"path": str(saved_path), "filename": "diwali_banner_16_9.png"},
+        )
+        assert dl_resp.status_code == 200
+        assert dl_resp.content == png_bytes
+        assert "attachment" in dl_resp.headers.get("content-disposition", "")
+        assert "diwali_banner_16_9.png" in dl_resp.headers.get("content-disposition", "")
+
+        # 3. Preview creative inline
+        inline_resp = client.get(
+            "/api/jira/creative/download",
+            params={"path": str(saved_path), "inline": "true"},
+        )
+        assert inline_resp.status_code == 200
+        assert inline_resp.content == png_bytes
+    finally:
+        app.dependency_overrides.clear()
+        if saved_path and saved_path.exists():
+            saved_path.unlink()

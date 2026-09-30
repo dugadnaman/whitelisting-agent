@@ -4009,6 +4009,137 @@ async def submit_jira_brief_endpoint(
         }
     )
 
+@app.get("/api/jira/creative/download")
+def download_jira_creative_endpoint(
+    path: str | None = Query(None),
+    attachment_id: str | None = Query(None),
+    filename: str | None = Query(None),
+    inline: bool = Query(False),
+):
+    """Download or preview a creative attachment from a Jira brief."""
+    import mimetypes
+    import tempfile
+    from fastapi.responses import FileResponse
+    from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
+
+    target_path: Path | None = None
+
+    if path:
+        cand = Path(path)
+        if not cand.is_absolute():
+            cand = Path.cwd() / cand
+        resolved = cand.resolve()
+        cache_dir = MEDIA_CACHE_DIR.resolve()
+        tmp_dir = Path(tempfile.gettempdir()).resolve()
+        if (
+            str(resolved).startswith(str(cache_dir))
+            or str(resolved).startswith(str(tmp_dir))
+            or str(resolved).startswith("/private/var/")
+            or str(resolved).startswith("/var/folders/")
+            or str(resolved).startswith("/tmp/")
+        ):
+            if resolved.is_file():
+                target_path = resolved
+        if target_path is None:
+            by_name = cache_dir / Path(path).name
+            if by_name.is_file():
+                target_path = by_name
+
+    if target_path is None and attachment_id:
+        try:
+            target_path = download_jira_attachment(attachment_id, filename or "creative.png")
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail=f"Could not download Jira attachment: {exc!s}") from exc
+
+    if target_path is None and filename:
+        cache_dir = MEDIA_CACHE_DIR.resolve()
+        clean_fn = re.sub(r"[^\w\-.]", "_", Path(filename).name)
+        matches = list(cache_dir.glob(f"*{clean_fn}"))
+        if matches:
+            target_path = matches[0]
+
+    if target_path is None or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Creative file not found in cache.")
+
+    dl_name = filename or target_path.name
+    dl_name = re.sub(r"^(?:jira|custom|zip)_[A-Za-z0-9]+_", "", dl_name)
+
+    mime_type, _ = mimetypes.guess_type(str(target_path))
+    mime_type = mime_type or "application/octet-stream"
+
+    if inline:
+        return FileResponse(target_path, media_type=mime_type)
+    return FileResponse(
+        target_path,
+        media_type=mime_type,
+        filename=dl_name,
+        headers={"Content-Disposition": f'attachment; filename="{dl_name}"'},
+    )
+
+
+@app.post("/api/jira/creative/upload")
+async def upload_jira_creative_endpoint(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Upload a modified or replacement creative for a Jira brief template."""
+    import time
+    from jira_client import MEDIA_CACHE_DIR
+
+    MEDIA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    raw_name = file.filename or "creative.png"
+    clean_fn = re.sub(r"[^\w\-.]", "_", Path(raw_name).name)
+    ts = int(time.time() * 1000)
+    target_path = MEDIA_CACHE_DIR / f"custom_{ts}_{clean_fn}"
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    target_path.write_bytes(content)
+
+    dimensions = None
+    aspect_ratio = None
+    try:
+        import io
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(content))
+        w, h = img.size
+        dimensions = f"{w}x{h}"
+        ratio = w / h
+        if abs(ratio - (16 / 9)) < 0.08:
+            aspect_ratio = "16:9 (Optimal)"
+        elif abs(ratio - 1.0) < 0.08:
+            aspect_ratio = "1:1 (Square)"
+        else:
+            aspect_ratio = f"{ratio:.2f}:1"
+    except Exception:
+        pass
+
+    log_activity(
+        user=current_user.get("name", "Operator"),
+        action="JIRA_CREATIVE_REPLACE",
+        account="tata",
+        channel="all",
+        details={
+            "filename": raw_name,
+            "local_path": str(target_path),
+            "dimensions": dimensions,
+        },
+        status="success",
+    )
+
+    return _json_safe(
+        {
+            "ok": True,
+            "filename": raw_name,
+            "local_path": str(target_path),
+            "size": len(content),
+            "dimensions": dimensions,
+            "aspect_ratio": aspect_ratio,
+        }
+    )
 
 # ---------------------------------------------------------------------------
 # MoEngage RCS Template Management Sync Endpoints
