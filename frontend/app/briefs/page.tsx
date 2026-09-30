@@ -16,6 +16,41 @@ import {
 } from '@/lib/api';
 import { formatError, formatDate } from '@/lib/format';
 
+function BriefStatusBadge({ status }: { status?: string }) {
+  const s = (status || 'Pending').toLowerCase().trim();
+  let colorClass = 'bg-amber-50 text-amber-800 border-amber-200';
+  let dotColor = 'bg-amber-500';
+  let label = status || 'Pending';
+
+  if (s === 'completed' || s === 'done' || s === 'approved' || s === 'whitelisted') {
+    colorClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+    dotColor = 'bg-emerald-500';
+    label = 'Completed';
+  } else if (s === 'in progress' || s === 'in_progress' || s === 'review' || s === 'test sent' || s === 'submitted') {
+    colorClass = 'bg-blue-50 text-blue-800 border-blue-200';
+    dotColor = 'bg-blue-500 animate-pulse';
+    label = 'In Progress';
+  } else if (s === 'failed' || s === 'rejected' || s === 'error') {
+    colorClass = 'bg-rose-50 text-rose-800 border-rose-200';
+    dotColor = 'bg-rose-500';
+    label = 'Failed';
+  } else if (s === 'not generated' || s === 'not_generated' || s === 'unparsed') {
+    colorClass = 'bg-slate-100 text-slate-700 border-slate-300';
+    dotColor = 'bg-slate-400';
+    label = 'Not Generated';
+  } else {
+    colorClass = 'bg-amber-50 text-amber-800 border-amber-200';
+    dotColor = 'bg-amber-500';
+    label = 'Pending';
+  }
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${colorClass}`}>
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+      <span>{label}</span>
+    </span>
+  );
+}
 export default function JiraBriefsPage() {
   const { user, accounts, getAccountLabel } = useApp();
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
@@ -34,6 +69,7 @@ export default function JiraBriefsPage() {
   const [brief, setBrief] = useState<JiraBriefData | null>(null);
   const [loadingBrief, setLoadingBrief] = useState(false);
   const [campaignTypeFilter, setCampaignTypeFilter] = useState<'all' | 'messaging' | 'email'>('all');
+  const [briefStatusFilter, setBriefStatusFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed' | 'failed' | 'not_generated'>('all');
   const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('whatsapp');
   const [submitting, setSubmitting] = useState(false);
   const [confirmationMode, setConfirmationMode] = useState<'all' | 'whatsapp' | 'rcs' | null>(null);
@@ -51,12 +87,14 @@ export default function JiraBriefsPage() {
   const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
   const activeRequestKey = useRef<string>('');
 
-  const loadIssues = useCallback(async (queryParam?: string) => {
+  const loadIssues = useCallback(async (queryParam?: string, bStatusParam?: string) => {
     try {
       setLoadingIssues(true);
+      const activeBStatus = bStatusParam !== undefined ? bStatusParam : briefStatusFilter;
       const list = await fetchJiraIssues({
         project,
         search: queryParam?.trim() || undefined,
+        brief_status: activeBStatus !== 'all' ? activeBStatus : undefined,
         limit: 50,
       });
       setIssues(list);
@@ -72,7 +110,7 @@ export default function JiraBriefsPage() {
     } finally {
       setLoadingIssues(false);
     }
-  }, [project]);
+  }, [project, briefStatusFilter]);
 
   useEffect(() => {
     fetchJiraProjects().then((projs) => {
@@ -104,10 +142,10 @@ export default function JiraBriefsPage() {
   // Server-side debounced search for tickets
   useEffect(() => {
     const timer = setTimeout(() => {
-      loadIssues(searchQuery);
+      loadIssues(searchQuery, briefStatusFilter);
     }, 350);
     return () => clearTimeout(timer);
-  }, [searchQuery, loadIssues]);
+  }, [searchQuery, briefStatusFilter, loadIssues]);
 
   const handleSelectIssue = (key: string) => {
     const cleanKey = key.trim().toUpperCase();
@@ -329,9 +367,24 @@ export default function JiraBriefsPage() {
   const emailCount = issues.filter((i) => i.is_email).length;
   const messagingCount = issues.length - emailCount;
 
+  const statusCounts = {
+    all: issues.length,
+    pending: issues.filter((i) => (i.brief_status || 'Pending').toLowerCase().trim() === 'pending').length,
+    in_progress: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'in progress').length,
+    completed: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'completed').length,
+    failed: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'failed').length,
+    not_generated: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'not generated').length,
+  };
+
   const filteredIssues = issues.filter((i) => {
     if (campaignTypeFilter === 'messaging' && i.is_email) return false;
     if (campaignTypeFilter === 'email' && !i.is_email) return false;
+
+    if (briefStatusFilter !== 'all') {
+      const bStatus = (i.brief_status || 'Pending').toLowerCase().replace(/\s+/g, '_');
+      if (bStatus !== briefStatusFilter) return false;
+    }
+
     return (
       i.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
       i.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -450,7 +503,54 @@ export default function JiraBriefsPage() {
               📧 Email ({emailCount})
             </button>
           </div>
-
+          {/* Jira Brief Status Filter */}
+          <div className="space-y-1.5 pt-1 border-t border-gray-100">
+            <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+              <span>Jira Brief Status</span>
+              {briefStatusFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setBriefStatusFilter('all')}
+                  className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold cursor-pointer"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {[
+                { id: 'all', label: 'All', count: statusCounts.all },
+                { id: 'pending', label: '🟡 Pending', count: statusCounts.pending },
+                { id: 'in_progress', label: '🔵 In Progress', count: statusCounts.in_progress },
+                { id: 'completed', label: '🟢 Completed', count: statusCounts.completed },
+                { id: 'failed', label: '🔴 Failed', count: statusCounts.failed },
+                { id: 'not_generated', label: '⚪ Not Generated', count: statusCounts.not_generated },
+              ].map((tab) => {
+                const active = briefStatusFilter === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setBriefStatusFilter(tab.id as typeof briefStatusFilter)}
+                    className={`px-2 py-1 rounded-md text-[10px] font-semibold transition border flex items-center gap-1 cursor-pointer ${
+                      active
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs font-bold'
+                        : 'bg-gray-50 hover:bg-gray-100 text-gray-600 border-gray-200'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span
+                      className={`px-1 py-0.2 rounded-full text-[9px] font-bold ${
+                        active ? 'bg-white/20 text-white' : 'bg-gray-200/80 text-gray-700'
+                      }`}
+                    >
+                      {tab.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <input
             type="text"
             placeholder="Search key, title, assignee..."
@@ -506,9 +606,12 @@ export default function JiraBriefsPage() {
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded font-semibold bg-gray-100 text-gray-600">
-                        {issue.status}
-                      </span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] px-1.5 py-0.2 rounded font-semibold bg-gray-100 text-gray-600">
+                          {issue.status}
+                        </span>
+                        <BriefStatusBadge status={issue.brief_status} />
+                      </div>
                     </div>
                     <p className="font-semibold text-gray-800 line-clamp-2 leading-snug">{issue.summary}</p>
                     <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1">
@@ -584,6 +687,7 @@ export default function JiraBriefsPage() {
                         {brief.issue_key}
                       </span>
                       <h2 className="text-base font-bold text-gray-900">{brief.summary}</h2>
+                      <BriefStatusBadge status={brief.brief_status} />
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
                       <span>🏢 Sub-Account: <strong className="text-gray-800 uppercase">{brief.account}</strong></span>

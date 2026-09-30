@@ -61,6 +61,42 @@ def is_explicit_push(text: str) -> bool:
     return any(re.search(p, t) for p in push_patterns)
 
 
+def compute_brief_status(
+    status_raw: str | None,
+    attachment_count: int = 0,
+    total_campaigns: int = 0,
+    is_submitted: bool = False,
+    submission_status: str | None = None,
+) -> str:
+    """
+    Compute Jira Brief processing status:
+    - 'Completed': All templates approved, or Jira ticket is marked Done/Closed/Resolved/Completed.
+    - 'Failed': Whitelisting submission failed or ticket is marked Rejected/Failed/Cancelled.
+    - 'In Progress': Ticket was submitted to Karix for processing, or Jira status is actively In Progress/Review/Test Sent.
+    - 'Pending': Brief has content ready for review/submission (or ticket is waiting in To Do/Open/Base Pending).
+    - 'Not Generated': Ticket has 0 attachments and 0 extracted campaign templates.
+    """
+    s = (status_raw or "").lower().strip()
+
+    # 1. Failed check
+    if any(k in s for k in ("rejected", "failed", "cancelled", "canceled", "dropped")) or submission_status == "failed":
+        return "Failed"
+
+    # 2. Completed check
+    if any(k in s for k in ("done", "closed", "resolved", "completed", "whitelisted", "approved")) or submission_status == "approved":
+        return "Completed"
+
+    # 3. Not Generated check: No attachments and no campaign copy/content detected
+    if attachment_count == 0 and total_campaigns == 0:
+        return "Not Generated"
+
+    # 4. In Progress check: Submitted to Karix, or active working status
+    if is_submitted or submission_status in ("submitted", "in_progress") or any(k in s for k in ("in progress", "in review", "under review", "review", "test sent", "testing")):
+        return "In Progress"
+
+    # 5. Pending: Brief has content and is pending review or action
+    return "Pending"
+
 def adf_to_text(node: dict[str, Any] | None) -> str:
     """Recursively convert Atlassian Document Format (ADF) into readable text with tables."""
     if not node or not isinstance(node, dict):
@@ -98,6 +134,7 @@ def adf_to_text(node: dict[str, Any] | None) -> str:
 def list_jira_issues(
     project: str = "TCN",
     status: str | None = None,
+    brief_status: str | None = None,
     search: str | None = None,
     limit: int = 25,
 ) -> list[dict[str, Any]]:
@@ -154,8 +191,27 @@ def list_jira_issues(
 
     data = resp.json()
     issues_raw = data.get("issues", [])
-    results = []
+    results: list[dict[str, Any]] = []
+    submitted_info: dict[str, str] = {}
+    try:
+        import db
 
+        with db.get_db() as conn:
+            rows = conn.execute(
+                "SELECT details, status FROM activities WHERE action = 'JIRA_BRIEF_SUBMISSION' ORDER BY timestamp DESC"
+            ).fetchall()
+            for r in rows:
+                try:
+                    import json
+
+                    det = json.loads(r["details"]) if isinstance(r["details"], str) else (r["details"] or {})
+                    k = det.get("issue_key")
+                    if k and k not in submitted_info:
+                        submitted_info[k] = r["status"]
+                except Exception:
+                    pass
+    except Exception:
+        pass
     for item in issues_raw:
         fields = item.get("fields", {})
         summary_val = str(fields.get("summary") or "")
@@ -268,9 +324,23 @@ def list_jira_issues(
                 "is_email": is_email,
                 "campaign_type": "email" if is_email else "messaging",
                 "channel_counts": channel_counts,
+                "brief_status": compute_brief_status(
+                    status_raw=fields.get("status", {}).get("name", "Unknown"),
+                    attachment_count=len(att_list),
+                    total_campaigns=total_channels,
+                    is_submitted=item.get("key") in submitted_info,
+                    submission_status=submitted_info.get(item.get("key")),
+                ),
             }
         )
 
+    if brief_status and brief_status.lower() != "all":
+        target = re.sub(r"[\s_]+", "_", brief_status.strip().lower())
+        results = [
+            i
+            for i in results
+            if re.sub(r"[\s_]+", "_", str(i.get("brief_status") or "").strip().lower()) == target
+        ]
     return results
 
 

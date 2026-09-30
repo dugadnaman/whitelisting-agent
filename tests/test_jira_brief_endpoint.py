@@ -482,3 +482,76 @@ def test_multi_channel_ticket_with_email_and_whatsapp_extracts_correct_channels_
     assert brief.channel_counts["email"] >= 1
     assert brief.channel_counts["push"] == 0
     assert brief.moengage_campaign["push_title"] is None
+def test_jira_brief_status_enrichment_and_filtering():
+    """Verify compute_brief_status accurately classifies ticket stages and /api/jira/issues filters by brief_status."""
+    from jira_client import compute_brief_status, list_jira_issues
+
+    # 1. Unit test classification logic
+    assert compute_brief_status("To Do", attachment_count=1, total_campaigns=1) == "Pending"
+    assert compute_brief_status("Open", attachment_count=2, total_campaigns=2) == "Pending"
+    assert compute_brief_status("Base Pending", attachment_count=1, total_campaigns=1) == "Pending"
+    assert compute_brief_status("In Progress", attachment_count=1, total_campaigns=1) == "In Progress"
+    assert compute_brief_status("Under Review", attachment_count=1, total_campaigns=1) == "In Progress"
+    assert compute_brief_status("To Do", attachment_count=1, total_campaigns=1, is_submitted=True) == "In Progress"
+    assert compute_brief_status("Done", attachment_count=1, total_campaigns=1) == "Completed"
+    assert compute_brief_status("Resolved", attachment_count=1, total_campaigns=1) == "Completed"
+    assert compute_brief_status("Closed", attachment_count=0, total_campaigns=0) == "Completed"
+    assert compute_brief_status("Rejected", attachment_count=1, total_campaigns=1) == "Failed"
+    assert compute_brief_status("Failed", attachment_count=1, total_campaigns=1) == "Failed"
+    assert compute_brief_status("To Do", attachment_count=0, total_campaigns=0) == "Not Generated"
+
+    # 2. Test list_jira_issues with brief_status filter
+    mock_issues = [
+        {
+            "key": "TCN-101",
+            "id": "10101",
+            "fields": {
+                "summary": "Pending Brief",
+                "status": {"name": "To Do"},
+                "attachment": [{"id": "1", "filename": "copy.xlsx"}],
+            },
+        },
+        {
+            "key": "TCN-102",
+            "id": "10102",
+            "fields": {
+                "summary": "Completed Brief",
+                "status": {"name": "Done"},
+                "attachment": [{"id": "2", "filename": "copy.xlsx"}],
+            },
+        },
+        {
+            "key": "TCN-103",
+            "id": "10103",
+            "fields": {
+                "summary": "Empty Brief",
+                "status": {"name": "To Do"},
+                "attachment": [],
+            },
+        },
+    ]
+
+    with patch("requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        mock_post.return_value.json.return_value = {"issues": mock_issues}
+
+        all_issues = list_jira_issues(project="TCN")
+        assert len(all_issues) == 3
+        assert all_issues[0]["brief_status"] == "Pending"
+        assert all_issues[1]["brief_status"] == "Completed"
+        assert all_issues[2]["brief_status"] == "Not Generated"
+
+        # Filter by Pending
+        pending_issues = list_jira_issues(project="TCN", brief_status="pending")
+        assert len(pending_issues) == 1
+        assert pending_issues[0]["key"] == "TCN-101"
+
+        # Filter by Completed
+        completed_issues = list_jira_issues(project="TCN", brief_status="completed")
+        assert len(completed_issues) == 1
+        assert completed_issues[0]["key"] == "TCN-102"
+
+        # Filter by Not Generated
+        not_gen_issues = list_jira_issues(project="TCN", brief_status="not_generated")
+        assert len(not_gen_issues) == 1
+        assert not_gen_issues[0]["key"] == "TCN-103"

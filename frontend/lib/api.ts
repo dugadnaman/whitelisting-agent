@@ -881,6 +881,7 @@ export type JiraIssueItem = {
   is_email?: boolean;
   campaign_type?: 'email' | 'messaging';
   channel_counts?: JiraChannelCounts;
+  brief_status?: 'Pending' | 'In Progress' | 'Completed' | 'Failed' | 'Not Generated' | string;
 };
 
 export type JiraWhatsAppDraft = {
@@ -938,6 +939,7 @@ export type JiraBriefData = {
   duedate?: string | null;
   is_email_campaign?: boolean;
   campaign_type_label?: string;
+  brief_status?: 'Pending' | 'In Progress' | 'Completed' | 'Failed' | 'Not Generated' | string;
   whatsapp_templates: JiraWhatsAppDraft[];
   rcs_templates: JiraRcsDraft[];
   sms_templates: JiraSmsDraft[];
@@ -1010,15 +1012,16 @@ export async function fetchJiraProjects(): Promise<JiraProjectItem[]> {
 export async function fetchJiraIssues(params?: {
   project?: string;
   status?: string;
+  brief_status?: string;
   search?: string;
   limit?: number;
 }): Promise<JiraIssueItem[]> {
   const qs = new URLSearchParams();
   if (params?.project) qs.set("project", params.project);
   if (params?.status) qs.set("status", params.status);
+  if (params?.brief_status && params.brief_status !== "all") qs.set("brief_status", params.brief_status);
   if (params?.search) qs.set("search", params.search);
   if (params?.limit) qs.set("limit", String(params.limit));
-
   const res = await fetchWithRetry(getApiUrl(`/api/jira/issues?${qs.toString()}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   const data = await res.json();

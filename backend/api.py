@@ -3596,6 +3596,7 @@ def get_jira_brief_projects_endpoint(current_user: dict = Depends(get_current_us
 def get_jira_issues_endpoint(
     project: str = Query("TCN"),
     status: str | None = Query(None),
+    brief_status: str | None = Query(None),
     search: str | None = Query(None),
     limit: int = Query(25),
     current_user: dict = Depends(get_current_user),
@@ -3604,7 +3605,9 @@ def get_jira_issues_endpoint(
     try:
         from jira_client import list_jira_issues
 
-        issues = list_jira_issues(project=project, status=status, search=search, limit=limit)
+        issues = list_jira_issues(
+            project=project, status=status, brief_status=brief_status, search=search, limit=limit
+        )
         return _json_safe({"ok": True, "count": len(issues), "issues": issues})
     except Exception as exc:
         logger.exception("Failed to list Jira issues: %s", exc)
@@ -3621,7 +3624,7 @@ def get_jira_brief_endpoint(
     """Fetch and parse a Jira campaign brief into multi-channel template drafts."""
     try:
         from briefing_parser import parse_jira_brief
-        from jira_client import fetch_jira_issue
+        from jira_client import compute_brief_status, fetch_jira_issue
 
         clean_key = issue_key.strip().upper()
         if clean_key.isdigit():
@@ -3689,6 +3692,11 @@ def get_jira_brief_endpoint(
             "comments": getattr(parsed, "comments", []),
             "comment_updates": getattr(parsed, "comment_updates", []),
             "channel_counts": getattr(parsed, "channel_counts", {}),
+            "brief_status": compute_brief_status(
+                status_raw=parsed.status,
+                attachment_count=len(parsed.attachments_mapped or []),
+                total_campaigns=getattr(parsed, "channel_counts", {}).get("total", 0),
+            ),
         }
 
         return _json_safe({"ok": True, "brief": parsed_dict})
