@@ -140,10 +140,46 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
     if not s:
         return "", []
 
-    # 1. Resolve explicit link placeholders first
-    s = re.sub(r"<\s*(?:link|Link|url|URL|website|લિંક)\s*>", DEFAULT_CTA_URL, s)
-    s = re.sub(r"\{\s*(?:link|Link|url|URL|website|લિંક)\s*\}", DEFAULT_CTA_URL, s)
-    s = re.sub(r"\[\s*(?:link|Link|url|URL|website|લિંક)\s*\]", DEFAULT_CTA_URL, s)
+    # 1. Clean standalone T&C lines first so links/tags on T&C lines never become {{1}} variables
+    # and never retain leading/trailing underscores or asterisks.
+    raw_lines = s.split("\n")
+    precleaned_lines: list[str] = []
+    for rline in raw_lines:
+        s_tc = rline.strip().strip("*_ \t").lower()
+        if s_tc.startswith(("t&c", "t & c", "terms", "conditions apply", "disclaimer")):
+            tc_line = rline.strip().strip("*_ \t")
+            tc_line = re.sub(r"https?://[^\s()\[\]_]+", "", tc_line)
+            tc_line = re.sub(
+                r"\{\{[^{}]*\}\}|#?\{#[^#]*#\}#?|<[^<>]*>|\[[^\[\]]*\]|\{[^{}]*\}",
+                "",
+                tc_line,
+            )
+            tc_line = re.sub(r"[ \t]+", " ", tc_line).strip("*_ \t:-–")
+            if tc_line:
+                precleaned_lines.append(tc_line)
+        else:
+            precleaned_lines.append(rline)
+    s = "\n".join(precleaned_lines)
+
+    # 1b. Resolve explicit link placeholders before variable numbering
+    s = re.sub(
+        r"<\s*(?:https?://[^<>]+|[^<>]*\b(?:link|url|website)\b[^<>]*|લિંક)\s*>",
+        DEFAULT_CTA_URL,
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"\{\s*(?:https?://[^{}]+|[^{}]*\b(?:link|url|website)\b[^{}]*|લિંક)\s*\}",
+        DEFAULT_CTA_URL,
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r"\[\s*(?:https?://[^\[\]]+|[^\[\]]*\b(?:link|url|website)\b[^\[\]]*|લિંક)\s*\]",
+        DEFAULT_CTA_URL,
+        s,
+        flags=re.IGNORECASE,
+    )
     # 2. Unified placeholder pattern matching all informal, regional, and existing variables
     placeholder_pat = re.compile(
         r"(?:₹\s*)?(?:"
@@ -364,18 +400,17 @@ def extract_and_strip_cta(
 
         lower_line = sline.lower()
 
-        # 1. Standalone T&C disclaimer line (e.g. '_T&Cs apply https://..._' or 'T&Cs apply.')
-        # T&Cs apply MUST remain in the message body — never extract to a separate footer component.
-        # Only strip any raw URL attached to the T&C line.
+        # 1. Standalone T&C disclaimer line (e.g. '_T&Cs apply https://..._' or '_T&Cs apply {{1}}_')
+        # T&Cs apply MUST remain in the message body as clean plain text without surrounding _/* or URLs/variables.
         clean_tc = sline.strip("*_ \t").lower()
         if clean_tc.startswith(("t&c", "t & c", "terms", "conditions apply", "disclaimer")):
-            tc_no_url = re.sub(url_pat, "", sline).strip()
-            if sline.startswith("_") and sline.endswith("_") and not tc_no_url.endswith("_"):
-                tc_no_url = tc_no_url.rstrip() + "_"
-            elif sline.startswith("*") and sline.endswith("*") and not tc_no_url.endswith("*"):
-                tc_no_url = tc_no_url.rstrip() + "*"
-            if tc_no_url:
-                cleaned_lines.append(tc_no_url)
+            tc_clean = sline.strip("*_ \t")
+            tc_clean = re.sub(url_pat, "", tc_clean)
+            tc_clean = re.sub(r"https?://[^\s()\[\]_]+", "", tc_clean)
+            tc_clean = re.sub(r"\{\{[^{}]*\}\}|#?\{#[^#]*#\}#?|<[^<>]*>|\[[^\[\]]*\]|\{[^{}]*\}", "", tc_clean)
+            tc_clean = re.sub(r"[ \t]+", " ", tc_clean).strip("*_ \t:-–")
+            if tc_clean:
+                cleaned_lines.append(tc_clean)
             continue
         m_cta_var = re.match(
             r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*Button|CTA|Button|Link|Apply)\s*[:\-–]?\s*(\{\{[^{}]+\}\}|\{#[^#]+#\}|\[[^\[\]]+\])\s*$",
@@ -517,6 +552,12 @@ def extract_and_strip_cta(
         cleaned_lines.append(line)
 
     clean_body = "\n".join(cleaned_lines)
+    clean_body = re.sub(
+        r"[*_]+\s*(T\s*&\s*Cs?\s+apply\.?|Terms\s*(?:and|&)\s*Conditions\s+apply\.?)\s*[*_]+",
+        r"\1",
+        clean_body,
+        flags=re.IGNORECASE,
+    )
     clean_body = re.sub(r"\n{3,}", "\n\n", clean_body).strip()
 
     if existing_footer and existing_footer.strip():

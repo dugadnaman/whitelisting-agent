@@ -36,10 +36,29 @@ def test_cta_line_removed_from_body_and_moved_to_button():
     assert btn_text == "Check Your Offer"
     assert btn_url == "https://u3.mnge.co/"
 
-    # 4. T&Cs apply MUST stay in body and footer MUST be None
+    # 4. T&Cs apply MUST stay in body without underscores and footer MUST be None
     assert "T&Cs apply" in clean_body
+    assert "_T&Cs" not in clean_body
+    assert "apply_" not in clean_body
     assert footer is None
 
+    # 5. Also verify TCN-543 pattern ('_T&Cs apply {{1}}_' or '_T&Cs apply <link>_') strips underscores and {{1}}
+    from briefing_parser import normalize_placeholders
+
+    tcn_543_raw = (
+        "👀 *What if your next Used Car loan deal didn't have to wait?* 🚗\n\n"
+        "There's a *faster* way to move eligible cases with *Tata Capital. 🤝*\n\n"
+        "⚡ *Same-day login. Same-day disbursal.* 💵\n\n"
+        "Contact your Tata Capital representative for more details. 📞\n\n"
+        "_T&Cs apply {{1}}_"
+    )
+    norm_543, samples_543 = normalize_placeholders(tcn_543_raw)
+    body_543, _, _, foot_543 = extract_and_strip_cta(norm_543)
+    assert body_543.endswith("T&Cs apply")
+    assert "_T&Cs" not in body_543
+    assert "{{1}}" not in body_543
+    assert samples_543 == []
+    assert foot_543 is None
 
 def test_cta_with_custom_campaign_url_preserved():
     """Verify specific campaign tracking URLs are preserved in the button."""
