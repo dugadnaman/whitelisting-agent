@@ -73,7 +73,8 @@ def test_jira_component_segmentation():
     assert comp.header_text == "Exclusive Car Loan Offer"
     assert "Drive home your new car" in comp.body_text
     assert "Special interest rate" in comp.body_text
-    assert comp.footer_text == "Tata Capital Ltd. All rights reserved."
+    assert "Tata Capital Ltd. All rights reserved." in comp.body_text
+    assert comp.footer_text is None
     assert comp.button_text == "Explore Cars"
     assert comp.button_url == "https://www.tatacapital.com/car-loan"
     assert comp.button_type == "URL"
@@ -128,7 +129,8 @@ def test_briefing_parser_integration_freeform_jira():
     assert "Rs. {{2}}" in draft["body"]
     assert "at {{3}}% interest" in draft["body"]
     assert "Repay in {{4}} monthly EMIs" in draft["body"]
-    assert draft["footer_text"] == "T&C apply. Tata Capital Financial Services."
+    assert "T&C apply. Tata Capital Financial Services." in draft["body"]
+    assert draft["footer_text"] is None
     assert draft["button_text"] == "Apply Now"
     assert draft["button_url"] == "https://www.tatacapital.com/twl"
     assert len(draft["variables"]) == 4

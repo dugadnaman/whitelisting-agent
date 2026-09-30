@@ -32,18 +32,18 @@ def test_everything_in_one_cell_decomposition():
     # 1. Header extracted
     assert res["header_text"] == "Diwali Festive Loan Mela"
 
-    # 2. Body stripped of CTA and T&C
+    # 2. Body stripped of CTA, while T&C remains inside the body
     assert "👉 Apply Now:" not in res["body"]
     assert "https://u3.mnge.co/offer" not in res["body"]
-    assert "T&C apply" not in res["body"]
+    assert "T&C apply" in res["body"]
     assert "pre-approved Personal Loan" in res["body"]
 
     # 3. Button populated
     assert res["button_text"] == "Apply Now"
     assert res["button_url"] == "https://u3.mnge.co/offer"
 
-    # 4. Footer populated
-    assert res["footer_text"] == "T&C apply"
+    # 4. Footer is strictly never used (always None)
+    assert res["footer_text"] is None
 
     # 5. Language & Category
     assert res["language"] == "en"

@@ -36,8 +36,9 @@ def test_cta_line_removed_from_body_and_moved_to_button():
     assert btn_text == "Check Your Offer"
     assert btn_url == "https://u3.mnge.co/"
 
-    # 4. Footer must receive T&C
-    assert footer == "T&C apply"
+    # 4. T&Cs apply MUST stay in body and footer MUST be None
+    assert "T&Cs apply" in clean_body
+    assert footer is None
 
 
 def test_cta_with_custom_campaign_url_preserved():
@@ -144,7 +145,8 @@ def test_cta_label_with_arrow_syntax():
     assert "https://tatacapital.com/pl" not in clean_body
     assert btn_text == "Apply Online"
     assert btn_url == "https://tatacapital.com/pl"
-    assert footer == "T&C apply"
+    assert "T&C apply." in clean_body
+    assert footer is None
 
 
 def test_cta_label_without_url():

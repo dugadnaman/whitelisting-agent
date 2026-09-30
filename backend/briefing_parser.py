@@ -331,16 +331,16 @@ def extract_and_strip_cta(
     """
     Identify and extract the Call-to-Action (CTA) line from a message body,
     removing it from the body text and placing it cleanly into button_text and button_url.
-    Also identifies trailing T&C disclaimer lines and extracts them to footer_text.
+    T&Cs apply and disclaimers remain inside the message body — we never emit a FOOTER component.
     If no destination URL is provided, defaults to https://u3.mnge.co/.
     """
     if not body:
-        return "", existing_btn_text or "Check Offer", existing_btn_url or DEFAULT_CTA_URL, existing_footer
+        fallback_body = existing_footer.strip() if existing_footer and existing_footer.strip() else ""
+        return fallback_body, existing_btn_text or "Check Offer", existing_btn_url or DEFAULT_CTA_URL, None
 
     text = body.strip()
     extracted_btn_text = existing_btn_text
     extracted_url = existing_btn_url
-    extracted_footer = existing_footer
 
     lines = text.split("\n")
     cleaned_lines: list[str] = []
@@ -365,22 +365,18 @@ def extract_and_strip_cta(
         lower_line = sline.lower()
 
         # 1. Standalone T&C disclaimer line (e.g. '_T&Cs apply https://..._' or 'T&Cs apply.')
+        # T&Cs apply MUST remain in the message body — never extract to a separate footer component.
+        # Only strip any raw URL attached to the T&C line.
         clean_tc = sline.strip("*_ \t").lower()
         if clean_tc.startswith(("t&c", "t & c", "terms", "conditions apply", "disclaimer")):
-            if not extracted_footer:
-                extracted_footer = "T&C apply"
+            tc_no_url = re.sub(url_pat, "", sline).strip()
+            if sline.startswith("_") and sline.endswith("_") and not tc_no_url.endswith("_"):
+                tc_no_url = tc_no_url.rstrip() + "_"
+            elif sline.startswith("*") and sline.endswith("*") and not tc_no_url.endswith("*"):
+                tc_no_url = tc_no_url.rstrip() + "*"
+            if tc_no_url:
+                cleaned_lines.append(tc_no_url)
             continue
-        # 2. Check if T&C is attached at the tail of the line
-        m_tail = re.search(
-            r"\s*(?:[*_])?\s*(?:t&c|t\s*&\s*c|terms\s*(?:and|&)?\s*conditions?)\s*(?:apply|applies)?\.?\s*(?:[*_])?\s*$",
-            sline,
-            re.IGNORECASE,
-        )
-        if m_tail and m_tail.start() > 10:
-            if not extracted_footer:
-                extracted_footer = "T&C apply"
-            sline = sline[: m_tail.start()].strip()
-        # 2. Check for CTA with variable (e.g. 'CTA {{4}}', 'CTA: {{1}}', 'Button: {{2}}')
         m_cta_var = re.match(
             r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*Button|CTA|Button|Link|Apply)\s*[:\-–]?\s*(\{\{[^{}]+\}\}|\{#[^#]+#\}|\[[^\[\]]+\])\s*$",
             sline,
@@ -523,6 +519,11 @@ def extract_and_strip_cta(
     clean_body = "\n".join(cleaned_lines)
     clean_body = re.sub(r"\n{3,}", "\n\n", clean_body).strip()
 
+    if existing_footer and existing_footer.strip():
+        ef = existing_footer.strip()
+        if ef.lower() not in clean_body.lower():
+            clean_body = f"{clean_body}\n\n{ef}".strip()
+
     final_btn_text = extracted_btn_text or "Check Offer"
     final_url = extracted_url or DEFAULT_CTA_URL
     if final_url.rstrip("/") in (
@@ -534,7 +535,7 @@ def extract_and_strip_cta(
     ):
         final_url = DEFAULT_CTA_URL
 
-    return clean_body, final_btn_text, final_url, extracted_footer
+    return clean_body, final_btn_text, final_url, None
 
 
 def is_cta_cell(val: str) -> bool:
@@ -676,7 +677,7 @@ def decompose_content(
     return {
         "header_text": header_text,
         "body": clean_body,
-        "footer_text": cta_foot or footer_text,
+        "footer_text": None,
         "button_text": cta_btn,
         "button_url": cta_url,
         "language": lang,
@@ -2429,7 +2430,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     body=clean_body,
                     header_type="IMAGE" if media else "TEXT",
                     header_text=None,
-                    footer_text=swcm_footer,
+                    footer_text=None,
                     media_file=media,
                     media_filename=Path(media).name if media else None,
                     button_type="URL",
@@ -2601,7 +2602,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     body=clean_body,
                     header_type=item.get("header_type") or ("IMAGE" if img else ("TEXT" if wa_header else "TEXT")),
                     header_text=wa_header,
-                    footer_text=cta_footer or item.get("footer"),
+                    footer_text=None,
                     media_file=img.get("local_path") if img else None,
                     media_filename=img.get("filename") if img else None,
                     button_type=b_type,

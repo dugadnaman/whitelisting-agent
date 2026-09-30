@@ -179,11 +179,16 @@ def _segment_text_components(raw_text: str) -> ExtractedTemplateComponent:
             filtered_lines.append(line)
         body_text = "\n".join(filtered_lines).strip() or text
 
+    # Strictly never use a separate footer component — merge any footer/T&C text into body_text
+    if footer_text and footer_text.lower() not in body_text.lower():
+        body_text = f"{body_text}\n\n{footer_text}".strip()
+    footer_text = None
+
     return ExtractedTemplateComponent(
         header_text=header_text,
         header_format="TEXT" if header_text else "NONE",
         body_text=body_text,
-        footer_text=footer_text,
+        footer_text=None,
         button_text=button_text,
         button_url=button_url,
         button_type=button_type,

@@ -828,11 +828,19 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
     Build the legacy portal create body used only for media headers.
     """
     components_raw = []
+    extra_footer_texts: list[str] = []
     for comp in payload.components:
         if isinstance(comp, dict):
             comp_d = copy.deepcopy(comp)
         else:
             comp_d = asdict(comp)
+
+        comp_type = str(comp_d.get("type") or "").upper()
+        # Strictly never emit a FOOTER component — merge any footer text into BODY
+        if comp_type == "FOOTER":
+            if comp_d.get("text"):
+                extra_footer_texts.append(str(comp_d["text"]).strip())
+            continue
 
         d: dict = {"type": comp_d.get("type")}
         if comp_d.get("format"):
@@ -850,6 +858,16 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         if comp_d.get("file_type"):
             d["file_type"] = comp_d["file_type"]
         components_raw.append(d)
+
+    if extra_footer_texts:
+        for d in components_raw:
+            if str(d.get("type") or "").upper() == "BODY":
+                body_txt = str(d.get("text") or "").strip()
+                for ft in extra_footer_texts:
+                    if ft and ft.lower() not in body_txt.lower():
+                        body_txt = f"{body_txt}\n\n{ft}".strip()
+                d["text"] = body_txt
+                break
     return {
         "requestType": "createTemplate",
         "esmeaddr": get_esmeaddr(client),

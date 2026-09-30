@@ -316,12 +316,11 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
 
         pattern = r"(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})"
         body_text = re.sub(pattern, _repl, body_text)
+        # Strictly never emit a FOOTER component — merge any footer/T&C text into BODY
+        footer_text = (raw_row.get("footer") or raw_row.get("footer_text") or "").strip()
+        if footer_text and footer_text.lower() not in body_text.lower():
+            body_text = f"{body_text.strip()}\n\n{footer_text}"
         components.append({"type": "BODY", "text": body_text.strip()})
-    # 3. FOOTER
-    footer_text = (raw_row.get("footer") or raw_row.get("footer_text") or "").strip()
-    if footer_text:
-        components.append({"type": "FOOTER", "text": footer_text})
-
     # 4. BUTTONS
     btype = (raw_row.get("button_type") or "").strip().upper()
     btext = (raw_row.get("button_text") or "").strip()
@@ -523,12 +522,10 @@ def _dynamic_row_to_submission(
     components: list[dict] = []
     if header:
         components.append({"type": "HEADER", "format": "TEXT", "text": header[:60]})
-    components.append({"type": "BODY", "text": clean_body.strip()})
-
     footer = row.get("footer_text", "").strip()
-    if footer:
-        components.append({"type": "FOOTER", "text": footer})
-
+    if footer and footer.lower() not in clean_body.lower():
+        clean_body = f"{clean_body.strip()}\n\n{footer}"
+    components.append({"type": "BODY", "text": clean_body.strip()})
     has_cta = bool(
         row.get("button_url")
         or row.get("button_text")
@@ -655,8 +652,10 @@ def _build_single_cell_card_submission(
                 "text": parsed["header"],
             }
         )
-    components.append({"type": "BODY", "text": parsed["body"]})
-    components.append({"type": "FOOTER", "text": "T&Cs apply"})
+    body_with_tc = parsed["body"].strip()
+    if "t&c" not in body_with_tc.lower() and "terms" not in body_with_tc.lower():
+        body_with_tc = f"{body_with_tc}\n\nT&Cs apply"
+    components.append({"type": "BODY", "text": body_with_tc})
     components.append(
         {
             "type": "BUTTONS",

@@ -253,6 +253,8 @@ def test_attached_spreadsheet_comprehensive_content_mapping(tmp_path: Path):
     wa_draft = next(w for w in brief.whatsapp_templates if w["template_name"] == "diwali_lap_special_v1")
     assert wa_draft["category"] == "MARKETING"
     assert wa_draft["header_text"] == "Festive Loan Dhamaka"
+    assert wa_draft["footer_text"] is None
+    assert "T&C apply" in wa_draft["body"]
     assert wa_draft["button_text"] == "Claim Loan"
     assert wa_draft["button_url"] == "https://u3.mnge.co/diwali"
 

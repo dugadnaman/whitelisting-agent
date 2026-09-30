@@ -1291,18 +1291,6 @@ export default function JiraBriefsPage() {
                                     className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
                                   />
 
-                                  {/* Footer text edit */}
-                                  <div>
-                                    <label className="block text-[11px] text-gray-500 mb-1">Footer / Disclaimer Text (optional):</label>
-                                    <input
-                                      type="text"
-                                      value={wa.footer_text || ''}
-                                      onChange={(e) => updateWaField(idx, 'footer_text', e.target.value)}
-                                      placeholder="e.g. *T&C apply. Tata Capital Financial Services Ltd."
-                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
-                                    />
-                                  </div>
-
                                   {/* Button controls */}
                                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                                     <div>
@@ -1361,12 +1349,6 @@ export default function JiraBriefsPage() {
                                   <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
                                     {wa.body}
                                   </div>
-
-                                  {wa.footer_text && (
-                                    <div className="text-[11px] text-gray-500 italic px-1">
-                                      {wa.footer_text}
-                                    </div>
-                                  )}
 
                                   {wa.button_type === 'URL' && (
                                     <div className="flex items-center gap-2 text-xs">

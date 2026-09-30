@@ -415,9 +415,9 @@ def tool_diagnose_and_fix(
                         "media_url": tmpl.get("header_media_url"),
                     }
                 )
+            if fixed_footer and fixed_footer.lower() not in fixed_body.lower():
+                fixed_body = f"{fixed_body.strip()}\n\n{fixed_footer}".strip()
             comp_list.append({"type": "BODY", "text": fixed_body})
-            if fixed_footer:
-                comp_list.append({"type": "FOOTER", "text": fixed_footer})
             if fixed_buttons:
                 comp_list.append({"type": "BUTTONS", "buttons": fixed_buttons})
 

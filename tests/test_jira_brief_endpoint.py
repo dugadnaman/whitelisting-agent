@@ -160,21 +160,19 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
         types = [c.type for c in sub1.components]
         assert "HEADER" in types, "HEADER component was dropped!"
         assert "BODY" in types, "BODY component missing!"
-        assert "FOOTER" in types, "FOOTER component was dropped!"
+        assert "FOOTER" not in types, "FOOTER component must never be emitted!"
         assert "BUTTONS" in types, "BUTTONS component was dropped!"
 
         header_comp = next(c for c in sub1.components if c.type == "HEADER")
         assert header_comp.format == "TEXT"
         assert header_comp.text == "Diwali Dhamaka Offer"
 
-        footer_comp = next(c for c in sub1.components if c.type == "FOOTER")
-        assert footer_comp.text == "T&C apply. Tata Capital Ltd."
-
         btn_comp = next(c for c in sub1.components if c.type == "BUTTONS")
         assert btn_comp.buttons[0]["type"] == "QUICK_REPLY"
         assert btn_comp.buttons[0]["text"] == "Interested"
 
         body_comp = next(c for c in sub1.components if c.type == "BODY")
+        assert "T&C apply. Tata Capital Ltd." in body_comp.text
         assert body_comp.example is not None
         assert body_comp.example.get("body_text") == [["Rahul", "5,00,000"]]
 

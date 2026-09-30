@@ -3785,7 +3785,11 @@ async def submit_jira_brief_endpoint(
                 )
 
             # 2. BODY component with variables & sample values
+            # Strictly never emit a FOOTER component — merge any footer_text into body_text
             body_text = str(wa.get("body") or "").strip()
+            footer_text = (wa.get("footer_text") or "").strip()
+            if footer_text and footer_text.lower() not in body_text.lower():
+                body_text = f"{body_text}\n\n{footer_text}".strip()
             body_vars = wa.get("variables") or []
             if not body_vars:
                 body_vars = re.findall(r"\{\{(\d+)\}\}", body_text)
@@ -3810,16 +3814,6 @@ async def submit_jira_brief_endpoint(
                     example=body_example,
                 )
             )
-
-            # 3. FOOTER component
-            footer_text = (wa.get("footer_text") or "").strip()
-            if footer_text:
-                comps.append(
-                    TemplateComponent(
-                        type="FOOTER",
-                        text=footer_text,
-                    )
-                )
 
             # 4. BUTTONS component (URL, QUICK_REPLY, PHONE_NUMBER)
             btn_list = []
