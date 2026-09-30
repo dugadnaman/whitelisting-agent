@@ -121,6 +121,7 @@ export default function SettingsPage() {
           setSmsSenderId(creds.sms_sender_id || '');
           setSmsDlrAuthToken(creds.sms_dlr_auth_token || '');
           setEntityId(creds.entity_id || '');
+          setLoungeCookie(creds.lounge_cookie || '');
         } else {
           setEntityId(creds.entity_id || '');
           setLoungeCookie(creds.lounge_cookie || '');
@@ -775,10 +776,10 @@ export default function SettingsPage() {
               {showMoEngage
                 ? 'MoEngage dashboard session used to sync approved Karix RCS templates into MoEngage Settings'
                 : isWhatsApp
-                ? 'Official WhatsApp Template REST API via static Bearer Token'
+                ? 'Karix Portal Session for Media Uploads & Official WABA Template API'
                 : isSms
-                ? 'Karix Send SMS JSON API with AES-256 PII encryption & DLR callbacks'
-                : 'DLT Template Registration via Karix Lounge / RCS Bot Builder'}
+                ? 'DLT SMS Template Registration via Karix Lounge & Send SMS API'
+                : 'DLT & Rich Card Template Registration via Karix Lounge Session'}
             </div>
           </div>
         </div>
@@ -931,119 +932,90 @@ export default function SettingsPage() {
           <>
         {isWhatsApp ? (
           <>
-            {/* Active / Expiring Section */}
+            {/* Active / Expiring Portal Session Section */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>⚡ Active API Credentials</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      Required for Submissions
+                    <span>🔑 Active Karix Portal Session</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                      Session Credentials — Refresh When Expired
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Official static Bearer token used for template submissions and status checks.
+                    Browser session credentials from <code>rcsgui.karix.solutions</code> required for WhatsApp image/video media-header submissions.
                   </p>
                 </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Official WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
-                  </label>
-                  {wabaAuthToken ? (
-                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      ✓ Permanent API Token Configured
-                    </span>
-                  ) : null}
-                </div>
-                <input
-                  id="waba_auth_token"
-                  type="password"
-                  value={wabaAuthToken}
-                  onChange={(e) => setWabaAuthToken(e.target.value)}
-                  placeholder="Paste static Bearer token from Karix Lounge..."
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-                />
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Static token generated from Karix Lounge for {accountTitle}. Pre-configured and permanent.
-                </p>
-              </div>
-
-              {/* Optional Portal Session Credentials */}
-              <div className="pt-2 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={() => setShowPortalCreds((prev) => !prev)}
-                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 font-medium"
-                >
-                  <span>{showPortalCreds ? '▾ Hide' : '▸ Show'} Portal Session Tokens</span>
-                  <span className="text-[10px] text-gray-400">(Required only for image/video media-header uploads; update when expired)</span>
-                </button>
-
-                {showPortalCreds && (
-                  <div className="mt-3 space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                    <div>
-                      <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                        Current Portal Bearer Token ({envPrefix}_KARIX_BEARER_TOKEN)
-                      </label>
-                      <input
-                        id="bearer_token"
-                        type="password"
-                        value={bearerToken}
-                        onChange={(e) => setBearerToken(e.target.value)}
-                        placeholder="e.g. eyJhbGciOi..."
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label htmlFor="session" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                          Session ID ({envPrefix}_KARIX_SESSION)
-                        </label>
-                        <input
-                          id="session"
-                          type="password"
-                          value={session}
-                          onChange={(e) => setSession(e.target.value)}
-                          placeholder="Session header from DevTools..."
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
-                        />
-                      </div>
-
-                      <div>
-                        <label htmlFor="user" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                          User Header ({envPrefix}_KARIX_USER)
-                        </label>
-                        <input
-                          id="user"
-                          type="text"
-                          value={user}
-                          onChange={(e) => setUser(e.target.value)}
-                          placeholder="User header from DevTools..."
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
-                        />
-                      </div>
-                    </div>
-                  </div>
+                {bearerToken && session ? (
+                  <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
+                    ✓ Portal Session Set
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 shrink-0">
+                    Paste Session When Uploading Media
+                  </span>
                 )}
+              </div>
+
+              <div className="space-y-4 p-4 bg-gray-50/70 rounded-xl border border-gray-200">
+                <div>
+                  <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    Current Portal Bearer Token ({envPrefix}_KARIX_BEARER_TOKEN)
+                  </label>
+                  <input
+                    id="bearer_token"
+                    type="password"
+                    value={bearerToken}
+                    onChange={(e) => setBearerToken(e.target.value)}
+                    placeholder="Paste Authorization: Bearer eyJhbGciOi... from rcsgui.karix.solutions DevTools"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label htmlFor="session" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Portal Session ID ({envPrefix}_KARIX_SESSION)
+                    </label>
+                    <input
+                      id="session"
+                      type="password"
+                      value={session}
+                      onChange={(e) => setSession(e.target.value)}
+                      placeholder="Paste Session header from DevTools..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="user" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Portal User Header ({envPrefix}_KARIX_USER)
+                    </label>
+                    <input
+                      id="user"
+                      type="text"
+                      value={user}
+                      onChange={(e) => setUser(e.target.value)}
+                      placeholder="Paste User header from DevTools..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Permanent Account Identifiers (Pre-Configured) */}
+            {/* Permanent Account Identifiers & Static API Token (Pre-Configured) */}
             <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔒 Permanent Account Constants</span>
+                    <span>🔒 Permanent Account Constants &amp; API Token</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                       Pre-configured
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Fixed account parameters. Operators do not need to re-enter these.
+                    Permanent WABA API token and fixed account parameters. These never expire and do not need to be changed.
                   </p>
                 </div>
                 <button
@@ -1056,7 +1028,14 @@ export default function SettingsPage() {
               </div>
 
               {!editPermanent ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Official WABA Token</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
+                      {wabaAuthToken ? '••••••••••••••••' : 'Pre-configured'}
+                    </div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Permanent Token</div>
+                  </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">WABA ID</div>
                     <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{wabaId || 'Pre-configured'}</div>
@@ -1080,6 +1059,19 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div className="sm:col-span-2">
+                    <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Official Permanent WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
+                    </label>
+                    <input
+                      id="waba_auth_token"
+                      type="password"
+                      value={wabaAuthToken}
+                      onChange={(e) => setWabaAuthToken(e.target.value)}
+                      placeholder="Static Bearer token from Karix Lounge..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
                   <div>
                     <label htmlFor="waba_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
                       WABA ID
@@ -1138,36 +1130,36 @@ export default function SettingsPage() {
           </>
         ) : isSms ? (
           <>
-            {/* Active / Expiring Section */}
+            {/* Active / Expiring Lounge Session Section */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>⚡ Active SMS Access Key</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      Authorization Key
+                    <span>🔑 Active Karix Lounge Session</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                      Session Cookie — Refresh When Expired
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    JsonReceiver API authorization key provided by Karix.
+                    Browser session cookie from <code>lounge.karix.solutions</code> required for automated DLT SMS template registration.
                   </p>
                 </div>
               </div>
 
-              <div>
-                <label htmlFor="sms_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Karix SMS Access Key ({envPrefix}_SMS_KEY)
+              <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
+                <label htmlFor="sms_lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
                 </label>
                 <input
-                  id="sms_key"
+                  id="sms_lounge_cookie"
                   type="password"
-                  value={smsKey}
-                  onChange={(e) => setSmsKey(e.target.value)}
-                  placeholder="e.g. ZOucgqXGgGSfKfNWqQdYJA=="
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  value={loungeCookie}
+                  onChange={(e) => setLoungeCookie(e.target.value)}
+                  placeholder="Paste PHPSESSID=... cookie from lounge.karix.solutions DevTools"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Authorization key provided by Karix for JsonReceiver API requests (passed as <code>key</code> in payload).
+                  Session cookie from browser when logged in to <code>lounge.karix.solutions</code>.
                 </p>
               </div>
             </div>
@@ -1177,13 +1169,13 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔒 Permanent SMS Identifiers</span>
+                    <span>🔒 Permanent SMS Identifiers &amp; API Key</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                       Pre-configured
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Sender ID header, telecom username, and DLT Entity ID for {accountTitle}.
+                    Permanent SMS Access Key, Sender ID header, telecom username, and DLT Entity ID for {accountTitle}.
                   </p>
                 </div>
                 <button
@@ -1196,7 +1188,14 @@ export default function SettingsPage() {
               </div>
 
               {!editPermanent ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">SMS Access Key</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
+                      {smsKey ? '••••••••••••••••' : 'Pre-configured'}
+                    </div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Permanent Key</div>
+                  </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sender ID Header</div>
                     <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsSenderId || 'BAJAJF'}</div>
@@ -1215,6 +1214,19 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div className="sm:col-span-2">
+                    <label htmlFor="sms_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Permanent Karix SMS Access Key ({envPrefix}_SMS_KEY)
+                    </label>
+                    <input
+                      id="sms_key"
+                      type="password"
+                      value={smsKey}
+                      onChange={(e) => setSmsKey(e.target.value)}
+                      placeholder="e.g. ZOucgqXGgGSfKfNWqQdYJA=="
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
                   <div>
                     <label htmlFor="sms_sender_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
                       Sender ID Header
@@ -1290,90 +1302,61 @@ export default function SettingsPage() {
           </>
         ) : (
           <>
-            {/* Active / Expiring Section */}
+            {/* Active / Expiring Karix Lounge Session Section */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>⚡ Active RCS API Credentials</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                      Required for Rich Card Submissions
+                    <span>🔑 Active Karix Lounge Session</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                      Session Cookie — Refresh When Expired
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Karix RCS API token for fetching approved rich cards and submitting templates.
+                    Browser session cookie from <code>lounge.karix.solutions</code> required for automated RCS &amp; DLT template submissions.
                   </p>
                 </div>
+                {loungeCookie ? (
+                  <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
+                    ✓ Lounge Session Cookie Set
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 shrink-0">
+                    Paste Cookie From Browser
+                  </span>
+                )}
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-                    Karix RCS Permanent API Token ({envPrefix}_RCS_AUTH_TOKEN)
-                  </label>
-                  {rcsAuthToken ? (
-                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                      ✓ Permanent API Token Configured
-                    </span>
-                  ) : null}
-                </div>
+              <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
+                <label htmlFor="lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
+                </label>
                 <input
-                  id="rcs_auth_token"
+                  id="lounge_cookie"
                   type="password"
-                  value={rcsAuthToken}
-                  onChange={(e) => setRcsAuthToken(e.target.value)}
-                  placeholder="e.g. yzHtsfT8v5DZ6XV3stK4YQ=="
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  value={loungeCookie}
+                  onChange={(e) => setLoungeCookie(e.target.value)}
+                  placeholder="Paste PHPSESSID=... cookie from lounge.karix.solutions DevTools"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Permanent Karix RCS API token for fetching approved rich cards and syncing to MoEngage.
+                  Session cookie from your logged-in browser session at <code>lounge.karix.solutions</code>. Refresh this whenever your Lounge session expires.
                 </p>
-              </div>
-
-              {/* Optional Lounge Session Cookie */}
-              <div className="pt-2 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={() => setShowPortalCreds((prev) => !prev)}
-                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 font-medium"
-                >
-                  <span>{showPortalCreds ? '▾ Hide' : '▸ Show'} Karix Lounge Session Cookie</span>
-                  <span className="text-[10px] text-gray-400">(Required only for automated DLT registration through Lounge)</span>
-                </button>
-
-                {showPortalCreds && (
-                  <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                    <label htmlFor="lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
-                    </label>
-                    <input
-                      id="lounge_cookie"
-                      type="password"
-                      value={loungeCookie}
-                      onChange={(e) => setLoungeCookie(e.target.value)}
-                      placeholder="PHPSESSID=... from lounge.karix.solutions"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
-                    />
-                    <p className="text-[11px] text-gray-400 mt-1">
-                      Session cookie from browser when logged in to lounge.karix.solutions.
-                    </p>
-                  </div>
-                )}
               </div>
             </div>
 
-            {/* Permanent Account Identifiers (Pre-Configured) */}
+            {/* Permanent Account Identifiers & Static RCS API Token (Pre-Configured) */}
             <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔒 Permanent RCS Identifiers</span>
+                    <span>🔒 Permanent RCS Identifiers &amp; API Token</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                       Pre-configured
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Fixed Bot ID, ESME routing address, and DLT Entity ID for {accountTitle}.
+                    Permanent RCS API Token, fixed Bot ID, ESME routing address, and DLT Entity ID for {accountTitle}.
                   </p>
                 </div>
                 <button
@@ -1386,7 +1369,14 @@ export default function SettingsPage() {
               </div>
 
               {!editPermanent ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">RCS Permanent Token</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
+                      {rcsAuthToken ? '••••••••••••••••' : 'Pre-configured'}
+                    </div>
+                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Permanent Token</div>
+                  </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">RCS Bot ID</div>
                     <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Pre-configured'}</div>
@@ -1405,6 +1395,19 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
+                  <div className="sm:col-span-3">
+                    <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                      Karix RCS Permanent API Token ({envPrefix}_RCS_AUTH_TOKEN)
+                    </label>
+                    <input
+                      id="rcs_auth_token"
+                      type="password"
+                      value={rcsAuthToken}
+                      onChange={(e) => setRcsAuthToken(e.target.value)}
+                      placeholder="e.g. yzHtsfT8v5DZ6XV3stK4YQ=="
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
                   <div>
                     <label htmlFor="rcs_bot_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
                       Karix RCS Bot ID
