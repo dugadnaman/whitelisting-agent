@@ -147,15 +147,15 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
     pattern = r"(\{\{\d+\}\}|\{\{[a-zA-Z0-9_]+\}\}|<[^>]+>|\{#[^#]+#\}|\[[a-zA-Z0-9_]+\]|\{[a-zA-Z0-9_]+\})"
     normalized_body = re.sub(pattern, _repl, spaced_body)
 
-    # Extract clean header title
-    first_line = clean_lines[0] if clean_lines else "Special Offer"
-    clean_title = re.sub(r"<[^>]+>|\[[^\]]+\]|\{[^}]+\}", "", first_line).strip()
-    clean_title = re.sub(r"^[,\s:–—\-]+|[,\s:–—\-]+$", "", clean_title)
-    if re.match(r"^(?:Dear|Hi|Hello)\b", clean_title, re.IGNORECASE) or len(clean_title) < 4:
-        clean_title = "Pre-Approved Personal Loan ✨"
+    # Only set header if an explicit Header: or Title: prefix was given; otherwise leave blank
+    clean_title = None
+    if clean_lines:
+        m_hdr = re.match(r"^(?:Header|Title)\s*[:\-–]\s*(.+)$", clean_lines[0], re.IGNORECASE)
+        if m_hdr:
+            clean_title = m_hdr.group(1).strip()[:60]
 
     return {
-        "header": clean_title[:60],
+        "header": clean_title,
         "body": normalized_body,
         "button_text": button_text,
         "button_url": button_url,

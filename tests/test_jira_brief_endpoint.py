@@ -218,12 +218,15 @@ def test_swcm_59_docx_and_sms_extraction():
         assert wa["category"] == "UTILITY"
         assert wa["button_type"] == "NONE"
         assert wa["button_text"] is None
-        assert wa["header_text"] in (
-            "Important Update - Loan Against Equity Mutual Funds",
-            "Immediate Action Required - Loan Against Equity Mutual Funds",
-            "Urgent Action Required - Loan Against Equity Mutual Funds",
+        assert wa["header_text"] is None
+        assert any(
+            h in wa["body"]
+            for h in (
+                "Important Update - Loan Against Equity Mutual Funds",
+                "Immediate Action Required - Loan Against Equity Mutual Funds",
+                "Urgent Action Required - Loan Against Equity Mutual Funds",
+            )
         )
-        assert "LAS_Whitelisting" not in (wa["header_text"] or "")
 
     # Exactly 3 clean SMS templates
     assert len(parsed.sms_templates) == 3

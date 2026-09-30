@@ -1873,13 +1873,9 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
             continue
         header = None
         if chan == "WA":
-            # If line 0 is a short punchy headline (< 65 chars), treat it as genuine customer header
-            if (
-                len(lines) >= 2
-                and len(lines[0]) < 65
-                and not lines[0].lower().startswith(("dear", "hi", "pursuant", "your loan", "please", "for "))
-            ):
-                header = lines[0]
+            m_hdr = re.match(r"^(?:Header|Title)\s*[:\-–]\s*(.+)$", lines[0], re.IGNORECASE)
+            if m_hdr and len(lines) >= 2:
+                header = m_hdr.group(1).strip()
                 body = "\n".join(lines[1:])
             else:
                 body = "\n".join(lines)
@@ -2626,10 +2622,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             wa_header = item.get("header")
             if wa_header and is_internal_identifier(wa_header, summary=summary):
                 wa_header = None
-            if not wa_header and not img:
-                wa_header = derive_clean_card_title(clean_body, account=issue_data.get("account"))
 
-            # Strip the extracted header from clean_body so it is never repeated in both header and body
+            # Strip the explicit header from clean_body if repeated on the first line
             if wa_header and clean_body:
                 lines = clean_body.strip().splitlines()
                 if len(lines) > 1:
@@ -2642,7 +2636,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     category=cat,
                     language=lang,
                     body=clean_body,
-                    header_type=item.get("header_type") or ("IMAGE" if img else ("TEXT" if wa_header else "TEXT")),
+                    header_type=item.get("header_type") or ("IMAGE" if img else ("TEXT" if wa_header else "NONE")),
                     header_text=wa_header,
                     footer_text=None,
                     media_file=img.get("local_path") if img else None,
