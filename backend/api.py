@@ -2599,7 +2599,7 @@ def get_credentials(
     rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or DEFAULT_RCS_AUTH_TOKENS.get(acc, "")
     rcs_esmeaddr = (
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
-        or os.environ.get(f"{prefix}_ESMEADDR")
+        or DEFAULT_RCS_ESMEADDRS.get(acc)
         or get_rcs_esmeaddr(acc)
         or ""
     )

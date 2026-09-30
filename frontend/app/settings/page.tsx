@@ -128,7 +128,7 @@ export default function SettingsPage() {
           setPortalPassword(creds.portal_password || '');
           setRcsBotId(creds.rcs_bot_id || (selectedAccount === 'apparel' ? 'P7hzkqCcW3x96I6T' : ''));
           setRcsAuthToken(creds.rcs_auth_token || (selectedAccount === 'apparel' ? 'yzHtsfT8v5DZ6XV3stK4YQ==' : ''));
-          setEsmeaddr(creds.esmeaddr || creds.rcs_esmeaddr || (selectedAccount === 'apparel' ? '72148300000000' : ''));
+          setEsmeaddr(creds.rcs_esmeaddr || creds.esmeaddr || (selectedAccount === 'apparel' ? '71189600000000' : '72434700000000'));
         }
       } catch {
         if (ignore) return;
@@ -1394,7 +1394,7 @@ export default function SettingsPage() {
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Karix ESME Address</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || '72516600000000'}</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || '72434700000000'}</div>
                     <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Routing Configured</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">

@@ -14,7 +14,6 @@ from pathlib import Path
 
 import requests
 
-from config import get_esmeaddr
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
     _account_prefix,
@@ -49,7 +48,7 @@ def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str
     c = client.lower()
     headers = dict(get_rcs_auth_headers(c))
     headers.pop("Content-Type", None)
-    esme_addr = get_esmeaddr(c)
+    esme_addr = get_rcs_esmeaddr(c)
     stream = io.BytesIO(image_data)
     stream.seek(0)
 
@@ -412,7 +411,7 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str = "tata") ->
         try:
             headers = get_rcs_auth_headers(c)
             bot_id_res = get_rcs_bot_id(c)
-            esme_res = get_esmeaddr(c)
+            esme_res = get_rcs_esmeaddr(c)
             logger.info(
                 "🔒 CONFIRMATION CHECKPOINT [RCS Create]: client=%s, bot_id=%s, esmeaddr=%s, template=%s, auth_env_prefix=%s",
                 c,
@@ -582,7 +581,7 @@ def fetch_rcs_templates(bot_id: str | None = None, client: str = "tata") -> list
     """
     c = client.lower()
     b_id = bot_id or get_rcs_bot_id(c)
-    esme_addr = get_esmeaddr(c)
+    esme_addr = get_rcs_esmeaddr(c)
     try:
         headers = get_rcs_auth_headers(c)
         logger.info(

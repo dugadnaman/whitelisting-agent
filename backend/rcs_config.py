@@ -157,8 +157,8 @@ def get_rcs_esmeaddr(client: str = "tata") -> str:
     prefix = _account_prefix(c)
     esme = (
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
-        or os.environ.get(f"{prefix}_ESMEADDR")
         or DEFAULT_RCS_ESMEADDRS.get(c)
+        or os.environ.get(f"{prefix}_ESMEADDR")
         or (
             os.environ.get("TATA_ESMEADDR")
             if c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy")
