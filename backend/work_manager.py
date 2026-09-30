@@ -582,6 +582,7 @@ def transfer_jira_ticket(
     to_account_id: str,
     handover_note: str = "",
     transferred_by: str = "Work Management Operator",
+    sync_to_jira: bool = True,
 ) -> dict[str, Any]:
     """
     Reassign a ticket:
@@ -615,6 +616,32 @@ def transfer_jira_ticket(
     except Exception:
         pass
 
+    # Option to skip Jira Cloud update: save as internal operational assignment
+    if not sync_to_jira:
+        save_operational_assignment(
+            issue_key=clean_key,
+            operational_assignee=target_name,
+            operational_account_id=to_clean_id,
+            operational_role=target_role,
+            original_jira_assignee=raw_assignee,
+            transferred_by=transferred_by,
+            handover_note=handover_note or "Internal Agent Reassignment (Jira update skipped)",
+        )
+        logger.info("Saved internal operational assignment for %s -> %s (Jira sync skipped)", clean_key, target_name)
+        return {
+            "success": True,
+            "ok": True,
+            "virtual_assignment": True,
+            "sync_to_jira": False,
+            "jira_updated": False,
+            "issue_key": clean_key,
+            "to_account_id": to_clean_id,
+            "assignee_name": target_name,
+            "role": target_role,
+            "original_assignee": raw_assignee,
+            "handover_note": handover_note,
+            "message": f"Successfully reassigned {clean_key} to {target_name} in agent (Jira update skipped).",
+        }
     # SOLUTION 1: Virtual Operational Assignment for users without an active Jira seat (Soham, Aadya)
     if not has_seat:
         save_operational_assignment(
@@ -675,6 +702,8 @@ def transfer_jira_ticket(
         "success": True,
         "ok": True,
         "virtual_assignment": False,
+        "sync_to_jira": True,
+        "jira_updated": True,
         "issue_key": clean_key,
         "to_account_id": to_clean_id,
         "assignee_name": target_name,
@@ -682,13 +711,13 @@ def transfer_jira_ticket(
         "message": f"Successfully reassigned {clean_key} to {target_name} in Jira Cloud.",
     }
 
-
 def bulk_transfer_jira_tickets(
     issue_keys: list[str],
     to_account_id: str,
     to_account_name: str = "",
     handover_note: str = "",
     transferred_by: str = "Work Management Operator",
+    sync_to_jira: bool = True,
 ) -> dict[str, Any]:
     """
     Reassign multiple Jira tickets in batch and post audit handover notes.
@@ -706,6 +735,7 @@ def bulk_transfer_jira_tickets(
                 to_account_id=to_account_id,
                 handover_note=handover_note,
                 transferred_by=transferred_by,
+                sync_to_jira=sync_to_jira,
             )
             if isinstance(res, dict) and res.get("success") is False and res.get("error"):
                 failed.append({"issue_key": clean_key, "key": clean_key, "error": str(res.get("error"))})
@@ -718,6 +748,8 @@ def bulk_transfer_jira_tickets(
     return {
         "ok": len(failed) == 0,
         "success": len(failed) == 0,
+        "sync_to_jira": sync_to_jira,
+        "jira_updated": sync_to_jira,
         "to_account_id": to_account_id,
         "to_account_name": to_account_name,
         "total_requested": len(issue_keys),
@@ -812,6 +844,7 @@ def ai_rebalance_workload(
     project: str = "TCN",
     auto_execute: bool = False,
     operator_name: str = "AI Workload Agent",
+    sync_to_jira: bool = True,
 ) -> dict[str, Any]:
     """
     Autonomous AI Workload Balancing Agent.
@@ -912,6 +945,7 @@ def ai_rebalance_workload(
                             to_account_id=target_user["account_id"],
                             handover_note=prop.reason,
                             transferred_by=operator_name,
+                            sync_to_jira=sync_to_jira,
                         )
                         prop.executed = True
                     except Exception as err:
@@ -927,9 +961,9 @@ def ai_rebalance_workload(
 
         except Exception as exc:
             logger.warning("TypeSafe AI rebalancing failed, falling back to rule engine: %s", exc)
-            return _rule_based_rebalance(context_prompt, pending_items, assignees, auto_execute, operator_name)
+            return _rule_based_rebalance(context_prompt, pending_items, assignees, auto_execute, operator_name, sync_to_jira)
     else:
-        return _rule_based_rebalance(context_prompt, pending_items, assignees, auto_execute, operator_name)
+        return _rule_based_rebalance(context_prompt, pending_items, assignees, auto_execute, operator_name, sync_to_jira)
 
     return {
         "ok": True,
@@ -947,6 +981,7 @@ def _rule_based_rebalance(
     assignees: list[dict],
     auto_execute: bool,
     operator_name: str,
+    sync_to_jira: bool = True,
 ) -> dict[str, Any]:
     """Deterministic rule-based rebalancing fallback."""
     proposals: list[TransferProposal] = []
@@ -991,6 +1026,7 @@ def _rule_based_rebalance(
                     to_account_id=target["account_id"],
                     handover_note=prop.reason,
                     transferred_by=operator_name,
+                    sync_to_jira=sync_to_jira,
                 )
                 prop.executed = True
             except Exception:

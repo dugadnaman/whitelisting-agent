@@ -188,6 +188,7 @@ export default function WorkManagementPage() {
   const [transferTargetId, setTransferTargetId] = useState<string>('');
   const [handoverNote, setHandoverNote] = useState<string>('');
   const [transferring, setTransferring] = useState<boolean>(false);
+  const [syncToJira, setSyncToJira] = useState<boolean>(true);
 
   // AI Rebalance
   const [aiPrompt, setAiPrompt] = useState<string>('');
@@ -230,6 +231,7 @@ export default function WorkManagementPage() {
   const [bulkTargetId, setBulkTargetId] = useState<string>('');
   const [bulkHandoverNote, setBulkHandoverNote] = useState<string>('');
   const [bulkTransferring, setBulkTransferring] = useState<boolean>(false);
+  const [bulkSyncToJira, setBulkSyncToJira] = useState<boolean>(true);
   const [assigningUnassigned, setAssigningUnassigned] = useState<boolean>(false);
   // Table Sorting
   const [sortField, setSortField] = useState<'key' | 'summary' | 'status' | 'assignee' | 'channel' | 'duedate'>('duedate');
@@ -427,7 +429,9 @@ export default function WorkManagementPage() {
       const res = await bulkTransferJiraTickets(
         selectedTicketKeys,
         bulkTargetId,
-        bulkHandoverNote
+        bulkHandoverNote,
+        undefined,
+        bulkSyncToJira
       );
       setBulkModalOpen(false);
       setBulkHandoverNote('');
@@ -435,7 +439,15 @@ export default function WorkManagementPage() {
       await handleRefresh();
       const targetUser = data?.assignees.find(a => a.account_id === bulkTargetId);
       const isVirtual = targetUser?.name === 'Soham Das' || targetUser?.name === 'Aadya';
-      alert(`Successfully assigned ${res.transferred_count} ticket(s) to ${targetUser?.name || 'target queue'}!${isVirtual ? ' (Operational assignment - Jira seat not required)' : ''}`);
+      alert(
+        `Successfully assigned ${res.transferred_count} ticket(s) to ${targetUser?.name || 'target queue'}!${
+          !bulkSyncToJira
+            ? ' (Jira Cloud update skipped — saved in Agent only)'
+            : isVirtual
+            ? ' (Operational assignment - Jira seat not required)'
+            : ' (Reflected in Jira Cloud)'
+        }`
+      );
     } catch (err: unknown) {
       alert(`Bulk transfer failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -486,11 +498,13 @@ export default function WorkManagementPage() {
     if (!transferItem || !transferTargetId) return;
     try {
       setTransferring(true);
-      const res = await transferJiraTicket(transferItem.key, transferTargetId, handoverNote);
+      const res = await transferJiraTicket(transferItem.key, transferTargetId, handoverNote, undefined, syncToJira);
       setTransferItem(null);
       setHandoverNote('');
       await handleRefresh();
-      if (res?.virtual_assignment) {
+      if (!syncToJira) {
+        alert(`✅ Ticket ${transferItem.key} reassigned to ${res.assignee_name} in Agent (Jira Cloud update skipped).`);
+      } else if (res?.virtual_assignment) {
         alert(`✅ Ticket ${transferItem.key} operationally assigned to ${res.assignee_name} (Jira seat not required).`);
       } else {
         alert(`✅ Ticket ${transferItem.key} successfully transferred in Jira Cloud!`);
@@ -498,6 +512,7 @@ export default function WorkManagementPage() {
     } catch (err: unknown) {
       alert(`Transfer failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
+      setTransferring(false);
     }
   };
 
@@ -1666,11 +1681,11 @@ export default function WorkManagementPage() {
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
                         {aiProposals.map((p) => (
-                          <div key={p.issue_key} className="p-3 bg-white/5 border border-white/10 rounded-lg text-xs space-y-1.5">
+                          <div key={p.issue_key} className="p-3 bg-white/5 border border-white/10 rounded-lg text-xs space-y-2">
                             <div className="flex items-center justify-between font-bold">
                               <span className="text-indigo-400">{p.issue_key}</span>
                               <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${p.executed ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
-                                {p.executed ? 'Reassigned in Jira ✓' : 'Proposed'}
+                                {p.executed ? 'Applied ✓' : 'Proposed'}
                               </span>
                             </div>
                             <p className="text-gray-300 truncate font-medium">{p.summary}</p>
@@ -1679,6 +1694,34 @@ export default function WorkManagementPage() {
                               <span>→</span>
                               <span className="font-bold text-white">{p.target_assignee}</span>
                             </div>
+                            {!p.executed && (
+                              <div className="flex items-center gap-1.5 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await transferJiraTicket(p.issue_key, p.target_account_id, p.reason, undefined, true);
+                                    setAiProposals(prev => prev.map(item => item.issue_key === p.issue_key ? { ...item, executed: true } : item));
+                                    await handleRefresh();
+                                  }}
+                                  className="flex-1 py-1 px-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold transition cursor-pointer"
+                                  title="Apply reassignment and update Jira Cloud"
+                                >
+                                  ✓ Confirm in Jira
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await transferJiraTicket(p.issue_key, p.target_account_id, p.reason, undefined, false);
+                                    setAiProposals(prev => prev.map(item => item.issue_key === p.issue_key ? { ...item, executed: true } : item));
+                                    await handleRefresh();
+                                  }}
+                                  className="flex-1 py-1 px-2 rounded bg-white/10 hover:bg-white/20 text-amber-200 border border-amber-400/30 text-[10px] font-bold transition cursor-pointer"
+                                  title="Apply reassignment in Agent only (skip Jira update)"
+                                >
+                                  ⏸️ Skip Jira
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -2464,6 +2507,42 @@ export default function WorkManagementPage() {
                   className="w-full border border-gray-300 rounded-lg p-2.5 text-xs text-gray-800 placeholder-gray-400"
                 />
               </div>
+              {/* Jira Reassignment Confirmation */}
+              <div className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-2">
+                <span className="block text-[11px] font-bold text-indigo-900 uppercase tracking-wider">
+                  Jira Reassignment Confirmation
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSyncToJira(true)}
+                    className={`p-2 rounded-lg text-left border transition cursor-pointer ${
+                      syncToJira
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">✓ Confirm in Jira</div>
+                    <div className={`text-[10px] mt-0.5 ${syncToJira ? 'text-indigo-100' : 'text-gray-500'}`}>
+                      Reflect change in Jira Cloud &amp; Agent
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSyncToJira(false)}
+                    className={`p-2 rounded-lg text-left border transition cursor-pointer ${
+                      !syncToJira
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">⏸️ Skip Jira Update</div>
+                    <div className={`text-[10px] mt-0.5 ${!syncToJira ? 'text-amber-100' : 'text-gray-500'}`}>
+                      Reassign within Agent only
+                    </div>
+                  </button>
+                </div>
+              </div>
 
               <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
                 <button
@@ -2476,9 +2555,15 @@ export default function WorkManagementPage() {
                 <button
                   type="submit"
                   disabled={transferring}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 shadow-sm"
+                  className={`px-4 py-2 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer ${
+                    syncToJira ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-amber-600 hover:bg-amber-700'
+                  }`}
                 >
-                  {transferring ? 'Transferring in Jira...' : 'Confirm Transfer'}
+                  {transferring
+                    ? 'Applying...'
+                    : syncToJira
+                    ? 'Confirm & Update in Jira'
+                    : 'Reassign in Agent (Skip Jira)'}
                 </button>
               </div>
             </form>
@@ -2542,6 +2627,42 @@ export default function WorkManagementPage() {
                   className="w-full border border-gray-300 rounded-lg p-2.5 text-xs text-gray-800 placeholder-gray-400"
                 />
               </div>
+              {/* Jira Reassignment Confirmation */}
+              <div className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-2">
+                <span className="block text-[11px] font-bold text-indigo-900 uppercase tracking-wider">
+                  Jira Reassignment Confirmation
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBulkSyncToJira(true)}
+                    className={`p-2 rounded-lg text-left border transition cursor-pointer ${
+                      bulkSyncToJira
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">✓ Confirm in Jira</div>
+                    <div className={`text-[10px] mt-0.5 ${bulkSyncToJira ? 'text-indigo-100' : 'text-gray-500'}`}>
+                      Reflect in Jira Cloud &amp; Agent
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkSyncToJira(false)}
+                    className={`p-2 rounded-lg text-left border transition cursor-pointer ${
+                      !bulkSyncToJira
+                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">⏸️ Skip Jira Update</div>
+                    <div className={`text-[10px] mt-0.5 ${!bulkSyncToJira ? 'text-amber-100' : 'text-gray-500'}`}>
+                      Reassign within Agent only
+                    </div>
+                  </button>
+                </div>
+              </div>
 
               <div className="pt-3 border-t border-gray-100 flex justify-end gap-2">
                 <button
@@ -2554,9 +2675,15 @@ export default function WorkManagementPage() {
                 <button
                   type="submit"
                   disabled={bulkTransferring}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 shadow-sm flex items-center gap-1.5"
+                  className={`px-4 py-2 text-white rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 cursor-pointer ${
+                    bulkSyncToJira ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-amber-600 hover:bg-amber-700'
+                  }`}
                 >
-                  {bulkTransferring ? 'Reassigning in Jira...' : `Confirm Reassign (${selectedTicketKeys.length})`}
+                  {bulkTransferring
+                    ? 'Applying...'
+                    : bulkSyncToJira
+                    ? `Confirm & Update in Jira (${selectedTicketKeys.length})`
+                    : `Reassign in Agent Only (${selectedTicketKeys.length})`}
                 </button>
               </div>
             </form>

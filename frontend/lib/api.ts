@@ -1246,11 +1246,17 @@ export async function fetchWorkManagementAssignees(project: string = "TCN") {
   return res.json();
 }
 
-export async function transferJiraTicket(issue_key: string, to_account_id: string, handover_note?: string, transferred_by?: string) {
+export async function transferJiraTicket(
+  issue_key: string,
+  to_account_id: string,
+  handover_note?: string,
+  transferred_by?: string,
+  sync_to_jira: boolean = true
+) {
   const res = await fetchWithRetry(getApiUrl(`/api/work-management/transfer`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ issue_key, to_account_id, handover_note: handover_note || "", transferred_by }),
+    body: JSON.stringify({ issue_key, to_account_id, handover_note: handover_note || "", transferred_by, sync_to_jira }),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
@@ -1260,12 +1266,13 @@ export async function bulkTransferJiraTickets(
   issue_keys: string[],
   to_account_id: string,
   handover_note?: string,
-  transferred_by?: string
+  transferred_by?: string,
+  sync_to_jira: boolean = true
 ) {
   const res = await fetchWithRetry(getApiUrl(`/api/work-management/bulk-transfer`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ issue_keys, to_account_id, handover_note: handover_note || "", transferred_by }),
+    body: JSON.stringify({ issue_keys, to_account_id, handover_note: handover_note || "", transferred_by, sync_to_jira }),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
@@ -1280,11 +1287,16 @@ export async function assignUnassignedTicketsToNeel(project: string = "ALL") {
 }
 
 
-export async function aiRebalanceWorkload(prompt: string, project: string = "TCN", auto_execute: boolean = false) {
+export async function aiRebalanceWorkload(
+  prompt: string,
+  project: string = "TCN",
+  auto_execute: boolean = false,
+  sync_to_jira: boolean = true
+) {
   const res = await fetchWithRetry(getApiUrl(`/api/work-management/ai-rebalance`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, project, auto_execute }),
+    body: JSON.stringify({ prompt, project, auto_execute, sync_to_jira }),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

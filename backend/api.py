@@ -4455,6 +4455,7 @@ class TicketTransferRequest(BaseModel):
     to_account_id: str
     handover_note: str = ""
     transferred_by: str | None = None
+    sync_to_jira: bool = True
 
 
 class BulkTicketTransferRequest(BaseModel):
@@ -4462,13 +4463,14 @@ class BulkTicketTransferRequest(BaseModel):
     to_account_id: str
     handover_note: str = ""
     transferred_by: str | None = None
+    sync_to_jira: bool = True
 
 
 class AiRebalanceRequest(BaseModel):
     prompt: str
     project: str = "TCN"
     auto_execute: bool = False
-
+    sync_to_jira: bool = True
 
 @app.get("/api/work-management/dashboard")
 def get_work_management_dashboard_endpoint(
@@ -4592,6 +4594,7 @@ def transfer_jira_ticket_endpoint(
         to_account_id=body.to_account_id,
         handover_note=body.handover_note,
         transferred_by=operator,
+        sync_to_jira=body.sync_to_jira,
     )
     return _json_safe(result)
 
@@ -4614,6 +4617,7 @@ def bulk_transfer_jira_tickets_endpoint(
         to_account_id=body.to_account_id,
         handover_note=body.handover_note,
         transferred_by=operator,
+        sync_to_jira=body.sync_to_jira,
     )
     return _json_safe(result)
 
@@ -4650,6 +4654,7 @@ def ai_rebalance_workload_endpoint(
         project=body.project,
         auto_execute=body.auto_execute,
         operator_name=operator,
+        sync_to_jira=body.sync_to_jira,
     )
     return _json_safe(result)
 

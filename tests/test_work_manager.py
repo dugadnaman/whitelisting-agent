@@ -602,3 +602,81 @@ def test_configurable_work_allocation_and_rebalancing():
     finally:
         set_member_allocation_status("Dnyanesh Khawas", True)
         app.dependency_overrides.clear()
+def test_jira_reassignment_confirmation_sync_or_skip():
+    """Verify users can choose to confirm Jira update (sync_to_jira=True) or skip Jira update (sync_to_jira=False)."""
+    from unittest.mock import patch, MagicMock
+    from work_manager import (
+        transfer_jira_ticket,
+        bulk_transfer_jira_tickets,
+        get_all_operational_assignments,
+        clear_operational_assignment,
+    )
+
+    try:
+        # 1. Skip Jira update (sync_to_jira=False) even for a user with a Jira seat (Neel Shah)
+        with patch("work_manager.requests.put") as mock_put:
+            res_skip = transfer_jira_ticket(
+                issue_key="SWCM-555",
+                to_account_id="712020:fae946f9-8472-455a-9d27-6d773ecfb48d",
+                handover_note="Internal handover only",
+                transferred_by="Mrunalini Gawande",
+                sync_to_jira=False,
+            )
+            assert res_skip["ok"] is True
+            assert res_skip["sync_to_jira"] is False
+            assert res_skip["jira_updated"] is False
+            assert res_skip["virtual_assignment"] is True
+            assert res_skip["assignee_name"] == "Neel Shah"
+            assert not mock_put.called
+
+            # Verify saved internally in operational_assignments
+            ops = get_all_operational_assignments()
+            assert "SWCM-555" in ops
+            assert ops["SWCM-555"]["operational_assignee"] == "Neel Shah"
+
+        # 2. Confirm Jira update (sync_to_jira=True) for Neel Shah
+        with (
+            patch("work_manager.get_jira_credentials", return_value=("https://example.atlassian.net", "u", "t")),
+            patch("work_manager.get_jira_auth_headers", return_value={"Authorization": "Basic xxx"}),
+            patch("work_manager.requests.put") as mock_put,
+        ):
+            mock_resp = MagicMock()
+            mock_resp.status_code = 204
+            mock_put.return_value = mock_resp
+
+            res_confirm = transfer_jira_ticket(
+                issue_key="SWCM-555",
+                to_account_id="712020:fae946f9-8472-455a-9d27-6d773ecfb48d",
+                handover_note="Confirmed Jira transfer",
+                transferred_by="Mrunalini Gawande",
+                sync_to_jira=True,
+            )
+            assert res_confirm["ok"] is True
+            assert res_confirm["sync_to_jira"] is True
+            assert res_confirm["jira_updated"] is True
+            assert res_confirm["virtual_assignment"] is False
+            assert mock_put.called
+
+            # Verify local virtual assignment was cleared since it synced to Jira
+            ops_after = get_all_operational_assignments()
+            assert "SWCM-555" not in ops_after
+
+        # 3. Bulk transfer with sync_to_jira=False
+        with patch("work_manager.requests.put") as mock_put:
+            res_bulk = bulk_transfer_jira_tickets(
+                issue_keys=["SWCM-556", "SWCM-557"],
+                to_account_id="712020:fae946f9-8472-455a-9d27-6d773ecfb48d",
+                handover_note="Bulk internal assignment",
+                transferred_by="Dnyanesh Khawas",
+                sync_to_jira=False,
+            )
+            assert res_bulk["ok"] is True
+            assert res_bulk["sync_to_jira"] is False
+            assert res_bulk["jira_updated"] is False
+            assert res_bulk["transferred_count"] == 2
+            assert not mock_put.called
+
+    finally:
+        clear_operational_assignment("SWCM-555")
+        clear_operational_assignment("SWCM-556")
+        clear_operational_assignment("SWCM-557")
