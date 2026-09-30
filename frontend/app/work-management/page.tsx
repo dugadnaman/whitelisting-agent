@@ -12,6 +12,7 @@ import {
   fetchAlertSchedulerStatus,
   toggleAlertScheduler,
   assignUnassignedTicketsToNeel,
+  updateAllocationSetting,
 } from '@/lib/api';
 import type {
   AlertEmailDraft,
@@ -35,6 +36,7 @@ type JiraUserItem = {
   due_tomorrow_count: number;
   due_day_after_count: number;
   overdue_count: number;
+  is_active_for_allocation?: boolean;
 };
 
 type OperatorVelocityItem = {
@@ -191,6 +193,29 @@ export default function WorkManagementPage() {
   const [aiPrompt, setAiPrompt] = useState<string>('');
   const [aiProposals, setAiProposals] = useState<TransferProposal[]>([]);
   const [aiReasoning, setAiReasoning] = useState<string | null>(null);
+  const [updatingAllocation, setUpdatingAllocation] = useState<Record<string, boolean>>({});
+
+  const handleToggleAllocation = async (e: React.MouseEvent, user: JiraUserItem) => {
+    e.stopPropagation();
+    const currentActive = user.is_active_for_allocation ?? true;
+    const newActive = !currentActive;
+    try {
+      setUpdatingAllocation(prev => ({ ...prev, [user.name]: true }));
+      await updateAllocationSetting(user.name, newActive);
+      if (data) {
+        setData({
+          ...data,
+          assignees: data.assignees.map(a =>
+            a.name === user.name ? { ...a, is_active_for_allocation: newActive } : a
+          )
+        });
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update allocation setting');
+    } finally {
+      setUpdatingAllocation(prev => ({ ...prev, [user.name]: false }));
+    }
+  };
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [autoExecute, setAutoExecute] = useState<boolean>(false);
   const [showAiDrawer, setShowAiDrawer] = useState<boolean>(false);
@@ -1265,6 +1290,9 @@ export default function WorkManagementPage() {
                   <span className="px-2.5 py-1 rounded-lg bg-gray-100 font-semibold text-gray-700">
                     Total Operators: <strong>{data.assignees.length}</strong>
                   </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
+                    Active for Allocation: <strong>{data.assignees.filter(u => u.is_active_for_allocation ?? true).length} / {data.assignees.length}</strong>
+                  </span>
                   <span className={`px-2.5 py-1 rounded-lg font-semibold ${overloadedCount > 0 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-600'}`}>
                     Overloaded (≥8): <strong>{overloadedCount}</strong>
                   </span>
@@ -1295,6 +1323,7 @@ export default function WorkManagementPage() {
                       <th className="py-2.5 px-3 text-emerald-700">Completed</th>
                       <th className="py-2.5 px-3">Handled</th>
                       <th className="py-2.5 px-4">Completion %</th>
+                      <th className="py-2.5 px-3">Allocation</th>
                       <th className="py-2.5 px-4 text-right">Quick Action</th>
                     </tr>
                   </thead>
@@ -1434,8 +1463,27 @@ export default function WorkManagementPage() {
                               <span className="text-gray-400">—</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleAllocation(e, u)}
+                              disabled={updatingAllocation[u.name]}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                                (u.is_active_for_allocation ?? true)
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                  : 'bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200'
+                              }`}
+                              title={(u.is_active_for_allocation ?? true) ? 'Click to exclude from ticket assignment' : 'Click to include in ticket assignment'}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                (u.is_active_for_allocation ?? true) ? 'bg-emerald-500' : 'bg-gray-400'
+                              }`} />
+                              <span>{(u.is_active_for_allocation ?? true) ? 'Active' : 'Excluded'}</span>
+                            </button>
+                          </td>
+
+                          <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1.5">
                               <button
                                 onClick={() => setSelectedAssignee(isSelected ? 'ALL' : u.name)}
                                 className={`px-2 py-1 rounded text-[11px] font-bold transition-all ${
@@ -1447,13 +1495,26 @@ export default function WorkManagementPage() {
                               >
                                 {isSelected ? 'Clear' : 'Filter'}
                               </button>
+                              {!(u.is_active_for_allocation ?? true) && u.open_tickets_count > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAiPrompt(`Rebalance all active tickets from ${u.name} (excluded from allocation) to active team members`);
+                                    setShowAiDrawer(true);
+                                  }}
+                                  className="px-2 py-1 rounded text-[11px] font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-all flex items-center gap-1 cursor-pointer"
+                                  title="Offload tickets from this excluded member"
+                                >
+                                  <span>⚡</span> Offload
+                                </button>
+                              )}
                               {isOverloaded && (
                                 <button
                                   onClick={() => {
                                     setAiPrompt(`Relieve ${u.name} by reassigning tickets to available peers and interns`);
                                     setShowAiDrawer(true);
                                   }}
-                                  className="px-2 py-1 rounded text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all flex items-center gap-1"
+                                  className="px-2 py-1 rounded text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all flex items-center gap-1 cursor-pointer"
                                   title="Open AI rebalancing for this operator"
                                 >
                                   <span>⚡</span> Rebalance
@@ -2387,7 +2448,7 @@ export default function WorkManagementPage() {
                 >
                   {data?.assignees.map((a) => (
                     <option key={a.account_id} value={a.account_id}>
-                      {a.name} ({a.role}) {a.name === 'Soham Das' || a.name === 'Aadya' ? '⚡ Operational Queue' : ''} — {a.open_tickets_count} open tickets
+                      {a.name} ({a.role}) {(a.is_active_for_allocation ?? true) ? '🟢 Active' : '⏸️ Excluded'} {a.name === 'Soham Das' || a.name === 'Aadya' ? '⚡ Operational Queue' : ''} — {a.open_tickets_count} open tickets
                     </option>
                   ))}
                 </select>
@@ -2465,7 +2526,7 @@ export default function WorkManagementPage() {
                 >
                   {data?.assignees.map((a) => (
                     <option key={a.account_id} value={a.account_id}>
-                      {a.name} ({a.role}) {a.name === 'Soham Das' || a.name === 'Aadya' ? '⚡ Operational Queue' : ''} — {a.open_tickets_count} open tickets
+                      {a.name} ({a.role}) {(a.is_active_for_allocation ?? true) ? '🟢 Active' : '⏸️ Excluded'} {a.name === 'Soham Das' || a.name === 'Aadya' ? '⚡ Operational Queue' : ''} — {a.open_tickets_count} open tickets
                     </option>
                   ))}
                 </select>

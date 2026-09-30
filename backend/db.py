@@ -40,6 +40,7 @@ VALID_TABLES: set[str] = {
     "ingestion_jobs",
     "job_tasks",
     "operational_assignments",
+    "team_allocation_settings",
     "sms_submissions",
     "sms_dlrs",
     "sms_clicks",
@@ -315,6 +316,13 @@ SQLITE_SCHEMA_DDL = [
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS team_allocation_settings (
+        member_name TEXT PRIMARY KEY,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS sms_submissions (
         id TEXT PRIMARY KEY,
         client TEXT NOT NULL DEFAULT 'bajaj',
@@ -472,6 +480,13 @@ POSTGRES_SCHEMA_DDL = [
     );
     """,
     """
+    CREATE TABLE IF NOT EXISTS team_allocation_settings (
+        member_name VARCHAR(100) PRIMARY KEY,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at VARCHAR(100) NOT NULL
+    );
+    """,
+    """
     CREATE TABLE IF NOT EXISTS sms_submissions (
         id VARCHAR(255) PRIMARY KEY,
         client VARCHAR(50) NOT NULL DEFAULT 'bajaj',
@@ -593,6 +608,7 @@ def migrate_sqlite_to_postgres(
         "ingestion_jobs",
         "job_tasks",
         "operational_assignments",
+        "team_allocation_settings",
         "sms_submissions",
         "sms_dlrs",
         "sms_clicks",

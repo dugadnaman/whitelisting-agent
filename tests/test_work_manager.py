@@ -521,3 +521,84 @@ def test_transfer_authorization_policy():
             assert resp_auth.status_code == 200
     finally:
         app.dependency_overrides.clear()
+def test_configurable_work_allocation_and_rebalancing():
+    """Verify team members can be included/excluded from work allocation, and rebalancing respects it."""
+    from fastapi.testclient import TestClient
+    from api import app, get_current_user
+    from work_manager import (
+        get_all_allocation_settings,
+        set_member_allocation_status,
+        fetch_assignable_jira_users,
+        ai_rebalance_workload,
+        _rule_based_rebalance,
+    )
+
+    try:
+        # 1. Default state: all members active
+        settings = get_all_allocation_settings()
+        assert settings.get("Dnyanesh Khawas") is True
+        assert settings.get("Neel Shah") is True
+
+        # 2. Exclude Dnyanesh Khawas from allocation
+        res = set_member_allocation_status("Dnyanesh Khawas", False)
+        assert res["ok"] is True
+        assert res["is_active_for_allocation"] is False
+
+        # Verify fetch_assignable_jira_users reflects this
+        users = fetch_assignable_jira_users()
+        dnyanesh = next(u for u in users if u.name == "Dnyanesh Khawas")
+        neel = next(u for u in users if u.name == "Neel Shah")
+        assert dnyanesh.is_active_for_allocation is False
+        assert neel.is_active_for_allocation is True
+
+        # 3. Rule-based rebalancing test: Dnyanesh must NOT be a recipient
+        mock_pending = [
+            {"key": "TCN-1", "summary": "Task 1", "assignee_name": "Neel Shah", "status_category": "PENDING"},
+            {"key": "TCN-2", "summary": "Task 2", "assignee_name": "Neel Shah", "status_category": "PENDING"},
+        ]
+        mock_assignees = [u.to_dict() for u in users]
+        rebal_res = _rule_based_rebalance(
+            context_prompt="Neel is overloaded, rebalance tickets",
+            pending_items=mock_pending,
+            assignees=mock_assignees,
+            auto_execute=False,
+            operator_name="Test Operator",
+        )
+        assert rebal_res["ok"] is True
+        for prop in rebal_res["proposals"]:
+            # Excluded member Dnyanesh must NEVER be chosen as target assignee!
+            assert prop["target_assignee"] != "Dnyanesh Khawas"
+
+        # 4. Test API endpoints
+        client = TestClient(app)
+        app.dependency_overrides[get_current_user] = lambda: {
+            "email": "neel.shah@attributics.com",
+            "name": "Neel Shah",
+            "role": "admin",
+        }
+
+        # GET allocation settings
+        get_res = client.get("/api/work-management/allocation-settings")
+        assert get_res.status_code == 200
+        data = get_res.json()
+        assert data["ok"] is True
+        assert data["settings"]["Dnyanesh Khawas"] is False
+
+        # POST allocation settings: reactivate Dnyanesh
+        post_res = client.post(
+            "/api/work-management/allocation-settings",
+            json={"member_name": "Dnyanesh Khawas", "is_active": True},
+        )
+        assert post_res.status_code == 200
+        post_data = post_res.json()
+        assert post_data["ok"] is True
+        assert post_data["is_active_for_allocation"] is True
+
+        # Verify reactivated
+        updated_users = fetch_assignable_jira_users()
+        dnyanesh_reactivated = next(u for u in updated_users if u.name == "Dnyanesh Khawas")
+        assert dnyanesh_reactivated.is_active_for_allocation is True
+
+    finally:
+        set_member_allocation_status("Dnyanesh Khawas", True)
+        app.dependency_overrides.clear()

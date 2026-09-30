@@ -149,6 +149,45 @@ def clear_operational_assignment(issue_key: str) -> None:
     except Exception as exc:
         logger.warning("Could not delete operational assignment for %s: %s", clean_key, exc)
 
+def get_all_allocation_settings() -> dict[str, bool]:
+    """Return dictionary of member_name -> is_active_for_allocation (defaulting to True)."""
+    settings: dict[str, bool] = {info["name"]: True for info in TEAM_MEMBERS_WHITELIST.values()}
+    settings["Aadya"] = True
+    try:
+        with _get_db() as conn:
+            rows = conn.execute("SELECT member_name, is_active FROM team_allocation_settings").fetchall()
+            for r in rows:
+                name = r["member_name"]
+                is_active = bool(r["is_active"])
+                settings[name] = is_active
+                if name.lower() == "aadya trivedi":
+                    settings["Aadya"] = is_active
+                elif name.lower() == "aadya":
+                    settings["Aadya Trivedi"] = is_active
+    except Exception as exc:
+        logger.debug("Could not read team_allocation_settings: %s", exc)
+    return settings
+
+
+def set_member_allocation_status(member_name: str, is_active: bool) -> dict[str, Any]:
+    """Toggle a team member's eligibility for ticket assignment and workload distribution."""
+    clean_name = member_name.strip()
+    now_str = datetime.now(UTC).isoformat()
+    with _get_db() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO team_allocation_settings
+            (member_name, is_active, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (clean_name, bool(is_active), now_str),
+        )
+    return {
+        "ok": True,
+        "member_name": clean_name,
+        "is_active_for_allocation": is_active,
+        "updated_at": now_str,
+    }
 
 TEAM_MEMBER_ROLES: dict[str, str] = {info["name"]: info["role"] for info in TEAM_MEMBERS_WHITELIST.values()}
 TEAM_MEMBER_ROLES["Aalya Mulla"] = "Associate / Intern"
@@ -183,7 +222,7 @@ class JiraUser:
     due_tomorrow_count: int = 0
     due_day_after_count: int = 0
     overdue_count: int = 0
-
+    is_active_for_allocation: bool = True
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -333,14 +372,18 @@ def infer_channel_from_summary(summary: str) -> str:
 
 def fetch_assignable_jira_users(project: str = "TCN") -> list[JiraUser]:
     """Fetch assignable users strictly scoped to the active team members."""
+    allocation_settings = get_all_allocation_settings()
     users_list: list[JiraUser] = []
     for info in TEAM_MEMBERS_WHITELIST.values():
+        name = info["name"]
+        is_active = allocation_settings.get(name, allocation_settings.get(name.split()[0], True))
         users_list.append(
             JiraUser(
                 account_id=info["account_id"],
-                name=info["name"],
+                name=name,
                 email=info["email"],
                 role=info["role"],
+                is_active_for_allocation=is_active,
             )
         )
     return users_list
@@ -727,12 +770,21 @@ def assign_unassigned_tickets_to_neel(project: str = "ALL", limit: int = 50) -> 
     transferred = []
     failed = []
 
+    allocation_settings = get_all_allocation_settings()
+    assignable_users = fetch_assignable_jira_users(project=project)
+    active_users = [u for u in assignable_users if u.is_active_for_allocation and u.account_id]
+    target_user = next((u for u in active_users if u.name == NEEL_SHAH_NAME), None)
+    if not target_user and active_users:
+        target_user = min(active_users, key=lambda u: u.open_tickets_count)
+    target_account_id = target_user.account_id if target_user else NEEL_SHAH_ACCOUNT_ID
+    target_name = target_user.name if target_user else NEEL_SHAH_NAME
+
     for key in unassigned_keys:
         try:
             res = transfer_jira_ticket(
                 issue_key=key,
-                to_account_id=NEEL_SHAH_ACCOUNT_ID,
-                handover_note="Auto-assigned unassigned ticket to Neel Shah",
+                to_account_id=target_account_id,
+                handover_note=f"Auto-assigned unassigned ticket to {target_name}",
                 transferred_by="Work Management Auto-Assigner",
             )
             if res.get("ok"):
@@ -740,7 +792,7 @@ def assign_unassigned_tickets_to_neel(project: str = "ALL", limit: int = 50) -> 
             else:
                 failed.append({"key": key, "error": str(res.get("error"))})
         except Exception as exc:
-            logger.error("Failed to assign %s to Neel Shah: %s", key, exc)
+            logger.error("Failed to assign %s to %s: %s", key, target_name, exc)
             failed.append({"key": key, "error": str(exc)})
 
     return {
@@ -750,8 +802,8 @@ def assign_unassigned_tickets_to_neel(project: str = "ALL", limit: int = 50) -> 
         "transferred_keys": transferred,
         "failed_count": len(failed),
         "failed_keys": failed,
-        "target_assignee": NEEL_SHAH_NAME,
-        "message": f"Successfully assigned {len(transferred)} unassigned ticket(s) to Neel Shah in Jira Cloud.",
+        "target_assignee": target_name,
+        "message": f"Successfully assigned {len(transferred)} unassigned ticket(s) to {target_name} in Jira Cloud.",
     }
 
 
@@ -818,17 +870,24 @@ def ai_rebalance_workload(
                 candidate_tickets = [w for w in pending_items if w["assignee_name"] == max_load_op["name"]]
                 src_op = max_load_op["name"]
 
-            # Filter eligible recipients
+            # Filter eligible recipients - ONLY ACTIVE MEMBERS INCLUDED IN ALLOCATION!
+            allocation_settings = get_all_allocation_settings()
+            active_assignees = [
+                a for a in assignees
+                if a.get("is_active_for_allocation", True) and allocation_settings.get(a["name"], True)
+            ]
             if target_grp == "INTERNS":
-                recipients = [a for a in assignees if "Intern" in a["role"]]
+                recipients = [a for a in active_assignees if "Intern" in a["role"] and a["name"] != src_op]
             elif target_grp == "PEERS":
-                recipients = [a for a in assignees if a["role"] == "Core Operator" and a["name"] != src_op]
+                recipients = [a for a in active_assignees if a["role"] == "Core Operator" and a["name"] != src_op]
             else:
-                recipients = [a for a in assignees if a["name"] != src_op and "Stakeholder" not in a["role"]]
+                recipients = [a for a in active_assignees if a["name"] != src_op and "Stakeholder" not in a["role"]]
 
             if not recipients:
-                recipients = [a for a in assignees if a["name"] != src_op]
+                recipients = [a for a in active_assignees if a["name"] != src_op]
 
+            if not recipients:
+                recipients = active_assignees or assignees
             # Rebalance up to 3 tickets to lowest-load recipients
             recipients.sort(key=lambda a: a["open_tickets_count"])
 
@@ -904,8 +963,16 @@ def _rule_based_rebalance(
         src_user = max(assignees, key=lambda a: a["open_tickets_count"])
 
     candidates = [w for w in pending_items if w["assignee_name"] == src_user["name"]]
-    recipients = [a for a in assignees if a["name"] != src_user["name"] and "Stakeholder" not in a["role"]]
-    recipients.sort(key=lambda a: a["open_tickets_count"])
+    allocation_settings = get_all_allocation_settings()
+    active_assignees = [
+        a for a in assignees
+        if a.get("is_active_for_allocation", True) and allocation_settings.get(a["name"], True)
+    ]
+    recipients = [a for a in active_assignees if a["name"] != src_user["name"] and "Stakeholder" not in a["role"]]
+    if not recipients:
+        recipients = [a for a in active_assignees if a["name"] != src_user["name"]]
+    if not recipients:
+        recipients = active_assignees or assignees
 
     for idx, item in enumerate(candidates[:2]):
         target = recipients[idx % len(recipients)]

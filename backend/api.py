@@ -4511,6 +4511,43 @@ def get_work_management_assignees_endpoint(
     users = fetch_assignable_jira_users(project=project)
     return _json_safe([u.to_dict() for u in users])
 
+class TeamAllocationUpdateRequest(BaseModel):
+    member_name: str
+    is_active: bool
+
+
+@app.get("/api/work-management/allocation-settings")
+def get_team_allocation_settings_endpoint(
+    current_user: dict = Depends(get_current_user),
+):
+    """Retrieve team member allocation eligibility settings."""
+    from work_manager import get_all_allocation_settings
+
+    settings = get_all_allocation_settings()
+    return _json_safe({"ok": True, "settings": settings})
+
+
+@app.post("/api/work-management/allocation-settings")
+def update_team_allocation_setting_endpoint(
+    body: TeamAllocationUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update team member allocation eligibility (include/exclude from ticket distribution)."""
+    from work_manager import set_member_allocation_status
+
+    result = set_member_allocation_status(body.member_name, body.is_active)
+    log_activity(
+        user=current_user.get("name", "Operator"),
+        action="TEAM_ALLOCATION_UPDATE",
+        account="tata",
+        channel="all",
+        details={
+            "member_name": body.member_name,
+            "is_active_for_allocation": body.is_active,
+        },
+        status="success",
+    )
+    return _json_safe(result)
 
 def require_transfer_authorization(user: dict[str, Any]) -> None:
     """

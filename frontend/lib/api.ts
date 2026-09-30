@@ -1302,6 +1302,25 @@ export async function fetchTurnaroundAnalytics(project: string = "SWCM", limit: 
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+export async function fetchAllocationSettings(): Promise<Record<string, boolean>> {
+  const res = await fetchWithRetry(getApiUrl("/api/work-management/allocation-settings"));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data = await res.json();
+  return data.settings || {};
+}
+
+export async function updateAllocationSetting(
+  memberName: string,
+  isActive: boolean
+): Promise<{ ok: boolean; member_name: string; is_active_for_allocation: boolean }> {
+  const res = await fetchWithRetry(getApiUrl("/api/work-management/allocation-settings"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ member_name: memberName, is_active: isActive }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
 
 export type TemplateDiscrepancyItem = {
   template_name: string;
