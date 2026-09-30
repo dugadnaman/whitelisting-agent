@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection, fetchMoEngageMcpStatus, saveMoEngageMcpToken, startMoEngageMcpOAuth, testMoEngageMcp } from '@/lib/api';
-import type { Account, Channel, AccountItem, AuthUser, MoEngageMcpStatus } from '@/lib/api';
+import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection } from '@/lib/api';
+import type { Account, Channel, AccountItem, AuthUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
@@ -67,12 +67,6 @@ export default function SettingsPage() {
   const [moeSenderId, setMoeSenderId] = useState('');
   const [moeExpiry, setMoeExpiry] = useState<{ expired?: boolean; remaining_min?: number | null }>({});
   const [moeLoaded, setMoeLoaded] = useState(false);
-  const [mcpStatus, setMcpStatus] = useState<MoEngageMcpStatus | null>(null);
-  const [mcpAccessToken, setMcpAccessToken] = useState('');
-  const [mcpUrl, setMcpUrl] = useState('https://mcp.moengage.com');
-  const [mcpTesting, setMcpTesting] = useState(false);
-  const [mcpTools, setMcpTools] = useState<string[]>([]);
-  const [mcpConnecting, setMcpConnecting] = useState(false);
   // Load MoEngage credentials for the selected account
   useEffect(() => {
     let ignore = false;
@@ -89,30 +83,8 @@ export default function SettingsPage() {
       } catch {
         setMoeLoaded(true);
       }
-      try {
-        const st = await fetchMoEngageMcpStatus(selectedAccount);
-        if (ignore) return;
-        setMcpStatus(st);
-        setMcpUrl(st.mcp_url || 'https://mcp.moengage.com');
-      } catch {}
     }
     loadMoEngage();
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('mcp_connected') === '1') {
-        setShowMoEngage(true);
-        setBanner({
-          type: 'success',
-          message: 'Connected to MoEngage MCP Server (https://mcp.moengage.com) via OAuth 2.0 (30-day session)!',
-        });
-      } else if (params.get('mcp_error')) {
-        setShowMoEngage(true);
-        setBanner({
-          type: 'error',
-          message: `MoEngage MCP OAuth error: ${params.get('mcp_error')}`,
-        });
-      }
-    }
     return () => { ignore = true; };
   }, [selectedAccount]);
 
@@ -832,170 +804,6 @@ export default function SettingsPage() {
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-6 space-y-5">
         {showMoEngage ? (
           <>
-            {/* MoEngage MCP Server (https://mcp.moengage.com) */}
-            <div className="p-5 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-2">
-                    <span>🔌 MoEngage MCP Server Connector</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                      30-Day OAuth Session
-                    </span>
-                    {mcpStatus?.has_token && (
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        ✓ MCP Connected
-                      </span>
-                    )}
-                  </h4>
-                  <p className="text-[11px] text-gray-600 mt-0.5">
-                    Connect directly to <code>https://mcp.moengage.com</code> for campaign search, flow inspection, custom segments, analytics, and Email/Push campaign drafts.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={mcpConnecting}
-                  onClick={async () => {
-                    try {
-                      setMcpConnecting(true);
-                      setBanner(null);
-                      const res = await startMoEngageMcpOAuth(selectedAccount, '/settings');
-                      if (res.authorize_url && typeof window !== 'undefined') {
-                        window.location.href = res.authorize_url;
-                      }
-                    } catch (err) {
-                      setBanner({
-                        type: 'error',
-                        message: err instanceof Error ? err.message : 'Failed to initiate MoEngage MCP OAuth',
-                      });
-                      setMcpConnecting(false);
-                    }
-                  }}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-xs font-semibold rounded-lg shadow-xs transition flex items-center gap-1.5 shrink-0"
-                >
-                  <span>{mcpConnecting ? 'Redirecting to MoEngage...' : '🔗 Authorize MoEngage MCP (OAuth)'}</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                    MCP Server URL
-                  </label>
-                  <input
-                    type="text"
-                    value={mcpUrl}
-                    onChange={(e) => setMcpUrl(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
-                    MCP OAuth / Bearer Token (Optional Override)
-                  </label>
-                  <input
-                    type="password"
-                    value={mcpAccessToken}
-                    onChange={(e) => setMcpAccessToken(e.target.value)}
-                    placeholder={mcpStatus?.has_token ? '•••••••••••••••• (MCP token stored)' : 'Or paste MCP Bearer token directly...'}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="p-3 bg-white rounded-lg border border-gray-200 font-mono text-[11px] text-gray-700 flex items-center justify-between gap-3">
-                <pre className="overflow-x-auto">{`{\n  "mcpServers": {\n    "moengage": {\n      "url": "${mcpUrl}"\n    }\n  }\n}`}</pre>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(
-                      JSON.stringify({ mcpServers: { moengage: { url: mcpUrl } } }, null, 2)
-                    );
-                    setBanner({ type: 'success', message: 'Copied MoEngage MCP JSON config to clipboard.' });
-                  }}
-                  className="px-2.5 py-1 text-[10px] font-sans font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300 shrink-0"
-                >
-                  Copy Config
-                </button>
-              </div>
-
-              {mcpTools.length > 0 && (
-                <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-lg space-y-1.5">
-                  <div className="text-[11px] font-bold text-emerald-900">
-                    ✓ Active MoEngage MCP Tools ({mcpTools.length}):
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {mcpTools.map((t) => (
-                      <span key={t} className="px-2 py-0.5 rounded text-[10px] font-mono bg-white text-emerald-800 border border-emerald-200">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2.5 pt-1">
-                <button
-                  type="button"
-                  disabled={mcpTesting}
-                  onClick={async () => {
-                    try {
-                      setMcpTesting(true);
-                      setBanner(null);
-                      const res = await testMoEngageMcp(selectedAccount, mcpAccessToken.trim() || undefined);
-                      if (res.ok) {
-                        setMcpTools(res.tools || []);
-                        setBanner({
-                          type: 'success',
-                          message: res.message || `Connected to MoEngage MCP (${res.tool_count || 0} tools).`,
-                        });
-                      } else {
-                        setBanner({ type: 'error', message: res.error || 'MoEngage MCP test failed.' });
-                      }
-                    } catch (err) {
-                      setBanner({
-                        type: 'error',
-                        message: err instanceof Error ? err.message : 'MoEngage MCP test failed',
-                      });
-                    } finally {
-                      setMcpTesting(false);
-                    }
-                  }}
-                  className="px-3.5 py-1.5 bg-white hover:bg-gray-50 text-indigo-700 border border-indigo-200 text-xs font-semibold rounded-lg transition"
-                >
-                  {mcpTesting ? 'Testing MCP...' : 'Test MCP Connection'}
-                </button>
-                {mcpAccessToken.trim() && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        setSaving(true);
-                        const st = await saveMoEngageMcpToken(selectedAccount, mcpAccessToken.trim(), undefined, mcpUrl.trim());
-                        setMcpStatus(st);
-                        setMcpAccessToken('');
-                        setBanner({ type: 'success', message: 'Saved MoEngage MCP token.' });
-                      } catch (err) {
-                        setBanner({ type: 'error', message: err instanceof Error ? err.message : 'Failed to save MCP token' });
-                      } finally {
-                        setSaving(false);
-                      }
-                    }}
-                    className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg transition"
-                  >
-                    Save MCP Token
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-2 border-t border-gray-200">
-              <h4 className="text-xs font-bold text-gray-900 mb-1">
-                🔑 MoEngage Dashboard Session (For Karix RCS Template Sync)
-              </h4>
-              <p className="text-[11px] text-gray-500 mb-3">
-                Used by the <strong>Sync to MoEngage</strong> button on RCS template cards to register Karix templates in MoEngage Settings.
-              </p>
-            </div>
             {moeExpiry.expired !== undefined && (
               <div className={`p-3 rounded-lg text-xs font-semibold flex items-center gap-2 border ${
                 moeExpiry.expired
