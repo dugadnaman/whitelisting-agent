@@ -73,6 +73,7 @@ def test_mcp_oauth_dynamic_registration_and_pkce_flow():
     }
 
     with (
+        patch.dict("os.environ", {}, clear=False),
         patch("moengage_mcp.requests.post", return_value=mock_tok_resp),
         patch("moengage_mcp.update_env_vars"),
     ):
@@ -85,7 +86,10 @@ def test_mcp_oauth_dynamic_registration_and_pkce_flow():
 
 def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
     """Verify MCP JSON-RPC client handles initialize, tools/list, and tools/call over SSE."""
-    with patch("moengage_mcp.update_env_vars"):
+    with (
+        patch.dict("os.environ", {}, clear=False),
+        patch("moengage_mcp.update_env_vars"),
+    ):
         save_mcp_tokens(account="tata", access_token="valid_mcp_token")
 
     def fake_post(url, headers=None, json=None, timeout=25):

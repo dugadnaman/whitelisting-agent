@@ -115,6 +115,20 @@ def get_mcp_config(account: str = "tata") -> dict[str, Any]:
         "expires_at": expires_at,
     }
 
+def extract_moe_bearer_from_mcp_token(mcp_token: str | None) -> str:
+    """Extract the embedded MoEngage dashboard JWT (`moe_bearer`) from an MCP OAuth access_token."""
+    clean = (mcp_token or "").strip()
+    if not clean:
+        return ""
+    try:
+        parts = clean.split(".")
+        if len(parts) >= 2:
+            b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(b64))
+            return str(claims.get("moe_bearer") or "").strip()
+    except Exception:
+        pass
+    return ""
 
 def save_mcp_tokens(
     account: str = "tata",
@@ -138,7 +152,12 @@ def save_mcp_tokens(
     if clean_access:
         updates[f"{prefix}_MOENGAGE_MCP_ACCESS_TOKEN"] = clean_access
         updates["MOENGAGE_MCP_ACCESS_TOKEN"] = clean_access
-
+        embedded_moe_bearer = extract_moe_bearer_from_mcp_token(clean_access)
+        if embedded_moe_bearer:
+            updates[f"{prefix}_MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
+            updates["MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
+            updates["TATA_MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
+            updates["TCL_PROMO_MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
     if refresh_token is not None and refresh_token.strip():
         updates[f"{prefix}_MOENGAGE_MCP_REFRESH_TOKEN"] = refresh_token.strip()
         updates["MOENGAGE_MCP_REFRESH_TOKEN"] = refresh_token.strip()
@@ -557,26 +576,46 @@ def call_mcp_tool(
     }
 
 
+def get_or_refresh_moe_bearer(account: str = "tata") -> str:
+    """
+    Return a valid MoEngage dashboard `moe_bearer` token extracted from the 30-day MCP OAuth session,
+    automatically refreshing via `refresh_mcp_access_token` whenever expired.
+    """
+    cfg = get_mcp_config(account)
+    tok = cfg.get("access_token", "")
+    now = int(time.time())
+    exp = cfg.get("expires_at") or 0
+    if tok and exp and now >= (exp - 120) and cfg.get("refresh_token"):
+        refreshed = refresh_mcp_access_token(account)
+        if refreshed:
+            tok = refreshed
+    moe_bearer = extract_moe_bearer_from_mcp_token(tok)
+    if moe_bearer:
+        return moe_bearer
+    if cfg.get("refresh_token"):
+        refreshed = refresh_mcp_access_token(account)
+        if refreshed:
+            return extract_moe_bearer_from_mcp_token(refreshed)
+    return ""
+
+
 def mcp_search_campaigns(
     account: str = "tata",
     query: str | None = None,
     channel: str | None = None,
     status: str | None = None,
-    limit: int = 25,
+    limit: int = 15,
+    page: int = 1,
 ) -> dict[str, Any]:
-    """Search campaigns across channels via MoEngage MCP `search_campaigns` tool."""
-    args: dict[str, Any] = {}
+    """Search campaigns across channels via MoEngage MCP `search_campaigns` tool (max 15/page)."""
+    args: dict[str, Any] = {"page": max(1, page), "limit": min(max(1, limit), 15)}
     if query:
         args["name"] = query
-    # Per MoEngage MCP docs: channel filter accepts Push, Email, SMS, MMS only; omit to include WhatsApp
     if channel and channel.upper() in ("PUSH", "EMAIL", "SMS", "MMS"):
-        args["channel"] = channel.upper()
+        args["channels"] = [channel.upper()]
     if status:
         args["status"] = [s.strip().upper() for s in status.split(",") if s.strip()]
-    if limit:
-        args["limit"] = limit
     return call_mcp_tool("search_campaigns", args, account=account)
-
 
 def mcp_search_flows(
     account: str = "tata",

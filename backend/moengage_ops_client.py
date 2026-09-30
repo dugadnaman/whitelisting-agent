@@ -477,17 +477,17 @@ def fetch_mcp_ops_records(account: str = "tata", default_vertical: str = "TCL") 
         if not status.get("has_token"):
             return []
 
-        camp_res = mcp_search_campaigns(account=account, limit=50)
+        camp_res = mcp_search_campaigns(account=account, limit=15)
         raw_camps = camp_res.get("data")
         camp_list: list[dict[str, Any]] = []
         if isinstance(raw_camps, list):
             camp_list = [c for c in raw_camps if isinstance(c, dict)]
         elif isinstance(raw_camps, dict):
+            inner_data = raw_camps.get("data") if isinstance(raw_camps.get("data"), dict) else raw_camps
             for key in ("campaigns", "data", "items", "results"):
-                if isinstance(raw_camps.get(key), list):
-                    camp_list = [c for c in raw_camps[key] if isinstance(c, dict)]
+                if isinstance(inner_data.get(key), list):
+                    camp_list = [c for c in inner_data[key] if isinstance(c, dict)]
                     break
-
         for c in camp_list:
             name = str(
                 c.get("campaign_name")
@@ -537,11 +537,11 @@ def fetch_mcp_ops_records(account: str = "tata", default_vertical: str = "TCL") 
         if isinstance(raw_flows, list):
             flow_list = [f for f in raw_flows if isinstance(f, dict)]
         elif isinstance(raw_flows, dict):
+            inner_flows = raw_flows.get("data") if isinstance(raw_flows.get("data"), dict) else raw_flows
             for key in ("flows", "data", "items", "results"):
-                if isinstance(raw_flows.get(key), list):
-                    flow_list = [f for f in raw_flows[key] if isinstance(f, dict)]
+                if isinstance(inner_flows.get(key), list):
+                    flow_list = [f for f in inner_flows[key] if isinstance(f, dict)]
                     break
-
         for f in flow_list:
             name = str(f.get("name") or f.get("flow_name") or "Unnamed Flow").strip()
             f_status = str(f.get("status") or "Active").title()

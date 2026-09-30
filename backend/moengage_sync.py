@@ -48,6 +48,15 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
         or ""
     ).strip()
 
+    if not token or decode_moengage_token_expiry(token).get("expired") is True:
+        try:
+            from moengage_mcp import get_or_refresh_moe_bearer
+
+            mcp_bearer = get_or_refresh_moe_bearer(account)
+            if mcp_bearer:
+                token = mcp_bearer
+        except Exception:
+            pass
     cookie = os.environ.get(f"{prefix}_MOENGAGE_COOKIE") or os.environ.get("MOENGAGE_COOKIE") or ""
 
     sender_id = (
