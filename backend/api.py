@@ -4575,6 +4575,197 @@ async def upload_moengage_export_endpoint(
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+class MoEngageMcpTokenRequest(BaseModel):
+    account: str = "tata"
+    access_token: str = ""
+    refresh_token: str | None = None
+    mcp_url: str | None = None
+
+
+class MoEngageMcpOAuthStartRequest(BaseModel):
+    account: str = "tata"
+    redirect_uri: str | None = None
+    return_to: str = "/settings"
+
+
+class MoEngageMcpToolCallRequest(BaseModel):
+    account: str = "tata"
+    tool_name: str
+    arguments: dict = {}
+
+
+@app.get("/api/moengage/mcp/status")
+def get_moengage_mcp_status_endpoint(
+    account: str = Query("tata"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get MoEngage MCP server URL, OAuth status, and generic MCP config JSON."""
+    from moengage_mcp import get_mcp_status
+
+    return _json_safe(get_mcp_status(account))
+
+
+@app.post("/api/moengage/mcp/token")
+def save_moengage_mcp_token_endpoint(
+    body: MoEngageMcpTokenRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Save MoEngage MCP access/refresh token or server URL."""
+    from moengage_mcp import save_mcp_tokens
+
+    status = save_mcp_tokens(
+        account=body.account,
+        access_token=body.access_token,
+        refresh_token=body.refresh_token,
+        mcp_url=body.mcp_url,
+    )
+    return _json_safe({"ok": True, **status})
+
+
+@app.post("/api/moengage/mcp/oauth/start")
+def start_moengage_mcp_oauth_endpoint(
+    body: MoEngageMcpOAuthStartRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Initiate OAuth 2.0 + PKCE flow against https://moeauth.moengage.com for https://mcp.moengage.com."""
+    from moengage_mcp import start_mcp_oauth
+
+    redirect_uri = body.redirect_uri
+    if not redirect_uri:
+        origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
+        redirect_uri = f"{origin.rstrip('/')}/api/moengage/mcp/oauth/callback"
+
+    try:
+        res = start_mcp_oauth(
+            redirect_uri=redirect_uri,
+            account=body.account,
+            return_to=body.return_to,
+        )
+        return _json_safe(res)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/moengage/mcp/oauth/callback")
+def moengage_mcp_oauth_callback_endpoint(
+    code: str | None = Query(None),
+    state: str | None = Query(None),
+    error: str | None = Query(None),
+    error_description: str | None = Query(None),
+):
+    """Handle OAuth 2.0 callback from https://moeauth.moengage.com and redirect back to the UI."""
+    from fastapi.responses import RedirectResponse
+    from moengage_mcp import complete_mcp_oauth
+
+    if error:
+        msg = urllib.parse.quote(error_description or error)
+        return RedirectResponse(url=f"/settings?mcp_error={msg}")
+
+    if not code or not state:
+        return RedirectResponse(url="/settings?mcp_error=Missing+authorization+code+or+state")
+
+    try:
+        res = complete_mcp_oauth(code=code, state=state)
+        return_to = res.get("return_to") or "/settings"
+        sep = "&" if "?" in return_to else "?"
+        return RedirectResponse(url=f"{return_to}{sep}mcp_connected=1")
+    except Exception as exc:
+        msg = urllib.parse.quote(str(exc))
+        return RedirectResponse(url=f"/settings?mcp_error={msg}")
+
+
+@app.post("/api/moengage/mcp/test")
+def test_moengage_mcp_endpoint(
+    account: str = Query("tata"),
+    token: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Test connectivity with https://mcp.moengage.com and list available tools."""
+    from moengage_mcp import test_mcp_connection
+
+    return _json_safe(test_mcp_connection(account=account, token_override=token))
+
+
+@app.get("/api/moengage/mcp/tools")
+def list_moengage_mcp_tools_endpoint(
+    account: str = Query("tata"),
+    current_user: dict = Depends(get_current_user),
+):
+    """List all tools exposed by https://mcp.moengage.com for the authenticated workspace."""
+    from moengage_mcp import list_mcp_tools
+
+    try:
+        tools = list_mcp_tools(account=account)
+        return _json_safe({"ok": True, "tools": tools})
+    except Exception as exc:
+        return _json_safe({"ok": False, "error": str(exc), "tools": []})
+
+
+@app.post("/api/moengage/mcp/call")
+def call_moengage_mcp_tool_endpoint(
+    body: MoEngageMcpToolCallRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Call any tool on https://mcp.moengage.com (e.g. search_campaigns, list_segments, create_campaign_draft)."""
+    from moengage_mcp import call_mcp_tool
+
+    try:
+        res = call_mcp_tool(body.tool_name, body.arguments, account=body.account)
+        return _json_safe(res)
+    except Exception as exc:
+        return _json_safe({"ok": False, "tool": body.tool_name, "error": str(exc)})
+
+
+@app.get("/api/moengage/mcp/campaigns")
+def search_moengage_mcp_campaigns_endpoint(
+    account: str = Query("tata"),
+    query: str | None = Query(None),
+    channel: str | None = Query(None),
+    status: str | None = Query(None),
+    limit: int = Query(25),
+    current_user: dict = Depends(get_current_user),
+):
+    """Search campaigns across channels via MoEngage MCP `search_campaigns`."""
+    from moengage_mcp import mcp_search_campaigns
+
+    try:
+        return _json_safe(mcp_search_campaigns(account=account, query=query, channel=channel, status=status, limit=limit))
+    except Exception as exc:
+        return _json_safe({"ok": False, "error": str(exc)})
+
+
+@app.get("/api/moengage/mcp/flows")
+def search_moengage_mcp_flows_endpoint(
+    account: str = Query("tata"),
+    query: str | None = Query(None),
+    status: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Search flows via MoEngage MCP `search_flows`."""
+    from moengage_mcp import mcp_search_flows
+
+    try:
+        return _json_safe(mcp_search_flows(account=account, query=query, status=status))
+    except Exception as exc:
+        return _json_safe({"ok": False, "error": str(exc)})
+
+
+@app.get("/api/moengage/mcp/segments")
+def list_moengage_mcp_segments_endpoint(
+    account: str = Query("tata"),
+    name: str | None = Query(None),
+    page: int = Query(1),
+    page_size: int = Query(20),
+    current_user: dict = Depends(get_current_user),
+):
+    """Browse segments via MoEngage MCP `list_segments`."""
+    from moengage_mcp import mcp_list_segments
+
+    try:
+        return _json_safe(mcp_list_segments(account=account, name=name, page=page, page_size=page_size))
+    except Exception as exc:
+        return _json_safe({"ok": False, "error": str(exc)})
 class TicketTransferRequest(BaseModel):
     issue_key: str
     to_account_id: str

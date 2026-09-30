@@ -7,6 +7,8 @@ import {
   fetchMoEngageWorkspaces,
   updateMoEngageWorkspace,
   uploadMoEngageExportFile,
+  fetchMoEngageMcpStatus,
+  startMoEngageMcpOAuth,
 } from '@/lib/api';
 
 type ChannelCounts = {
@@ -69,6 +71,8 @@ export default function MoEngageOpsPage() {
   const [savingWs, setSavingWs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [mcpConnected, setMcpConnected] = useState(false);
+  const [mcpConnecting, setMcpConnecting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,8 +122,10 @@ export default function MoEngageOpsPage() {
 
   useEffect(() => {
     loadDashboard();
+    fetchMoEngageMcpStatus('tata')
+      .then((st) => setMcpConnected(Boolean(st.has_token && !st.expired)))
+      .catch(() => {});
   }, [loadDashboard]);
-
   const handleSync = async () => {
     try {
       setSyncing(true);
@@ -176,15 +182,38 @@ export default function MoEngageOpsPage() {
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">MoEngage Operations Dashboard</h1>
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
               <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              Live API
+              {mcpConnected ? 'MCP + Live API' : 'Live API'}
             </span>
+            {mcpConnected && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                🔌 mcp.moengage.com Connected
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-500 mt-1">
-            Campaigns, flows, and flow nodes built by Attributics across Tata Capital verticals.
+            Campaigns, flows, and flow nodes built by Attributics across Tata Capital verticals (via MoEngage MCP &amp; API).
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={async () => {
+              try {
+                setMcpConnecting(true);
+                const res = await startMoEngageMcpOAuth('tata', '/moengage-ops');
+                if (res.authorize_url && typeof window !== 'undefined') {
+                  window.location.href = res.authorize_url;
+                }
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Failed to connect MoEngage MCP');
+                setMcpConnecting(false);
+              }
+            }}
+            disabled={mcpConnecting}
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 shadow-sm transition-all"
+          >
+            <span>🔌 {mcpConnecting ? 'Connecting MCP...' : mcpConnected ? 'Reconnect MCP' : 'Connect MoEngage MCP'}</span>
+          </button>
           <button
             onClick={openWorkspaces}
             className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-all"

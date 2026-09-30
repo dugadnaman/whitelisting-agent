@@ -467,10 +467,125 @@ def fetch_workspace_flows(
     return records
 
 
+def fetch_mcp_ops_records(account: str = "tata", default_vertical: str = "TCL") -> list[NormalizedOpsRecord]:
+    """Fetch campaigns and flows via the MoEngage MCP Server (`https://mcp.moengage.com`) when connected."""
+    records: list[NormalizedOpsRecord] = []
+    try:
+        from moengage_mcp import get_mcp_status, mcp_search_campaigns, mcp_search_flows
+
+        status = get_mcp_status(account)
+        if not status.get("has_token"):
+            return []
+
+        camp_res = mcp_search_campaigns(account=account, limit=50)
+        raw_camps = camp_res.get("data")
+        camp_list: list[dict[str, Any]] = []
+        if isinstance(raw_camps, list):
+            camp_list = [c for c in raw_camps if isinstance(c, dict)]
+        elif isinstance(raw_camps, dict):
+            for key in ("campaigns", "data", "items", "results"):
+                if isinstance(raw_camps.get(key), list):
+                    camp_list = [c for c in raw_camps[key] if isinstance(c, dict)]
+                    break
+
+        for c in camp_list:
+            name = str(
+                c.get("campaign_name")
+                or c.get("name")
+                or (c.get("basic_details") or {}).get("name")
+                or "Unnamed Campaign"
+            ).strip()
+            c_by = str(c.get("created_by") or c.get("author") or "").strip()
+            raw_chan = str(c.get("channel") or "")
+            chan = infer_channel_from_name_or_raw(raw_chan, name=name)
+            start_time = (
+                c.get("campaign_start_time")
+                or c.get("created_at")
+                or c.get("updated_at")
+                or datetime.now(UTC).isoformat()
+            )
+            try:
+                dt = datetime.fromisoformat(str(start_time).split(".")[0].replace("Z", "+00:00")).date()
+            except Exception:
+                dt = datetime.now(UTC).date()
+
+            is_test = _is_test_campaign(name)
+            is_attributics = ("@attributics.com" in c_by.lower()) if c_by else True
+            vertical = _infer_vertical_from_name(name, default_vertical)
+            in_scope = is_attributics and not is_test
+
+            records.append(
+                NormalizedOpsRecord(
+                    vertical=vertical,
+                    type="Campaign",
+                    channel=chan,
+                    date=dt.isoformat(),
+                    week_start=_compute_week_start(dt),
+                    month=dt.strftime("%Y-%m"),
+                    in_scope=in_scope,
+                    is_test=is_test,
+                    name=name,
+                    created_by=c_by,
+                    source=f"{vertical} / MCP",
+                    status=str(c.get("campaign_status") or c.get("status") or "Active"),
+                )
+            )
+
+        flow_res = mcp_search_flows(account=account)
+        raw_flows = flow_res.get("data")
+        flow_list: list[dict[str, Any]] = []
+        if isinstance(raw_flows, list):
+            flow_list = [f for f in raw_flows if isinstance(f, dict)]
+        elif isinstance(raw_flows, dict):
+            for key in ("flows", "data", "items", "results"):
+                if isinstance(raw_flows.get(key), list):
+                    flow_list = [f for f in raw_flows[key] if isinstance(f, dict)]
+                    break
+
+        for f in flow_list:
+            name = str(f.get("name") or f.get("flow_name") or "Unnamed Flow").strip()
+            f_status = str(f.get("status") or "Active").title()
+            c_by = str(f.get("created_by") or "")
+            pub_raw = f.get("published_at") or f.get("created_at") or datetime.now(UTC).isoformat()
+            try:
+                dt = datetime.fromisoformat(str(pub_raw).split(".")[0].replace("Z", "+00:00")).date()
+            except Exception:
+                dt = datetime.now(UTC).date()
+            is_test = _is_test_campaign(name)
+            is_attributics = ("@attributics.com" in c_by.lower()) if c_by else True
+            vertical = _infer_vertical_from_name(name, default_vertical)
+            in_scope = is_attributics and not is_test
+            records.append(
+                NormalizedOpsRecord(
+                    vertical=vertical,
+                    type="Flow",
+                    channel="",
+                    date=dt.isoformat(),
+                    week_start=_compute_week_start(dt),
+                    month=dt.strftime("%Y-%m"),
+                    in_scope=in_scope,
+                    is_test=is_test,
+                    name=name,
+                    created_by=c_by,
+                    source=f"{vertical} / MCP Flow",
+                    status=f_status,
+                    flow_id=str(f.get("flow_id") or f.get("id") or ""),
+                )
+            )
+    except Exception as exc:
+        logger.warning("MoEngage MCP ops sync skipped or failed: %s", exc)
+
+    return records
+
+
 def sync_all_moengage_ops() -> list[NormalizedOpsRecord]:
-    """Fetch all campaigns and flows across all registered workspaces and cache to disk."""
+    """Fetch all campaigns and flows across MoEngage MCP and registered workspaces and cache to disk."""
     configs = load_workspace_configs()
     all_records: list[NormalizedOpsRecord] = []
+
+    mcp_records = fetch_mcp_ops_records()
+    if mcp_records:
+        all_records.extend(mcp_records)
 
     for cfg in configs:
         if not cfg.is_active:
@@ -488,7 +603,6 @@ def sync_all_moengage_ops() -> list[NormalizedOpsRecord]:
         logger.warning("Failed to write %s: %s", CACHE_DATA_PATH, err)
 
     return all_records
-
 
 def load_cached_ops_records() -> list[NormalizedOpsRecord]:
     """Load cached operations records, or trigger sync if cache is empty."""

@@ -1542,3 +1542,97 @@ export async function toggleAlertScheduler(enabled: boolean): Promise<AlertSched
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+export type MoEngageMcpStatus = {
+  account: string;
+  mcp_url: string;
+  has_token: boolean;
+  has_refresh_token: boolean;
+  client_id?: string;
+  expired?: boolean;
+  expires_at?: number | null;
+  remaining_min?: number | null;
+  mcp_config_json?: {
+    mcpServers: {
+      moengage: {
+        url: string;
+      };
+    };
+  };
+};
+
+export async function fetchMoEngageMcpStatus(account: string = 'tata'): Promise<MoEngageMcpStatus> {
+  const qs = new URLSearchParams({ account });
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/mcp/status?${qs.toString()}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function saveMoEngageMcpToken(
+  account: string,
+  accessToken: string,
+  refreshToken?: string,
+  mcpUrl?: string
+): Promise<MoEngageMcpStatus & { ok: boolean }> {
+  const res = await fetchWithRetry(getApiUrl('/api/moengage/mcp/token'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      account,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      mcp_url: mcpUrl,
+    }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function startMoEngageMcpOAuth(
+  account: string = 'tata',
+  returnTo: string = '/settings'
+): Promise<{ ok: boolean; authorize_url: string; client_id: string; state: string }> {
+  const redirectUri =
+    typeof window !== 'undefined' ? `${window.location.origin}/api/moengage/mcp/oauth/callback` : undefined;
+  const res = await fetchWithRetry(getApiUrl('/api/moengage/mcp/oauth/start'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      account,
+      redirect_uri: redirectUri,
+      return_to: returnTo,
+    }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function testMoEngageMcp(
+  account: string = 'tata',
+  token?: string
+): Promise<{ ok: boolean; mcp_url?: string; tool_count?: number; tools?: string[]; message?: string; error?: string }> {
+  const qs = new URLSearchParams({ account });
+  if (token) qs.set('token', token);
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/mcp/test?${qs.toString()}`), {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function callMoEngageMcpTool(
+  toolName: string,
+  args: Record<string, unknown> = {},
+  account: string = 'tata'
+): Promise<{ ok: boolean; tool: string; data?: unknown; text?: string; error?: string }> {
+  const res = await fetchWithRetry(getApiUrl('/api/moengage/mcp/call'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      account,
+      tool_name: toolName,
+      arguments: args,
+    }),
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
