@@ -32,13 +32,35 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _load_db_mcp_creds() -> dict[str, str]:
+    """Load persisted MoEngage MCP credentials from shared PostgreSQL/SQLite DB."""
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT details_json FROM alert_scheduler_runs WHERE slot_key = ?",
+                ("__MOENGAGE_MCP_CREDENTIALS__",),
+            ).fetchone()
+            if row and row["details_json"]:
+                data = json.loads(row["details_json"])
+                if isinstance(data, dict):
+                    for k, v in data.items():
+                        if isinstance(v, str) and v and not os.environ.get(k):
+                            os.environ[k] = v
+                    return data
+    except Exception:
+        pass
+    return {}
+
+
 def update_env_vars(mapping: dict[str, str]) -> None:
-    """Update live os.environ and credentials.json with MoEngage MCP keys."""
+    """Update live os.environ, credentials.json, and shared PostgreSQL DB with MoEngage MCP keys."""
     for k, v in mapping.items():
         os.environ[k] = v
+    saved_creds: dict[str, Any] = {}
     try:
         cred_json_path = Path("credentials.json")
-        saved_creds: dict[str, Any] = {}
         if cred_json_path.exists():
             try:
                 saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
@@ -48,7 +70,28 @@ def update_env_vars(mapping: dict[str, str]) -> None:
         cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
     except Exception as exc:
         logger.debug("Could not write credentials.json: %s", exc)
-logger = logging.getLogger(__name__)
+
+    try:
+        from db import get_db
+
+        db_creds = _load_db_mcp_creds()
+        db_creds.update({k: v for k, v in mapping.items() if not k.startswith("MOE_MCP_OAUTH_STATE_")})
+        with get_db() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO alert_scheduler_runs "
+                "(slot_key, day_str, stage, dispatched_at, details_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    "__MOENGAGE_MCP_CREDENTIALS__",
+                    "GLOBAL",
+                    "MCP_OAUTH",
+                    str(int(time.time())),
+                    json.dumps(db_creds),
+                ),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.debug("Could not persist MCP creds to DB: %s", exc)
 
 MOENGAGE_MCP_URL = "https://mcp.moengage.com"
 MOENGAGE_OAUTH_ISSUER = "https://moeauth.moengage.com"
@@ -69,6 +112,8 @@ def _setting_key(account: str, suffix: str) -> str:
 def get_mcp_config(account: str = "tata") -> dict[str, Any]:
     """Load MoEngage MCP server URL and OAuth/Bearer credentials for an account."""
     _load_env_file()
+    if not os.environ.get("MOENGAGE_MCP_ACCESS_TOKEN"):
+        _load_db_mcp_creds()
     prefix = _account_prefix(account or "tata")
 
     mcp_url = (
