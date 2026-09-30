@@ -47,23 +47,23 @@ STAGE_SCHEDULE: dict[str, dict[str, Any]] = {
     "MORNING": {
         "title": "10:00 AM SLA Kickoff • Daily Workload",
         "scheduled_time": "10:00 AM IST",
-        "window_start_minutes": 9 * 60 + 30,  # 09:30 AM
-        "window_end_minutes": 11 * 60 + 30,  # 11:30 AM
-        "window_label": "09:30 AM – 11:30 AM IST",
+        "window_start_minutes": 9 * 60 + 55,  # 09:55 AM
+        "window_end_minutes": 10 * 60 + 15,  # 10:15 AM
+        "window_label": "09:55 AM – 10:15 AM IST",
     },
     "MIDDAY": {
         "title": "1:00 PM SLA Checkpoint • Midday Status",
         "scheduled_time": "01:00 PM IST",
-        "window_start_minutes": 12 * 60 + 30,  # 12:30 PM
-        "window_end_minutes": 14 * 60 + 30,  # 02:30 PM
-        "window_label": "12:30 PM – 02:30 PM IST",
+        "window_start_minutes": 12 * 60 + 55,  # 12:55 PM
+        "window_end_minutes": 13 * 60 + 15,  # 01:15 PM
+        "window_label": "12:55 PM – 01:15 PM IST",
     },
     "EOD": {
         "title": "4:00 PM Urgent SLA Escalation • Attention Required",
         "scheduled_time": "04:00 PM IST",
-        "window_start_minutes": 15 * 60 + 30,  # 03:30 PM
-        "window_end_minutes": 18 * 60 + 0,  # 06:00 PM
-        "window_label": "03:30 PM – 06:00 PM IST",
+        "window_start_minutes": 15 * 60 + 55,  # 03:55 PM
+        "window_end_minutes": 16 * 60 + 15,  # 04:15 PM
+        "window_label": "03:55 PM – 04:15 PM IST",
     },
 }
 
@@ -807,7 +807,11 @@ def send_google_chat_sla_alert(
         "https://chat.googleapis.com/v1/spaces/AAQAsqKm6oQ/messages?"
         "key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=er00Zc1ZFnDfrmthvXlRvtkWQHXDd862nhHl9TlguLk"
     )
-    url = webhook_url if webhook_url is not None else (os.getenv("GOOGLE_CHAT_WEBHOOK_URL") or default_url)
+    # Never hit the hardcoded live Google Chat space during pytest runs unless webhook_url is explicitly passed
+    if os.environ.get("PYTEST_CURRENT_TEST") and webhook_url is None:
+        url = ""
+    else:
+        url = webhook_url if webhook_url is not None else (os.getenv("GOOGLE_CHAT_WEBHOOK_URL") or default_url)
     if not url:
         return {
             "delivered": True,
@@ -971,9 +975,16 @@ def dispatch_due_today_alerts(
                 "dispatched_by": operator_name,
             }
 
-    # 1. Google Chat Space Broadcast
+    # 1. Google Chat Space Broadcast (strictly simulated when dry_run=True)
     google_chat_res: dict[str, Any] = {}
-    if send_google_chat and operators:
+    if dry_run and send_google_chat:
+        google_chat_res = {
+            "delivered": True,
+            "simulated": True,
+            "channel": "Google Chat",
+            "message": "Dry run preview mode — no real Google Chat webhook dispatched.",
+        }
+    elif send_google_chat and operators:
         google_chat_res = send_google_chat_sla_alert(
             resolved_stage, operators, preview["ist_time"], webhook_url=google_chat_webhook_url
         )
@@ -1071,25 +1082,41 @@ async def run_scheduler_loop() -> None:
                 # Check 10:00 AM slot (10:00 to 10:05 window)
                 if hour == 10 and 0 <= minute <= 5:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "MORNING"):
+                        SCHEDULER_STATE.mark_sent(today_str, "MORNING", {"status": "claimed_by_scheduler"})
                         logger.info("Triggering automated 10:00 AM IST Kickoff SLA reminder...")
-                        dispatch_due_today_alerts(
-                            project="ALL", stage="MORNING", operator_name="Daily 10:00 AM Scheduler"
+                        await asyncio.to_thread(
+                            dispatch_due_today_alerts,
+                            project="ALL",
+                            stage="MORNING",
+                            operator_name="Daily 10:00 AM Scheduler",
+                            force=True,
                         )
 
                 # Check 1:00 PM slot (13:00 to 13:05 window)
                 elif hour == 13 and 0 <= minute <= 5:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "MIDDAY"):
+                        SCHEDULER_STATE.mark_sent(today_str, "MIDDAY", {"status": "claimed_by_scheduler"})
                         logger.info("Triggering automated 1:00 PM IST Midday Checkpoint SLA reminder...")
-                        dispatch_due_today_alerts(
-                            project="ALL", stage="MIDDAY", operator_name="Daily 1:00 PM Scheduler"
+                        await asyncio.to_thread(
+                            dispatch_due_today_alerts,
+                            project="ALL",
+                            stage="MIDDAY",
+                            operator_name="Daily 1:00 PM Scheduler",
+                            force=True,
                         )
 
                 # Check 4:00 PM slot (16:00 to 16:05 window)
                 elif hour == 16 and 0 <= minute <= 5:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "EOD"):
+                        SCHEDULER_STATE.mark_sent(today_str, "EOD", {"status": "claimed_by_scheduler"})
                         logger.info("Triggering automated 4:00 PM IST EOD Escalation SLA reminder...")
-                        dispatch_due_today_alerts(project="ALL", stage="EOD", operator_name="Daily 4:00 PM Scheduler")
-
+                        await asyncio.to_thread(
+                            dispatch_due_today_alerts,
+                            project="ALL",
+                            stage="EOD",
+                            operator_name="Daily 4:00 PM Scheduler",
+                            force=True,
+                        )
         except Exception as exc:
             logger.error("Error in alert scheduler loop: %s", exc)
 

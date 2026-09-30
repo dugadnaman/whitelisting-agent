@@ -158,7 +158,7 @@ def test_client_pending_tickets_are_not_attributed_in_sla_webhook():
         assert preview["drafts"][0]["ticket_keys"] == ["SWCM-75"]
 
         result = dispatch_due_today_alerts(
-            project="SWCM", stage="MIDDAY", dry_run=True, send_email=False,
+            project="SWCM", stage="MIDDAY", dry_run=False, force=True, send_email=False,
             google_chat_webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages",
         )
         payload = post.call_args.kwargs["json"]
@@ -182,7 +182,7 @@ def test_only_client_pending_tickets_do_not_trigger_webhook():
         patch("requests.post") as post,
     ):
         result = dispatch_due_today_alerts(
-            project="SWCM", stage="MIDDAY", dry_run=True, send_email=False,
+            project="SWCM", stage="MIDDAY", dry_run=False, force=True, send_email=False,
             google_chat_webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages",
         )
         assert result["total_tickets"] == 0
