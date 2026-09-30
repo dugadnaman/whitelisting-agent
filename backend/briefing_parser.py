@@ -140,21 +140,22 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
     if not s:
         return "", []
 
-    # 1. Clean standalone T&C lines first so links/tags on T&C lines never become {{1}} variables
-    # and never retain leading/trailing underscores or asterisks.
+    # 1. Clean standalone T&C lines: strip surrounding _/* markdown, and convert any
+    # <link>/<url> placeholder on a T&C line into a variable token (<tc_url>) so it becomes {{1}}
+    # at the end of T&Cs apply instead of being replaced by DEFAULT_CTA_URL.
     raw_lines = s.split("\n")
     precleaned_lines: list[str] = []
     for rline in raw_lines:
         s_tc = rline.strip().strip("*_ \t").lower()
         if s_tc.startswith(("t&c", "t & c", "terms", "conditions apply", "disclaimer")):
             tc_line = rline.strip().strip("*_ \t")
-            tc_line = re.sub(r"https?://[^\s()\[\]_]+", "", tc_line)
             tc_line = re.sub(
-                r"\{\{[^{}]*\}\}|#?\{#[^#]*#\}#?|<[^<>]*>|\[[^\[\]]*\]|\{[^{}]*\}",
-                "",
+                r"<\s*(?:link|url|website|લિંક)\s*>|\{\s*(?:link|url|website|લિંક)\s*\}|\[\s*(?:link|url|website|લિંક)\s*\]",
+                "<tc_url>",
                 tc_line,
+                flags=re.IGNORECASE,
             )
-            tc_line = re.sub(r"[ \t]+", " ", tc_line).strip("*_ \t:-–")
+            tc_line = re.sub(r"[ \t]+", " ", tc_line).strip("*_ \t")
             if tc_line:
                 precleaned_lines.append(tc_line)
         else:
@@ -401,13 +402,13 @@ def extract_and_strip_cta(
         lower_line = sline.lower()
 
         # 1. Standalone T&C disclaimer line (e.g. '_T&Cs apply https://..._' or '_T&Cs apply {{1}}_')
-        # T&Cs apply MUST remain in the message body as clean plain text without surrounding _/* or URLs/variables.
+        # T&Cs apply MUST remain in the message body without surrounding _/* markdown,
+        # while keeping any {{1}} variable at the end.
         clean_tc = sline.strip("*_ \t").lower()
         if clean_tc.startswith(("t&c", "t & c", "terms", "conditions apply", "disclaimer")):
             tc_clean = sline.strip("*_ \t")
             tc_clean = re.sub(url_pat, "", tc_clean)
             tc_clean = re.sub(r"https?://[^\s()\[\]_]+", "", tc_clean)
-            tc_clean = re.sub(r"\{\{[^{}]*\}\}|#?\{#[^#]*#\}#?|<[^<>]*>|\[[^\[\]]*\]|\{[^{}]*\}", "", tc_clean)
             tc_clean = re.sub(r"[ \t]+", " ", tc_clean).strip("*_ \t:-–")
             if tc_clean:
                 cleaned_lines.append(tc_clean)
