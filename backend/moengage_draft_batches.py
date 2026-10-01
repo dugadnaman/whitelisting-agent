@@ -8,6 +8,7 @@ second provider POST. UNCERTAIN rows require manual investigation, not retry.
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Any
 from uuid import uuid4
@@ -56,7 +57,12 @@ class DraftBatchQueue:
 
     def _db(self):
         conn = get_db()
-        if not conn.is_postgres and (get_database_url() or not self.allow_sqlite_for_tests):
+        allow_sqlite = (
+            self.allow_sqlite_for_tests
+            or os.environ.get("MOENGAGE_DRAFT_ALLOW_SQLITE") == "true"
+            or os.environ.get(f"MOENGAGE_DRAFT_{self.account.upper()}_ALLOW_SQLITE") == "true"
+        )
+        if not conn.is_postgres and (get_database_url() or not allow_sqlite):
             conn.close()
             raise PermissionError("Shared PostgreSQL unavailable; draft batches disabled")
         return conn

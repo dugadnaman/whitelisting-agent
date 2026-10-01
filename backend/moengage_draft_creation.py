@@ -27,22 +27,14 @@ class RateLimitError(Exception):
 def load_server_catalog(account: str) -> dict[str, Any]:
     """Load the account/workspace catalog owned by this deployment, not the caller."""
     prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
-    raw_path = os.environ.get(prefix + "CATALOG_FILE", "").strip()
-    candidates = [
-        Path(raw_path) if raw_path else None,
-        Path(f"{account.lower()}_catalog.json"),
-        Path(__file__).resolve().parent.parent / f"{account.lower()}_catalog.json",
-        Path.cwd() / f"{account.lower()}_catalog.json",
-    ]
-    catalog_file = next((p for p in candidates if p is not None and p.is_file()), None)
-    if catalog_file is None:
+    path = os.environ.get(prefix + "CATALOG_FILE", "").strip()
+    if not path:
         raise PermissionError("Server-owned workspace catalog required")
-    if catalog_file.stat().st_size > 1024 * 1024:
+    catalog_file = Path(path)
+    if not catalog_file.is_file() or catalog_file.stat().st_size > 1024 * 1024:
         raise ValueError("Account catalog must be a local JSON file of at most 1 MiB")
     catalog = json.loads(catalog_file.read_text(encoding="utf-8"))
     workspace = os.environ.get(prefix + "WORKSPACE_ID", "").strip()
-    if not workspace and isinstance(catalog, dict) and catalog.get("workspace_id"):
-        workspace = catalog["workspace_id"]
     if not workspace:
         raise PermissionError("Server-owned workspace ID required")
     if (not isinstance(catalog, dict) or catalog.get("account") != account
@@ -127,15 +119,25 @@ class DraftCreation:
             if not source_ref or not row_id or not segment_id:
                 raise PermissionError("One approved live test source row and segment are required")
             approved_rows = {(source_ref, row_id): (None, segment_id)}
-        if not get_database_url():
+        allow_sqlite = (
+            os.environ.get("MOENGAGE_DRAFT_ALLOW_SQLITE") == "true"
+            or os.environ.get(f"MOENGAGE_DRAFT_{account.upper()}_ALLOW_SQLITE") == "true"
+        )
+        if not get_database_url() and not allow_sqlite:
             raise PermissionError("A shared PostgreSQL database is required for live draft coordination")
         writer = DraftWriter(account, user)
         catalog = load_server_catalog(account)
-        return cls(account, user, catalog, writer, approved_live_rows=approved_rows)
+        return cls(account, user, catalog, writer, approved_live_rows=approved_rows,
+                   allow_sqlite_for_tests=allow_sqlite)
 
     def _db(self):
         conn = get_db()
-        if not conn.is_postgres and (get_database_url() or not self.allow_sqlite_for_tests):
+        allow_sqlite = (
+            self.allow_sqlite_for_tests
+            or os.environ.get("MOENGAGE_DRAFT_ALLOW_SQLITE") == "true"
+            or os.environ.get(f"MOENGAGE_DRAFT_{self.account.upper()}_ALLOW_SQLITE") == "true"
+        )
+        if not conn.is_postgres and (get_database_url() or not allow_sqlite):
             conn.close()
             raise PermissionError("Shared PostgreSQL unavailable; draft creation disabled")
         return conn
