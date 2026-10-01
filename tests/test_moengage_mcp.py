@@ -14,6 +14,8 @@ from moengage_mcp import (
     get_mcp_status,
     save_mcp_tokens,
     start_mcp_oauth,
+)
+from moengage_mcp import (
     test_mcp_connection as check_mcp_connection,
 )
 from moengage_ops_client import fetch_mcp_ops_records
@@ -92,8 +94,20 @@ def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
     ):
         save_mcp_tokens(account="tata", access_token="valid_mcp_token")
 
-    def fake_post(url, headers=None, json=None, timeout=25):
-        method = (json or {}).get("method")
+    def fake_post(url, headers=None, json_data=None, timeout=25, **kwargs):
+        if "oauth" in str(url):
+            resp = MagicMock()
+            resp.ok = True
+            resp.status_code = 200
+            resp.json.return_value = {"access_token": "valid_mcp_token", "expires_in": 3600}
+            return resp
+        body = json_data or kwargs.get("json") or {}
+        if not body and "data" in kwargs:
+            try:
+                body = json.loads(kwargs["data"])
+            except Exception:
+                pass
+        method = body.get("method")
         resp = MagicMock()
         resp.ok = True
         resp.status_code = 200
@@ -126,7 +140,7 @@ def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
             }
             resp.text = f"event: message\ndata: {__import__('json').dumps(payload)}\n\n"
         elif method == "tools/call":
-            tname = (json or {}).get("params", {}).get("name")
+            tname = body.get("params", {}).get("name")
             if tname == "search_campaigns":
                 inner = [
                     {

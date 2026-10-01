@@ -24,6 +24,33 @@ class RateLimitError(Exception):
     """A local workspace create cap was reached; no provider call was made."""
 
 
+def load_server_catalog(account: str) -> dict[str, Any]:
+    """Load the account/workspace catalog owned by this deployment, not the caller."""
+    prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
+    raw_path = os.environ.get(prefix + "CATALOG_FILE", "").strip()
+    candidates = [
+        Path(raw_path) if raw_path else None,
+        Path(f"{account.lower()}_catalog.json"),
+        Path(__file__).resolve().parent.parent / f"{account.lower()}_catalog.json",
+        Path.cwd() / f"{account.lower()}_catalog.json",
+    ]
+    catalog_file = next((p for p in candidates if p is not None and p.is_file()), None)
+    if catalog_file is None:
+        raise PermissionError("Server-owned workspace catalog required")
+    if catalog_file.stat().st_size > 1024 * 1024:
+        raise ValueError("Account catalog must be a local JSON file of at most 1 MiB")
+    catalog = json.loads(catalog_file.read_text(encoding="utf-8"))
+    workspace = os.environ.get(prefix + "WORKSPACE_ID", "").strip()
+    if not workspace and isinstance(catalog, dict) and catalog.get("workspace_id"):
+        workspace = catalog["workspace_id"]
+    if not workspace:
+        raise PermissionError("Server-owned workspace ID required")
+    if (not isinstance(catalog, dict) or catalog.get("account") != account
+            or catalog.get("workspace_id") != workspace):
+        raise ValueError("Catalog does not match the server-owned account/workspace")
+    return catalog
+
+
 def _matches(actual: Any, expected: Any) -> bool:
     """Provider may add defaults; every requested value still has to match."""
     if isinstance(expected, dict):
@@ -49,8 +76,7 @@ class DraftCreation:
         *,
         clock: Callable[[], float] = time.time,
         allow_sqlite_for_tests: bool = False,
-        live_test_row: tuple[str, str] | None = None,
-        live_test_segment_id: str | None = None,
+        approved_live_rows: dict[tuple[str, str], tuple[str | None, str]] | None = None,
     ) -> None:
         authorize_draft_account(account, user)
         if catalog.get("account") != account or not isinstance(catalog.get("workspace_id"), str) or not catalog["workspace_id"]:
@@ -61,8 +87,7 @@ class DraftCreation:
         self.writer = writer
         self.clock = clock
         self.allow_sqlite_for_tests = allow_sqlite_for_tests
-        self.live_test_row = live_test_row
-        self.live_test_segment_id = live_test_segment_id
+        self.approved_live_rows = approved_live_rows
 
     @classmethod
     def from_environment(cls, account: str, user: dict[str, Any]) -> DraftCreation:
@@ -73,29 +98,40 @@ class DraftCreation:
                 or os.environ.get(prefix + "NO_PUBLISH_SCOPE_CONFIRMED") != "true"):
             raise PermissionError("Workspace billing and no-publish scope approval required")
         operator = os.environ.get(prefix + "LIVE_TEST_OPERATOR_EMAIL", "").strip()
-        source_ref = os.environ.get(prefix + "LIVE_TEST_SOURCE_REF", "").strip()
-        row_id = os.environ.get(prefix + "LIVE_TEST_ROW_ID", "").strip()
         segment_id = os.environ.get(prefix + "LIVE_TEST_SEGMENT_ID", "").strip()
+        rows_json = os.environ.get(prefix + "LIVE_TEST_ROWS_JSON", "").strip()
         email = user.get("email")
         if not operator or not isinstance(email, str) or email.casefold() != operator.casefold():
             raise PermissionError("Only the designated live test operator may create a draft")
-        if not source_ref or not row_id or not segment_id:
-            raise PermissionError("One approved live test source row and segment are required")
+        if rows_json:
+            try:
+                selected = json.loads(rows_json)
+            except json.JSONDecodeError as exc:
+                raise PermissionError("Approved live Email/Push rows must be valid JSON") from exc
+            if not isinstance(selected, list) or len(selected) != 2:
+                raise PermissionError("Exactly one approved Email and one Push live test row are required")
+            approved_rows: dict[tuple[str, str], tuple[str | None, str]] = {}
+            for row in selected:
+                if not isinstance(row, dict) or set(row) != {"source_ref", "row_id", "channel", "segment_id"}:
+                    raise PermissionError("Approved live rows require source_ref, row_id, channel and segment_id")
+                if any(not isinstance(value, str) or not value.strip() for value in row.values()):
+                    raise PermissionError("Approved live row fields must be nonempty strings")
+                key = (row["source_ref"], row["row_id"])
+                approved_rows[key] = (row["channel"], row["segment_id"])
+            if (len(approved_rows) != 2
+                    or {channel for channel, _ in approved_rows.values()} != {"EMAIL", "PUSH"}):
+                raise PermissionError("Approved live rows must contain distinct Email and Push source rows")
+        else:
+            source_ref = os.environ.get(prefix + "LIVE_TEST_SOURCE_REF", "").strip()
+            row_id = os.environ.get(prefix + "LIVE_TEST_ROW_ID", "").strip()
+            if not source_ref or not row_id or not segment_id:
+                raise PermissionError("One approved live test source row and segment are required")
+            approved_rows = {(source_ref, row_id): (None, segment_id)}
         if not get_database_url():
             raise PermissionError("A shared PostgreSQL database is required for live draft coordination")
         writer = DraftWriter(account, user)
-        path = os.environ.get(prefix + "CATALOG_FILE", "")
-        if not path:
-            raise PermissionError("Server-owned workspace catalog required")
-        catalog_file = Path(path)
-        if not catalog_file.is_file() or catalog_file.stat().st_size > 1024 * 1024:
-            raise ValueError("Account catalog must be a local JSON file of at most 1 MiB")
-        catalog = json.loads(catalog_file.read_text(encoding="utf-8"))
-        if (not isinstance(catalog, dict) or catalog.get("account") != account
-                or catalog.get("workspace_id") != os.environ.get(prefix + "WORKSPACE_ID")):
-            raise ValueError("Catalog does not match the server-owned account/workspace")
-        return cls(account, user, catalog, writer, live_test_row=(source_ref, row_id),
-                   live_test_segment_id=segment_id)
+        catalog = load_server_catalog(account)
+        return cls(account, user, catalog, writer, approved_live_rows=approved_rows)
 
     def _db(self):
         conn = get_db()
@@ -123,13 +159,13 @@ class DraftCreation:
                 if stored["payload_hash"] != digest:
                     raise ValueError("Source row already reserved with different campaign content")
                 return stored, False
-            if self.live_test_row is not None:
+            if self.approved_live_rows is not None:
                 count = conn.execute(
                     "SELECT COUNT(*) AS n FROM moengage_draft_attempts WHERE workspace_id=?",
                     (workspace,),
                 ).fetchone()["n"]
-                if count:
-                    raise RateLimitError("Workspace live draft test attempt already used")
+                if count >= len(self.approved_live_rows):
+                    raise RateLimitError("Workspace live draft test attempts already used")
             for seconds, maximum in ((1, 5), (60, 5), (3600, 25), (86400, 100)):
                 count = conn.execute(
                     "SELECT COUNT(*) AS n FROM moengage_draft_attempts WHERE workspace_id=? AND attempted_at>=?",
@@ -158,11 +194,11 @@ class DraftCreation:
 
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         """Never reissue an attempted POST, including after timeout or process crash."""
-        if self.live_test_row is not None and (
-                row.get("source_ref") != self.live_test_row[0]
-                or row.get("row_id") != self.live_test_row[1]
-                or row.get("segment_id") != self.live_test_segment_id):
-            raise PermissionError("This source row or audience is not approved for the live draft test")
+        if self.approved_live_rows is not None:
+            selected = self.approved_live_rows.get((row.get("source_ref"), row.get("row_id")))
+            if (selected is None or row.get("segment_id") != selected[1]
+                    or (selected[0] is not None and row.get("channel") != selected[0])):
+                raise PermissionError("This source row, channel or audience is not approved for the live draft test")
         preview = prepare_batch([row], self.account, self.catalog, self.user["email"], source_type="server_catalog")
         item = preview["items"][0]
         if item["status"] != "preview_ready":

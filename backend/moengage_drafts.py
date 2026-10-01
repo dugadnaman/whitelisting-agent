@@ -108,7 +108,7 @@ class DraftWriter:
                 or not payload["created_by"].strip()):
             raise ValueError("One-time Email/Push and creator are required")
         key = self._operation_key(idempotency_key)
-        data = self._request("POST", payload=payload, idempotency_key=key)
+        data = self._request("POST", payload={**payload, "request_id": key}, idempotency_key=key)
         if data.get("status") != "DRAFT":
             raise ValueError("Created campaign is not confirmed DRAFT")
         return data

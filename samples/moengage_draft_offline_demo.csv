@@ -1,0 +1,3 @@
+channel,campaign_name,segment_id,scheduled_at,timezone,content_type,subscription_category,from_address,subject,html_content,push_platform,push_title,push_message,click_url
+EMAIL,OFFLINE DEMO VIP email,seg-vip,2026-12-01T10:00:00+05:30,Asia/Kolkata,PROMOTIONAL,Offers,mail@example.com,Demo offer,<p>This is a synthetic offline campaign. Do not send.</p>,,,,
+PUSH,OFFLINE DEMO VIP push,seg-vip,2026-12-01T10:30:00+05:30,Asia/Kolkata,,,,,,ANDROID,Demo alert,Synthetic offline campaign. Do not send.,https://example.com/demo

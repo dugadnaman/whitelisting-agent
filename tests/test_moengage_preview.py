@@ -66,11 +66,12 @@ def test_mixed_rows_preserve_identity_and_produce_exact_candidate():
         "campaign_content": {"content": {"email": {
             "html_content": "<p>Welcome VIP</p>", "subject": "Exclusive offer",
             "sender_name": "Tata", "from_address": "mail@example.com",
+            "reply_to_address": "mail@example.com",
         }}},
         "segmentation_details": {"included_filters": {"filter_operator": "and", "filters": [
             {"filter_type": "custom_segments", "name": "VIP", "id": "seg-vip"}
         ]}},
-        "scheduling_details": {"delivery_type": "AT_FIXED_TIME", "start_time": "2026-10-15T04:30:00+00:00"},
+        "scheduling_details": {"delivery_type": "AT_FIXED_TIME", "start_time": "2026-10-15T10:00:00", "timezone": "Asia/Kolkata"},
     }
     push_payload = result["items"][1]["candidate_v5_payload"]
     assert push_payload["campaign_content"]["content"]["push"]["android"] == {

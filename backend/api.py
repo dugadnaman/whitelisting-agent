@@ -4643,6 +4643,119 @@ async def preview_moengage_drafts_file_endpoint(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+
+@app.post("/api/moengage/drafts/preview-upload")
+async def preview_moengage_drafts_upload_endpoint(
+    file: UploadFile = File(...),
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Preview spreadsheet candidates against this deployment's account catalog."""
+    from moengage_draft_creation import load_server_catalog
+    from moengage_preview import prepare_batch, rows_from_file
+
+    creator = _authorize_moengage_preview(account, current_user)
+    try:
+        catalog = load_server_catalog(account)
+        rows = rows_from_file(file.filename or "", await file.read(5 * 1024 * 1024 + 1), account)
+        return prepare_batch(rows, account, catalog, creator, source_type="spreadsheet")
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except (ValueError, UnicodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get("/api/moengage/drafts/catalog")
+def get_moengage_drafts_catalog_endpoint(
+    account: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the verified catalog of segments, senders, platforms, and templates for this account."""
+    from moengage_draft_creation import load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return load_server_catalog(account)
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/moengage/drafts/batches")
+async def stage_moengage_draft_batch_endpoint(
+    file: UploadFile = File(...),
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Persist every CSV/XLSX row for account-bound, human-reviewed draft creation."""
+    from moengage_draft_batches import DraftBatchQueue
+    from moengage_draft_creation import load_server_catalog
+    from moengage_preview import rows_from_file
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        catalog = load_server_catalog(account)
+        rows = rows_from_file(file.filename or "", await file.read(5 * 1024 * 1024 + 1), account)
+        if not rows:
+            raise ValueError("Spreadsheet contains no campaign rows")
+        return DraftBatchQueue(account, current_user, catalog).stage(rows, rows[0]["source_ref"])
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except (ValueError, UnicodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/moengage/drafts/batches/{batch_id}")
+def get_moengage_draft_batch_endpoint(
+    batch_id: str,
+    account: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
+    from moengage_draft_creation import load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return DraftBatchQueue(account, current_user, load_server_catalog(account)).get(batch_id)
+    except BatchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Draft batch access denied") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except (ValueError, UnicodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Draft batch not found") from exc
+
+
+@app.post("/api/moengage/drafts/batches/{batch_id}/rows/{row_id}/create")
+def create_moengage_draft_batch_row_endpoint(
+    batch_id: str,
+    row_id: str,
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Create one selected row; an ambiguous request is never blindly retried."""
+    from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
+    from moengage_draft_creation import RateLimitError, load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return DraftBatchQueue(account, current_user, load_server_catalog(account)).create_row(batch_id, row_id)
+    except BatchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Draft batch access denied") from exc
+    except RateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Draft batch row not found") from exc
+    except ValueError as exc:
+        status_code = 409 if "already reserved" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Draft batch state unavailable; inspect the batch before retry")
+        raise HTTPException(status_code=503, detail="Draft state unavailable; inspect before retry") from exc
+
 class MoEngageDraftCreateRequest(BaseModel):
     account: str
     row: dict[str, Any]

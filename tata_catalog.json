@@ -1,0 +1,58 @@
+{
+  "account": "tata",
+  "workspace_id": "0KYUNUW5WODKX5ZFVAGPVL0U",
+  "segments": [
+    {
+      "id": "65cf4af4d4c88174e5ad186e",
+      "name": "Test_FSTP_Pranav_1602"
+    },
+    {
+      "id": "6ab60caace27e15e345f59c1",
+      "name": "CUG_UAT_25_Jun_26"
+    },
+    {
+      "id": "6a201689e6f094a2d031e478",
+      "name": "HL_UAT_03_JUN_2026"
+    }
+  ],
+  "subscription_categories": [],
+  "email_senders": [
+    {
+      "from_address": "hello@info.tatacapital.co.in",
+      "sender_name": "Tata Capital",
+      "connector_type": "SENDGRID",
+      "connector_name": "default"
+    }
+  ],
+  "push_platforms": [
+    {
+      "platform": "ANDROID",
+      "notification_channel": "general"
+    }
+  ],
+  "whatsapp_senders": [
+    {
+      "sender_name": "Tata Capital Financial Services Limited",
+      "phone_number": "919643789719",
+      "provider": "KARIX"
+    },
+    {
+      "sender_name": "Tata Capital Wealth",
+      "phone_number": "918657597116",
+      "provider": "KARIX"
+    },
+    {
+      "sender_name": "Tata Capital Housing Finance Limited",
+      "phone_number": "919594951475",
+      "provider": "KARIX"
+    }
+  ],
+  "assets": [],
+  "email_templates": [],
+  "whatsapp_templates": [
+    {
+      "id": "test_1234",
+      "name": "test_1234 (EN)"
+    }
+  ]
+}

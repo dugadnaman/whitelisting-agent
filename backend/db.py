@@ -47,6 +47,8 @@ VALID_TABLES: set[str] = {
     "system_errors",
     "alert_scheduler_runs",
     "moengage_draft_attempts",
+    "moengage_draft_batches",
+    "moengage_draft_batch_rows",
 }
 
 
@@ -407,6 +409,40 @@ SQLITE_SCHEMA_DDL = [
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_moe_draft_attempts_workspace_time ON moengage_draft_attempts(workspace_id, attempted_at);",
+    """
+    CREATE TABLE IF NOT EXISTS moengage_draft_batches (
+        batch_id TEXT PRIMARY KEY,
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        creator_sub TEXT NOT NULL,
+        creator_email TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        created_at REAL NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS moengage_draft_batch_rows (
+        batch_id TEXT NOT NULL REFERENCES moengage_draft_batches(batch_id),
+        position INTEGER NOT NULL,
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        row_json TEXT NOT NULL,
+        candidate_json TEXT,
+        source_fields_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL,
+        issues_json TEXT NOT NULL,
+        campaign_id TEXT,
+        issue TEXT,
+        validation_json TEXT NOT NULL DEFAULT '[]',
+        updated_at REAL NOT NULL,
+        PRIMARY KEY (batch_id, position)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_moe_batch_rows_identity ON moengage_draft_batch_rows(batch_id, row_id);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_moe_batch_rows_claim ON moengage_draft_batch_rows(account, workspace_id, source_ref, row_id) WHERE status NOT IN ('preview_ready', 'blocked');",
 ]
 
 POSTGRES_SCHEMA_DDL = [
@@ -588,18 +624,55 @@ POSTGRES_SCHEMA_DDL = [
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_moe_draft_attempts_workspace_time ON moengage_draft_attempts(workspace_id, attempted_at);",
+    """
+    CREATE TABLE IF NOT EXISTS moengage_draft_batches (
+        batch_id TEXT PRIMARY KEY,
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        creator_sub TEXT NOT NULL,
+        creator_email TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        created_at DOUBLE PRECISION NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS moengage_draft_batch_rows (
+        batch_id TEXT NOT NULL REFERENCES moengage_draft_batches(batch_id),
+        position INTEGER NOT NULL,
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        row_json TEXT NOT NULL,
+        candidate_json TEXT,
+        source_fields_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL,
+        issues_json TEXT NOT NULL,
+        campaign_id TEXT,
+        issue TEXT,
+        validation_json TEXT NOT NULL DEFAULT '[]',
+        updated_at DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (batch_id, position)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_moe_batch_rows_identity ON moengage_draft_batch_rows(batch_id, row_id);",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_moe_batch_rows_claim ON moengage_draft_batch_rows(account, workspace_id, source_ref, row_id) WHERE status NOT IN ('preview_ready', 'blocked');",
 ]
 
 
-def init_database() -> None:
-    """Initialize database tables and indexes for active driver (PostgreSQL or SQLite)."""
-    with get_db() as conn:
-        ddl_list = POSTGRES_SCHEMA_DDL if conn.is_postgres else SQLITE_SCHEMA_DDL
-        for stmt in ddl_list:
-            clean_stmt = stmt.strip()
-            if clean_stmt:
-                conn.execute(clean_stmt)
-        conn.commit()
+def init_database(conn: DBConnection | None = None) -> None:
+    """Initialize tables and indexes on the selected or supplied database connection."""
+    if conn is None:
+        with get_db() as owned:
+            init_database(owned)
+        return
+    ddl_list = POSTGRES_SCHEMA_DDL if conn.is_postgres else SQLITE_SCHEMA_DDL
+    for stmt in ddl_list:
+        clean_stmt = stmt.strip()
+        if clean_stmt:
+            conn.execute(clean_stmt)
+    conn.commit()
 
 
 # ---------------------------------------------------------------------------

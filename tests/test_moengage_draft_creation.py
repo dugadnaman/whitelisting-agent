@@ -181,8 +181,8 @@ def test_live_test_only_approved_row_and_segment_once_across_time(offline_db):
     writer = FakeWriter()
     tick = [1_000_000.0]
     first = DraftCreation("tata", USER, CATALOG, writer, clock=lambda: tick[0],
-                          allow_sqlite_for_tests=True, live_test_row=("rows.json", "1"),
-                          live_test_segment_id="seg-vip")
+                          allow_sqlite_for_tests=True,
+                          approved_live_rows={("rows.json", "1"): (None, "seg-vip")})
     with pytest.raises(PermissionError, match="not approved"):
         first.create({**ROW, "segment_id": "not-test-segment"})
     with pytest.raises(PermissionError, match="not approved"):
@@ -192,8 +192,8 @@ def test_live_test_only_approved_row_and_segment_once_across_time(offline_db):
     tick[0] += 100_000
     assert first.create(ROW) == approved
     next_row = DraftCreation("tata", USER, CATALOG, writer, clock=lambda: tick[0],
-                             allow_sqlite_for_tests=True, live_test_row=("rows.json", "2"),
-                             live_test_segment_id="seg-vip")
+                             allow_sqlite_for_tests=True,
+                             approved_live_rows={("rows.json", "2"): (None, "seg-vip")})
     with pytest.raises(RateLimitError, match="already used"):
         next_row.create({**ROW, "row_id": "2"})
     assert [name for name, _ in writer.calls].count("create") == 1
@@ -202,13 +202,38 @@ def test_live_test_only_approved_row_and_segment_once_across_time(offline_db):
 def test_uncertain_live_test_attempt_also_exhausts_limit(offline_db):
     writer = FakeWriter(create_error=TimeoutError("provider response unknown"))
     first = DraftCreation("tata", USER, CATALOG, writer, allow_sqlite_for_tests=True,
-                          live_test_row=("rows.json", "1"), live_test_segment_id="seg-vip")
+                          approved_live_rows={("rows.json", "1"): (None, "seg-vip")})
     assert first.create(ROW)["state"] == "UNCERTAIN"
     next_row = DraftCreation("tata", USER, CATALOG, writer, allow_sqlite_for_tests=True,
-                             live_test_row=("rows.json", "2"), live_test_segment_id="seg-vip")
+                             approved_live_rows={("rows.json", "2"): (None, "seg-vip")})
     with pytest.raises(RateLimitError, match="already used"):
         next_row.create({**ROW, "row_id": "2"})
     assert [name for name, _ in writer.calls] == ["create"]
+
+
+def test_two_named_live_channels_have_exact_row_and_workspace_attempt_bounds(offline_db):
+    writer = FakeWriter()
+    catalog = {**CATALOG, "push_platforms": [{"platform": "ANDROID", "notification_channel": "campaigns"}]}
+    push = {"account": "tata", "source_ref": "rows.json", "row_id": "2", "channel": "PUSH",
+            "campaign_name": "Demo test push", "segment_id": "seg-vip",
+            "scheduled_at": ROW["scheduled_at"], "timezone": ROW["timezone"],
+            "push_platform": "ANDROID", "push_title": "Demo", "push_message": "Test only",
+            "click_url": "https://example.com/demo"}
+    approved = {("rows.json", "1"): ("EMAIL", "seg-vip"),
+                ("rows.json", "2"): ("PUSH", "seg-vip")}
+    worker = DraftCreation("tata", USER, catalog, writer, allow_sqlite_for_tests=True,
+                           approved_live_rows=approved)
+    with pytest.raises(PermissionError, match="not approved"):
+        worker.create({**ROW, "row_id": "2"})
+    assert worker.create(ROW)["state"] == "VALIDATED"
+    assert worker.create(push)["state"] == "VALIDATED"
+    assert worker.create(ROW)["state"] == "VALIDATED"
+    rotated = DraftCreation("tata", USER, catalog, writer, allow_sqlite_for_tests=True,
+                            approved_live_rows={("rows.json", "3"): ("EMAIL", "seg-vip"),
+                                                ("rows.json", "4"): ("PUSH", "seg-vip")})
+    with pytest.raises(RateLimitError, match="already used"):
+        rotated.create({**ROW, "row_id": "3"})
+    assert [name for name, _ in writer.calls].count("create") == 2
 
 
 def test_live_test_requires_explicit_operator_and_row(offline_db, monkeypatch):
@@ -249,8 +274,20 @@ def test_server_catalog_must_match_bound_workspace(offline_db, tmp_path, monkeyp
             ProductionDraftCreation.from_environment("tata", USER)
         catalog_file.write_text(json.dumps(CATALOG))
         production = ProductionDraftCreation.from_environment("tata", USER)
-        assert production.live_test_row == ("rows.json", "1")
-        assert production.live_test_segment_id == "seg-vip"
+        assert production.approved_live_rows == {("rows.json", "1"): (None, "seg-vip")}
+        monkeypatch.setenv(prefix + "LIVE_TEST_ROWS_JSON", "[]")
+        with pytest.raises(PermissionError, match="Exactly one approved Email and one Push"):
+            ProductionDraftCreation.from_environment("tata", USER)
+        selected = [
+            {"source_ref": "campaigns.csv", "row_id": "2", "channel": "EMAIL", "segment_id": "seg-vip"},
+            {"source_ref": "campaigns.csv", "row_id": "3", "channel": "PUSH", "segment_id": "seg-vip"},
+        ]
+        monkeypatch.setenv(prefix + "LIVE_TEST_ROWS_JSON", json.dumps(selected))
+        production = ProductionDraftCreation.from_environment("tata", USER)
+        assert production.approved_live_rows == {
+            ("campaigns.csv", "2"): ("EMAIL", "seg-vip"),
+            ("campaigns.csv", "3"): ("PUSH", "seg-vip"),
+        }
 
 
 
@@ -272,11 +309,12 @@ def test_create_route_requires_owner_approval_and_uses_server_catalog(offline_db
                 assert writer.calls[0][0] == "create"
             guarded_writer = FakeWriter()
             guarded = DraftCreation("tata", USER, CATALOG, guarded_writer,
-                                    allow_sqlite_for_tests=True, live_test_row=("rows.json", "1"),
-                                    live_test_segment_id="seg-vip")
+                                    allow_sqlite_for_tests=True,
+                                    approved_live_rows={("rows.json", "1"): (None, "seg-vip")})
             with patch("moengage_draft_creation.DraftCreation.from_environment", return_value=guarded):
                 forbidden = client.post("/api/moengage/drafts/create",
                                         json={"account": "tata", "row": {**ROW, "row_id": "not-approved"}})
                 assert forbidden.status_code == 423 and guarded_writer.calls == []
         finally:
             app.dependency_overrides.pop(get_current_user, None)
+

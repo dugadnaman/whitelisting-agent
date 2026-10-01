@@ -10,7 +10,7 @@ import csv
 import html
 import io
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -22,15 +22,20 @@ from openpyxl import load_workbook
 _ROW_FIELDS = frozenset({
     "account", "workspace_id", "source_ref", "row_id", "channel", "campaign_name",
     "segment_id", "segment_name", "scheduled_at", "timezone", "created_by",
-    "content_type", "subscription_category", "from_address", "subject", "html_content",
+    "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
     "email_template_id", "email_attachment_ids", "push_platform", "push_title",
     "push_message", "click_url", "push_image_asset_id", "source_attachments", "_row_error",
 })
 _EMAIL_FIELDS = frozenset({
-    "content_type", "subscription_category", "from_address", "subject", "html_content",
+    "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
     "email_template_id", "email_attachment_ids",
 })
 _PUSH_FIELDS = frozenset({"push_platform", "push_title", "push_message", "click_url", "push_image_asset_id"})
+_DISPLAY_FIELDS = (
+    "campaign_name", "segment_id", "segment_name", "scheduled_at", "timezone",
+    "content_type", "from_address", "subject", "html_content", "email_template_id",
+    "push_platform", "push_title", "push_message", "click_url",
+)
 _MAX_FILE_BYTES = 5 * 1024 * 1024
 _IOS_FLAGS = (
     "send_to_all_eligible_device", "exclude_provisional_push_devices",
@@ -83,7 +88,11 @@ def _schedule(row: dict[str, Any], errors: list[str]) -> dict[str, str] | None:
     except (ValueError, ZoneInfoNotFoundError):
         errors.append("scheduled_at must have a valid ISO offset matching the IANA timezone")
         return None
-    return {"delivery_type": "AT_FIXED_TIME", "start_time": date.astimezone(UTC).isoformat()}
+    return {
+        "delivery_type": "AT_FIXED_TIME",
+        "start_time": date.astimezone(zone).strftime("%Y-%m-%dT%H:%M:%S"),
+        "timezone": zone_name,
+    }
 
 
 def _audience(row: dict[str, Any], catalog: dict[str, Any], errors: list[str]) -> dict[str, Any] | None:
@@ -121,9 +130,12 @@ def _email(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: list
     if content_type == "PROMOTIONAL":
         category = _text(row, "subscription_category")
         categories = catalog.get("subscription_categories")
-        if not isinstance(categories, list) or category not in categories:
-            errors.append("subscription_category must match the account catalog")
-        else:
+        if categories:
+            if not isinstance(categories, list) or category not in categories:
+                errors.append("subscription_category must match the account catalog")
+            else:
+                details["subscription_category"] = category
+        elif category:
             details["subscription_category"] = category
     elif _text(row, "subscription_category"):
         errors.append("subscription_category is only for PROMOTIONAL email")
@@ -144,8 +156,12 @@ def _email(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: list
         for key in ("sender_name", "from_address", "connector_type", "connector_name"):
             if not _text(sender, key):
                 errors.append(f"Catalog email sender is missing {key}")
-        content.update({"sender_name": sender.get("sender_name"), "from_address": sender.get("from_address")})
-
+        reply_to = _text(row, "reply_to_address") or _text(sender, "reply_to_address") or sender.get("from_address")
+        content.update({
+            "sender_name": sender.get("sender_name"),
+            "from_address": sender.get("from_address"),
+            "reply_to_address": reply_to,
+        })
     ids = row.get("email_attachment_ids") or []
     if isinstance(ids, str):
         ids = [item.strip() for item in ids.split(",") if item.strip()]
@@ -256,6 +272,8 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
             }
         results.append({"source_ref": source, "row_id": row_id, "channel": channel,
                         "account": account, "workspace_id": catalog["workspace_id"],
+                        "source_fields": {field: row[field] for field in _DISPLAY_FIELDS
+                                          if isinstance(row.get(field), str) and row[field].strip()},
                         "source_attachments": row.get("source_attachments", []),
                         "status": "preview_ready" if candidate else "blocked", "issues": errors,
                         "candidate_v5_payload": candidate})
