@@ -36,6 +36,7 @@ COPY backend/ ./backend/
 COPY media_cache/ ./media_cache/
 COPY samples/ ./samples/
 COPY tests/ ./tests/
+COPY tata_catalog.json* ./
 COPY --from=frontend-builder /app/frontend /app/frontend
 
 # Setup supervisord configuration to run both FastAPI (8000) and Next.js (3000)
