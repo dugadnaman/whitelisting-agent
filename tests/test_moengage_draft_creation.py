@@ -177,6 +177,58 @@ def test_rate_limit_is_shared_by_workspace_not_account(offline_db):
     assert [name for name, _ in writer.calls].count("create") == 5
 
 
+def test_live_test_only_approved_row_and_segment_once_across_time(offline_db):
+    writer = FakeWriter()
+    tick = [1_000_000.0]
+    first = DraftCreation("tata", USER, CATALOG, writer, clock=lambda: tick[0],
+                          allow_sqlite_for_tests=True, live_test_row=("rows.json", "1"),
+                          live_test_segment_id="seg-vip")
+    with pytest.raises(PermissionError, match="not approved"):
+        first.create({**ROW, "segment_id": "not-test-segment"})
+    with pytest.raises(PermissionError, match="not approved"):
+        first.create({**ROW, "row_id": "2"})
+    approved = first.create(ROW)
+    assert approved["state"] == "VALIDATED"
+    tick[0] += 100_000
+    assert first.create(ROW) == approved
+    next_row = DraftCreation("tata", USER, CATALOG, writer, clock=lambda: tick[0],
+                             allow_sqlite_for_tests=True, live_test_row=("rows.json", "2"),
+                             live_test_segment_id="seg-vip")
+    with pytest.raises(RateLimitError, match="already used"):
+        next_row.create({**ROW, "row_id": "2"})
+    assert [name for name, _ in writer.calls].count("create") == 1
+
+
+def test_uncertain_live_test_attempt_also_exhausts_limit(offline_db):
+    writer = FakeWriter(create_error=TimeoutError("provider response unknown"))
+    first = DraftCreation("tata", USER, CATALOG, writer, allow_sqlite_for_tests=True,
+                          live_test_row=("rows.json", "1"), live_test_segment_id="seg-vip")
+    assert first.create(ROW)["state"] == "UNCERTAIN"
+    next_row = DraftCreation("tata", USER, CATALOG, writer, allow_sqlite_for_tests=True,
+                             live_test_row=("rows.json", "2"), live_test_segment_id="seg-vip")
+    with pytest.raises(RateLimitError, match="already used"):
+        next_row.create({**ROW, "row_id": "2"})
+    assert [name for name, _ in writer.calls] == ["create"]
+
+
+def test_live_test_requires_explicit_operator_and_row(offline_db, monkeypatch):
+    for field, value in {
+        "ZERO_CHARGE_CONFIRMED": "true", "NO_PUBLISH_SCOPE_CONFIRMED": "true",
+        "LIVE_TEST_SOURCE_REF": "rows.json", "LIVE_TEST_ROW_ID": "1",
+        "LIVE_TEST_SEGMENT_ID": "seg-vip",
+    }.items():
+        monkeypatch.setenv("MOENGAGE_DRAFT_TATA_" + field, value)
+    with pytest.raises(PermissionError, match="designated live test operator"):
+        DraftCreation.from_environment("tata", USER)
+    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_LIVE_TEST_OPERATOR_EMAIL", "other@example.com")
+    with pytest.raises(PermissionError, match="designated live test operator"):
+        DraftCreation.from_environment("tata", USER)
+    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_LIVE_TEST_OPERATOR_EMAIL", USER["email"])
+    monkeypatch.delenv("MOENGAGE_DRAFT_TATA_LIVE_TEST_SEGMENT_ID")
+    with pytest.raises(PermissionError, match="approved live test source row and segment"):
+        DraftCreation.from_environment("tata", USER)
+
+
 def test_server_catalog_must_match_bound_workspace(offline_db, tmp_path, monkeypatch):
     from moengage_draft_creation import DraftCreation as ProductionDraftCreation
 
@@ -185,6 +237,8 @@ def test_server_catalog_must_match_bound_workspace(offline_db, tmp_path, monkeyp
     prefix = "MOENGAGE_DRAFT_TATA_"
     for field, value in {
         "ZERO_CHARGE_CONFIRMED": "true", "NO_PUBLISH_SCOPE_CONFIRMED": "true",
+        "LIVE_TEST_OPERATOR_EMAIL": USER["email"], "LIVE_TEST_SOURCE_REF": "rows.json",
+        "LIVE_TEST_ROW_ID": "1", "LIVE_TEST_SEGMENT_ID": "seg-vip",
         "LIVE_ENABLED": "true", "WORKSPACE_ID": CATALOG["workspace_id"],
         "DATA_CENTER": "03", "API_KEY": "offline-placeholder", "CATALOG_FILE": str(catalog_file),
     }.items():
@@ -193,6 +247,11 @@ def test_server_catalog_must_match_bound_workspace(offline_db, tmp_path, monkeyp
     with patch("requests.request", side_effect=AssertionError("No provider call allowed")):
         with pytest.raises(ValueError, match="Catalog does not match"):
             ProductionDraftCreation.from_environment("tata", USER)
+        catalog_file.write_text(json.dumps(CATALOG))
+        production = ProductionDraftCreation.from_environment("tata", USER)
+        assert production.live_test_row == ("rows.json", "1")
+        assert production.live_test_segment_id == "seg-vip"
+
 
 
 def test_create_route_requires_owner_approval_and_uses_server_catalog(offline_db):
@@ -211,5 +270,13 @@ def test_create_route_requires_owner_approval_and_uses_server_catalog(offline_db
                                                                           "catalog": {"account": "bajaj"}})
                 assert result.status_code == 200 and result.json()["state"] == "VALIDATED"
                 assert writer.calls[0][0] == "create"
+            guarded_writer = FakeWriter()
+            guarded = DraftCreation("tata", USER, CATALOG, guarded_writer,
+                                    allow_sqlite_for_tests=True, live_test_row=("rows.json", "1"),
+                                    live_test_segment_id="seg-vip")
+            with patch("moengage_draft_creation.DraftCreation.from_environment", return_value=guarded):
+                forbidden = client.post("/api/moengage/drafts/create",
+                                        json={"account": "tata", "row": {**ROW, "row_id": "not-approved"}})
+                assert forbidden.status_code == 423 and guarded_writer.calls == []
         finally:
             app.dependency_overrides.pop(get_current_user, None)
