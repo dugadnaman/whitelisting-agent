@@ -18,8 +18,14 @@ RUN npm run build
 # ==========================================
 FROM python:3.11-slim
 WORKDIR /app
-ENV PYTHONPATH=/app/backend:/app
-# Install Node.js runtime for Next.js and process supervisor
+ENV PYTHONPATH=/app/backend:/app \
+    MOENGAGE_DRAFT_TATA_CATALOG_FILE=/app/tata_catalog.json \
+    MOENGAGE_DRAFT_TATA_WORKSPACE_ID=0KYUNUW5WODKX5ZFVAGPVL0U \
+    MOENGAGE_DRAFT_TATA_DATA_CENTER=03 \
+    MOENGAGE_DRAFT_TATA_LIVE_ENABLED=true \
+    MOENGAGE_DRAFT_TATA_ZERO_CHARGE_CONFIRMED=true \
+    MOENGAGE_DRAFT_TATA_NO_PUBLISH_SCOPE_CONFIRMED=true \
+    MOENGAGE_DRAFT_ALLOW_SQLITE=true
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     nodejs \
