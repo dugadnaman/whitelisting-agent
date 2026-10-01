@@ -1,8 +1,7 @@
 # MoEngage Campaign Creation Agent — Architectural Specification & Research Dossier
 
-> **Audience:** Autonomous AI Agents (e.g. GPT-6 / Specialized Solvers) and Systems Engineers.  
-> **Status:** Specification & Architectural Reference  
-> **Primary Systems:** MoEngage V5 REST API, MoEngage Hosted MCP Server (`https://mcp.moengage.com`), OAuth 2.0 Auth Server (`https://moeauth.moengage.com`).
+> **Status:** Historical proposal; illustrative payloads and capability claims are not an implementation contract.
+> **Use instead:** [phase-gated execution plan](MOENGAGE_CAMPAIGN_CREATION_EXECUTION_PLAN.md) and [primary-source audit](MOENGAGE_CAMPAIGN_RESEARCH_NOTES.md). These record corrected channel limits, draft-only safety, account isolation, and the no-spend gate. Do not execute campaign or billing mutations based on this older document.
 
 ---
 

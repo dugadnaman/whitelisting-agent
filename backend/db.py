@@ -46,6 +46,7 @@ VALID_TABLES: set[str] = {
     "sms_clicks",
     "system_errors",
     "alert_scheduler_runs",
+    "moengage_draft_attempts",
 }
 
 
@@ -389,6 +390,23 @@ SQLITE_SCHEMA_DDL = [
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_alert_sched_day ON alert_scheduler_runs(day_str);",
+    """
+    CREATE TABLE IF NOT EXISTS moengage_draft_attempts (
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        state TEXT NOT NULL,
+        campaign_id TEXT,
+        attempted_at REAL NOT NULL,
+        validation_json TEXT,
+        issue TEXT,
+        PRIMARY KEY (account, workspace_id, source_ref, row_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_moe_draft_attempts_workspace_time ON moengage_draft_attempts(workspace_id, attempted_at);",
 ]
 
 POSTGRES_SCHEMA_DDL = [
@@ -553,6 +571,23 @@ POSTGRES_SCHEMA_DDL = [
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_alert_sched_day ON alert_scheduler_runs(day_str);",
+    """
+    CREATE TABLE IF NOT EXISTS moengage_draft_attempts (
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        state TEXT NOT NULL,
+        campaign_id TEXT,
+        attempted_at DOUBLE PRECISION NOT NULL,
+        validation_json TEXT,
+        issue TEXT,
+        PRIMARY KEY (account, workspace_id, source_ref, row_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_moe_draft_attempts_workspace_time ON moengage_draft_attempts(workspace_id, attempted_at);",
 ]
 
 
