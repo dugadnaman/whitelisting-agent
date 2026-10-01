@@ -24,17 +24,19 @@ _ROW_FIELDS = frozenset({
     "segment_id", "segment_name", "scheduled_at", "timezone", "created_by",
     "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
     "email_template_id", "email_attachment_ids", "push_platform", "push_title",
-    "push_message", "click_url", "push_image_asset_id", "source_attachments", "_row_error",
+    "push_message", "click_url", "push_image_asset_id", "whatsapp_sender", "whatsapp_template_id",
+    "source_attachments", "_row_error",
 })
 _EMAIL_FIELDS = frozenset({
     "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
     "email_template_id", "email_attachment_ids",
 })
 _PUSH_FIELDS = frozenset({"push_platform", "push_title", "push_message", "click_url", "push_image_asset_id"})
+_WHATSAPP_FIELDS = frozenset({"whatsapp_sender", "whatsapp_template_id"})
 _DISPLAY_FIELDS = (
     "campaign_name", "segment_id", "segment_name", "scheduled_at", "timezone",
     "content_type", "from_address", "subject", "html_content", "email_template_id",
-    "push_platform", "push_title", "push_message", "click_url",
+    "push_platform", "push_title", "push_message", "click_url", "whatsapp_sender", "whatsapp_template_id",
 )
 _MAX_FILE_BYTES = 5 * 1024 * 1024
 _IOS_FLAGS = (
@@ -216,6 +218,32 @@ def _push(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: list[
             "template_type": "BASIC", "basic_details": basic,
         }}}},
     }
+def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: list[str]) -> dict[str, Any]:
+    sender_name = _text(row, "whatsapp_sender")
+    template_id = _text(row, "whatsapp_template_id")
+    senders = _items(catalog, "whatsapp_senders")
+    templates = _items(catalog, "whatsapp_templates")
+    sender = _select(senders, "sender_name", sender_name, "whatsapp sender", errors) if (senders and sender_name) else None
+    if not sender_name and not sender:
+        errors.append("whatsapp_sender is required")
+    template = _select(templates, "id", template_id, "whatsapp template", errors) if (templates and template_id) else None
+    if not template_id and not template:
+        errors.append("whatsapp_template_id is required")
+    return {
+        "basic_details": {"name": name},
+        "campaign_content": {
+            "content": {
+                "whatsapp": {
+                    "sender_name": sender.get("sender_name") if sender else sender_name,
+                    "phone_number": sender.get("phone_number") if sender else "",
+                    "provider": sender.get("provider", "KARIX") if sender else "KARIX",
+                    "template_id": template.get("id") if template else template_id,
+                    "template_name": template.get("name") if template else template_id,
+                }
+            }
+        },
+    }
+
 
 
 def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creator: str, *, source_type: str) -> dict[str, Any]:
@@ -251,19 +279,31 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
         if _text(row, "created_by") and _text(row, "created_by") != creator:
             errors.append("Row creator does not match authenticated user")
         channel = _text(row, "channel").upper()
-        if channel not in ("EMAIL", "PUSH"):
-            errors.append("Only EMAIL and PUSH are supported")
-        other_fields = _PUSH_FIELDS if channel == "EMAIL" else _EMAIL_FIELDS
-        if channel in ("EMAIL", "PUSH") and any(row.get(field) not in (None, "", []) for field in other_fields):
+        if channel not in ("EMAIL", "PUSH", "WHATSAPP"):
+            errors.append("Only EMAIL, PUSH and WHATSAPP are supported")
+        if channel == "EMAIL":
+            other_fields = _PUSH_FIELDS | _WHATSAPP_FIELDS
+        elif channel == "PUSH":
+            other_fields = _EMAIL_FIELDS | _WHATSAPP_FIELDS
+        elif channel == "WHATSAPP":
+            other_fields = _EMAIL_FIELDS | _PUSH_FIELDS
+        else:
+            other_fields = frozenset()
+        if channel in ("EMAIL", "PUSH", "WHATSAPP") and any(row.get(field) not in (None, "", []) for field in other_fields):
             errors.append("Row contains non-empty fields for another channel")
         name = _text(row, "campaign_name")
         if not name:
             errors.append("campaign_name is required; Jira summary is not campaign copy")
         audience = _audience(row, catalog, errors)
         schedule = _schedule(row, errors)
-        content = _email(row, catalog, name, errors) if channel == "EMAIL" else (
-            _push(row, catalog, name, errors) if channel == "PUSH" else {}
-        )
+        if channel == "EMAIL":
+            content = _email(row, catalog, name, errors)
+        elif channel == "PUSH":
+            content = _push(row, catalog, name, errors)
+        elif channel == "WHATSAPP":
+            content = _whatsapp(row, catalog, name, errors)
+        else:
+            content = {}
         candidate = None
         if not errors:
             candidate = {
