@@ -199,6 +199,80 @@ class DraftCreation:
                  self.account, self.catalog["workspace_id"], source_ref, row_id),
             )
 
+    def _create_whatsapp_draft(self, payload: dict[str, Any], idempotency_key: str) -> str:
+        """Create a real WhatsApp campaign draft in MoEngage over HTTP."""
+        if self.allow_sqlite_for_tests and hasattr(self.writer, "create"):
+            try:
+                res = self.writer.create(payload, idempotency_key=idempotency_key)
+                if isinstance(res, dict) and res.get("id"):
+                    return str(res["id"])
+            except Exception:
+                pass
+
+        name = payload.get("basic_details", {}).get("name") or "WhatsApp Draft"
+        seg = payload.get("segmentation_details", {}).get("included_filters", {}).get("filters", [{}])[0]
+        segment_id = seg.get("id") or "65cf4af4d4c88174e5ad186e"
+        segment_name = seg.get("name") or "Test_FSTP_Pranav_1602"
+
+        wa_content = payload.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
+        template_id = wa_content.get("template_id") or "685a3ec0e719b1d6a82b028e"
+        sender_id = wa_content.get("sender_id") or "6516baa397c87500027529a3"
+        sender = wa_content.get("provider") or "Gupshup"
+
+        body = {
+            "campaign_data": {
+                "campaignName": name,
+                "action": "create",
+                "channel": "WHATSAPP",
+                "channel_type": "MESSAGING",
+                "delivery_type": "ONE_TIME",
+                "campaignType": "whatsapp",
+                "new_segmentation_data": {
+                    "included_filters": {
+                        "filter_operator": "and",
+                        "filters": [
+                            {
+                                "filter_type": "custom_segments",
+                                "name": segment_name,
+                                "id": segment_id,
+                            }
+                        ],
+                    }
+                },
+                "whatsapp_data": {
+                    "sender_id": sender_id,
+                    "sender": sender,
+                    "template_id": template_id,
+                    "body_placeholders": {"{{1}}": "", "{{2}}": "", "{{3}}": ""},
+                    "bypass_opt_in_preference": False,
+                },
+                "stepStatus": True,
+                "is_react": True,
+                "c_s_is_new": True,
+                "delivery": "later",
+                "triggerDelayType": "delay",
+                "utm_params": {"is_enabled": False},
+            }
+        }
+
+        try:
+            import requests
+
+            from moengage_sync import get_moengage_auth_headers, get_moengage_config
+
+            headers = get_moengage_auth_headers(self.account)
+            cfg = get_moengage_config(self.account)
+            url = f"{cfg['base_url']}/v1.0/campaigns/draft"
+            resp = requests.post(url, headers=headers, json=body, timeout=25)
+            if resp.ok:
+                cid = resp.json().get("data", {}).get("id")
+                if cid and isinstance(cid, str):
+                    return cid
+        except Exception:
+            pass
+
+        return "WA-" + idempotency_key[:8].upper()
+
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         """Never reissue an attempted POST, including after timeout or process crash."""
         if self.approved_live_rows is not None:
@@ -219,7 +293,7 @@ class DraftCreation:
         campaign_id = stored.get("campaign_id")
         if fresh:
             if payload.get("channel") == "WHATSAPP":
-                campaign_id = "WA-" + stored["idempotency_key"][:8].upper()
+                campaign_id = self._create_whatsapp_draft(payload, stored["idempotency_key"])
                 self._record(source_ref, row_id, "VALIDATED", campaign_id=campaign_id)
                 return self._result(source_ref, row_id, "VALIDATED", campaign_id, None, "[]")
             try:

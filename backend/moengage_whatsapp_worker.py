@@ -13,6 +13,8 @@ import os
 import time
 from typing import Any
 
+import requests
+
 from db import get_db, init_database
 from moengage_drafts import authorize_draft_account
 
@@ -79,15 +81,98 @@ def automate_whatsapp_draft_batch(
         or "https://dashboard-03.moengage.com"
     )
 
-    # 3. Launch Playwright headless browser
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        raise RuntimeError("Playwright is required on the server for automated WhatsApp creation.") from exc
-
     results: list[dict[str, Any]] = []
     created_count = 0
     failed_count = 0
+    remaining_rows: list[dict[str, Any]] = []
+
+    # Try fast direct HTTP API first (~200ms per draft)
+    try:
+        from moengage_sync import get_moengage_auth_headers, get_moengage_config
+        headers = get_moengage_auth_headers(account)
+        cfg = get_moengage_config(account)
+        url = f"{cfg['base_url']}/v1.0/campaigns/draft"
+
+        for r in wa_rows:
+            source_fields = json.loads(r["source_fields_json"]) if r.get("source_fields_json") else {}
+            name = source_fields.get("campaign_name") or f"WA_Campaign_Row_{r['row_id']}"
+            segment_name = source_fields.get("segment_name") or "Test_FSTP_Pranav_1602"
+            segment_id = source_fields.get("segment_id") or "65cf4af4d4c88174e5ad186e"
+            sender_id = "6516baa397c87500027529a3"
+            template_id = "685a3ec0e719b1d6a82b028e"
+            row_id = r["row_id"]
+            position = r["position"]
+
+            body = {
+                "campaign_data": {
+                    "campaignName": name,
+                    "action": "create",
+                    "channel": "WHATSAPP",
+                    "channel_type": "MESSAGING",
+                    "delivery_type": "ONE_TIME",
+                    "campaignType": "whatsapp",
+                    "new_segmentation_data": {
+                        "included_filters": {
+                            "filter_operator": "and",
+                            "filters": [
+                                {
+                                    "filter_type": "custom_segments",
+                                    "name": segment_name,
+                                    "id": segment_id,
+                                }
+                            ]
+                        }
+                    },
+                    "whatsapp_data": {
+                        "sender_id": sender_id,
+                        "sender": "Gupshup",
+                        "template_id": template_id,
+                        "body_placeholders": {"{{1}}": "", "{{2}}": "", "{{3}}": ""},
+                        "bypass_opt_in_preference": False,
+                    },
+                    "stepStatus": True,
+                    "is_react": True,
+                    "c_s_is_new": True,
+                    "delivery": "later",
+                    "triggerDelayType": "delay",
+                    "utm_params": {"is_enabled": False},
+                }
+            }
+
+            resp = requests.post(url, headers=headers, json=body, timeout=20)
+            if resp.ok:
+                resp_data = resp.json()
+                cid = resp_data.get("data", {}).get("id")
+                if cid and isinstance(cid, str):
+                    now = time.time()
+                    with get_db() as conn:
+                        conn.execute(
+                            "UPDATE moengage_draft_batch_rows SET status='VALIDATED', "
+                            "campaign_id=?, issue=NULL, updated_at=? WHERE batch_id=? AND position=?",
+                            (cid, now, batch_id, position),
+                        )
+                    created_count += 1
+                    results.append({"row_id": row_id, "name": name, "status": "VALIDATED", "id": cid})
+                    continue
+            remaining_rows.append(r)
+    except Exception as exc:
+        logger.info("Direct HTTP WhatsApp creation not available or failed (%s); falling back to Playwright", exc)
+        remaining_rows = wa_rows
+
+    if not remaining_rows:
+        return {
+            "ok": True,
+            "total": len(wa_rows),
+            "created": created_count,
+            "failed": 0,
+            "results": results,
+        }
+
+    # 3. Fallback: Launch Playwright headless browser for any remaining rows
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise RuntimeError("Playwright is required for browser-fallback WhatsApp creation.") from exc
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -111,7 +196,7 @@ def automate_whatsapp_draft_batch(
 
         page = context.new_page()
 
-        for r in wa_rows:
+        for r in remaining_rows:
             source_fields = json.loads(r["source_fields_json"]) if r.get("source_fields_json") else {}
             name = source_fields.get("campaign_name") or f"WA_Campaign_Row_{r['row_id']}"
             segment = (
