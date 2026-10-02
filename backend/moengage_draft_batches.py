@@ -179,8 +179,8 @@ class DraftBatchQueue:
                 "WHERE batch_id=? AND position=? AND status='preview_ready'",
                 (time.time(), batch_id, current["position"]),
             ).rowcount
-        if claimed != 1:
-            return self.get(batch_id)
+            if claimed != 1:
+                return self.get(batch_id)
         try:
             result = creator.create(json.loads(current["row_json"]))
             if not isinstance(result, dict) or result.get("state") not in (

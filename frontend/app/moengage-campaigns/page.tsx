@@ -214,23 +214,52 @@ function RowCard({
       )}
 
       {row.campaign_id && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-900 flex items-center justify-between">
+        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3.5 text-sm text-emerald-900 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <span className="font-semibold">Recorded MoEngage Draft ID:</span>{' '}
-            <code className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded font-mono font-bold text-xs">
-              {row.campaign_id}
-            </code>
-            <p className="text-xs text-emerald-700 mt-0.5">
-              Verified in MoEngage Drafts table. Requires human review and manual publish in dashboard before sending.
+            <div className="flex items-center gap-2">
+              <span className="font-semibold">Recorded MoEngage Draft ID:</span>
+              <code className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded font-mono font-bold text-xs">
+                {row.campaign_id}
+              </code>
+            </div>
+            <p className="text-xs text-emerald-700 mt-1">
+              {isWhatsApp
+                ? 'WhatsApp draft candidate validated for Karix BSP. Open in MoEngage Studio to finalize and publish.'
+                : 'Verified in MoEngage Drafts table. Requires human review and manual publish in dashboard before sending.'}
             </p>
           </div>
+          {isWhatsApp && (
+            <a
+              href="https://dashboard-03.moengage.com/v4/whatsapp/create/one-time/"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-700 text-white font-semibold text-xs hover:bg-emerald-800 transition-colors shadow-xs"
+            >
+              Open in MoEngage WhatsApp Studio →
+            </a>
+          )}
         </div>
       )}
 
-      {uncertain && (
-        <p className="text-sm font-semibold text-amber-800 bg-amber-50 p-2.5 rounded-lg border border-amber-200">
-          ⚠️ Create request was not confirmed. Do not click create again. Refresh the batch to reconcile state.
-        </p>
+      {uncertain && !row.campaign_id && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200">
+          <div>
+            <span>⚠️ Previous attempt was unconfirmed.</span>
+            <p className="text-xs text-amber-700 font-normal mt-0.5">
+              No remote campaign ID was registered yet. You can retry creating this row.
+            </p>
+          </div>
+          {batch && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onCreate(row)}
+              className="rounded-lg bg-amber-700 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-50 transition-colors"
+            >
+              Retry Create…
+            </button>
+          )}
+        </div>
       )}
 
       {batch && ready && !uncertain && !row.campaign_id && (

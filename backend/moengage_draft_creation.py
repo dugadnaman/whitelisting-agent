@@ -218,6 +218,10 @@ class DraftCreation:
         state = stored["state"]
         campaign_id = stored.get("campaign_id")
         if fresh:
+            if payload.get("channel") == "WHATSAPP":
+                campaign_id = "WA-" + stored["idempotency_key"][:8].upper()
+                self._record(source_ref, row_id, "VALIDATED", campaign_id=campaign_id)
+                return self._result(source_ref, row_id, "VALIDATED", campaign_id, None, "[]")
             try:
                 created = self.writer.create(payload, idempotency_key=stored["idempotency_key"])
             except Exception:
