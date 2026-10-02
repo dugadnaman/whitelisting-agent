@@ -214,18 +214,26 @@ function RowCard({
       )}
 
       {row.campaign_id && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3.5 text-sm text-emerald-900 flex flex-wrap items-center justify-between gap-3">
+        <div
+          className={`rounded-xl border p-4 text-sm flex flex-wrap items-center justify-between gap-3 shadow-xs ${
+            isWhatsApp
+              ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
+        >
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-semibold">Recorded MoEngage Draft ID:</span>
+              <span className="font-bold">
+                {isWhatsApp ? 'Validated WhatsApp Brief Reference:' : 'Remote MoEngage Campaign ID:'}
+              </span>
               <code className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded font-mono font-bold text-xs">
                 {row.campaign_id}
               </code>
             </div>
-            <p className="text-xs text-emerald-700 mt-1">
+            <p className="text-xs text-emerald-800 mt-1 max-w-xl">
               {isWhatsApp
-                ? 'WhatsApp draft candidate validated for Karix BSP. Open in MoEngage Studio to finalize and publish.'
-                : 'Verified in MoEngage Drafts table. Requires human review and manual publish in dashboard before sending.'}
+                ? 'MoEngage does not support programmatic REST API creation for WhatsApp (Email & Push only). This brief is verified against your Karix BSP sender and template. Click the studio button to save or schedule the draft in MoEngage.'
+                : 'Confirmed draft created in your MoEngage Live workspace via V5 API. View under Campaigns → Drafts.'}
             </p>
           </div>
           {isWhatsApp && (
@@ -233,9 +241,9 @@ function RowCard({
               href="https://dashboard-03.moengage.com/v4/whatsapp/create/one-time/"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-700 text-white font-semibold text-xs hover:bg-emerald-800 transition-colors shadow-xs"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold text-xs hover:bg-emerald-800 transition-colors shadow-sm shrink-0"
             >
-              Open in MoEngage WhatsApp Studio →
+              Open in MoEngage WhatsApp Studio ↗
             </a>
           )}
         </div>
