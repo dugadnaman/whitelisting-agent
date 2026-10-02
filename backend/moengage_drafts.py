@@ -109,7 +109,7 @@ class DraftWriter:
             raise ValueError("One-time Email/Push and creator are required")
         key = self._operation_key(idempotency_key)
         data = self._request("POST", payload={**payload, "request_id": key}, idempotency_key=key)
-        if data.get("status") != "DRAFT":
+        if str(data.get("status", "")).upper() != "DRAFT":
             raise ValueError("Created campaign is not confirmed DRAFT")
         return data
 
@@ -119,6 +119,6 @@ class DraftWriter:
 
     def validate(self, campaign_id: str) -> dict[str, Any]:
         path = self._campaign_path(campaign_id)
-        if self.get(campaign_id).get("status") != "DRAFT":
+        if str(self.get(campaign_id).get("status", "")).upper() != "DRAFT":
             raise PermissionError("Only confirmed drafts may be validated")
         return self._request("POST", path + "/validate")

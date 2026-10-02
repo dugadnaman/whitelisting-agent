@@ -228,7 +228,7 @@ class DraftCreation:
                 self._record(source_ref, row_id, "UNCERTAIN", issue="create_result_unconfirmed")
                 return self._result(source_ref, row_id, "UNCERTAIN", None, "create_result_unconfirmed")
             campaign_id = created.get("id")
-            if (created.get("status") != "DRAFT" or not isinstance(campaign_id, str)
+            if (str(created.get("status", "")).upper() != "DRAFT" or not isinstance(campaign_id, str)
                     or len(campaign_id) != 24
                     or any(c not in "0123456789abcdefABCDEF" for c in campaign_id)):
                 self._record(source_ref, row_id, "UNCERTAIN", issue="created_draft_unconfirmed")
@@ -243,7 +243,7 @@ class DraftCreation:
             except Exception:
                 self._record(source_ref, row_id, "CREATED", issue="readback_unavailable")
                 return self._result(source_ref, row_id, "CREATED", campaign_id, "readback_unavailable")
-            if (readback.get("status") != "DRAFT" or readback.get("id") != campaign_id
+            if (str(readback.get("status", "")).upper() != "DRAFT" or readback.get("id") != campaign_id
                     or not _matches(readback, payload)):
                 self._record(source_ref, row_id, "NEEDS_REVIEW", issue="readback_mismatch_or_not_draft")
                 return self._result(source_ref, row_id, "NEEDS_REVIEW", campaign_id, "readback_mismatch_or_not_draft")
