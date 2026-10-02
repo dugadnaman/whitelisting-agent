@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useApp } from '@/lib/context';
 import {
+  automateMoEngageWhatsAppBatch,
   createMoEngageDraftRow,
   fetchMoEngageCatalog,
   fetchMoEngageDraftBatch,
@@ -295,6 +296,7 @@ export default function MoEngageCampaignsPage() {
   const [catalog, setCatalog] = useState<MoEngageCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
+  const [automatingWa, setAutomatingWa] = useState(false);
   // Single form builder state
   const [singleChannel, setSingleChannel] = useState<'WHATSAPP' | 'EMAIL' | 'PUSH'>('WHATSAPP');
   const [singleName, setSingleName] = useState('');
@@ -507,6 +509,39 @@ This will create a confirmed DRAFT in your MoEngage workspace. It will NOT publi
         .map((r) => r.row_id)
     );
   }, [batch, currentUser, account]);
+  const handleAutomateWhatsApp = async () => {
+    if (!batch || busy || automatingWa) return;
+    const pendingWa = batch.items.filter(
+      (r) => r.channel?.toUpperCase() === 'WHATSAPP' && (!r.campaign_id || r.status !== 'VALIDATED')
+    );
+    if (pendingWa.length === 0) return;
+
+    if (
+      !window.confirm(
+        `Start automated creation of ${pendingWa.length} WhatsApp drafts in MoEngage?
+
+The server's background automation worker will open the MoEngage studio, fill in each campaign name, select your Karix sender and template, and save each draft directly in MoEngage.`
+      )
+    )
+      return;
+
+    setAutomatingWa(true);
+    setError('');
+    setNotice('');
+    try {
+      const res = await automateMoEngageWhatsAppBatch(batch.batch_id, account);
+      showBatch(await fetchMoEngageDraftBatch(batch.batch_id, account), storageKey);
+      if (res.failed > 0) {
+        setError(`Automated ${res.created} drafts in MoEngage, but ${res.failed} had issues. Check the cards below.`);
+      } else {
+        setNotice(`Successfully created all ${res.created} WhatsApp drafts in MoEngage! Verified in Drafts.`);
+      }
+    } catch (err) {
+      setError(`WhatsApp automation error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setAutomatingWa(false);
+    }
+  };
 
   const handleCreateFromSingleForm = async () => {
     if (busy || !singleName.trim() || !singleSegment) {
@@ -1238,16 +1273,27 @@ This will create a confirmed DRAFT in your MoEngage workspace. It will NOT publi
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void refreshBatch()}
-                  className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  🔄 Refresh Stored State
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {batch.items.some((r) => r.channel?.toUpperCase() === 'WHATSAPP' && (!r.campaign_id || r.status !== 'VALIDATED')) && (
+                    <button
+                      type="button"
+                      disabled={busy || automatingWa}
+                      onClick={() => void handleAutomateWhatsApp()}
+                      className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-xs font-bold disabled:opacity-50 transition-colors shadow-xs flex items-center gap-1.5"
+                    >
+                      {automatingWa ? '⚡ Automating in MoEngage…' : '⚡ Automate All WhatsApp Drafts in MoEngage'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy || automatingWa}
+                    onClick={() => void refreshBatch()}
+                    className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    🔄 Refresh Stored State
+                  </button>
+                </div>
               </div>
-
               {/* Channel Filter Chips */}
               <div className="flex gap-2 text-xs font-semibold">
                 {(['ALL', 'WHATSAPP', 'EMAIL', 'PUSH'] as const).map((ch) => (

@@ -1250,6 +1250,17 @@ export function createMoEngageDraftRow(batchId: string, rowId: string, account: 
     { method: "POST", body: form }
   );
 }
+export function automateMoEngageWhatsAppBatch(
+  batchId: string,
+  account: string
+): Promise<{ ok: boolean; total: number; created: number; failed: number; message?: string }> {
+  const form = new FormData();
+  form.append("account", account);
+  return moEngageDraftRequest(
+    `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}/automate-whatsapp`,
+    { method: "POST", body: form }
+  );
+}
 export type MoEngageCatalogSegment = { id: string; name: string };
 export type MoEngageCatalogEmailSender = { from_address: string; sender_name: string; connector_type: string; connector_name: string };
 export type MoEngageCatalogPushPlatform = { platform: string; notification_channel?: string };

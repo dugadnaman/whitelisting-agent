@@ -36,7 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python backend dependencies
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 # Copy Python backend code and static assets. Runtime secrets, SQLite, and JSONL
 # logs are supplied through environment variables/volumes at deployment time.
 COPY backend/ ./backend/
