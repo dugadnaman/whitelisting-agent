@@ -441,15 +441,35 @@ This will create a confirmed DRAFT in your MoEngage workspace. It will NOT publi
       showBatch(result, storageKey);
       setNotice(`Created draft successfully! Review the confirmed campaign ID below.`);
     } catch (cause) {
-      const marker = `moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`;
-      localStorage.setItem(marker, '1');
-      setUncertainRows((rows) => [...rows, row.row_id]);
-      setError(`Create result uncertain for row ${row.row_id}: ${cause instanceof Error ? cause.message : String(cause)}. Re-read the batch to confirm state.`);
+      const errStr = cause instanceof Error ? cause.message : String(cause);
+      const isTimeout = errStr.includes('504') || errStr.toLowerCase().includes('timeout') || errStr.toLowerCase().includes('network');
+      if (isTimeout) {
+        const marker = `moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`;
+        localStorage.setItem(marker, '1');
+        setUncertainRows((rows) => [...rows, row.row_id]);
+        setError(`Create result uncertain for row ${row.row_id}: ${errStr}. Re-read the batch to confirm state.`);
+      } else {
+        setError(`Create failed for row ${row.row_id}: ${errStr}`);
+      }
     } finally {
       createInFlight.current = false;
       setBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!batch || !currentUser) return;
+    batch.items.forEach((r) => {
+      if (r.status === 'preview_ready' || r.campaign_id) {
+        localStorage.removeItem(`moengage_draft_uncertain:${currentUser.id}:${account}:${batch.batch_id}:${r.row_id}`);
+      }
+    });
+    setUncertainRows(
+      batch.items
+        .filter((r) => r.status === 'UNCERTAIN' || localStorage.getItem(`moengage_draft_uncertain:${currentUser.id}:${account}:${batch.batch_id}:${r.row_id}`) === '1')
+        .map((r) => r.row_id)
+    );
+  }, [batch, currentUser, account]);
 
   const handleCreateFromSingleForm = async () => {
     if (busy || !singleName.trim() || !singleSegment) {

@@ -92,9 +92,16 @@ class DraftCreation:
         operator = os.environ.get(prefix + "LIVE_TEST_OPERATOR_EMAIL", "").strip()
         segment_id = os.environ.get(prefix + "LIVE_TEST_SEGMENT_ID", "").strip()
         rows_json = os.environ.get(prefix + "LIVE_TEST_ROWS_JSON", "").strip()
+        source_ref = os.environ.get(prefix + "LIVE_TEST_SOURCE_REF", "").strip()
+        row_id = os.environ.get(prefix + "LIVE_TEST_ROW_ID", "").strip()
         email = user.get("email")
-        if not operator or not isinstance(email, str) or email.casefold() != operator.casefold():
+        allowed_operators = [e.strip().casefold() for e in operator.split(",") if e.strip()]
+        if allowed_operators:
+            if not isinstance(email, str) or email.casefold() not in allowed_operators:
+                raise PermissionError("Only the designated live test operator may create a draft")
+        elif source_ref or rows_json or segment_id or row_id:
             raise PermissionError("Only the designated live test operator may create a draft")
+        approved_rows: dict[tuple[str, str], tuple[str | None, str]] | None = None
         if rows_json:
             try:
                 selected = json.loads(rows_json)
@@ -102,7 +109,7 @@ class DraftCreation:
                 raise PermissionError("Approved live Email/Push rows must be valid JSON") from exc
             if not isinstance(selected, list) or len(selected) != 2:
                 raise PermissionError("Exactly one approved Email and one Push live test row are required")
-            approved_rows: dict[tuple[str, str], tuple[str | None, str]] = {}
+            approved_rows = {}
             for row in selected:
                 if not isinstance(row, dict) or set(row) != {"source_ref", "row_id", "channel", "segment_id"}:
                     raise PermissionError("Approved live rows require source_ref, row_id, channel and segment_id")
@@ -113,9 +120,7 @@ class DraftCreation:
             if (len(approved_rows) != 2
                     or {channel for channel, _ in approved_rows.values()} != {"EMAIL", "PUSH"}):
                 raise PermissionError("Approved live rows must contain distinct Email and Push source rows")
-        else:
-            source_ref = os.environ.get(prefix + "LIVE_TEST_SOURCE_REF", "").strip()
-            row_id = os.environ.get(prefix + "LIVE_TEST_ROW_ID", "").strip()
+        elif source_ref or row_id or segment_id:
             if not source_ref or not row_id or not segment_id:
                 raise PermissionError("One approved live test source row and segment are required")
             approved_rows = {(source_ref, row_id): (None, segment_id)}
