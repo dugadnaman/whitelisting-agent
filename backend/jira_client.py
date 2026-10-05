@@ -166,6 +166,11 @@ def list_jira_issues(
         else:
             jql_parts.append(f'(summary ~ "{clean_q}" OR text ~ "{clean_q}")')
     jql = " AND ".join(jql_parts) + " ORDER BY created DESC"
+    target = (
+        re.sub(r"[\s_]+", "_", brief_status.strip().lower())
+        if brief_status and brief_status.lower() != "all"
+        else None
+    )
 
     payload = {
         "jql": jql,
@@ -185,12 +190,20 @@ def list_jira_issues(
             "description",
         ],
     }
-    resp = requests.post(url, headers=headers, json=payload, timeout=20)
-    if not resp.ok:
-        raise RuntimeError(f"Jira API error ({resp.status_code}): {resp.text[:300]}")
 
-    data = resp.json()
-    issues_raw = data.get("issues", [])
+    def issue_pages():
+        next_page_token = None
+        while True:
+            page_payload = {**payload, "nextPageToken": next_page_token} if next_page_token else payload
+            resp = requests.post(url, headers=headers, json=page_payload, timeout=20)
+            if not resp.ok:
+                raise RuntimeError(f"Jira API error ({resp.status_code}): {resp.text[:300]}")
+            data = resp.json()
+            yield from data.get("issues", [])
+            next_page_token = data.get("nextPageToken")
+            if target is None or data.get("isLast") or not next_page_token:
+                break
+
     results: list[dict[str, Any]] = []
     submitted_info: dict[str, str] = {}
     try:
@@ -212,7 +225,7 @@ def list_jira_issues(
                     pass
     except Exception:
         pass
-    for item in issues_raw:
+    for item in issue_pages():
         fields = item.get("fields", {})
         summary_val = str(fields.get("summary") or "")
         desc_val = adf_to_text(fields.get("description"))
@@ -294,53 +307,49 @@ def list_jira_issues(
             "push": ch_push,
         }
 
-        results.append(
-            {
-                "key": item.get("key"),
-                "id": item.get("id"),
-                "summary": summary_val,
-                "status": fields.get("status", {}).get("name", "Unknown"),
-                "assignee": fields.get("assignee", {}).get("displayName") if fields.get("assignee") else "Unassigned",
-                "reporter": fields.get("reporter", {}).get("displayName") if fields.get("reporter") else "Anonymous",
-                "duedate": fields.get("duedate"),
-                "created": fields.get("created"),
-                "updated": fields.get("updated"),
-                "attachment_count": len(att_list),
-                "attachments": [
-                    {
-                        "id": a.get("id"),
-                        "filename": a.get("filename"),
-                        "size": a.get("size"),
-                        "mimeType": a.get("mimeType"),
-                        "created": a.get("created"),
-                    }
-                    for a in att_list
-                ],
-                "labels": fields.get("labels", []),
-                "mentions_soham": mentions_soham,
-                "soham_mention_reasons": soham_mention_reasons,
-                "comments_text": all_comments_str,
-                "description_text": desc_val,
-                "is_email": is_email,
-                "campaign_type": "email" if is_email else "messaging",
-                "channel_counts": channel_counts,
-                "brief_status": compute_brief_status(
-                    status_raw=fields.get("status", {}).get("name", "Unknown"),
-                    attachment_count=len(att_list),
-                    total_campaigns=total_channels,
-                    is_submitted=item.get("key") in submitted_info,
-                    submission_status=submitted_info.get(item.get("key")),
-                ),
-            }
-        )
+        issue = {
+            "key": item.get("key"),
+            "id": item.get("id"),
+            "summary": summary_val,
+            "status": fields.get("status", {}).get("name", "Unknown"),
+            "assignee": fields.get("assignee", {}).get("displayName") if fields.get("assignee") else "Unassigned",
+            "reporter": fields.get("reporter", {}).get("displayName") if fields.get("reporter") else "Anonymous",
+            "duedate": fields.get("duedate"),
+            "created": fields.get("created"),
+            "updated": fields.get("updated"),
+            "attachment_count": len(att_list),
+            "attachments": [
+                {
+                    "id": a.get("id"),
+                    "filename": a.get("filename"),
+                    "size": a.get("size"),
+                    "mimeType": a.get("mimeType"),
+                    "created": a.get("created"),
+                }
+                for a in att_list
+            ],
+            "labels": fields.get("labels", []),
+            "mentions_soham": mentions_soham,
+            "soham_mention_reasons": soham_mention_reasons,
+            "comments_text": all_comments_str,
+            "description_text": desc_val,
+            "is_email": is_email,
+            "campaign_type": "email" if is_email else "messaging",
+            "channel_counts": channel_counts,
+            "brief_status": compute_brief_status(
+                status_raw=fields.get("status", {}).get("name", "Unknown"),
+                attachment_count=len(att_list),
+                total_campaigns=total_channels,
+                is_submitted=item.get("key") in submitted_info,
+                submission_status=submitted_info.get(item.get("key")),
+            ),
+        }
+        if target is not None and re.sub(r"[\s_]+", "_", issue["brief_status"].strip().lower()) != target:
+            continue
+        results.append(issue)
+        if target is not None and len(results) >= payload["maxResults"]:
+            break
 
-    if brief_status and brief_status.lower() != "all":
-        target = re.sub(r"[\s_]+", "_", brief_status.strip().lower())
-        results = [
-            i
-            for i in results
-            if re.sub(r"[\s_]+", "_", str(i.get("brief_status") or "").strip().lower()) == target
-        ]
     return results
 
 

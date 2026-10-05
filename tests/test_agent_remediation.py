@@ -267,3 +267,43 @@ def test_copilot_does_not_claim_missing_when_karix_lookup_fails():
     assert "Search Unavailable" in chat_resp["reply"]
     assert "not** a confirmation" in chat_resp["reply"]
     assert "No existing template found" not in chat_resp["reply"]
+
+
+def test_copilot_handles_jira_brief_status_filter():
+    """Verify AI Copilot parses brief status filters ('pending', 'completed') and calls list_jira_issues."""
+    mock_issues = [
+        {
+            "key": "TCN-101",
+            "summary": "Festival Loan Offer",
+            "status": "To Do",
+            "brief_status": "Pending",
+            "assignee": "Naman",
+            "attachment_count": 2,
+            "duedate": "2026-10-15",
+        }
+    ]
+
+    with patch("jira_client.list_jira_issues", return_value=mock_issues) as mock_list:
+        resp = agent_instance.handle_message(
+            message="Show pending Jira briefs",
+            account="tata",
+            channel="whatsapp",
+            user="Operator",
+        )
+        mock_list.assert_called_once_with(project="TCN", brief_status="pending", limit=8)
+        assert "Pending" in resp["reply"]
+        assert "TCN-101" in resp["reply"]
+        assert resp["data"]["brief_status"] == "pending"
+        assert any(act.get("brief_status") == "pending" for act in resp["actions_taken"])
+
+    # Test completed filter
+    with patch("jira_client.list_jira_issues", return_value=[]) as mock_list_done:
+        resp_done = agent_instance.handle_message(
+            message="List completed Jira briefs",
+            account="tata",
+            channel="whatsapp",
+            user="Operator",
+        )
+        mock_list_done.assert_called_once_with(project="TCN", brief_status="completed", limit=8)
+        assert "No tickets found" in resp_done["reply"]
+        assert "Filtered by Status: **Completed**" in resp_done["reply"]

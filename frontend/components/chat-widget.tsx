@@ -19,7 +19,7 @@ type ChatMessage = {
 const DEFAULT_SUGGESTED_PROMPTS = [
   'Check if template exists: Dear customer, your EMI is due.',
   'Brief TCN-524 (LAP GST Content)',
-  'Brief TCN-523 (Ganesh Chaturthi)',
+  'Show pending Jira briefs',
   'Show recent Jira briefs',
   'List all rejected templates for this account',
   'Poll live approval status from Meta',

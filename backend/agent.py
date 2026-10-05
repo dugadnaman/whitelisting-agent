@@ -831,39 +831,54 @@ def _handle_agent_jira_inquiry(text: str, account: str, user: str) -> dict | Non
                 "suggested_actions": ["List Jira briefs", "Help"],
             }
 
-    # If user wants a list of recent Jira tickets/briefs
-    if any(w in t_lower for w in ["list", "show", "recent", "open", "queue", "tickets", "briefs", "all"]):
+    # If user wants a list of recent Jira tickets/briefs or status filtering
+    if any(w in t_lower for w in ["list", "show", "recent", "open", "queue", "tickets", "briefs", "all", "filter", "status"]):
+        # Extract brief status filter if specified in the query
+        target_brief_status = None
+        if "pending" in t_lower:
+            target_brief_status = "pending"
+        elif any(k in t_lower for k in ["in progress", "in-progress", "in_progress"]):
+            target_brief_status = "in_progress"
+        elif any(k in t_lower for k in ["completed", "complete", "done", "resolved"]):
+            target_brief_status = "completed"
+        elif any(k in t_lower for k in ["failed", "rejected", "error"]):
+            target_brief_status = "failed"
+        elif any(k in t_lower for k in ["not generated", "not-generated", "not_generated"]):
+            target_brief_status = "not_generated"
+
         try:
-            issues = list_jira_issues(project="TCN", limit=6)
+            issues = list_jira_issues(project="TCN", brief_status=target_brief_status, limit=8)
+            filter_suffix = f" (Filtered by Status: **{target_brief_status.replace('_', ' ').title()}**)" if target_brief_status else ""
             if not issues:
                 return {
-                    "reply": "No recent tickets found in Jira project **TCN**.",
+                    "reply": f"No tickets found in Jira project **TCN**{filter_suffix}.\n\n*Available brief status filters: `Pending`, `In Progress`, `Completed`, `Failed`, `Not Generated`.*",
                     "actions_taken": [],
-                    "suggested_actions": ["Help"],
+                    "suggested_actions": ["List Jira briefs", "Show pending Jira briefs", "Help"],
                 }
 
             lines = []
             for i in issues:
                 due = f" (Due: {i['duedate']})" if i.get("duedate") else ""
+                b_status = i.get("brief_status") or "Pending"
                 lines.append(
                     f"• **`{i['key']}`** — {i['summary']}\n"
-                    f"  Status: `{i['status']}` | Assignee: {i['assignee']}{due} | Attachments: {i['attachment_count']}"
+                    f"  Brief Status: **`{b_status}`** | Jira: `{i['status']}` | Assignee: {i['assignee']}{due} | Attachments: {i['attachment_count']}"
                 )
 
             reply = (
-                "### 📋 Active Jira Campaign Briefs (Project: TCN)\n\n"
+                f"### 📋 Jira Campaign Briefs (Project: TCN){filter_suffix}\n\n"
                 + "\n\n".join(lines)
-                + '\n\n*Tip: Ask me to **"Brief TCN-524"** to automatically extract templates and creatives.*'
+                + '\n\n*Tip: Filter briefs using "Show pending Jira briefs", "Show completed Jira briefs", or ask to **"Brief <KEY>"**.*'
             )
 
             first_key = issues[0]["key"] if issues else "TCN-524"
-            suggested = [f"Brief {first_key}", "Poll approval status", "Help"]
+            suggested = [f"Brief {first_key}", "Show pending Jira briefs", "Show completed Jira briefs", "Help"]
 
             return {
                 "reply": reply,
-                "actions_taken": [{"tool": "list_jira_issues", "count": len(issues)}],
+                "actions_taken": [{"tool": "list_jira_issues", "count": len(issues), "brief_status": target_brief_status}],
                 "suggested_actions": suggested,
-                "data": {"issues": issues},
+                "data": {"issues": issues, "brief_status": target_brief_status},
             }
         except Exception as exc:
             return {
@@ -871,7 +886,6 @@ def _handle_agent_jira_inquiry(text: str, account: str, user: str) -> dict | Non
                 "actions_taken": [],
                 "suggested_actions": ["Help"],
             }
-
     return None
 
 

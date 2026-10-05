@@ -556,6 +556,67 @@ def test_jira_brief_status_enrichment_and_filtering():
         not_gen_issues = list_jira_issues(project="TCN", brief_status="not_generated")
         assert len(not_gen_issues) == 1
         assert not_gen_issues[0]["key"] == "TCN-103"
+
+
+def test_filtered_briefs_continue_past_nonmatching_first_page():
+    from jira_client import list_jira_issues
+
+    completed = [
+        {"key": f"TCN-{i}", "fields": {"summary": "Done", "status": {"name": "Done"}}}
+        for i in range(8)
+    ]
+    pending = [
+        {
+            "key": f"TCN-{i}",
+            "fields": {"summary": "Pending", "status": {"name": "To Do"}, "attachment": [{"filename": "copy.xlsx"}]},
+        }
+        for i in range(8, 16)
+    ]
+    with patch("requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        mock_post.return_value.json.side_effect = [
+            {"issues": completed, "nextPageToken": "page-2", "isLast": False},
+            {"issues": pending, "nextPageToken": "page-3", "isLast": False},
+        ]
+
+        issues = list_jira_issues(project="TCN", brief_status="pending", limit=8)
+
+    assert [issue["key"] for issue in issues] == [f"TCN-{i}" for i in range(8, 16)]
+    assert mock_post.call_count == 2
+    assert "nextPageToken" not in mock_post.call_args_list[0].kwargs["json"]
+    assert mock_post.call_args_list[1].kwargs["json"]["nextPageToken"] == "page-2"
+
+
+def test_filtered_briefs_return_partial_page_when_jira_is_exhausted():
+    from jira_client import list_jira_issues
+
+    with patch("requests.post") as mock_post:
+        mock_post.return_value.ok = True
+        mock_post.return_value.json.side_effect = [
+            {
+                "issues": [{"key": "TCN-1", "fields": {"status": {"name": "Done"}}}],
+                "nextPageToken": "last-page",
+                "isLast": False,
+            },
+            {
+                "issues": [
+                    {
+                        "key": "TCN-2",
+                        "fields": {"status": {"name": "To Do"}, "attachment": [{"filename": "copy.xlsx"}]},
+                    }
+                ],
+                "isLast": True,
+            },
+        ]
+
+        issues = list_jira_issues(project="TCN", brief_status="pending", limit=8)
+
+    assert [issue["key"] for issue in issues] == ["TCN-2"]
+    assert mock_post.call_count == 2
+
+
+
+
 def test_jira_creative_upload_and_download():
     """Verify users can upload a replacement creative and download/preview it via the Jira creative endpoints."""
     import io
