@@ -90,6 +90,8 @@ export default function JiraBriefsPage() {
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
   const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
   const currentRcs = getRcsDetails(targetAccount, accounts);
+  const whatsappAccount = targetAccount === 'wealth' ? 'tcl_promo' : targetAccount;
+  const whatsappAccountName = accounts.find((acc) => acc.id === whatsappAccount)?.name || whatsappAccount;
   const activeRequestKey = useRef<string>('');
 
   const loadIssues = useCallback(async (queryParam?: string, bStatusParam?: string) => {
@@ -256,6 +258,11 @@ export default function JiraBriefsPage() {
         if (rcsToSubmit.length > 0) submitChannels.push('rcs');
       }
 
+      if (rcsToSubmit.length > 0 && !currentRcs.botId) {
+        setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Refresh account settings before submitting.`, type: 'error' });
+        return;
+      }
+
       if (submitChannels.length === 0) {
         setFeedback({ message: 'Please select at least one template to whitelist.', type: 'error' });
         setSubmitting(false);
@@ -268,7 +275,9 @@ export default function JiraBriefsPage() {
         user || 'Briefing Operator',
         waToSubmit,
         rcsToSubmit,
-        targetAccount
+        targetAccount,
+        waToSubmit.length > 0 ? whatsappAccount : undefined,
+        rcsToSubmit.length > 0 ? currentRcs.botId : undefined
       );
 
       const waCount = res.whatsapp_submitted?.length || 0;
@@ -293,6 +302,10 @@ export default function JiraBriefsPage() {
       : selectedWa.size + selectedRcs.size;
     if (count === 0) {
       setFeedback({ message: 'Please select at least one template to whitelist.', type: 'error' });
+      return;
+    }
+    if (channelMode !== 'whatsapp' && selectedRcs.size > 0 && !currentRcs.botId) {
+      setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Refresh account settings before submitting.`, type: 'error' });
       return;
     }
     setConfirmationMode(channelMode);
@@ -838,10 +851,10 @@ export default function JiraBriefsPage() {
                       </select>
                       <span className="text-[11px] text-gray-500">
                         {rcsTemplates.length > 0 && waTemplates.length > 0
-                          ? `(WhatsApp ➔ WABA · RCS ➔ Karix Bot '${currentRcs.botName}' / ${currentRcs.rcsUser})`
+                          ? `(WhatsApp ➔ ${whatsappAccountName} WABA · RCS ➔ Karix Bot '${currentRcs.botName}' / ${currentRcs.rcsUser})`
                           : rcsTemplates.length > 0
-                          ? `(RCS templates will be submitted to Karix Bot '${currentRcs.botName}' · ${currentRcs.rcsUser} · Bot ID: ${currentRcs.botId})`
-                          : `(WhatsApp templates will be registered on Karix WABA under this account)`}
+                          ? `(RCS templates will be submitted to Karix Bot '${currentRcs.botName}' · ${currentRcs.rcsUser} · Bot ID: ${currentRcs.botId || 'Not configured'})`
+                          : `(WhatsApp templates will be registered on Karix WABA under ${whatsappAccountName})`}
                       </span>
                     </div>
 
@@ -860,7 +873,7 @@ export default function JiraBriefsPage() {
                           </div>
                           <div className="flex items-center gap-2 text-[11px]">
                             <span className="font-mono text-blue-900 bg-blue-100/90 px-2 py-0.5 rounded border border-blue-200 font-bold">
-                              Bot ID: {currentRcs.botId}
+                              Bot ID: {currentRcs.botId || 'Not configured'}
                             </span>
                             <span className="font-mono text-blue-800 bg-blue-100/80 px-2 py-0.5 rounded border border-blue-200">
                               User: {currentRcs.rcsUser}
@@ -872,6 +885,11 @@ export default function JiraBriefsPage() {
                           <span>🏛️ DLT Entity: <strong>{currentRcs.entity}</strong></span>
                           <span>📡 API: <strong className="font-mono">Karix RCS Bot Builder</strong></span>
                         </div>
+                        {!currentRcs.botId && (
+                          <p role="alert" className="font-semibold text-amber-800">
+                            RCS submission is unavailable: this account has no verified Karix bot. Refresh account settings.
+                          </p>
+                        )}
                         {brief.account && brief.account !== targetAccount && (
                           <div className="mt-1 pt-1.5 border-t border-blue-200/80 flex flex-wrap items-center justify-between gap-2 text-xs bg-amber-50/90 p-2 rounded-lg border border-amber-200 text-amber-900">
                             <span>
@@ -915,7 +933,7 @@ export default function JiraBriefsPage() {
                         {rcsTemplates.length > 0 && (
                           <button
                             onClick={() => requestWhitelist('rcs')}
-                            disabled={submitting || selectedRcs.size === 0}
+                            disabled={submitting || selectedRcs.size === 0 || !currentRcs.botId}
                             className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
                             title={`Submit ${selectedRcs.size} RCS template(s) to Karix RCS Bot '${currentRcs.botName}' (ID: ${currentRcs.botId})`}
                           >
@@ -931,7 +949,7 @@ export default function JiraBriefsPage() {
 
                         <button
                           onClick={() => requestWhitelist('all')}
-                          disabled={submitting || totalSelectedCount === 0}
+                          disabled={submitting || totalSelectedCount === 0 || (selectedRcs.size > 0 && !currentRcs.botId)}
                           className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
                         >
                           {submitting ? (
@@ -1852,6 +1870,11 @@ export default function JiraBriefsPage() {
                 <li>{selectedRcs.size} RCS template{selectedRcs.size === 1 ? '' : 's'}</li>
               )}
             </ul>
+            {(confirmationMode === 'all' || confirmationMode === 'whatsapp') && selectedWa.size > 0 && (
+              <p className="font-semibold text-gray-800">
+                WhatsApp destination: <strong>{whatsappAccountName}</strong> ({whatsappAccount.toUpperCase()}) — WABA
+              </p>
+            )}
 
             {/* Dedicated RCS Whitelisting Destination breakdown inside modal */}
             {(confirmationMode === 'all' || confirmationMode === 'rcs') && selectedRcs.size > 0 && (
@@ -1905,12 +1928,6 @@ export default function JiraBriefsPage() {
               </div>
             )}
 
-            {(confirmationMode === 'whatsapp' || (confirmationMode === 'all' && selectedWa.size > 0 && selectedRcs.size === 0)) && (
-              <p className="font-semibold text-gray-800">
-                Target account: <strong>{currentRcs.name}</strong> ({targetAccount.toUpperCase()})
-              </p>
-            )}
-
             <p className="pt-2 border-t border-amber-200/80 font-semibold">
               After you confirm, the application will submit them to Karix for whitelisting.
             </p>
@@ -1928,7 +1945,7 @@ export default function JiraBriefsPage() {
             <button
               type="button"
               onClick={confirmWhitelist}
-              disabled={submitting}
+              disabled={submitting || (confirmationMode !== 'whatsapp' && selectedRcs.size > 0 && !currentRcs.botId)}
               className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
             >
               {submitting ? 'Whitelisting...' : 'Confirm & Whitelist'}

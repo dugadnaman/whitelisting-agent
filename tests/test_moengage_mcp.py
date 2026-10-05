@@ -90,9 +90,9 @@ def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
         patch.dict("os.environ", {}, clear=False),
         patch("moengage_mcp.update_env_vars"),
     ):
-        save_mcp_tokens(account="tata", access_token="valid_mcp_token")
+        save_mcp_tokens(account="tata", access_token="valid_mcp_token", expires_in=86400)
 
-    def fake_post(url, headers=None, json=None, timeout=25):
+    def fake_post(url, headers=None, json=None, timeout=25, **kwargs):
         method = (json or {}).get("method")
         resp = MagicMock()
         resp.ok = True

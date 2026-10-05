@@ -6,7 +6,10 @@ Verifies:
 3. Does not crash on sub-accounts with missing or expired tokens.
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -151,6 +154,7 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
         assert response.status_code == 200, f"Expected 200, got: {response.text}"
         data = response.json()
         assert data["ok"] is True
+        assert data["account"] == data["whatsapp_account"] == "tcl_promo"
         assert len(data["whatsapp_submitted"]) == 2
 
         assert len(captured_submissions) == 2
@@ -183,6 +187,236 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
         assert btn_comp2.buttons[0]["text"] == "Call Support"
         assert btn_comp2.buttons[0]["phone_number"] == "+919876543210"
 
+
+
+@pytest.fixture
+def jira_submit_user():
+    """Exercise the real FastAPI dependency rather than patching its import."""
+    def set_user(tenant):
+        api.app.dependency_overrides[api.get_current_user] = lambda: {
+            "tenant_id": tenant, "role": "operator", "name": "Test Operator"
+        }
+
+    try:
+        yield set_user
+    finally:
+        api.app.dependency_overrides.pop(api.get_current_user, None)
+
+
+def _mock_parsed_brief():
+    return SimpleNamespace(
+        account="tcl_promo",
+        summary="Mixed channel offer",
+        whatsapp_templates=[],
+        rcs_templates=[],
+    )
+
+
+def _mixed_submission_payload():
+    return {
+        "account": "wealth",
+        "whatsapp_account": "tcl_promo",
+        "channels": ["whatsapp", "rcs"],
+        "whatsapp_templates": [{
+            "template_name": "wealth_wa",
+            "body": "Dear {{1}}, welcome.",
+            "variables": ["1"],
+        }],
+        "rcs_templates": [{"template_name": "wealth_rcs", "body": "Welcome"}],
+    }
+
+
+def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit_user):
+    from models import ApprovalStatus, SubmissionResult, SubmissionStatus
+    from rcs_models import RcsSubmissionResult
+
+    jira_submit_user("tata")
+    waba_accounts = []
+    wa_submissions = []
+    rcs_submissions = []
+    audit = []
+
+    def waba_id(account):
+        waba_accounts.append(account)
+        if account != "tcl_promo":
+            raise OSError("Missing WABA ID")
+        return "tcl-waba"
+
+    def submit_wa(submission, client):
+        wa_submissions.append((submission, client))
+        return SubmissionResult(
+            source_ref=submission.source_ref, template_name=submission.template_name,
+            status=SubmissionStatus.SUBMITTED, approval_status=ApprovalStatus.PENDING,
+            client=client,
+        )
+
+    def submit_rcs(submission, client):
+        rcs_submissions.append((submission, client))
+        return RcsSubmissionResult(
+            source_ref=submission.source_ref, template_name=submission.template_name,
+            template_id="rcs-id", client=client,
+        )
+
+    payload = _mixed_submission_payload()
+    payload["expected_rcs_bot_id"] = "live-wealth-bot"
+
+    with (
+        patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA),
+        patch("briefing_parser.parse_jira_brief", return_value=_mock_parsed_brief()),
+        patch("config.get_waba_id", side_effect=waba_id),
+        patch("api.get_rcs_bot_id", return_value="live-wealth-bot") as get_bot,
+        patch("submission_client.normalize_whatsapp_text_variables", return_value=("Dear {{1}}", ["Asha"])) as normalize,
+        patch("submission_client.submit_template", side_effect=submit_wa),
+        patch("rcs_client.submit_rcs_template", side_effect=submit_rcs),
+        patch("api.log_activity", side_effect=lambda **kwargs: audit.append(kwargs)),
+        patch("tracker.log_result"),
+        patch("rcs_tracker.log_rcs_result"),
+    ):
+        response = client.post("/api/jira/submit/TCN-999", json=payload)
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert (data["account"], data["whatsapp_account"]) == ("wealth", "tcl_promo")
+    assert len(data["whatsapp_submitted"]) == len(data["rcs_submitted"]) == 1
+    get_bot.assert_called_once_with("wealth")
+    assert waba_accounts == ["tcl_promo", "tcl_promo"]
+    normalize.assert_called_once_with("Dear {{1}}, welcome.", client="tcl_promo")
+    assert wa_submissions[0][0].client == wa_submissions[0][1] == "tcl_promo"
+    assert wa_submissions[0][0].waba_id == "tcl-waba"
+    assert rcs_submissions[0][0].client == rcs_submissions[0][1] == "wealth"
+    assert audit[0]["account"] == "wealth"
+    assert audit[0]["details"]["whatsapp_account"] == "tcl_promo"
+    assert audit[0]["details"]["rcs_account"] == "wealth"
+
+
+@pytest.mark.parametrize("tenant", ["wealth", "tcl_promo"])
+def test_jira_submit_rejects_unauthorized_destination_before_submitting(jira_submit_user, tenant):
+    jira_submit_user(tenant)
+    with (
+        patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA),
+        patch("briefing_parser.parse_jira_brief", return_value=_mock_parsed_brief()),
+        patch("config.get_waba_id") as get_waba,
+        patch("submission_client.submit_template") as submit_wa,
+        patch("rcs_client.submit_rcs_template") as submit_rcs,
+    ):
+        response = client.post("/api/jira/submit/TCN-999", json=_mixed_submission_payload())
+
+    assert response.status_code == 403
+    get_waba.assert_not_called()
+    submit_wa.assert_not_called()
+    submit_rcs.assert_not_called()
+
+
+def test_jira_submit_validates_selected_whatsapp_waba(jira_submit_user):
+    jira_submit_user("tata")
+    with (
+        patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA),
+        patch("briefing_parser.parse_jira_brief", return_value=_mock_parsed_brief()),
+        patch("config.get_waba_id", side_effect=OSError("Missing WABA ID")) as get_waba,
+        patch("submission_client.submit_template") as submit_wa,
+        patch("rcs_client.submit_rcs_template") as submit_rcs,
+    ):
+        response = client.post("/api/jira/submit/TCN-999", json=_mixed_submission_payload())
+
+    assert response.status_code == 400
+    assert "TCL_PROMO" in response.json()["detail"]
+    get_waba.assert_called_once_with("tcl_promo")
+    submit_wa.assert_not_called()
+    submit_rcs.assert_not_called()
+
+
+def test_jira_submit_refuses_rcs_bot_changed_since_confirmation(jira_submit_user):
+    jira_submit_user("tata")
+    payload = _mixed_submission_payload()
+    payload["expected_rcs_bot_id"] = "reviewed-wealth-bot"
+    with (
+        patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA),
+        patch("briefing_parser.parse_jira_brief", return_value=_mock_parsed_brief()),
+        patch("api.get_rcs_bot_id", return_value="different-live-bot"),
+        patch("submission_client.submit_template") as submit_wa,
+        patch("rcs_client.submit_rcs_template") as submit_rcs,
+    ):
+        response = client.post("/api/jira/submit/TCN-999", json=payload)
+
+    assert response.status_code == 409
+    assert "changed since confirmation" in response.json()["detail"]
+    submit_wa.assert_not_called()
+    submit_rcs.assert_not_called()
+
+
+def test_spreadsheet_submit_refuses_rcs_bot_changed_since_review(jira_submit_user):
+    jira_submit_user("tata")
+    with patch("api.get_rcs_bot_id", return_value="different-live-bot"), patch("api._submit_rcs_batch") as submit:
+        response = client.post(
+            "/api/submit?account=wealth&channel=rcs&auto_route=false&expected_rcs_bot_id=reviewed-wealth-bot",
+            files={"file": ("brief.csv", b"template_name,body\nwealth_rcs,Welcome", "text/csv")},
+        )
+
+    assert response.status_code == 409
+    assert "changed since confirmation" in response.json()["detail"]
+    submit.assert_not_called()
+
+
+
+
+def test_accounts_expose_effective_rcs_destination_without_secrets_or_persistence(jira_submit_user, monkeypatch):
+    jira_submit_user("all")
+    monkeypatch.setenv("WEALTH_RCS_BOT_ID", "live-wealth-bot")
+    monkeypatch.setenv("WEALTH_RCS_BOT_NAME", "Live Wealth")
+    monkeypatch.setenv("WEALTH_RCS_USERNAME", "live-rcs-user")
+    monkeypatch.setenv("WEALTH_KARIX_USER", "active-header-user")
+    monkeypatch.setenv("WEALTH_PORTAL_USER", "live-portal-user")
+    monkeypatch.delenv("CUSTOM_UNCONFIGURED_RCS_BOT_ID", raising=False)
+    monkeypatch.delenv("CUSTOM_UNCONFIGURED_RCS_SENDER_ID", raising=False)
+    custom = {
+        "id": "custom_unconfigured", "name": "Custom", "entity": "Custom Entity",
+        "rcs_bot_id": "stale-stored-id", "rcs_bot_name": "Stale Name",
+        "rcs_auth_token": "secret-token", "bearer_token": "secret-bearer",
+    }
+    accounts = [dict(next(a for a in api.DEFAULT_ACCOUNTS if a["id"] == "wealth")), custom]
+    with (
+        patch("api.load_accounts", return_value=accounts) as load_accounts,
+        patch("rcs_config._load_env_file"),
+    ):
+        response = client.get("/api/accounts")
+
+    assert response.status_code == 200
+    wealth, unknown = response.json()
+    assert wealth["rcs_bot_id"] == "live-wealth-bot"
+    assert wealth["rcs_bot_name"] == "Live Wealth"
+    assert wealth["rcs_username"] == "active-header-user"
+    assert wealth["portal_username"] == "live-portal-user"
+    assert (unknown["name"], unknown["entity"]) == ("Custom", "Custom Entity")
+    assert "rcs_bot_id" not in unknown
+    assert "rcs_bot_name" not in unknown
+    assert "secret-token" not in response.text
+    assert "secret-bearer" not in response.text
+    assert load_accounts.call_count == 1
+    assert accounts[0]["rcs_bot_id"] != wealth["rcs_bot_id"]
+
+
+def test_accounts_only_enrich_visible_tenant_accounts(jira_submit_user, monkeypatch):
+    jira_submit_user("wealth")
+    monkeypatch.setenv("WEALTH_RCS_BOT_ID", "wealth-override")
+    with (patch("api.load_accounts", return_value=api.DEFAULT_ACCOUNTS), patch("rcs_config._load_env_file")):
+        response = client.get("/api/accounts")
+
+    assert response.status_code == 200
+    assert [account["id"] for account in response.json()] == ["wealth"]
+    assert response.json()[0]["rcs_bot_id"] == "wealth-override"
+
+
+def test_accounts_do_not_trust_custom_group_for_tenant_visibility(jira_submit_user):
+    jira_submit_user("tata")
+    accounts = [
+        {"id": "wealth", "name": "Wealth", "group": "Tata Capital"},
+        {"id": "outsider", "name": "Outsider", "group": "Tata Capital"},
+    ]
+    with (patch("api.load_accounts", return_value=accounts), patch("rcs_config._load_env_file")):
+        response = client.get("/api/accounts")
+
+    assert response.status_code == 200
+    assert [account["id"] for account in response.json()] == ["wealth"]
 
 @patch("api.get_current_user", return_value=MOCK_USER)
 def test_jira_projects_catalog_endpoint(mock_user):

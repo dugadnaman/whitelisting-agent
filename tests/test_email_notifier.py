@@ -22,6 +22,7 @@ from email_notifier import (
     preview_due_today_alerts,
     send_email_smtp,
     send_google_chat_sla_alert,
+    classify_ticket_ownership,
 )
 
 
@@ -247,6 +248,83 @@ def test_send_google_chat_sla_alert_live():
         assert "cardsV2" in payload
         assert "Urgent" in payload["text"] or "CRITICAL" in payload["text"]
 
+
+def test_classify_ticket_ownership():
+    """Verify accurate classification of tickets as Tata Capital vs Attributics."""
+    # 1. Tata Capital dependencies
+    assert classify_ticket_ownership({"status": "Test Sent"})["ownership"] == "Tata Capital"
+    assert classify_ticket_ownership({"status": "Base Pending"})["ownership"] == "Tata Capital"
+    assert classify_ticket_ownership({"status": "Content Pending"})["ownership"] == "Tata Capital"
+    assert classify_ticket_ownership({"status": "Asset Pending"})["ownership"] == "Tata Capital"
+    assert classify_ticket_ownership({"status": "Client Review"})["ownership"] == "Tata Capital"
+    assert classify_ticket_ownership({"status": "Whitelisting"})["ownership"] == "Tata Capital"
+
+    # 2. Attributics operator action items
+    assert classify_ticket_ownership({"status": "To Do"})["ownership"] == "Attributics"
+    assert classify_ticket_ownership({"status": "In Progress"})["ownership"] == "Attributics"
+    assert classify_ticket_ownership({"status": "Test Approved"})["ownership"] == "Attributics"
+    assert classify_ticket_ownership({"status": "Rework"})["ownership"] == "Attributics"
+
+
+def test_send_google_chat_sla_alert_ownership_separation():
+    """Verify webhook clearly separates Attributics action items from Tata Capital client blockers."""
+    operators = [
+        OperatorTicketSummary(
+            operator_name="Dnyanesh Khawas",
+            operator_email="dnyanesh.khawas@attributics.com",
+            role="Core Operator",
+            pending_count=3,
+            tickets=[
+                {"key": "SWCM-94", "status": "To Do", "summary": "PL Diwali"},
+                {"key": "SWCM-90", "status": "Test Sent", "summary": "LAP Festive"},
+                {"key": "SWCM-81", "status": "Base Pending", "summary": "HL Festive"},
+            ],
+        ),
+        OperatorTicketSummary(
+            operator_name="Neel Shah",
+            operator_email="neel.shah@attributics.com",
+            role="Core Operator",
+            pending_count=1,
+            tickets=[
+                {"key": "TCN-546", "status": "In Progress", "summary": "Cards promo"},
+            ],
+        ),
+    ]
+
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.status_code = 200
+        mock_post.return_value = mock_resp
+
+        res = send_google_chat_sla_alert(
+            "MIDDAY", operators, "01:00 PM IST", webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages"
+        )
+        assert res["delivered"] is True
+        payload = mock_post.call_args[1]["json"]
+
+        # Plain text assertions
+        text = payload["text"]
+        assert "Pending with Attributics" in text
+        assert "Pending with Tata Capital" in text
+        assert "SWCM-94" in text
+        assert "SWCM-90" in text
+        assert "SWCM-81" in text
+        assert "Test Sent" in text
+        assert "Base Pending" in text
+        assert "Ownership Breakdown" in text
+
+        # CardV2 assertions
+        cards = payload["cardsV2"]
+        assert len(cards) == 1
+        card_header = cards[0]["card"]["header"]
+        assert "2 with Attributics" in card_header["subtitle"]
+        assert "2 with Tata Capital" in card_header["subtitle"]
+
+        sections = cards[0]["card"]["sections"]
+        assert len(sections) == 2
+        assert "Pending with Attributics" in sections[0]["header"]
+        assert "Pending with Tata Capital" in sections[1]["header"]
 
 def test_api_alerts_endpoints():
     """Verify FastAPI preview, dispatch, and scheduler endpoints."""

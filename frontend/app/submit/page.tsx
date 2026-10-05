@@ -359,10 +359,21 @@ export default function SubmitPage() {
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
   const executeSubmit = useCallback(async (fixRatio: boolean, fixGrammar: boolean) => {
     if (!file || !currentPreviews) return;
+    if (channel === 'rcs' && !activeRcs.botId) {
+      setState({
+        step: 'error',
+        message: `RCS bot is not configured for ${account}. Refresh account settings before submitting.`,
+        previews: currentPreviews,
+      });
+      return;
+    }
     setShowBlockedModal(false);
     setState({ step: 'submitting' });
     try {
-      const res = await submitFile(file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates, true);
+      const res = await submitFile(
+        file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates,
+        channel !== 'rcs', channel === 'rcs' ? activeRcs.botId : undefined
+      );
       const isComplete = res.status === 'COMPLETED' || !res.job_id;
       setState({
         step: 'submitted',
@@ -382,7 +393,7 @@ export default function SubmitPage() {
         previews: currentPreviews,
       });
     }
-  }, [file, account, channel, user, currentPreviews, autoSkipDuplicates]);
+  }, [file, account, channel, user, currentPreviews, autoSkipDuplicates, activeRcs.botId]);
 
   const handleInitiateSubmit = useCallback(() => {
     if (!file || !currentPreviews) return;
@@ -427,7 +438,7 @@ export default function SubmitPage() {
             {channel === 'rcs' && (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-900 border border-blue-200">
                 <span>🤖 Bot: <strong>{activeRcs.botName}</strong></span>
-                <span className="font-mono text-[11px] text-blue-600">({activeRcs.botId})</span>
+                <span className="font-mono text-[11px] text-blue-600">({activeRcs.botId || 'Not configured'})</span>
               </span>
             )}
           </div>
@@ -845,9 +856,14 @@ export default function SubmitPage() {
                 <p className="text-xs text-blue-700/80 mt-0.5">
                   Ready to submit to {accountLabel} on {channelLabel}
                   {channel === 'rcs' && (
-                    <> (Karix RCS Bot: <strong>{activeRcs.botName}</strong> &bull; ID: <code className="font-mono">{activeRcs.botId}</code> &bull; User: <code className="font-mono">{activeRcs.rcsUser}</code>)</>
+                    <> (Karix RCS Bot: <strong>{activeRcs.botName}</strong> &bull; ID: <code className="font-mono">{activeRcs.botId || 'Not configured'}</code> &bull; User: <code className="font-mono">{activeRcs.rcsUser}</code>)</>
                   )}. Review before final submission.
                 </p>
+                {channel === 'rcs' && !activeRcs.botId && (
+                  <p role="alert" className="mt-1 text-xs font-semibold text-amber-800">
+                    RCS submission is unavailable: this account has no verified Karix bot. Refresh account settings.
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <button
@@ -858,7 +874,8 @@ export default function SubmitPage() {
                 </button>
                 <button
                   onClick={handleInitiateSubmit}
-                  className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors flex items-center gap-2"
+                  disabled={channel === 'rcs' && !activeRcs.botId}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-sm transition-colors flex items-center gap-2"
                 >
                   {(() => {
                     const blocked = state.previews.filter(p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked)));

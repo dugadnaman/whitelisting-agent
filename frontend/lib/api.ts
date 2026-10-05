@@ -383,7 +383,8 @@ export async function submitFile(
   fixAspectRatio: boolean = true,
   fixGrammar: boolean = true,
   skipDuplicates: boolean = true,
-  autoRoute: boolean = true
+  autoRoute: boolean = true,
+  expectedRcsBotId?: string
 ): Promise<{ submitted: number; skipped_duplicates?: number; results: Template[]; job_id?: string; status?: string }> {
   const form = new FormData();
   form.append("file", file);
@@ -395,9 +396,10 @@ export async function submitFile(
     fix_grammar: String(fixGrammar),
     skip_duplicates: String(skipDuplicates),
     auto_route: String(autoRoute),
-  }).toString();
+  });
+  if (expectedRcsBotId) qs.set("expected_rcs_bot_id", expectedRcsBotId);
   const res = await fetchWithRetry(
-    getApiUrl(`/api/submit?${qs}`),
+    getApiUrl(`/api/submit?${qs.toString()}`),
     {
       method: "POST",
       headers: { "X-User": user },
@@ -1053,7 +1055,9 @@ export async function submitJiraBrief(
   user: string = "Briefing Operator",
   whatsappTemplates?: JiraWhatsAppDraft[],
   rcsTemplates?: JiraRcsDraft[],
-  account?: string
+  account?: string,
+  whatsappAccount?: string,
+  expectedRcsBotId?: string
 ): Promise<{
   ok: boolean;
   issue_key: string;
@@ -1067,6 +1071,8 @@ export async function submitJiraBrief(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       account,
+      whatsapp_account: whatsappAccount,
+      expected_rcs_bot_id: expectedRcsBotId,
       channels,
       user,
       whatsapp_templates: whatsappTemplates || null,

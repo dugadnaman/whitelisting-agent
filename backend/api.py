@@ -79,6 +79,7 @@ from rcs_config import (
     DEFAULT_RCS_ESMEADDRS,
     get_rcs_auth_headers,
     get_rcs_bot_id,
+    get_rcs_bot_name,
     get_rcs_entity_id,
     get_rcs_esmeaddr,
 )
@@ -1963,6 +1964,7 @@ async def submit_file(
     fix_grammar: bool = Query(True),
     skip_duplicates: bool = Query(True),
     auto_route: bool = Query(True),
+    expected_rcs_bot_id: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
@@ -1972,12 +1974,15 @@ async def submit_file(
             status_code=400,
             detail="The Apparel account is strictly dedicated to RCS Karix-to-MoEngage sync only. Template creation spreadsheets are disabled for Apparel.",
         )
+    chan = channel.lower()
+    if chan == "rcs" and expected_rcs_bot_id:
+        if auto_route:
+            raise HTTPException(status_code=400, detail="Confirm an explicit RCS account before submitting to a reviewed bot.")
+        _verify_rcs_destination(acc, expected_rcs_bot_id)
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
-    acc = account.lower()
-    chan = channel.lower()
     try:
         if chan == "sms":
             return await _submit_sms_batch(tmp_path, suffix, acc, user, file.filename or "upload.csv", current_user)
@@ -2407,18 +2412,54 @@ def identify_templates_json_endpoint(
 @app.get("/api/accounts")
 def get_accounts(current_user: dict = Depends(get_current_user)):
     accs = load_accounts()
-    tenant = current_user.get("tenant_id", "all")
-    if tenant != "all" and current_user.get("role") != "superadmin":
-        if tenant == "tata":
-            return [
-                a
-                for a in accs
-                if a.get("group") == "Tata Capital" or a.get("id") in TATA_SUB_ACCOUNTS or a.get("id") == "tata"
-            ]
-        elif tenant == "bajaj":
-            return [a for a in accs if a.get("group") == "Bajaj" or a.get("id") == "bajaj"]
-        return [a for a in accs if a.get("id") == tenant]
-    return accs
+    tenant = str(current_user.get("tenant_id", "all")).lower().strip()
+    role = str(current_user.get("role", "operator")).lower().strip()
+    if tenant != "all" and role != "superadmin":
+        allowed = TATA_SUB_ACCOUNTS if tenant == "tata" else {tenant}
+        accs = [a for a in accs if a.get("id") in allowed]
+
+    # The account store describes labels, not the active RCS destination. Do not
+    # write these computed values back to accounts.json or expose credential fields.
+    public_fields = (
+        "id", "name", "entity", "type", "is_builtin", "group",
+        "headers", "channels", "description", "portal_username", "rcs_username",
+    )
+    visible = []
+    for account in accs:
+        account_id = account["id"]
+        prefix = _account_prefix(account_id)
+        info = {key: account[key] for key in public_fields if key in account}
+        info["portal_username"] = os.environ.get(f"{prefix}_PORTAL_USER") or info.get("portal_username", "")
+        info["rcs_username"] = (
+            os.environ.get(f"{prefix}_KARIX_USER")
+            or os.environ.get(f"{prefix}_RCS_USERNAME")
+            or os.environ.get(f"{prefix}_RCS_USER")
+            or info.get("rcs_username", "")
+        )
+        try:
+            bot_id = get_rcs_bot_id(account_id)
+        except OSError:
+            bot_id = ""
+        if bot_id:
+            info["rcs_bot_id"] = bot_id
+            info["rcs_bot_name"] = get_rcs_bot_name(account_id)
+        visible.append(info)
+    return visible
+
+
+def _verify_rcs_destination(account: str, expected_bot_id: str | None) -> None:
+    """Refuse to submit if the bot changed since the operator reviewed it."""
+    if not expected_bot_id:
+        return
+    try:
+        actual_bot_id = get_rcs_bot_id(account)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"RCS bot is not configured for {account.upper()}.") from exc
+    if actual_bot_id != expected_bot_id:
+        raise HTTPException(
+            status_code=409,
+            detail=f"RCS bot for {account.upper()} changed since confirmation. Refresh account settings before submitting.",
+        )
 
 
 @app.post("/api/accounts")
@@ -3707,6 +3748,8 @@ def get_jira_brief_endpoint(
 
 class JiraSubmitRequest(BaseModel):
     account: str | None = None
+    whatsapp_account: str | None = None
+    expected_rcs_bot_id: str | None = None
     channels: list[str] = ["whatsapp", "rcs"]
     user: str = "Briefing Operator"
     whatsapp_templates: list[dict] | None = None
@@ -3735,20 +3778,24 @@ async def submit_jira_brief_endpoint(
     issue_data = await asyncio.to_thread(fetch_jira_issue, issue_key)
     parsed = await asyncio.to_thread(parse_jira_brief, issue_data, download_creatives=True)
     acc = (req.account or parsed.account or "tcl_promo").lower().strip()
+    wa_acc = (req.whatsapp_account or acc).lower().strip()
     require_tenant_access(acc, current_user)
-    # Validate target account credentials before remote submission to avoid 500 errors
-    if "whatsapp" in req.channels and (req.whatsapp_templates or parsed.whatsapp_templates):
+    if "whatsapp" in req.channels:
+        require_tenant_access(wa_acc, current_user)
+    rcs_sources = req.rcs_templates if req.rcs_templates is not None else parsed.rcs_templates
+    if "rcs" in req.channels and rcs_sources:
+        _verify_rcs_destination(acc, req.expected_rcs_bot_id)
+    # Validate the actual WhatsApp destination before any remote submission.
+    wa_sources = req.whatsapp_templates if req.whatsapp_templates is not None else parsed.whatsapp_templates
+    if "whatsapp" in req.channels and wa_sources:
         try:
             from config import get_waba_id
 
-            _ = get_waba_id(acc)
+            _ = get_waba_id(wa_acc)
         except Exception as waba_err:
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    f"Account '{acc.upper()}' does not have WhatsApp WABA credentials configured ({waba_err!s}). "
-                    f"Please select 'Tata Capital Limited (Promotional)' (TCL_PROMO) in the Target Account dropdown."
-                ),
+                detail=f"Account '{wa_acc.upper()}' does not have WhatsApp WABA credentials configured ({waba_err!s}).",
             ) from waba_err
 
     user_name = req.user or current_user.get("name", "Briefing Operator")
@@ -3757,7 +3804,7 @@ async def submit_jira_brief_endpoint(
 
     # 1. Submit WhatsApp templates
     if "whatsapp" in req.channels:
-        wa_sources = req.whatsapp_templates if req.whatsapp_templates is not None else parsed.whatsapp_templates
+        # The RCS/general account does not need a WABA when WhatsApp is routed elsewhere.
         for wa in wa_sources:
             comps: list[TemplateComponent] = []
 
@@ -3798,7 +3845,7 @@ async def submit_jira_brief_endpoint(
             if body_vars and not sample_vals:
                 from submission_client import normalize_whatsapp_text_variables
 
-                _, auto_samples = normalize_whatsapp_text_variables(body_text, client=acc)
+                _, auto_samples = normalize_whatsapp_text_variables(body_text, client=wa_acc)
                 if auto_samples:
                     sample_vals = auto_samples
                 else:
@@ -3863,18 +3910,18 @@ async def submit_jira_brief_endpoint(
             from config import get_waba_id
 
             submission = TemplateSubmission(
-                client=acc,
+                client=wa_acc,
                 channel="whatsapp",
                 template_name=wa["template_name"],
                 language=wa.get("language", "en"),
                 category=wa.get("category", "MARKETING"),
-                waba_id=get_waba_id(acc),
+                waba_id=get_waba_id(wa_acc),
                 components=comps,
                 source_ref=f"{issue_key}_{wa['template_name']}",
             )
 
             try:
-                res = await asyncio.to_thread(submit_template, submission, client=acc)
+                res = await asyncio.to_thread(submit_template, submission, client=wa_acc)
                 res.submitted_by = user_name
                 res.source_file = f"Jira: {issue_key}"
                 log_result(res, LOG_PATH)
@@ -3899,7 +3946,6 @@ async def submit_jira_brief_endpoint(
 
     # 2. Submit RCS templates
     if "rcs" in req.channels:
-        rcs_sources = req.rcs_templates if req.rcs_templates is not None else parsed.rcs_templates
         for rcs in rcs_sources:
             suggestions = []
             btn_text = rcs.get("button_text") or rcs.get("action_label")
@@ -3955,36 +4001,17 @@ async def submit_jira_brief_endpoint(
                         "error": str(rcs_exc),
                     }
                 )
-    # 3. Post automated status comment back to Jira
-    wa_summary = f"{len(submitted_wa)} WhatsApp templates" if submitted_wa else ""
-    rcs_summary = f"{len(submitted_rcs)} RCS templates" if submitted_rcs else ""
-    submitted_channels = " and ".join(filter(None, [wa_summary, rcs_summary])) or "content"
-
-    comment_body = (
-        f"🤖 [Karix Briefing Agent]\n"
-        f"Successfully submitted {submitted_channels} for whitelisting under account {acc.upper()}.\n\n"
-    )
-    if submitted_wa:
-        comment_body += "WhatsApp Templates:\n"
-        for w in submitted_wa:
-            comment_body += (
-                f"• {w['template_name']}: {w['status'].upper()} (Approval: {w['approval_status'].upper()})\n"
-            )
-        comment_body += "\n"
-    if submitted_rcs:
-        comment_body += "RCS Templates:\n"
-        for r in submitted_rcs:
-            comment_body += f"• {r['template_name']}: {r['status'].upper()} (ID: {r.get('template_id') or 'N/A'})\n"
-
     # Jira remains strictly READ-ONLY per project policy (zero comments/writes to Jira)
     jira_comment_res = {"ok": True, "skipped": True, "message": "Jira comment skipped (Jira is strictly read-only)"}
     log_activity(
         user=user_name,
         action="JIRA_BRIEF_SUBMISSION",
-        account=acc,
+        account=wa_acc if submitted_wa and not submitted_rcs else acc,
         channel="all",
         details={
             "issue_key": issue_key,
+            "whatsapp_account": wa_acc,
+            "rcs_account": acc,
             "whatsapp_count": len(submitted_wa),
             "rcs_count": len(submitted_rcs),
             "jira_comment_posted": jira_comment_res.get("ok", False),
@@ -3997,6 +4024,7 @@ async def submit_jira_brief_endpoint(
             "ok": True,
             "issue_key": issue_key,
             "account": acc,
+            "whatsapp_account": wa_acc,
             "whatsapp_submitted": submitted_wa,
             "rcs_submitted": submitted_rcs,
             "jira_comment": jira_comment_res,

@@ -792,6 +792,117 @@ def get_brevo_event_logs(limit: int = 15) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
+def classify_ticket_ownership(ticket: dict[str, Any]) -> dict[str, str]:
+    """
+    Classify whether a ticket's pending action rests with Attributics (internal operator)
+    or Tata Capital (client sign-off, test approval, base file, or content).
+    """
+    status_raw = str(ticket.get("status") or "").strip()
+    s = status_raw.lower()
+
+    # 1. Tata Capital Client Dependencies / Actions
+    if any(k in s for k in ("test sent", "test_sent")):
+        return {
+            "ownership": "Tata Capital",
+            "pending_with": "Tata Capital",
+            "reason": "Test Sent (Awaiting Client Test Approval)",
+            "short_reason": "Test Sent • Awaiting Client Approval",
+            "badge": "🏢 Test Sent",
+            "status_raw": status_raw or "Test Sent",
+        }
+    if any(k in s for k in ("base pending", "base_pending", "audience", "datamart")):
+        return {
+            "ownership": "Tata Capital",
+            "pending_with": "Tata Capital",
+            "reason": "Base Pending (Awaiting Customer Audience File from Tata Capital)",
+            "short_reason": "Base Pending • Awaiting Audience File",
+            "badge": "📁 Base Pending",
+            "status_raw": status_raw or "Base Pending",
+        }
+    if any(k in s for k in ("content pending", "copy pending", "content_pending", "brief pending")):
+        return {
+            "ownership": "Tata Capital",
+            "pending_with": "Tata Capital",
+            "reason": "Content Pending (Awaiting Copy / Brand Content from Tata Capital)",
+            "short_reason": "Content Pending • Awaiting Copy",
+            "badge": "✍️ Content Pending",
+            "status_raw": status_raw or "Content Pending",
+        }
+    if any(k in s for k in ("asset pending", "creative pending", "creative_pending")):
+        return {
+            "ownership": "Tata Capital",
+            "pending_with": "Tata Capital",
+            "reason": "Asset Pending (Awaiting Creatives / Images from Tata Capital)",
+            "short_reason": "Creatives Pending",
+            "badge": "🎨 Creatives Pending",
+            "status_raw": status_raw or "Creatives Pending",
+        }
+    if any(k in s for k in ("client feedback", "waiting on client", "hold", "client review", "pending client")):
+        return {
+            "ownership": "Tata Capital",
+            "pending_with": "Tata Capital",
+            "reason": "Client Review (Waiting on Tata Capital Feedback / Sign-Off)",
+            "short_reason": "Client Review • Awaiting Sign-Off",
+            "badge": "⏳ Client Review",
+            "status_raw": status_raw or "Client Review",
+        }
+    if any(k in s for k in ("whitelisting", "carrier review", "karix review", "meta review")):
+        return {
+            "ownership": "Tata Capital",
+            "pending_with": "Tata Capital",
+            "reason": "Carrier Gateway Review (Awaiting Karix / Meta Whitelisting Approval)",
+            "short_reason": "Carrier Review",
+            "badge": "📡 Gateway Review",
+            "status_raw": status_raw or "Whitelisting",
+        }
+
+    # 2. Attributics Operator Actions
+    if any(k in s for k in ("test approved", "test_approved")):
+        return {
+            "ownership": "Attributics",
+            "pending_with": "Attributics",
+            "reason": "Test Approved • Ready for Campaign Dispatch / Scheduling",
+            "short_reason": "Test Approved • Ready to Dispatch",
+            "badge": "🚀 Ready for Dispatch",
+            "status_raw": status_raw or "Test Approved",
+        }
+    if any(k in s for k in ("in progress", "in_progress", "drafting")):
+        return {
+            "ownership": "Attributics",
+            "pending_with": "Attributics",
+            "reason": "In Progress (Operator Drafting Campaign)",
+            "short_reason": "In Progress",
+            "badge": "⚙️ In Progress",
+            "status_raw": status_raw or "In Progress",
+        }
+    if any(k in s for k in ("to do", "todo", "open", "backlog", "reopened")):
+        return {
+            "ownership": "Attributics",
+            "pending_with": "Attributics",
+            "reason": "To Do (Operator Action Needed)",
+            "short_reason": "To Do",
+            "badge": "📋 Action Needed",
+            "status_raw": status_raw or "To Do",
+        }
+    if any(k in s for k in ("rework", "review rework", "changes needed")):
+        return {
+            "ownership": "Attributics",
+            "pending_with": "Attributics",
+            "reason": "Rework Needed (Operator Changes Required)",
+            "short_reason": "Rework Needed",
+            "badge": "🔄 Rework Needed",
+            "status_raw": status_raw or "Rework Needed",
+        }
+
+    return {
+        "ownership": "Attributics",
+        "pending_with": "Attributics",
+        "reason": f"Attributics Ops Queue ({status_raw})",
+        "short_reason": status_raw or "Action Needed",
+        "badge": f"📌 {status_raw or 'Action Needed'}",
+        "status_raw": status_raw or "Action Needed",
+    }
+
 
 def send_google_chat_sla_alert(
     stage: str,
@@ -820,7 +931,51 @@ def send_google_chat_sla_alert(
             "message": "Google Chat simulated (GOOGLE_CHAT_WEBHOOK_URL not configured).",
         }
 
-    total_tickets = sum(o.pending_count for o in operators)
+    import collections
+
+    known_ids: dict[str, str] = {
+        "Dnyanesh Khawas": "118094956873954063156",
+        "Dnyanesh": "118094956873954063156",
+        "Mrunalini Gawande": "111262272226595238971",
+        "Mrunali Gawande": "111262272226595238971",
+        "Mrunalini": "111262272226595238971",
+        "Mrunali": "111262272226595238971",
+        "Neel Shah": "115510908861903356318",
+        "Neel": "115510908861903356318",
+        "Soham Das": "116501804443197433991",
+        "Soham": "116501804443197433991",
+        "Aadya": "113432812427365134875",
+        "Aalya Mulla": "113432812427365134875",
+        "Mudar": "110968683937158757696",
+    }
+
+    def _resolve_mention(op_name: str) -> str:
+        first_word = op_name.split()[0].title() if op_name else ""
+        uid = (
+            known_ids.get(op_name)
+            or known_ids.get(first_word)
+            or os.getenv(f"GCHAT_USER_ID_{first_word.upper()}", "")
+        )
+        if uid:
+            return f"<users/{uid}>"
+        return f"*@{op_name}*"
+
+    # Segregate tickets by ownership (Attributics vs Tata Capital)
+    attributics_by_op: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    tata_tickets: list[tuple[dict[str, Any], dict[str, str], str]] = []
+
+    for op in operators:
+        for t in op.tickets:
+            cls = classify_ticket_ownership(t)
+            if cls["ownership"] == "Tata Capital":
+                tata_tickets.append((t, cls, op.operator_name))
+            else:
+                attributics_by_op[op.operator_name].append(t)
+
+    total_attributics = sum(len(tkts) for tkts in attributics_by_op.values())
+    total_tata = len(tata_tickets)
+    total_tickets = total_attributics + total_tata
+
     stage_meta = {
         "MORNING": {
             "title": "🌞 10:00 AM SLA Kickoff • Daily Workload",
@@ -841,55 +996,79 @@ def send_google_chat_sla_alert(
         stage, {"title": f"🚨 SLA Alert • {stage}", "color": "#dc2626", "desc": f"{total_tickets} campaigns due today."}
     )
 
-    op_lines = []
+    # 1. Build Attributics Section
+    attributics_lines = []
     mentions_list = []
     for op in operators:
-        keys = ", ".join(t.get("key", "") for t in op.tickets)
-        known_ids: dict[str, str] = {
-            "Dnyanesh Khawas": "118094956873954063156",
-            "Dnyanesh": "118094956873954063156",
-            "Mrunalini Gawande": "111262272226595238971",
-            "Mrunali Gawande": "111262272226595238971",
-            "Mrunalini": "111262272226595238971",
-            "Mrunali": "111262272226595238971",
-            "Neel Shah": "115510908861903356318",
-            "Neel": "115510908861903356318",
-            "Soham Das": "116501804443197433991",
-            "Soham": "116501804443197433991",
-            "Aadya": "113432812427365134875",
-            "Aalya Mulla": "113432812427365134875",
-            "Mudar": "110968683937158757696",
-        }
-        first_word = op.operator_name.split()[0].title() if op.operator_name else ""
-        uid = (
-            known_ids.get(op.operator_name)
-            or known_ids.get(first_word)
-            or os.getenv(f"GCHAT_USER_ID_{first_word.upper()}", "")
-        )
-        if uid:
-            mention_tag = f"<users/{uid}>"
-        else:
-            mention_tag = f"*@{op.operator_name}*"
-
+        op_tkts = attributics_by_op.get(op.operator_name, [])
+        if not op_tkts:
+            continue
+        mention_tag = _resolve_mention(op.operator_name)
         mentions_list.append(mention_tag)
-        op_lines.append(f"• {mention_tag} ({op.pending_count} pending): `{keys}`")
+        tkt_strs = []
+        for t in op_tkts:
+            c = classify_ticket_ownership(t)
+            st = c["short_reason"]
+            tkt_strs.append(f"`{t.get('key')}` [{st}]")
+        attributics_lines.append(f"• {mention_tag} ({len(op_tkts)} action required): {', '.join(tkt_strs)}")
 
-    op_text = "\n".join(op_lines) if op_lines else "All campaigns due today are completed! 🎉"
+    attributics_text = "\n".join(attributics_lines) if attributics_lines else "• All internal operator action items are up to date! 🎉"
+
+    # 2. Build Tata Capital Section
+    tata_lines = []
+    for t, cls, op_name in tata_tickets:
+        k = t.get("key", "")
+        reason = cls["short_reason"]
+        tata_lines.append(f"• `{k}` [{cls['badge']} • {reason}] (Owner: {op_name})")
+
+    tata_text = "\n".join(tata_lines) if tata_lines else "• No client-blocked campaigns."
+
+    # Mentions header: ping operators who have Attributics action items;
+    # if none, ping operators tracking Tata Capital items so space is informed.
+    if not mentions_list and tata_tickets:
+        for _, _, op_name in tata_tickets:
+            m = _resolve_mention(op_name)
+            if m not in mentions_list:
+                mentions_list.append(m)
+
     mentions_header = f"<users/all> 🔔 Attn: {' '.join(mentions_list)}\n\n" if mentions_list else ""
+    summary_breakdown = (
+        f"📊 *Ownership Breakdown:* {total_attributics} Pending with Attributics (Action Needed) "
+        f"• {total_tata} Pending with Tata Capital (Client Review / Dependencies)"
+    )
+
+    body_text = (
+        f"{mentions_header}*{stage_meta['title']}*\n"
+        f"{stage_meta['desc']}\n"
+        f"{summary_breakdown}\n\n"
+        f"🟡 *Pending with Attributics (Action Items: {total_attributics}):*\n"
+        f"{attributics_text}\n\n"
+        f"🏢 *Pending with Tata Capital (Client Dependencies: {total_tata}):*\n"
+        f"{tata_text}"
+    )
+
+    card_sections = [
+        {
+            "header": f"🟡 Pending with Attributics (Action Required: {total_attributics})",
+            "widgets": [{"textParagraph": {"text": attributics_text}}],
+        },
+        {
+            "header": f"🏢 Pending with Tata Capital (Client Dependencies: {total_tata})",
+            "widgets": [{"textParagraph": {"text": tata_text}}],
+        },
+    ]
 
     card_payload = {
-        "text": f"{mentions_header}*{stage_meta['title']}*\n{stage_meta['desc']}\n\n{op_text}",
+        "text": body_text,
         "cardsV2": [
             {
                 "cardId": f"slaAlert_{stage}",
                 "card": {
                     "header": {
                         "title": stage_meta["title"],
-                        "subtitle": f"{total_tickets} Campaigns Due Today • {ist_time_str}",
+                        "subtitle": f"{total_tickets} Due Today • {total_attributics} with Attributics • {total_tata} with Tata Capital • {ist_time_str}",
                     },
-                    "sections": [
-                        {"header": "Operator Workload Breakdown", "widgets": [{"textParagraph": {"text": op_text}}]}
-                    ],
+                    "sections": card_sections,
                 },
             }
         ],
