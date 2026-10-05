@@ -1,0 +1,70 @@
+{
+  "info": {
+    "name": "Karix RCS - fetchTemplates",
+    "_postman_id": "7c8e6b12-9a3e-4b21-8f55-2d1234567890",
+    "description": "Karix official RCS Bot Builder template fetch API endpoint",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "fetchTemplates",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{Auth}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"esmeaddr\": \"{{esmeaddr}}\",\n  \"senderId\": \"{{senderId}}\",\n  \"templateId\": \"{{templateId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://rcsgui.karix.solutions/api/rcstemplate/fetchTemplates",
+          "protocol": "https",
+          "host": [
+            "rcsgui",
+            "karix",
+            "solutions"
+          ],
+          "path": [
+            "api",
+            "rcstemplate",
+            "fetchTemplates"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "Auth",
+      "value": "EcLwxXg5cE7XYSbvx5rQRQ=="
+    },
+    {
+      "key": "esmeaddr",
+      "value": "72434700000000"
+    },
+    {
+      "key": "senderId",
+      "value": "Uv9tdd0KNADbq3pX"
+    },
+    {
+      "key": "templateId",
+      "value": "maap_newfile2"
+    }
+  ]
+}

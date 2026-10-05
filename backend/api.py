@@ -2409,6 +2409,15 @@ def identify_templates_json_endpoint(
     return _json_safe(report.to_dict())
 
 
+@app.get("/api/postman/rcs-fetch-templates")
+def get_postman_rcs_fetch_templates():
+    """Return the Postman Collection v2.1 JSON for Karix RCS fetchTemplates."""
+    path = Path("docs/postman/Karix_RCS_fetchTemplates.postman_collection.json")
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="Postman collection not found")
+
+
 @app.get("/api/accounts")
 def get_accounts(current_user: dict = Depends(get_current_user)):
     accs = load_accounts()
