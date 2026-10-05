@@ -38,6 +38,8 @@ data/*.json
 media_cache/jira_*
 # Scratch/Local configs
 scratch/
+accounts.json
+backend/accounts.json
 # Agent skills temporary directory
 agent/
 .DS_Store
