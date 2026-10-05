@@ -10,6 +10,11 @@ import {
   syncRcsTemplateToMoEngage,
   getJiraCreativeDownloadUrl,
   uploadJiraCreative,
+  fetchMoEngageCatalog,
+  stageMoEngageDraftBatch,
+  createMoEngageDraft,
+  type MoEngageCatalog,
+  type MoEngageDraftBatch,
   type AccountItem,
   type JiraProjectItem,
   type JiraIssueItem,
@@ -93,6 +98,162 @@ export default function JiraBriefsPage() {
   const whatsappAccount = targetAccount === 'wealth' ? 'tcl_promo' : targetAccount;
   const whatsappAccountName = accounts.find((acc) => acc.id === whatsappAccount)?.name || whatsappAccount;
   const activeRequestKey = useRef<string>('');
+  // MoEngage Campaign Staging State
+  const [moeCatalog, setMoeCatalog] = useState<MoEngageCatalog | null>(null);
+  const [loadingCatalog, setLoadingCatalog] = useState<boolean>(false);
+  const [moeCampaignName, setMoeCampaignName] = useState<string>('');
+  const [moeChannel, setMoeChannel] = useState<'WHATSAPP' | 'EMAIL' | 'PUSH'>('WHATSAPP');
+  const [moeSegmentId, setMoeSegmentId] = useState<string>('Test_FSTP_Pranav_1602');
+  const [moeScheduledAt, setMoeScheduledAt] = useState<string>('');
+  const [moeTimezone, setMoeTimezone] = useState<string>('Asia/Kolkata');
+  const [moeWaTemplateId, setMoeWaTemplateId] = useState<string>('');
+  const [moeWaSender, setMoeWaSender] = useState<string>('Tata Capital Limited');
+  const [moeEmailFrom, setMoeEmailFrom] = useState<string>('contact@tatacapital.com');
+  const [moeEmailSubject, setMoeEmailSubject] = useState<string>('');
+  const [moeEmailContent, setMoeEmailContent] = useState<string>('<p>Exclusive Offer from Tata Capital</p>');
+  const [moePushTitle, setMoePushTitle] = useState<string>('');
+  const [moePushBody, setMoePushBody] = useState<string>('');
+  const [moePushPlatform, setMoePushPlatform] = useState<'ANDROID' | 'IOS'>('ANDROID');
+
+  const [moeStagingStatus, setMoeStagingStatus] = useState<'DRAFT' | 'STAGING' | 'STAGED' | 'CREATING' | 'CREATED' | 'ERROR'>('DRAFT');
+  const [moeResultCampaignId, setMoeResultCampaignId] = useState<string | null>(null);
+  const [moeBatchId, setMoeBatchId] = useState<string | null>(null);
+  const [moeError, setMoeError] = useState<string | null>(null);
+  const [moeBusy, setMoeBusy] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (activeTab === 'moengage' && !moeCatalog && targetAccount) {
+      setLoadingCatalog(true);
+      fetchMoEngageCatalog(targetAccount)
+        .then((cat) => {
+          setMoeCatalog(cat);
+          if (cat.segments && cat.segments.length > 0 && !moeSegmentId) {
+            setMoeSegmentId(cat.segments[0].id);
+          }
+          if (cat.whatsapp_senders && cat.whatsapp_senders.length > 0 && !moeWaSender) {
+            setMoeWaSender(cat.whatsapp_senders[0].sender_name);
+          }
+          if (cat.email_senders && cat.email_senders.length > 0 && !moeEmailFrom) {
+            setMoeEmailFrom(cat.email_senders[0].from_address);
+          }
+        })
+        .catch((err) => {
+          console.warn('Could not load MoEngage catalog:', err);
+        })
+        .finally(() => setLoadingCatalog(false));
+    }
+  }, [activeTab, targetAccount, moeCatalog, moeSegmentId, moeWaSender, moeEmailFrom]);
+
+  const handleMoeStageBatch = async () => {
+    if (!brief) return;
+    try {
+      setMoeBusy(true);
+      setMoeError(null);
+      setMoeStagingStatus('STAGING');
+      const scheduledVal = moeScheduledAt || new Date(Date.now() + 86400000).toISOString().slice(0, 19);
+
+      const rowDict: Record<string, string> = {
+        campaign_name: moeCampaignName || `${brief.issue_key} Campaign`,
+        channel: moeChannel,
+        segment_id: moeSegmentId || 'Test_FSTP_Pranav_1602',
+        scheduled_at: scheduledVal,
+        timezone: moeTimezone || 'Asia/Kolkata',
+      };
+
+      if (moeChannel === 'WHATSAPP') {
+        rowDict.whatsapp_sender = moeWaSender || 'Tata Capital Limited';
+        rowDict.whatsapp_template_id = moeWaTemplateId || (waTemplates[0]?.template_name || 'test_1234');
+      } else if (moeChannel === 'EMAIL') {
+        rowDict.from_address = moeEmailFrom || 'contact@tatacapital.com';
+        rowDict.subject = moeEmailSubject || brief.summary || 'Exclusive Offer';
+        rowDict.html_content = moeEmailContent || '<p>Exclusive Offer</p>';
+        rowDict.content_type = 'PROMOTIONAL';
+        rowDict.subscription_category = 'Offers';
+      } else if (moeChannel === 'PUSH') {
+        rowDict.push_platform = moePushPlatform;
+        rowDict.push_title = moePushTitle || brief.summary?.slice(0, 30) || 'Tata Capital Offer';
+        rowDict.push_message = moePushBody || brief.summary || 'Click to explore offer';
+      }
+
+      const headers = Object.keys(rowDict);
+      const csvLine = headers.map(h => `"${(rowDict[h] || '').replace(/"/g, '""')}"`).join(',');
+      const csvData = `${headers.join(',')}\n${csvLine}\n`;
+      const file = new File([csvData], `${brief.issue_key}_moengage_draft.csv`, { type: 'text/csv' });
+
+      const batch = await stageMoEngageDraftBatch(file, targetAccount);
+      setMoeBatchId(batch.batch_id);
+      setMoeStagingStatus('STAGED');
+      setFeedback({
+        message: `Campaign staged in MoEngage batch queue (Batch ${batch.batch_id}). Ready to create remote draft.`,
+        type: 'success',
+      });
+    } catch (err) {
+      const msg = formatError(err);
+      setMoeError(msg);
+      setMoeStagingStatus('ERROR');
+      setFeedback({ message: `Failed to stage batch: ${msg}`, type: 'error' });
+    } finally {
+      setMoeBusy(false);
+    }
+  };
+
+  const handleMoeCreateDraft = async () => {
+    if (!brief) return;
+    try {
+      setMoeBusy(true);
+      setMoeError(null);
+      setMoeStagingStatus('CREATING');
+      const scheduledVal = moeScheduledAt || new Date(Date.now() + 86400000).toISOString().slice(0, 19);
+
+      const rowDict: Record<string, any> = {
+        account: targetAccount,
+        source_ref: `jira_${brief.issue_key}.csv`,
+        row_id: '1',
+        channel: moeChannel,
+        campaign_name: moeCampaignName || `${brief.issue_key} Campaign`,
+        segment_id: moeSegmentId || 'Test_FSTP_Pranav_1602',
+        scheduled_at: scheduledVal,
+        timezone: moeTimezone || 'Asia/Kolkata',
+      };
+
+      if (moeChannel === 'WHATSAPP') {
+        rowDict.whatsapp_sender = moeWaSender || 'Tata Capital Limited';
+        rowDict.whatsapp_template_id = moeWaTemplateId || (waTemplates[0]?.template_name || 'test_1234');
+      } else if (moeChannel === 'EMAIL') {
+        rowDict.from_address = moeEmailFrom || 'contact@tatacapital.com';
+        rowDict.subject = moeEmailSubject || brief.summary || 'Exclusive Offer';
+        rowDict.html_content = moeEmailContent || '<p>Exclusive Offer</p>';
+        rowDict.content_type = 'PROMOTIONAL';
+        rowDict.subscription_category = 'Offers';
+      } else if (moeChannel === 'PUSH') {
+        rowDict.push_platform = moePushPlatform;
+        rowDict.push_title = moePushTitle || brief.summary?.slice(0, 30) || 'Tata Capital Offer';
+        rowDict.push_message = moePushBody || brief.summary || 'Click to explore offer';
+      }
+
+      const res = await createMoEngageDraft(targetAccount, rowDict);
+      if (res.campaign_id) {
+        setMoeResultCampaignId(res.campaign_id);
+        setMoeStagingStatus('CREATED');
+        setFeedback({
+          message: `Successfully created MoEngage draft (Campaign ID: ${res.campaign_id})!`,
+          type: 'success',
+        });
+      } else if (res.state === 'BLOCKED' || (res.validation_errors && res.validation_errors.length > 0)) {
+        const issues = res.validation_errors.map(e => `${e.field || ''}: ${e.issue || ''}`).join(', ');
+        throw new Error(issues || res.issue || 'Draft creation blocked');
+      } else {
+        throw new Error(res.issue || 'Draft creation unconfirmed');
+      }
+    } catch (err) {
+      const msg = formatError(err);
+      setMoeError(msg);
+      setMoeStagingStatus('ERROR');
+      setFeedback({ message: `Failed to create draft in MoEngage: ${msg}`, type: 'error' });
+    } finally {
+      setMoeBusy(false);
+    }
+  };
 
   const loadIssues = useCallback(async (queryParam?: string, bStatusParam?: string) => {
     try {
@@ -209,6 +370,25 @@ export default function JiraBriefsPage() {
         initialAcc = 'tcl_promo';
       }
       setTargetAccount(initialAcc);
+      if (data.moengage_campaign) {
+        setMoeCampaignName(data.moengage_campaign.campaign_name || `${data.issue_key} - ${data.summary}`);
+        setMoePushTitle(data.moengage_campaign.push_title || `Tata Capital: ${data.summary?.slice(0, 30)}`);
+        setMoePushBody(data.moengage_campaign.push_body || data.summary || '');
+        setMoeScheduledAt(data.moengage_campaign.scheduled_date || '');
+        if (waList.length > 0) {
+          setMoeChannel('WHATSAPP');
+          setMoeWaTemplateId(waList[0].template_name || '');
+        } else if (data.is_email_campaign || (data.email_templates?.length || 0) > 0) {
+          setMoeChannel('EMAIL');
+          setMoeEmailSubject(data.summary || '');
+        } else {
+          setMoeChannel('PUSH');
+        }
+        setMoeStagingStatus('DRAFT');
+        setMoeResultCampaignId(null);
+        setMoeBatchId(null);
+        setMoeError(null);
+      }
       if (data.is_email_campaign) {
         setActiveTab('email');
       } else if (waList.length > 0) {
@@ -1794,37 +1974,333 @@ export default function JiraBriefsPage() {
                   {/* MoEngage Staging Panel */}
                   {activeTab === 'moengage' && (
                     <div className="space-y-4">
-                      <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xs font-bold text-amber-900 uppercase tracking-wider">MoEngage Campaign Staging</h3>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
-                            Status: DRAFT
-                          </span>
+                      {/* Success Banner if created */}
+                      {moeResultCampaignId && (
+                        <div className="p-4 rounded-xl border border-emerald-300 bg-emerald-50/90 text-emerald-900 space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">🎉</span>
+                              <span className="text-xs font-bold uppercase tracking-wider">
+                                Draft Created in MoEngage Workspace!
+                              </span>
+                            </div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-200 text-emerald-800">
+                              CONFIRMED
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-gray-600">Campaign ID:</span>
+                            <code className="px-2 py-0.5 rounded bg-white border border-emerald-200 font-mono font-bold text-gray-900 select-all">
+                              {moeResultCampaignId}
+                            </code>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(moeResultCampaignId);
+                                setFeedback({ message: `Copied Campaign ID: ${moeResultCampaignId}`, type: 'success' });
+                              }}
+                              className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                            >
+                              Copy ID
+                            </button>
+                            <a
+                              href="/moengage-campaigns"
+                              className="text-[11px] font-bold text-emerald-700 hover:underline ml-2"
+                            >
+                              View in MoEngage Campaigns Builder ➔
+                            </a>
+                          </div>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      )}
+
+                      {/* Error Banner */}
+                      {moeError && (
+                        <div className="p-3 rounded-xl border border-rose-300 bg-rose-50 text-rose-900 text-xs flex items-center justify-between">
+                          <span>⚠️ {moeError}</span>
+                          <button
+                            type="button"
+                            onClick={() => setMoeError(null)}
+                            className="text-rose-600 font-bold hover:text-rose-800"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Main Interactive Form Card */}
+                      <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 space-y-4 shadow-2xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-amber-200/60">
                           <div>
-                            <span className="text-gray-500 font-medium">Campaign Name:</span>
-                            <p className="font-semibold text-gray-900">{brief.moengage_campaign.campaign_name}</p>
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">🚀</span>
+                              <h3 className="text-xs font-bold text-amber-950 uppercase tracking-wider">
+                                MoEngage Campaign Staging & Deployment
+                              </h3>
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              Configure required campaign parameters and stage or create real V5 drafts in MoEngage.
+                            </p>
                           </div>
-                          <div>
-                            <span className="text-gray-500 font-medium">Scheduled Send Date:</span>
-                            <p className="font-semibold text-gray-900">{brief.moengage_campaign.scheduled_date || 'Immediate / Manual'}</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500 font-medium">WhatsApp Staged Template:</span>
-                            <p className="font-mono text-gray-900 font-semibold">{brief.moengage_campaign.whatsapp_template || 'None'}</p>
-                          </div>
-                          <div>
-                            <span className="text-gray-500 font-medium">Push Notification Title:</span>
-                            <p className="font-semibold text-gray-900">{brief.moengage_campaign.push_title || 'None'}</p>
+                          <div className="flex items-center gap-2">
+                            {loadingCatalog && (
+                              <span className="text-[10px] text-gray-400 animate-pulse">Loading catalog...</span>
+                            )}
+                            <span
+                              className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                moeStagingStatus === 'CREATED'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : moeStagingStatus === 'STAGED'
+                                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                  : moeStagingStatus === 'CREATING'
+                                  ? 'bg-indigo-100 text-indigo-800 border border-indigo-200 animate-pulse'
+                                  : moeStagingStatus === 'ERROR'
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+                              }`}
+                            >
+                              Status: {moeStagingStatus}
+                            </span>
                           </div>
                         </div>
 
-                        <div className="pt-2 border-t border-amber-200/60">
-                          <span className="text-gray-500 font-medium text-xs">Push Notification Body:</span>
-                          <p className="p-2.5 mt-1 bg-white rounded border border-gray-200 text-xs text-gray-800">
-                            {brief.moengage_campaign.push_body || 'None'}
-                          </p>
+                        {/* Core Form Fields Grid */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          {/* Campaign Name */}
+                          <div>
+                            <label className="block text-gray-600 font-medium mb-1">
+                              Campaign Name <span className="text-rose-500">*</span>:
+                            </label>
+                            <input
+                              type="text"
+                              value={moeCampaignName}
+                              onChange={(e) => setMoeCampaignName(e.target.value)}
+                              placeholder="e.g. TCN-546 - Personal Loan Blast"
+                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+
+                          {/* Channel Selector */}
+                          <div>
+                            <label className="block text-gray-600 font-medium mb-1">
+                              Campaign Channel <span className="text-rose-500">*</span>:
+                            </label>
+                            <select
+                              value={moeChannel}
+                              onChange={(e) => setMoeChannel(e.target.value as 'WHATSAPP' | 'EMAIL' | 'PUSH')}
+                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+                            >
+                              <option value="WHATSAPP">🟢 WhatsApp</option>
+                              <option value="EMAIL">📧 Email</option>
+                              <option value="PUSH">📱 Push Notification</option>
+                            </select>
+                          </div>
+
+                          {/* Target Audience / Segment */}
+                          <div>
+                            <label className="block text-gray-600 font-medium mb-1">
+                              Target Segment / Audience <span className="text-rose-500">*</span>:
+                            </label>
+                            {moeCatalog?.segments && moeCatalog.segments.length > 0 ? (
+                              <select
+                                value={moeSegmentId}
+                                onChange={(e) => setMoeSegmentId(e.target.value)}
+                                className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+                              >
+                                {moeCatalog.segments.map((seg) => (
+                                  <option key={seg.id} value={seg.id}>
+                                    {seg.name} ({seg.id})
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                value={moeSegmentId}
+                                onChange={(e) => setMoeSegmentId(e.target.value)}
+                                placeholder="Segment ID, e.g. Test_FSTP_Pranav_1602"
+                                className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                              />
+                            )}
+                          </div>
+
+                          {/* Scheduled Date */}
+                          <div>
+                            <label className="block text-gray-600 font-medium mb-1">
+                              Scheduled Send Time:
+                            </label>
+                            <input
+                              type="datetime-local"
+                              value={moeScheduledAt ? moeScheduledAt.slice(0, 16) : ''}
+                              onChange={(e) => setMoeScheduledAt(e.target.value)}
+                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+
+                          {/* Channel-Specific Parameters */}
+                          {moeChannel === 'WHATSAPP' && (
+                            <>
+                              <div>
+                                <label className="block text-gray-600 font-medium mb-1">
+                                  WhatsApp Template ID:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={moeWaTemplateId}
+                                  onChange={(e) => setMoeWaTemplateId(e.target.value)}
+                                  placeholder="e.g. pl_diwali_promo"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-mono font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-gray-600 font-medium mb-1">
+                                  WhatsApp Sender:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={moeWaSender}
+                                  onChange={(e) => setMoeWaSender(e.target.value)}
+                                  placeholder="e.g. Tata Capital Limited"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          {moeChannel === 'EMAIL' && (
+                            <>
+                              <div>
+                                <label className="block text-gray-600 font-medium mb-1">
+                                  From Address:
+                                </label>
+                                <input
+                                  type="email"
+                                  value={moeEmailFrom}
+                                  onChange={(e) => setMoeEmailFrom(e.target.value)}
+                                  placeholder="e.g. contact@tatacapital.com"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-gray-600 font-medium mb-1">
+                                  Email Subject:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={moeEmailSubject}
+                                  onChange={(e) => setMoeEmailSubject(e.target.value)}
+                                  placeholder="e.g. Festive Loan Offer"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          {moeChannel === 'PUSH' && (
+                            <>
+                              <div>
+                                <label className="block text-gray-600 font-medium mb-1">
+                                  Push Title:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={moePushTitle}
+                                  onChange={(e) => setMoePushTitle(e.target.value)}
+                                  placeholder="e.g. Tata Capital Offer"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-gray-600 font-medium mb-1">
+                                  Push Platform:
+                                </label>
+                                <select
+                                  value={moePushPlatform}
+                                  onChange={(e) => setMoePushPlatform(e.target.value as 'ANDROID' | 'IOS')}
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+                                >
+                                  <option value="ANDROID">🤖 Android</option>
+                                  <option value="IOS">🍎 iOS</option>
+                                </select>
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Content text area for Push / Email */}
+                        {moeChannel === 'PUSH' && (
+                          <div>
+                            <label className="block text-gray-600 font-medium mb-1 text-xs">
+                              Push Message Body:
+                            </label>
+                            <textarea
+                              rows={2}
+                              value={moePushBody}
+                              onChange={(e) => setMoePushBody(e.target.value)}
+                              placeholder="Message body copy..."
+                              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                        )}
+
+                        {moeChannel === 'EMAIL' && (
+                          <div>
+                            <label className="block text-gray-600 font-medium mb-1 text-xs">
+                              Email HTML Content:
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={moeEmailContent}
+                              onChange={(e) => setMoeEmailContent(e.target.value)}
+                              placeholder="<p>HTML content...</p>"
+                              className="w-full px-3 py-2 rounded-lg border border-gray-300 font-mono text-xs text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                            />
+                          </div>
+                        )}
+
+                        {/* Action Buttons Row */}
+                        <div className="pt-3 border-t border-amber-200/80 flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleMoeCreateDraft}
+                              disabled={moeBusy || !moeCampaignName.trim()}
+                              className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 shadow-2xs transition flex items-center gap-2"
+                              title="Create real audited V5 draft in MoEngage Live workspace"
+                            >
+                              <span>✨</span>
+                              <span>{moeBusy && moeStagingStatus === 'CREATING' ? 'Creating Draft...' : 'Create Draft in MoEngage'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleMoeStageBatch}
+                              disabled={moeBusy || !moeCampaignName.trim()}
+                              className="px-3.5 py-2 rounded-lg text-xs font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 shadow-2xs transition flex items-center gap-1.5"
+                              title="Stage campaign in local workspace batch queue"
+                            >
+                              <span>📁</span>
+                              <span>{moeBusy && moeStagingStatus === 'STAGING' ? 'Staging...' : 'Stage in Queue'}</span>
+                            </button>
+                          </div>
+
+                          {/* Direct Links to MoEngage Studio */}
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={
+                                moeChannel === 'WHATSAPP'
+                                  ? 'https://dashboard-03.moengage.com/v4/whatsapp/create/one-time/'
+                                  : moeChannel === 'EMAIL'
+                                  ? 'https://dashboard-03.moengage.com/v4/email/create/one-time/'
+                                  : 'https://dashboard-03.moengage.com/v4/push/create/one-time/'
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 transition"
+                            >
+                              <span>🔗</span>
+                              <span>Open in MoEngage {moeChannel === 'WHATSAPP' ? 'WhatsApp' : moeChannel === 'EMAIL' ? 'Email' : 'Push'} Studio ↗</span>
+                            </a>
+                          </div>
                         </div>
                       </div>
                     </div>

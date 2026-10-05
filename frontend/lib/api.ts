@@ -1277,6 +1277,22 @@ export function automateMoEngageWhatsAppBatch(
     { method: "POST", body: form }
   );
 }
+export function createMoEngageDraft(account: string, row: Record<string, unknown>): Promise<{
+  account: string;
+  workspace_id: string;
+  source_ref: string;
+  row_id: string;
+  state: string;
+  campaign_id: string | null;
+  issue: string | null;
+  validation_errors: Array<{ field?: string; issue?: string }>;
+}> {
+  return moEngageDraftRequest("/api/moengage/drafts/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ account, row }),
+  });
+}
 export type MoEngageCatalogSegment = { id: string; name: string };
 export type MoEngageCatalogEmailSender = { from_address: string; sender_name: string; connector_type: string; connector_name: string };
 export type MoEngageCatalogPushPlatform = { platform: string; notification_channel?: string };
@@ -1624,6 +1640,7 @@ export type AlertsPreviewResponse = {
   ist_time: string;
   scheduled_time?: string;
   window_label?: string;
+  google_chat_skipped_weekend?: boolean;
   is_valid_window?: boolean;
   window_warning?: string;
   already_sent_today?: boolean;
@@ -1653,7 +1670,7 @@ export type AlertsDispatchResponse = {
   real_sent_count: number;
   simulated_count: number;
   failed_count: number;
-  google_chat_result?: { delivered?: boolean; simulated?: boolean; message?: string; error?: string };
+  google_chat_result?: { delivered?: boolean; simulated?: boolean; skipped?: boolean; message?: string; error?: string };
   dry_run: boolean;
   dispatched_by: string;
   results: Array<{
