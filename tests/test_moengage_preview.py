@@ -28,6 +28,8 @@ CATALOG = {
     ],
     "assets": [{"id": "asset-1", "url": "https://example.com/banner.png"}],
     "email_templates": [{"id": "tmpl-1"}],
+    "whatsapp_senders": [{"sender_name": "Tata Capital Financial Services Limited", "phone_number": "+919876543210", "provider": "KARIX"}],
+    "whatsapp_templates": [{"id": "festive_wa_1", "name": "festive_wa_1"}],
 }
 BASE = {
     "account": "tata", "source_ref": "brief.json", "row_id": "1", "channel": "EMAIL",
@@ -172,6 +174,38 @@ def test_parsed_jira_attachments_keep_provenance_without_invented_copy():
     assert result["items"][1]["candidate_v5_payload"] is None
     assert brief["moengage_campaign"]["push_body"] not in json.dumps(result)
 
+def test_jira_brief_whatsapp_templates_generate_v5_candidate_drafts_and_tata_subaccounts():
+    brief = {
+        "issue_key": "SWCM-106",
+        "summary": "WhatsApp festival brief",
+        "account": "tcl_promo",
+        "whatsapp_templates": [
+            {"template_name": "festive_wa_1", "body": "Dear {{1}}, festival offer"}
+        ],
+        "channel_counts": {"whatsapp": 1},
+        "attachments_mapped": [{"id": "att-1", "filename": "copy.xlsx"}],
+    }
+    overrides = {
+        "segment_id": "seg-vip",
+        "scheduled_at": BASE["scheduled_at"],
+        "timezone": BASE["timezone"],
+    }
+    # Allows 'tcl_promo' brief to generate drafts under parent 'tata' workspace
+    rows = rows_from_jira_brief(brief, overrides, "tata")
+    assert len(rows) == 1
+    assert rows[0]["row_id"] == "whatsapp:1"
+    assert rows[0]["channel"] == "WHATSAPP"
+    assert rows[0]["whatsapp_template_id"] == "festive_wa_1"
+    assert rows[0]["campaign_name"] == "festive_wa_1"
+
+    batch = preview(rows)
+    assert batch["ready"] == 1
+    assert batch["blocked"] == 0
+    candidate = batch["items"][0]["candidate_v5_payload"]
+    assert candidate["channel"] == "WHATSAPP"
+    assert candidate["basic_details"]["name"] == "festive_wa_1"
+    assert candidate["campaign_content"]["content"]["whatsapp"]["template_id"] == "festive_wa_1"
+    assert candidate["campaign_content"]["content"]["whatsapp"]["sender_name"] == "Tata Capital Financial Services Limited"
 
 def test_empty_batch_bad_file_and_wrong_workspace_are_rejected():
     with pytest.raises(ValueError, match="At least one"):

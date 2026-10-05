@@ -247,3 +247,35 @@ def test_card_title_and_body_deduplication(tmp_path):
     assert "CTA {{4}}" not in rcs["body"]
     assert rcs["action_label"] == "Apply Now"
     assert rcs["action_url"] == "https://u3.mnge.co/{{4}}"
+def test_customer_messages_with_embedded_urls_preserve_body():
+    """Verify single-line messages with embedded URLs (e.g. SWCM-93, SWCM-91, SWCM-31) preserve their body text."""
+    # 1. Message with embedded FAQ URL after colon
+    msg_93 = (
+        "Dear Sir/Madam, Pre- EMI of Rs.{{1}} for your Tata Capital loan a/c {{2}} is due & will be debited on {{3}}. "
+        "Kindly maintain sufficient balance in your bank a/c one day prior. "
+        "For charge details: https://www.tatacapital.com/contact-us/retail-service-faqs.html#types-of-charges -Tata Capital"
+    )
+    clean_93, btn_93, url_93, _ = extract_and_strip_cta(msg_93)
+    assert len(clean_93) > 100
+    assert "Dear Sir/Madam" in clean_93
+    assert "Pre- EMI of Rs.{{1}}" in clean_93
+    assert url_93 == "https://www.tatacapital.com/contact-us/retail-service-faqs.html#types-of-charges"
+
+    # 2. Message with embedded URL in parentheses
+    msg_91 = (
+        "Dear Customer, according to our policy review, the balance tenure of your loan account number XXXX exceeds the maximum allowed tenure. "
+        "You can view the updated impact by downloading your revised drawdown schedule from our website "
+        "(https://www.tatacapital.com/contact-us/retail-service-faqs.html). For more details, please check email. – Tata Capital Housing Finance Limited"
+    )
+    clean_91, btn_91, url_91, _ = extract_and_strip_cta(msg_91)
+    assert len(clean_91) > 100
+    assert "Dear Customer" in clean_91
+    assert url_91 == "https://www.tatacapital.com/contact-us/retail-service-faqs.html"
+
+    # 3. Message with inline link placeholder and trailing disclaimer
+    msg_31 = "Dear {{1}}, Successful referrals unlock exclusive Taj experiences while supporting a meaningful cause. https://u3.mnge.co/ T&Cs Apply"
+    clean_31, btn_31, url_31, _ = extract_and_strip_cta(msg_31)
+    assert len(clean_31) > 50
+    assert "Dear {{1}}" in clean_31
+    assert "Successful referrals unlock exclusive" in clean_31
+    assert url_31 == "https://u3.mnge.co/"

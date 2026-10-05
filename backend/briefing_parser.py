@@ -542,15 +542,38 @@ def extract_and_strip_cta(
                 cleaned_lines.append(before_part)
             continue
 
-        elif is_url_only or (has_url and (starts_with_cta or starts_with_emoji or ":" in sline)):
+        is_standalone_cta_line = bool(
+            re.match(
+                r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:\*|_)?\s*(?:CTA(?:\s*Button)?|Link|URL|Website|Portal|Apply(?:\s*Now|\s*Online)?|Check\s+(?:Your\s+|My\s+)?Offer|Explore(?:\s*Now)?|View\s*Offer)\s*[:\-–]?\s*(?:\*|_)?\s*(?:"
+                + url_pat
+                + r")\s*$",
+                sline,
+                re.IGNORECASE,
+            )
+            or (re.match(r"^\s*(?:[👉🔗▶️📍📲➡️✅])\s*(?:" + url_pat + r")\s*$", sline) and len(sline) <= 80)
+        )
+
+        if is_url_only or is_standalone_cta_line:
             if has_url:
                 c_url = has_url.group(1).rstrip('.,_*_`"').strip()
                 if c_url.lower() in ("<link>", "{link}", "[link]", "<url>", "{url}", "[url]"):
                     extracted_url = DEFAULT_CTA_URL
                 elif c_url.startswith("http"):
                     extracted_url = c_url
+            if not existing_btn_text:
+                lbl = re.sub(url_pat, "", sline)
+                lbl = re.sub(r"[👉🔗▶️📍📲➡️✅*_\-:–|]", " ", lbl)
+                lbl = re.sub(r"^\s*CTA(?:\s*Button)?\s*", "", lbl, flags=re.IGNORECASE).strip()
+                lbl = re.sub(r"\s+", " ", lbl).strip()
+                if lbl and len(lbl) <= 25 and len(lbl) >= 3:
+                    extracted_btn_text = lbl.title()
             continue
-        cleaned_lines.append(line)
+        else:
+            if has_url and (not extracted_url or extracted_url == DEFAULT_CTA_URL):
+                c_url = has_url.group(1).rstrip('.,_*_`"').strip()
+                if c_url.startswith("http"):
+                    extracted_url = c_url
+            cleaned_lines.append(line)
 
     clean_body = "\n".join(cleaned_lines)
     clean_body = re.sub(
@@ -560,6 +583,8 @@ def extract_and_strip_cta(
         flags=re.IGNORECASE,
     )
     clean_body = re.sub(r"\n{3,}", "\n\n", clean_body).strip()
+    if not clean_body and text:
+        clean_body = text
 
     if existing_footer and existing_footer.strip():
         ef = existing_footer.strip()

@@ -46,10 +46,22 @@ MOCK_ISSUE_DATA = {
 }
 
 MOCK_USER = {
+    "sub": "usr_tata_test",
     "email": "operator@tatacapital.com",
     "name": "Briefing Operator",
     "is_admin": True,
+    "tenant_id": "tata",
+    "role": "admin",
 }
+
+
+@pytest.fixture(autouse=True)
+def authenticated_jira_operator():
+    api.app.dependency_overrides[api.get_current_user] = lambda: MOCK_USER
+    try:
+        yield
+    finally:
+        api.app.dependency_overrides.pop(api.get_current_user, None)
 
 
 @patch("api.get_current_user", return_value=MOCK_USER)
@@ -194,7 +206,7 @@ def jira_submit_user():
     """Exercise the real FastAPI dependency rather than patching its import."""
     def set_user(tenant):
         api.app.dependency_overrides[api.get_current_user] = lambda: {
-            "tenant_id": tenant, "role": "operator", "name": "Test Operator"
+            "sub": "usr_jira_test", "tenant_id": tenant, "role": "operator", "name": "Test Operator"
         }
 
     try:

@@ -318,3 +318,55 @@ def test_create_route_requires_owner_approval_and_uses_server_catalog(offline_db
         finally:
             app.dependency_overrides.pop(get_current_user, None)
 
+
+def test_multi_operator_and_whatsapp_rows_in_live_test_config(offline_db, tmp_path, monkeypatch):
+    """Verify multiple comma-separated operators and WhatsApp channel in live test configuration."""
+    from moengage_draft_creation import DraftCreation as ProductionDraftCreation
+
+    catalog_file = tmp_path / "tata_catalog.json"
+    catalog_file.write_text(json.dumps(CATALOG))
+    prefix = "MOENGAGE_DRAFT_TATA_"
+
+    operators = "neel.shah@attributics.com, dnyanesh.khawas@attributics.com, " + USER["email"]
+    wa_rows = [
+        {"source_ref": "wa_campaigns.csv", "row_id": "1", "channel": "WHATSAPP", "segment_id": "seg-vip"},
+        {"source_ref": "wa_campaigns.csv", "row_id": "2", "channel": "EMAIL", "segment_id": "seg-vip"},
+    ]
+
+    for field, value in {
+        "ZERO_CHARGE_CONFIRMED": "true",
+        "NO_PUBLISH_SCOPE_CONFIRMED": "true",
+        "LIVE_TEST_OPERATOR_EMAIL": operators,
+        "LIVE_TEST_ROWS_JSON": json.dumps(wa_rows),
+        "LIVE_ENABLED": "true",
+        "WORKSPACE_ID": CATALOG["workspace_id"],
+        "DATA_CENTER": "03",
+        "API_KEY": "offline-placeholder",
+        "CATALOG_FILE": str(catalog_file),
+    }.items():
+        monkeypatch.setenv(prefix + field, value)
+    monkeypatch.setattr("moengage_draft_creation.get_database_url", lambda: "postgresql://not-used")
+
+    with patch("requests.request", side_effect=AssertionError("No provider call allowed")):
+        # Allowed for USER
+        prod = ProductionDraftCreation.from_environment("tata", USER)
+        assert prod.approved_live_rows == {
+            ("wa_campaigns.csv", "1"): ("WHATSAPP", "seg-vip"),
+            ("wa_campaigns.csv", "2"): ("EMAIL", "seg-vip"),
+        }
+
+        # Allowed for another operator in the comma-separated list
+        neel_user = {**USER, "email": "neel.shah@attributics.com"}
+        prod_neel = ProductionDraftCreation.from_environment("tata", neel_user)
+        assert prod_neel.approved_live_rows is not None
+
+        # Denied for unlisted operator
+        unlisted = {**USER, "email": "unlisted@example.com"}
+        with pytest.raises(PermissionError, match="designated live test operator"):
+            ProductionDraftCreation.from_environment("tata", unlisted)
+
+        # Wildcard allows any operator
+        monkeypatch.setenv(prefix + "LIVE_TEST_OPERATOR_EMAIL", "*")
+        prod_wildcard = ProductionDraftCreation.from_environment("tata", unlisted)
+        assert prod_wildcard.approved_live_rows is not None
+

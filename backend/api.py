@@ -3634,9 +3634,22 @@ def test_gemini_endpoint(
         return _json_safe({"ok": False, "error": str(exc)})
 
 
+def _require_tata_jira_access(current_user: dict) -> None:
+    """Jira campaign briefs and their creatives belong to Tata, not Bajaj."""
+    from auth import TATA_SUB_ACCOUNTS
+
+    if current_user.get("sub") in (None, "usr_anon"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if current_user.get("tenant_id") not in TATA_SUB_ACCOUNTS and not (
+        current_user.get("tenant_id") == "all" and current_user.get("role") == "superadmin"
+    ):
+        raise HTTPException(status_code=403, detail="Tata Jira brief access denied")
+
+
 @app.get("/api/jira/projects")
 def get_jira_brief_projects_endpoint(current_user: dict = Depends(get_current_user)):
     """List available Tata Capital Jira projects for campaign briefs."""
+    _require_tata_jira_access(current_user)
     from work_manager import JIRA_PROJECTS_CATALOG
 
     return _json_safe(JIRA_PROJECTS_CATALOG)
@@ -3652,6 +3665,7 @@ def get_jira_issues_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """List campaign brief issues from Jira."""
+    _require_tata_jira_access(current_user)
     try:
         from jira_client import list_jira_issues
 
@@ -3672,6 +3686,7 @@ def get_jira_brief_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Fetch and parse a Jira campaign brief into multi-channel template drafts."""
+    _require_tata_jira_access(current_user)
     try:
         from briefing_parser import parse_jira_brief
         from jira_client import compute_brief_status, fetch_jira_issue
@@ -3775,6 +3790,7 @@ async def submit_jira_brief_endpoint(
     Submit extracted WhatsApp and/or RCS templates from a Jira brief directly to Karix,
     record results in database queue, and post automated comment back to Jira ticket.
     """
+    _require_tata_jira_access(current_user)
     from briefing_parser import parse_jira_brief
     from jira_client import fetch_jira_issue
     from models import TemplateComponent, TemplateSubmission
@@ -3786,8 +3802,12 @@ async def submit_jira_brief_endpoint(
 
     issue_data = await asyncio.to_thread(fetch_jira_issue, issue_key)
     parsed = await asyncio.to_thread(parse_jira_brief, issue_data, download_creatives=True)
+    from auth import TATA_SUB_ACCOUNTS
+
     acc = (req.account or parsed.account or "tcl_promo").lower().strip()
     wa_acc = (req.whatsapp_account or acc).lower().strip()
+    if acc not in TATA_SUB_ACCOUNTS or wa_acc not in TATA_SUB_ACCOUNTS:
+        raise HTTPException(status_code=403, detail="Jira briefs cannot be submitted to another tenant")
     require_tenant_access(acc, current_user)
     if "whatsapp" in req.channels:
         require_tenant_access(wa_acc, current_user)
@@ -4046,10 +4066,11 @@ def download_jira_creative_endpoint(
     attachment_id: str | None = Query(None),
     filename: str | None = Query(None),
     inline: bool = Query(False),
+    current_user: dict = Depends(get_current_user),
 ):
     """Download or preview a creative attachment from a Jira brief."""
+    _require_tata_jira_access(current_user)
     import mimetypes
-    import tempfile
     from fastapi.responses import FileResponse
     from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
 
@@ -4061,16 +4082,8 @@ def download_jira_creative_endpoint(
             cand = Path.cwd() / cand
         resolved = cand.resolve()
         cache_dir = MEDIA_CACHE_DIR.resolve()
-        tmp_dir = Path(tempfile.gettempdir()).resolve()
-        if (
-            str(resolved).startswith(str(cache_dir))
-            or str(resolved).startswith(str(tmp_dir))
-            or str(resolved).startswith("/private/var/")
-            or str(resolved).startswith("/var/folders/")
-            or str(resolved).startswith("/tmp/")
-        ):
-            if resolved.is_file():
-                target_path = resolved
+        if resolved.is_relative_to(cache_dir) and resolved.is_file():
+            target_path = resolved
         if target_path is None:
             by_name = cache_dir / Path(path).name
             if by_name.is_file():
@@ -4114,6 +4127,7 @@ async def upload_jira_creative_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Upload a modified or replacement creative for a Jira brief template."""
+    _require_tata_jira_access(current_user)
     import time
     from jira_client import MEDIA_CACHE_DIR
 
@@ -4188,12 +4202,19 @@ class MoEngageRcsSyncRequest(BaseModel):
     sender_id: str = "68888420892e852255fca466"
 
 
+def _require_moengage_account_access(account: str, current_user: dict) -> None:
+    if current_user.get("sub") in (None, "usr_anon"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    require_tenant_access(account, current_user)
+
+
 @app.post("/api/moengage/rcs/sync")
 async def sync_moengage_rcs_endpoint(
     req: MoEngageRcsSyncRequest,
     current_user: dict = Depends(get_current_user),
 ):
     """Register an approved RCS template into MoEngage Settings -> RCS Template Management."""
+    _require_moengage_account_access("tata", current_user)
     from moengage_sync import create_moengage_rcs_template
 
     try:
@@ -4280,6 +4301,7 @@ def get_moengage_credentials_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Return MoEngage credential state (token, cookie, expiry) for an account."""
+    _require_moengage_account_access(account, current_user)
     from moengage_sync import get_moengage_credentials
 
     creds = get_moengage_credentials(account)
@@ -4306,6 +4328,7 @@ def update_moengage_credentials_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Persist an account's MoEngage workspace credentials to .env and credentials.json."""
+    _require_moengage_account_access(req.account, current_user)
     keys = _moengage_credential_keys(req.account)
     mapping: dict[str, str] = {}
     if req.base_url and req.base_url.strip():
@@ -4391,6 +4414,7 @@ def test_moengage_connection_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Test an account's MoEngage token validity by listing RCS templates."""
+    _require_moengage_account_access(account, current_user)
     from moengage_sync import test_moengage_connection
 
     result = test_moengage_connection(account)

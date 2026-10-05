@@ -521,6 +521,7 @@ def preview_due_today_alerts(
         "ist_time": ist_now.strftime("%Y-%m-%d %H:%M:%S IST"),
         "scheduled_time": STAGE_SCHEDULE.get(resolved_stage, {}).get("scheduled_time", "Unknown"),
         "window_label": STAGE_SCHEDULE.get(resolved_stage, {}).get("window_label", ""),
+        "google_chat_skipped_weekend": ist_now.weekday() >= 5,
         "is_valid_window": is_valid_win,
         "window_warning": win_warn,
         "already_sent_today": already_sent,
@@ -914,6 +915,14 @@ def send_google_chat_sla_alert(
     Send an interactive rich card to Google Chat Space via Incoming Webhook.
     Uses standard HTTPS Port 443 (never blocked by cloud firewalls).
     """
+    if get_current_ist_time().weekday() >= 5:
+        return {
+            "delivered": False,
+            "skipped": True,
+            "channel": "Google Chat",
+            "message": "Google Chat SLA alerts are not sent on Saturdays or Sundays (IST).",
+        }
+
     default_url = (
         "https://chat.googleapis.com/v1/spaces/AAQAsqKm6oQ/messages?"
         "key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=er00Zc1ZFnDfrmthvXlRvtkWQHXDd862nhHl9TlguLk"

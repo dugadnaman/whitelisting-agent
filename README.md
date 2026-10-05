@@ -56,6 +56,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - Jira brief-status filters (including the chat prompt "Show pending Jira briefs") scan successive Jira search pages until the requested number of matching briefs is found or Jira has no more pages. Results remain newest-first; unfiltered listings use a single page.
    - MoEngage attribute resolver and automated template catalog sync.
    - SLA kickoff/checkpoint/escalation alerts omit due-today tickets in **Base Pending** or **Content Pending**: these are client-side dependencies, not operator-owned pending work. They are excluded from Google Chat mentions/counts and operator emails until the status changes; if no operator-owned work remains, no Chat webhook is sent. The alert dispatcher does not change Jira assignees.
+   - Google Chat SLA webhooks are skipped on Saturdays and Sundays in IST, including manual `force` dispatches. The work-management preview marks Chat as paused and disables Chat-only live dispatch; direct email and dry-run previews remain available. Dispatch summaries distinguish skipped Chat alerts from posted or simulated ones.
 
 ---
 

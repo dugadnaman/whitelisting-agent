@@ -373,12 +373,18 @@ def _sheet_rows(records: Any, filename: str, account: str, sheet: str = "") -> l
     return result
 
 
+_TATA_SUB_ACCOUNTS = frozenset({"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"})
+
+
 def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], account: str) -> list[dict[str, Any]]:
     """Adapt an already-parsed Jira brief; never use inferred staging copy or fetch Jira."""
     key = str(brief.get("issue_key") or "").strip()
     if not key:
         raise ValueError("Parsed Jira brief must contain issue_key")
-    if brief.get("account") != account:
+    brief_acc = str(brief.get("account") or "").strip().lower()
+    sel_acc = str(account or "").strip().lower()
+    is_tata_match = brief_acc in _TATA_SUB_ACCOUNTS and sel_acc in _TATA_SUB_ACCOUNTS
+    if brief_acc != sel_acc and not is_tata_match:
         raise ValueError("Jira brief account differs from selected account")
     if set(overrides) - (_ROW_FIELDS - {"source_ref", "row_id", "account", "workspace_id",
                                        "channel", "source_attachments", "_row_error"}):
@@ -390,22 +396,37 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
     ]
     counts = brief.get("channel_counts") or {}
     rows = []
-    for channel, field in (("EMAIL", "email_templates"), ("PUSH", "push_templates")):
+    for channel, field in (("EMAIL", "email_templates"), ("PUSH", "push_templates"), ("WHATSAPP", "whatsapp_templates")):
         templates = brief.get(field) or []
         if not isinstance(templates, list):
             raise ValueError(f"{field} must be a list")
         if not templates and isinstance(counts, dict) and counts.get(channel.lower(), 0):
             templates = [{}]  # Named channel but no reviewed copy: retain a blocked row.
         for index, item in enumerate(templates, 1):
-            excluded = _PUSH_FIELDS if channel == "EMAIL" else _EMAIL_FIELDS
+            if channel == "EMAIL":
+                excluded = _PUSH_FIELDS | _WHATSAPP_FIELDS
+            elif channel == "PUSH":
+                excluded = _EMAIL_FIELDS | _WHATSAPP_FIELDS
+            elif channel == "WHATSAPP":
+                excluded = _EMAIL_FIELDS | _PUSH_FIELDS
+            else:
+                excluded = frozenset()
             row = {name: value for name, value in overrides.items() if name not in excluded}
             row.update({"account": account, "source_ref": key, "row_id": f"{channel.lower()}:{index}",
                         "channel": channel, "source_attachments": attachments})
             if isinstance(item, dict):
-                sources = (("campaign_name", "campaign_name"), ("subject", "subject"),
-                           ("html_content", "html_content")) if channel == "EMAIL" else (
-                           ("campaign_name", "campaign_name"), ("push_title", "title"),
-                           ("push_message", "message"), ("click_url", "click_url"))
+                if channel == "EMAIL":
+                    sources = (("campaign_name", "campaign_name"), ("subject", "subject"),
+                               ("html_content", "html_content"))
+                elif channel == "PUSH":
+                    sources = (("campaign_name", "campaign_name"), ("push_title", "title"),
+                               ("push_message", "message"), ("click_url", "click_url"))
+                elif channel == "WHATSAPP":
+                    sources = (("campaign_name", "campaign_name"),
+                               ("whatsapp_template_id", "template_name"),
+                               ("whatsapp_template_id", "template_id"))
+                else:
+                    sources = ()
                 for target, source in sources:
                     if item.get(source) is not None:
                         row.setdefault(target, item[source])
@@ -413,7 +434,9 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
                 if channel == "EMAIL" and isinstance(body, str) and body.strip():
                     row.setdefault("html_content", "<p>" + html.escape(body.strip()).replace("\n", "<br>") + "</p>")
             if not row.get("campaign_name"):
-                row["campaign_name"] = ""  # Jira summary is not approved campaign content.
+                row["campaign_name"] = str(item.get("template_name") or "") if isinstance(item, dict) and item.get("template_name") else ""
+            if channel == "WHATSAPP":
+                row.setdefault("whatsapp_sender", overrides.get("whatsapp_sender") or "Tata Capital Financial Services Limited")
             rows.append(row)
     if not rows:
         rows.append({**overrides, "account": account, "source_ref": key, "row_id": "brief:1",

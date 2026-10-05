@@ -389,7 +389,15 @@ export default function WorkManagementPage() {
       let summary = `${dryRun ? 'Dry Run' : 'Dispatch'} Complete!\nStage: ${res.stage}\n\n`;
       summary += `🔒 Jira is strictly read-only: zero comments or updates posted to Jira.\n`;
       if (sendGoogleChat) {
-        summary += `• 💬 Google Chat: ${res.google_chat_result?.delivered ? 'Card posted to Google Chat Space' : res.google_chat_result?.simulated ? 'Simulated (paste Webhook URL to send live)' : res.google_chat_result?.error || 'Delivered'}\n`;
+        const chat = res.google_chat_result;
+        const status = chat?.simulated
+          ? 'Simulated (no webhook posted)'
+          : chat?.skipped
+          ? chat.message || 'Skipped'
+          : chat?.delivered
+          ? 'Card posted to Google Chat Space'
+          : chat?.error || chat?.message || 'Not delivered';
+        summary += `• 💬 Google Chat: ${status}\n`;
       }
       if (sendDirectEmail) {
         summary += `• ✉️ Direct Outbound Email: ${res.real_sent_count} sent, ${res.failed_count} failed\n`;
@@ -2800,6 +2808,11 @@ export default function WorkManagementPage() {
               ))}
             </div>
 
+            {alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && (
+              <div role="status" className="p-3 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs">
+                <strong>Google Chat paused on Saturdays and Sundays (IST).</strong> No Chat webhook will be posted, even with Force Override. Direct email remains available.
+              </div>
+            )}
             {/* Stage Timing & Status Banner */}
             {alertsPreview && (
               <div
@@ -2818,6 +2831,8 @@ export default function WorkManagementPage() {
                         ? '⚠️ Off-Schedule Slot'
                         : alertsPreview.already_sent_today
                         ? 'ℹ️ Already Sent Today'
+                        : alertsPreview.google_chat_skipped_weekend && sendGoogleChat
+                        ? '✅ Active Email Slot (Chat Paused)'
                         : '✅ Active Scheduled Slot'}
                     </span>
                     <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-white/80 border">
@@ -2829,6 +2844,8 @@ export default function WorkManagementPage() {
                       ? `It is currently ${alertsPreview.ist_time}. The ${alertsPreview.stage} alert is designated for ${alertsPreview.scheduled_time}. Sending now may result in out-of-order messages in Google Chat.`
                       : alertsPreview.already_sent_today
                       ? `This alert was already dispatched earlier today. Duplicate dispatches are blocked by default.`
+                      : alertsPreview.google_chat_skipped_weekend && sendGoogleChat
+                      ? 'Current time is within the delivery window, but Google Chat is paused for the weekend. Direct email can still dispatch.'
                       : `Current time is within the active delivery window for ${alertsPreview.stage}. Ready to dispatch.`}
                   </p>
                 </div>
@@ -3032,10 +3049,12 @@ export default function WorkManagementPage() {
                 disabled={
                   alertsDispatching ||
                   alertsPreview?.recipient_count === 0 ||
-                  ((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule)
+                  ((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule) ||
+                  (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail)
                 }
                 className={`px-5 py-2 rounded-lg text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95 ${
-                  (!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule
+                  (((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule) ||
+                    (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail))
                     ? 'bg-gray-400 text-white cursor-not-allowed'
                     : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                 }`}
@@ -3044,8 +3063,10 @@ export default function WorkManagementPage() {
                 <span>
                   {alertsDispatching
                     ? 'Dispatching...'
+                    : alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail
+                    ? 'Google Chat paused for weekend (IST)'
                     : (!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule
-                    ? `Blocked: Off-Schedule (Check Force Override)`
+                    ? 'Blocked: Off-Schedule (Check Force Override)'
                     : `Dispatch Live Alerts (${alertsPreview?.recipient_count || 0})`}
                 </span>
               </button>

@@ -8,6 +8,8 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from email_notifier import (
@@ -149,6 +151,7 @@ def test_client_pending_tickets_are_not_attributed_in_sla_webhook():
          "timeline_bucket": "TODAY", "assignee_name": "Dnyanesh Khawas"},
     ]
     with (
+        patch("email_notifier.get_current_ist_time", return_value=datetime(2026, 10, 5, 13, 0, tzinfo=UTC)),
         patch("email_notifier.get_work_management_dashboard", return_value={"work_items": issues}),
         patch("requests.post") as post,
     ):
@@ -191,6 +194,87 @@ def test_only_client_pending_tickets_do_not_trigger_webhook():
         assert result["google_chat_result"]["skipped"] is True
         post.assert_not_called()
 
+
+@pytest.mark.parametrize(
+    ("ist_now", "force", "should_post"),
+    [
+        (datetime(2026, 10, 3, 10, 0, tzinfo=UTC), False, False),  # Saturday
+        (datetime(2026, 10, 4, 10, 0, tzinfo=UTC), True, False),   # Sunday, manual override
+        (datetime(2026, 10, 5, 10, 0, tzinfo=UTC), False, True),  # Monday
+    ],
+)
+def test_google_chat_sla_dispatch_only_posts_on_ist_weekdays(ist_now, force, should_post):
+    tickets = [
+        {
+            "key": "SWCM-100",
+            "summary": "Campaign due today",
+            "assignee_name": "Dnyanesh Khawas",
+            "timeline_bucket": "TODAY",
+            "status_category": "PENDING",
+            "status": "To Do",
+        }
+    ]
+    with (
+        patch("email_notifier.get_current_ist_time", return_value=ist_now),
+        patch("email_notifier.get_due_today_incomplete_tickets", return_value=tickets),
+        patch("email_notifier.SCHEDULER_STATE.is_already_sent_today", return_value=False),
+        patch("email_notifier.SCHEDULER_STATE.mark_sent"),
+        patch("requests.post") as post,
+    ):
+        post.return_value.ok = True
+        preview = preview_due_today_alerts(stage="MORNING")
+        assert preview["google_chat_skipped_weekend"] is not should_post
+        assert preview["is_valid_window"] is True
+        result = dispatch_due_today_alerts(
+            stage="MORNING", force=force, send_email=False,
+            google_chat_webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages",
+        )
+    assert result["ok"] is True
+    if should_post:
+        post.assert_called_once()
+        assert result["google_chat_result"]["delivered"] is True
+    else:
+        post.assert_not_called()
+        assert result["google_chat_result"]["skipped"] is True
+
+
+def test_direct_google_chat_sla_sender_skips_ist_weekend():
+    saturday = datetime(2026, 10, 3, 10, 0, tzinfo=UTC)
+    operators = group_tickets_by_operator([{"key": "SWCM-100", "assignee_name": "Dnyanesh Khawas"}])
+    with patch("email_notifier.get_current_ist_time", return_value=saturday), patch("requests.post") as post:
+        result = send_google_chat_sla_alert(
+            "MORNING", operators, "10:00 AM IST",
+            webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages",
+        )
+    post.assert_not_called()
+    assert result["skipped"] is True
+    assert result["delivered"] is False
+
+
+def test_weekend_google_chat_skip_does_not_suppress_email_dispatch():
+    tickets = [{
+        "key": "SWCM-100", "summary": "Campaign due today", "assignee_name": "Dnyanesh Khawas",
+        "timeline_bucket": "TODAY", "status_category": "PENDING", "status": "To Do",
+    }]
+    with (
+        patch("email_notifier.get_current_ist_time", return_value=datetime(2026, 10, 3, 10, 0, tzinfo=UTC)),
+        patch("email_notifier.get_due_today_incomplete_tickets", return_value=tickets),
+        patch("email_notifier.SCHEDULER_STATE.mark_sent"),
+        patch("email_notifier.send_email_dispatcher", return_value={"delivered": True}) as send_email,
+        patch("requests.post") as post,
+    ):
+        result = dispatch_due_today_alerts(
+            stage="MORNING", force=True,
+            google_chat_webhook_url="https://chat.googleapis.com/v1/spaces/TEST/messages",
+        )
+    assert result["ok"] is True
+    assert result["google_chat_result"]["skipped"] is True
+    post.assert_not_called()
+    send_email.assert_called_once()
+    assert result["real_sent_count"] == 1
+
+
+
 def test_scheduler_state_deduplication():
     """Verify AlertSchedulerState prevents duplicate sends for the same slot on the same day."""
     state = AlertSchedulerState()
@@ -214,7 +298,10 @@ def test_send_google_chat_sla_alert_simulation():
         )
     ]
 
-    with patch.dict("os.environ", {}, clear=True):
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch("email_notifier.get_current_ist_time", return_value=datetime(2026, 10, 5, 10, 0, tzinfo=UTC)),
+    ):
         res = send_google_chat_sla_alert("MORNING", operators, "10:00 AM IST", webhook_url="")
         assert res["simulated"] is True
         assert res["channel"] == "Google Chat"
@@ -232,7 +319,10 @@ def test_send_google_chat_sla_alert_live():
         )
     ]
 
-    with patch("requests.post") as mock_post:
+    with (
+        patch("email_notifier.get_current_ist_time", return_value=datetime(2026, 10, 5, 16, 0, tzinfo=UTC)),
+        patch("requests.post") as mock_post,
+    ):
         mock_resp = MagicMock()
         mock_resp.ok = True
         mock_resp.status_code = 200
@@ -291,7 +381,10 @@ def test_send_google_chat_sla_alert_ownership_separation():
         ),
     ]
 
-    with patch("requests.post") as mock_post:
+    with (
+        patch("email_notifier.get_current_ist_time", return_value=datetime(2026, 10, 5, 13, 0, tzinfo=UTC)),
+        patch("requests.post") as mock_post,
+    ):
         mock_resp = MagicMock()
         mock_resp.ok = True
         mock_resp.status_code = 200

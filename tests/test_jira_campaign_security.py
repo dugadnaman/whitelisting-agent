@@ -1,0 +1,102 @@
+"""Jira brief and MoEngage handoffs must not cross tenants or expose local files."""
+
+from pathlib import Path
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+import pytest
+
+import api
+
+
+TATA_USER = {"sub": "usr_tata_test", "email": "tata@example.invalid", "tenant_id": "tata", "role": "operator"}
+BAJAJ_USER = {"sub": "usr_bajaj_test", "email": "bajaj@example.invalid", "tenant_id": "bajaj", "role": "operator"}
+
+
+@pytest.fixture
+def client():
+    api.app.dependency_overrides.pop(api.get_current_user, None)
+    try:
+        yield TestClient(api.app)
+    finally:
+        api.app.dependency_overrides.pop(api.get_current_user, None)
+
+
+@pytest.mark.parametrize("user,expected", [(None, 401), (BAJAJ_USER, 403)])
+def test_tata_jira_briefs_and_creatives_reject_other_tenants(client, user, expected):
+    if user is not None:
+        api.app.dependency_overrides[api.get_current_user] = lambda: user
+    with (
+        patch("jira_client.list_jira_issues") as list_issues,
+        patch("jira_client.fetch_jira_issue") as fetch_issue,
+        patch("jira_client.download_jira_attachment") as download,
+    ):
+        responses = [
+            client.get("/api/jira/projects"),
+            client.get("/api/jira/issues"),
+            client.get("/api/jira/brief/TCN-999"),
+            client.post("/api/jira/submit/TCN-999", json={"channels": []}),
+            client.get("/api/jira/creative/download", params={"attachment_id": "123"}),
+            client.post("/api/jira/creative/upload", files={"file": ("test.png", b"image")}),
+        ]
+    assert [response.status_code for response in responses] == [expected] * len(responses)
+    list_issues.assert_not_called()
+    fetch_issue.assert_not_called()
+    download.assert_not_called()
+
+
+def test_tata_creative_download_cannot_read_other_temp_files(client):
+    api.app.dependency_overrides[api.get_current_user] = lambda: TATA_USER
+    with tempfile.NamedTemporaryFile(mode="w", prefix="jira-creative-probe-", delete=False) as handle:
+        handle.write("private local content")
+        path = Path(handle.name)
+    try:
+        response = client.get("/api/jira/creative/download", params={"path": str(path)})
+        assert response.status_code == 404
+        assert "private local content" not in response.text
+    finally:
+        path.unlink()
+
+
+def test_tata_jira_brief_cannot_submit_to_bajaj(client):
+    api.app.dependency_overrides[api.get_current_user] = lambda: TATA_USER
+    with (
+        patch("jira_client.fetch_jira_issue", return_value={"key": "TCN-999"}),
+        patch("briefing_parser.parse_jira_brief", return_value=SimpleNamespace(account="tcl_promo")),
+        patch("submission_client.submit_template") as submit,
+    ):
+        response = client.post("/api/jira/submit/TCN-999", json={"account": "bajaj", "channels": ["whatsapp"]})
+    assert response.status_code == 403
+    submit.assert_not_called()
+
+
+def test_bajaj_cannot_read_or_update_tata_moengage_credentials_or_sync_rcs(client):
+    api.app.dependency_overrides[api.get_current_user] = lambda: BAJAJ_USER
+    with (
+        patch("moengage_sync.get_moengage_credentials") as credentials,
+        patch("moengage_sync.test_moengage_connection") as connection,
+        patch("moengage_sync.create_moengage_rcs_template") as create,
+    ):
+        responses = [
+            client.get("/api/moengage/credentials?account=tata"),
+            client.put("/api/moengage/credentials", json={"account": "tata", "bearer_token": "not-a-real-token"}),
+            client.post("/api/moengage/test?account=tata"),
+            client.post("/api/moengage/rcs/sync", json={
+                "template_name": "test", "template_id": "test", "card_title": "test", "card_description": "test",
+            }),
+        ]
+    assert [response.status_code for response in responses] == [403] * len(responses)
+    credentials.assert_not_called()
+    connection.assert_not_called()
+    create.assert_not_called()
+
+
+def test_tata_can_still_access_own_moengage_credentials(client):
+    api.app.dependency_overrides[api.get_current_user] = lambda: TATA_USER
+    with patch("moengage_sync.get_moengage_credentials", return_value={"has_token": True}) as credentials:
+        response = client.get("/api/moengage/credentials?account=tata")
+    assert response.status_code == 200
+    assert response.json()["has_token"] is True
+    credentials.assert_called_once_with("tata")
