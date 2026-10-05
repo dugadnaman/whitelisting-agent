@@ -1116,6 +1116,171 @@ export async function syncRcsTemplateToMoEngage(params: {
   return res.json();
 }
 
+
+export type MoEngageDraftCandidate = {
+  channel: "EMAIL" | "PUSH" | "WHATSAPP";
+  basic_details?: {
+    name?: string;
+    content_type?: string;
+    platforms?: string[];
+    subscription_category?: string;
+  };
+  segmentation_details?: {
+    included_filters?: {
+      filters?: Array<{ filter_type?: string; name?: string; id?: string }>;
+    };
+  };
+  scheduling_details?: { delivery_type?: string; start_time?: string; timezone?: string };
+  connector?: { connector_type?: string; connector_name?: string };
+  campaign_content?: {
+    content?: {
+      email?: {
+        subject?: string;
+        html_content?: string;
+        custom_template_id?: string;
+        from_address?: string;
+      };
+      push?: Record<string, {
+        basic_details?: {
+          title?: string;
+          message?: string;
+          redirect_url?: string;
+          default_click_action_value?: string;
+        };
+      }>;
+    };
+  };
+};
+
+export type MoEngageDraftSourceFields = {
+  campaign_name?: string;
+  segment_id?: string;
+  segment_name?: string;
+  scheduled_at?: string;
+  timezone?: string;
+  content_type?: string;
+  from_address?: string;
+  subject?: string;
+  html_content?: string;
+  email_template_id?: string;
+  push_platform?: string;
+  push_title?: string;
+  push_message?: string;
+  click_url?: string;
+  whatsapp_sender?: string;
+  whatsapp_template_id?: string;
+};
+
+export type MoEngageDraftRow = {
+  source_ref: string;
+  row_id: string;
+  channel: string;
+  status: string;
+  issues: string[];
+  candidate_v5_payload?: MoEngageDraftCandidate | null;
+  source_fields?: MoEngageDraftSourceFields;
+  campaign_id?: string | null;
+  issue?: string | null;
+  validation_errors?: unknown;
+  updated_at?: number;
+};
+
+export type MoEngageDraftPreview = {
+  account: string;
+  workspace_id: string;
+  source_type: string;
+  catalog_verified: boolean;
+  write_eligible: boolean;
+  items: MoEngageDraftRow[];
+  ready: number;
+  blocked: number;
+};
+
+export type MoEngageDraftBatch = {
+  batch_id: string;
+  account: string;
+  workspace_id: string;
+  source_ref: string;
+  created_at?: number;
+  items: MoEngageDraftRow[];
+  ready: number;
+  blocked: number;
+};
+
+function moEngageDraftForm(file: File, account: string): FormData {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("account", account);
+  return form;
+}
+
+async function moEngageDraftRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!getAuthToken()) throw new Error("Sign in to access MoEngage drafts.");
+  // A timed-out write may still have reached MoEngage: never retry POSTs automatically.
+  const res = await fetchWithRetry(getApiUrl(path), init, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json() as Promise<T>;
+}
+
+export function previewMoEngageDraftFile(file: File, account: string): Promise<MoEngageDraftPreview> {
+  return moEngageDraftRequest("/api/moengage/drafts/preview-upload", {
+    method: "POST",
+    body: moEngageDraftForm(file, account),
+  });
+}
+
+export function stageMoEngageDraftBatch(file: File, account: string): Promise<MoEngageDraftBatch> {
+  return moEngageDraftRequest("/api/moengage/drafts/batches", {
+    method: "POST",
+    body: moEngageDraftForm(file, account),
+  });
+}
+
+export function fetchMoEngageDraftBatch(batchId: string, account: string): Promise<MoEngageDraftBatch> {
+  return moEngageDraftRequest(
+    `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}?${new URLSearchParams({ account })}`
+  );
+}
+
+export function createMoEngageDraftRow(batchId: string, rowId: string, account: string): Promise<MoEngageDraftBatch> {
+  const form = new FormData();
+  form.append("account", account);
+  return moEngageDraftRequest(
+    `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(rowId)}/create`,
+    { method: "POST", body: form }
+  );
+}
+export function automateMoEngageWhatsAppBatch(
+  batchId: string,
+  account: string
+): Promise<{ ok: boolean; total: number; created: number; failed: number; message?: string }> {
+  const form = new FormData();
+  form.append("account", account);
+  return moEngageDraftRequest(
+    `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}/automate-whatsapp`,
+    { method: "POST", body: form }
+  );
+}
+export type MoEngageCatalogSegment = { id: string; name: string };
+export type MoEngageCatalogEmailSender = { from_address: string; sender_name: string; connector_type: string; connector_name: string };
+export type MoEngageCatalogPushPlatform = { platform: string; notification_channel?: string };
+export type MoEngageCatalogWhatsAppSender = { sender_name: string; phone_number: string; provider: string };
+export type MoEngageCatalogWhatsAppTemplate = { id: string; name: string };
+
+export type MoEngageCatalog = {
+  account: string;
+  workspace_id: string;
+  segments: MoEngageCatalogSegment[];
+  email_senders: MoEngageCatalogEmailSender[];
+  push_platforms: MoEngageCatalogPushPlatform[];
+  whatsapp_senders?: MoEngageCatalogWhatsAppSender[];
+  whatsapp_templates?: MoEngageCatalogWhatsAppTemplate[];
+  subscription_categories?: string[];
+};
+
+export function fetchMoEngageCatalog(account: string): Promise<MoEngageCatalog> {
+  return moEngageDraftRequest(`/api/moengage/drafts/catalog?account=${encodeURIComponent(account)}`);
+}
 export type MoEngageCredentials = {
   ok: boolean;
   account: string;
@@ -1636,3 +1801,4 @@ export async function callMoEngageMcpTool(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
+

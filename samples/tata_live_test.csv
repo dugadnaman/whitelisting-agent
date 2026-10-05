@@ -1,0 +1,4 @@
+channel,campaign_name,segment_id,scheduled_at,timezone,content_type,subscription_category,from_address,subject,html_content,push_platform,push_title,push_message,click_url,whatsapp_sender,whatsapp_template_id
+EMAIL,TATA_TEST_DRAFT_EMAIL_OCT01,65cf4af4d4c88174e5ad186e,2026-10-15T10:00:00+05:30,Asia/Kolkata,PROMOTIONAL,,hello@info.tatacapital.co.in,Tata Capital Verification Test,<p>Test verification draft. Do not publish.</p>,,,,,,
+PUSH,TATA_TEST_DRAFT_PUSH_OCT01,65cf4af4d4c88174e5ad186e,2026-10-15T10:30:00+05:30,Asia/Kolkata,,,,,,ANDROID,Tata Capital Test Draft,Test verification draft. Do not publish.,https://tatacapital.com,,
+WHATSAPP,TATA_TEST_DRAFT_WA_OCT01,65cf4af4d4c88174e5ad186e,2026-10-15T11:00:00+05:30,Asia/Kolkata,,,,,,,,,,Tata Capital Financial Services Limited,test_1234

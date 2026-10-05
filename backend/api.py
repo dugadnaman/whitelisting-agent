@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import requests as http_client
-from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
@@ -4575,6 +4575,234 @@ async def upload_moengage_export_endpoint(
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+class MoEngageDraftPreviewRequest(BaseModel):
+    account: str
+    catalog: dict[str, Any]
+    row: dict[str, Any] | None = None
+    rows: list[Any] | None = None
+    brief: dict[str, Any] | None = None
+    overrides: dict[str, Any] | None = None
+
+
+def _authorize_moengage_preview(account: str, current_user: dict) -> str:
+    from moengage_drafts import authorize_draft_account
+
+    if current_user.get("sub") in (None, "usr_anon"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        authorize_draft_account(account, current_user)
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    creator = current_user.get("email")
+    if not isinstance(creator, str) or "@" not in creator:
+        raise HTTPException(status_code=403, detail="Authenticated creator email required")
+    return creator
+
+
+@app.post("/api/moengage/drafts/preview")
+def preview_moengage_drafts_endpoint(
+    body: MoEngageDraftPreviewRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Preview JSON rows or an already-parsed Jira brief; no provider reads/writes."""
+    from moengage_preview import prepare_batch, rows_from_jira_brief
+
+    creator = _authorize_moengage_preview(body.account, current_user)
+    if sum(value is not None for value in (body.row, body.rows, body.brief)) != 1:
+        raise HTTPException(status_code=400, detail="Provide exactly one of row, rows, brief")
+    try:
+        if body.brief is not None:
+            rows = rows_from_jira_brief(body.brief, body.overrides or {}, body.account)
+            source_type = "jira_export"
+        else:
+            rows = body.rows if body.rows is not None else [body.row]
+            source_type = "json"
+        return prepare_batch(rows, body.account, body.catalog, creator, source_type=source_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/moengage/drafts/preview-file")
+async def preview_moengage_drafts_file_endpoint(
+    file: UploadFile = File(...),
+    account: str = Form(...),
+    catalog_json: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Preview CSV/XLSX rows in memory, preserving their physical source identities."""
+    from moengage_preview import prepare_batch, rows_from_file
+
+    creator = _authorize_moengage_preview(account, current_user)
+    try:
+        catalog = json.loads(catalog_json)
+        if not isinstance(catalog, dict):
+            raise ValueError("catalog_json must be an object")
+        rows = rows_from_file(file.filename or "", await file.read(5 * 1024 * 1024 + 1), account)
+        return prepare_batch(rows, account, catalog, creator, source_type="spreadsheet")
+    except (ValueError, UnicodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+
+@app.post("/api/moengage/drafts/preview-upload")
+async def preview_moengage_drafts_upload_endpoint(
+    file: UploadFile = File(...),
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Preview spreadsheet candidates against this deployment's account catalog."""
+    from moengage_draft_creation import load_server_catalog
+    from moengage_preview import prepare_batch, rows_from_file
+
+    creator = _authorize_moengage_preview(account, current_user)
+    try:
+        catalog = load_server_catalog(account)
+        rows = rows_from_file(file.filename or "", await file.read(5 * 1024 * 1024 + 1), account)
+        return prepare_batch(rows, account, catalog, creator, source_type="spreadsheet")
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except (ValueError, UnicodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+@app.get("/api/moengage/drafts/catalog")
+def get_moengage_drafts_catalog_endpoint(
+    account: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the verified catalog of segments, senders, platforms, and templates for this account."""
+    from moengage_draft_creation import load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return load_server_catalog(account)
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/moengage/drafts/batches")
+async def stage_moengage_draft_batch_endpoint(
+    file: UploadFile = File(...),
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Persist every CSV/XLSX row for account-bound, human-reviewed draft creation."""
+    from moengage_draft_batches import DraftBatchQueue
+    from moengage_draft_creation import load_server_catalog
+    from moengage_preview import rows_from_file
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        catalog = load_server_catalog(account)
+        rows = rows_from_file(file.filename or "", await file.read(5 * 1024 * 1024 + 1), account)
+        if not rows:
+            raise ValueError("Spreadsheet contains no campaign rows")
+        return DraftBatchQueue(account, current_user, catalog).stage(rows, rows[0]["source_ref"])
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except (ValueError, UnicodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/moengage/drafts/batches/{batch_id}")
+def get_moengage_draft_batch_endpoint(
+    batch_id: str,
+    account: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
+    from moengage_draft_creation import load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return DraftBatchQueue(account, current_user, load_server_catalog(account)).get(batch_id)
+    except BatchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Draft batch access denied") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except (ValueError, UnicodeError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Draft batch not found") from exc
+
+
+@app.post("/api/moengage/drafts/batches/{batch_id}/rows/{row_id}/create")
+def create_moengage_draft_batch_row_endpoint(
+    batch_id: str,
+    row_id: str,
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Create one selected row; an ambiguous request is never blindly retried."""
+    from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
+    from moengage_draft_creation import RateLimitError, load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return DraftBatchQueue(account, current_user, load_server_catalog(account)).create_row(batch_id, row_id)
+    except BatchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Draft batch access denied") from exc
+    except RateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Draft batch row not found") from exc
+    except ValueError as exc:
+        status_code = 409 if "already reserved" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Draft batch state unavailable; inspect the batch before retry")
+        raise HTTPException(status_code=503, detail="Draft state unavailable; inspect before retry") from exc
+@app.post("/api/moengage/drafts/batches/{batch_id}/automate-whatsapp")
+def automate_moengage_whatsapp_batch_endpoint(
+    batch_id: str,
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Run server-side headless automation to create all WhatsApp drafts in MoEngage Studio."""
+    from moengage_whatsapp_worker import automate_whatsapp_draft_batch
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return automate_whatsapp_draft_batch(batch_id, account, current_user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+class MoEngageDraftCreateRequest(BaseModel):
+    account: str
+    row: dict[str, Any]
+
+
+@app.post("/api/moengage/drafts/create")
+def create_moengage_draft_endpoint(
+    body: MoEngageDraftCreateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Create one audited V5 draft; never accept a caller-supplied catalog or payload."""
+    from moengage_draft_creation import DraftCreation, RateLimitError
+
+    _authorize_moengage_preview(body.account, current_user)
+    try:
+        return DraftCreation.from_environment(body.account, current_user).create(body.row)
+    except RateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except ValueError as exc:
+        status_code = 409 if "already reserved" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Draft persistence unavailable; inspect the row before retry")
+        raise HTTPException(status_code=503, detail="Draft state unavailable; inspect before retry") from exc
+
+
 class MoEngageMcpTokenRequest(BaseModel):
     account: str = "tata"
     access_token: str = ""
@@ -4707,7 +4935,12 @@ def call_moengage_mcp_tool_endpoint(
     body: MoEngageMcpToolCallRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Call any tool on https://mcp.moengage.com (e.g. search_campaigns, list_segments, create_campaign_draft)."""
+    """Permit only read-only MCP discovery; draft writes use a separate V5 interface."""
+    if current_user.get("sub") in (None, "usr_anon"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    require_tenant_access(body.account, current_user)
+    if body.tool_name not in {"search_campaigns", "search_flows", "list_segments", "get_campaign_stats"}:
+        raise HTTPException(status_code=403, detail="MCP tool is not allowed")
     from moengage_mcp import call_mcp_tool
 
     try:

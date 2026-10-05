@@ -695,11 +695,3 @@ def mcp_get_campaign_stats(
 ) -> dict[str, Any]:
     """Fetch aggregate performance stats for up to 50 campaigns via MCP `get_campaign_stats`."""
     return call_mcp_tool("get_campaign_stats", {"campaign_ids": campaign_ids[:50]}, account=account)
-
-
-def mcp_create_campaign_draft(
-    payload: dict[str, Any],
-    account: str = "tata",
-) -> dict[str, Any]:
-    """Create a Push or Email campaign draft in MoEngage via MCP `create_campaign_draft`."""
-    return call_mcp_tool("create_campaign_draft", payload, account=account)

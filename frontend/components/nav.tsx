@@ -29,6 +29,19 @@ const links = [
     ),
   },
   {
+    href: '/moengage-campaigns',
+    label: 'MoEngage Campaigns',
+    subtitle: 'WhatsApp, Email & Push builder',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        <path d="M8 10h.01" />
+        <path d="M12 10h.01" />
+        <path d="M16 10h.01" />
+      </svg>
+    ),
+  },
+  {
     href: '/activity',
     label: 'Activity Logs',
     icon: (
@@ -230,8 +243,15 @@ export default function Nav() {
                   : 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors'
               }
             >
-              {link.icon}
-              {link.label}
+              <span className={link.subtitle ? 'shrink-0 mt-0.5 self-start' : 'shrink-0'}>{link.icon}</span>
+              <div className="min-w-0">
+                <div className="leading-tight">{link.label}</div>
+                {link.subtitle && (
+                  <div className={`text-[10px] font-normal mt-0.5 truncate ${active ? 'text-blue-600' : 'text-gray-400'}`}>
+                    {link.subtitle}
+                  </div>
+                )}
+              </div>
             </Link>
           );
         })}

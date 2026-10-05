@@ -18,8 +18,15 @@ RUN npm run build
 # ==========================================
 FROM python:3.11-slim
 WORKDIR /app
-ENV PYTHONPATH=/app/backend:/app
-# Install Node.js runtime for Next.js and process supervisor
+ENV PYTHONPATH=/app/backend:/app \
+    MOENGAGE_DRAFT_TATA_CATALOG_FILE=/app/tata_catalog.json \
+    MOENGAGE_DRAFT_TATA_WORKSPACE_ID=0KYUNUW5WODKX5ZFVAGPVL0U \
+    MOENGAGE_DRAFT_TATA_DATA_CENTER=03 \
+    MOENGAGE_DRAFT_TATA_LIVE_ENABLED=true \
+    MOENGAGE_DRAFT_TATA_ZERO_CHARGE_CONFIRMED=true \
+    MOENGAGE_DRAFT_TATA_NO_PUBLISH_SCOPE_CONFIRMED=true \
+    MOENGAGE_DRAFT_TATA_LIVE_TEST_OPERATOR_EMAIL=dugadnaman@gmail.com,naman.dugad@attributics.com \
+    MOENGAGE_DRAFT_ALLOW_SQLITE=true
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     nodejs \
@@ -29,13 +36,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python backend dependencies
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 # Copy Python backend code and static assets. Runtime secrets, SQLite, and JSONL
 # logs are supplied through environment variables/volumes at deployment time.
 COPY backend/ ./backend/
 COPY media_cache/ ./media_cache/
 COPY samples/ ./samples/
 COPY tests/ ./tests/
+COPY tata_catalog.json* ./
 COPY --from=frontend-builder /app/frontend /app/frontend
 
 # Setup supervisord configuration to run both FastAPI (8000) and Next.js (3000)
