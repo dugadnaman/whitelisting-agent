@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates } from '@/lib/api';
 import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
-import { useApp } from '@/lib/context';
+import { useApp, getRcsDetails } from '@/lib/context';
 import { formatChannel, formatError } from '@/lib/format';
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -59,7 +59,8 @@ function isAcceptedFile(file: File): boolean {
 }
 
 export default function SubmitPage() {
-  const { account, channel, user, setAccount, getAccountLabel } = useApp();
+  const { account, channel, user, setAccount, getAccountLabel, accounts } = useApp();
+  const activeRcs = getRcsDetails(account, accounts);
   const [state, setState] = useState<State>({ step: 'idle' });
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -423,6 +424,12 @@ export default function SubmitPage() {
             >
               {accountLabel} &bull; {channelLabel}
             </span>
+            {channel === 'rcs' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-900 border border-blue-200">
+                <span>🤖 Bot: <strong>{activeRcs.botName}</strong></span>
+                <span className="font-mono text-[11px] text-blue-600">({activeRcs.botId})</span>
+              </span>
+            )}
           </div>
           <p className="text-sm text-gray-500 mt-1">
             Upload a spreadsheet of {channelLabel} templates to validate, preview, and submit for {accountLabel}.
@@ -836,7 +843,10 @@ export default function SubmitPage() {
                   </h3>
                 </div>
                 <p className="text-xs text-blue-700/80 mt-0.5">
-                  Ready to submit to {accountLabel} on {channelLabel}. Review before final submission.
+                  Ready to submit to {accountLabel} on {channelLabel}
+                  {channel === 'rcs' && (
+                    <> (Karix RCS Bot: <strong>{activeRcs.botName}</strong> &bull; ID: <code className="font-mono">{activeRcs.botId}</code> &bull; User: <code className="font-mono">{activeRcs.rcsUser}</code>)</>
+                  )}. Review before final submission.
                 </p>
               </div>
               <div className="flex items-center gap-3">

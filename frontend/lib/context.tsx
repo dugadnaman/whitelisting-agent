@@ -12,12 +12,92 @@ import {
 import type { Account, Channel, AccountItem, AuthUser, UserItem } from './api';
 
 const DEFAULT_ACCOUNTS: AccountItem[] = [
-  { id: 'tcl_promo', name: 'Tata Capital Limited (Promotional)', is_builtin: true },
-  { id: 'tcl_trans', name: 'Tata Capital Limited (Transactional)', is_builtin: true },
-  { id: 'tchfl', name: 'Tata Capital Housing Finance Limited', is_builtin: true },
-  { id: 'wealth', name: 'Tata Capital Wealth', is_builtin: true },
-  { id: 'moneyfy', name: 'Tata Capital Moneyfy', is_builtin: true },
+  {
+    id: 'tcl_promo',
+    name: 'Tata Capital Limited (Promotional)',
+    is_builtin: true,
+    entity: 'Tata Capital Limited',
+    rcs_bot_id: 'Uv9tdd0KNADbq3pX',
+    rcs_bot_name: 'Tata Capital Limited',
+    rcs_username: 'TATACAPRCS',
+    portal_username: 'TATACAPPROMO',
+  },
+  {
+    id: 'tcl_trans',
+    name: 'Tata Capital Limited (Transactional)',
+    is_builtin: true,
+    entity: 'Tata Capital Limited',
+    rcs_bot_id: 'Uv9tdd0KNADbq3pX',
+    rcs_bot_name: 'Tata Capital Limited',
+    rcs_username: 'TATACAPRCS',
+    portal_username: 'TATACAPTRANS',
+  },
+  {
+    id: 'tchfl',
+    name: 'Tata Capital Housing Finance Limited',
+    is_builtin: true,
+    entity: 'Tata Capital Housing finance Limited',
+    rcs_bot_id: 'G0OedCS9mbsMYBq1',
+    rcs_bot_name: 'TCHFL',
+    rcs_username: 'TATACAPRCS2',
+    portal_username: 'TATACAPWABA',
+  },
+  {
+    id: 'wealth',
+    name: 'Tata Capital Wealth',
+    is_builtin: true,
+    entity: 'Tata Capital Wealth',
+    rcs_bot_id: 'Wk22bU8IZqDRyIwQ',
+    rcs_bot_name: 'Tata Capital Wealth',
+    rcs_username: 'TATASECRCS',
+    portal_username: 'TATASEC_MUSKAN',
+  },
+  {
+    id: 'moneyfy',
+    name: 'Tata Capital Moneyfy',
+    is_builtin: true,
+    entity: 'Tata Capital Moneyfy',
+    rcs_bot_id: 'ouwJCTgIe0QDBPPI',
+    rcs_bot_name: 'Moneyfy by Tata Capital',
+    rcs_username: 'TATACAPRCS2',
+    portal_username: 'TATASEC_MUSKAN',
+  },
 ];
+
+export function getRcsDetails(accId: string, accList: AccountItem[] = DEFAULT_ACCOUNTS) {
+  const found = accList.find((a) => a.id === accId);
+  const botId = found?.rcs_bot_id || (
+    accId === 'tchfl' ? 'G0OedCS9mbsMYBq1' :
+    accId === 'wealth' ? 'Wk22bU8IZqDRyIwQ' :
+    accId === 'moneyfy' ? 'ouwJCTgIe0QDBPPI' :
+    accId === 'bajaj' ? 'af2vdbyFh3RX8eee' :
+    accId === 'apparel' ? 'P7hzkqCcW3x96I6T' :
+    'Uv9tdd0KNADbq3pX'
+  );
+  const botName = found?.rcs_bot_name || (
+    accId === 'tchfl' ? 'TCHFL' :
+    accId === 'wealth' ? 'Tata Capital Wealth' :
+    accId === 'moneyfy' ? 'Moneyfy by Tata Capital' :
+    accId === 'bajaj' ? 'Bajaj Finserv' :
+    accId === 'apparel' ? 'Apparel Brand' :
+    'Tata Capital Limited'
+  );
+  const rcsUser = found?.rcs_username || (
+    accId === 'tchfl' || accId === 'moneyfy' ? 'TATACAPRCS2' :
+    accId === 'wealth' ? 'TATASECRCS' :
+    accId === 'bajaj' ? 'BAJAJRCS' :
+    accId === 'apparel' ? 'APPARELRCS' :
+    'TATACAPRCS'
+  );
+  const entity = found?.entity || (
+    accId === 'tchfl' ? 'Tata Capital Housing finance Limited' :
+    accId === 'wealth' ? 'Tata Capital Wealth' :
+    accId === 'moneyfy' ? 'Tata Capital Moneyfy' :
+    accId === 'bajaj' ? 'Bajaj Finserv' :
+    'Tata Capital Limited'
+  );
+  return { botId, botName, rcsUser, entity, name: found?.name || accId };
+}
 
 type AppContextType = {
   account: Account;

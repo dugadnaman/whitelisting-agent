@@ -5,6 +5,16 @@ export type AccountItem = {
   id: string;
   name: string;
   is_builtin?: boolean;
+  entity?: string;
+  type?: string;
+  group?: string;
+  headers?: string[];
+  portal_username?: string;
+  rcs_username?: string;
+  rcs_bot_id?: string;
+  rcs_bot_name?: string;
+  channels?: string[];
+  description?: string;
 };
 
 export type AuthUser = {

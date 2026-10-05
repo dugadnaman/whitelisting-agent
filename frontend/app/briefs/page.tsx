@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useApp } from '@/lib/context';
+import { useApp, getRcsDetails } from '@/lib/context';
 import {
   fetchJiraProjects,
   fetchJiraIssues,
@@ -10,6 +10,7 @@ import {
   syncRcsTemplateToMoEngage,
   getJiraCreativeDownloadUrl,
   uploadJiraCreative,
+  type AccountItem,
   type JiraProjectItem,
   type JiraIssueItem,
   type JiraBriefData,
@@ -53,6 +54,7 @@ function BriefStatusBadge({ status }: { status?: string }) {
     </span>
   );
 }
+
 export default function JiraBriefsPage() {
   const { user, accounts, getAccountLabel } = useApp();
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
@@ -87,6 +89,7 @@ export default function JiraBriefsPage() {
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
   const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
+  const currentRcs = getRcsDetails(targetAccount, accounts);
   const activeRequestKey = useRef<string>('');
 
   const loadIssues = useCallback(async (queryParam?: string, bStatusParam?: string) => {
@@ -197,7 +200,12 @@ export default function JiraBriefsPage() {
       setSelectedWa(new Set(waList.map((_, idx) => idx)));
       setSelectedRcs(new Set(rcsList.map((_, idx) => idx)));
       setEditingCard({});
-      const initialAcc = data.account === 'wealth' ? 'tcl_promo' : (data.account || 'tcl_promo');
+      const hasWa = waList.length > 0;
+      const hasRcs = rcsList.length > 0;
+      let initialAcc = data.account || 'tcl_promo';
+      if (data.account === 'wealth' && hasWa && !hasRcs) {
+        initialAcc = 'tcl_promo';
+      }
       setTargetAccount(initialAcc);
       if (data.is_email_campaign) {
         setActiveTab('email');
@@ -816,19 +824,70 @@ export default function JiraBriefsPage() {
                       <select
                         value={targetAccount}
                         onChange={(e) => setTargetAccount(e.target.value)}
-                        className="text-xs font-bold bg-white border border-blue-300 text-blue-900 rounded-lg px-2.5 py-1 shadow-2xs focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                        className="text-xs font-bold bg-white border border-blue-300 text-blue-900 rounded-lg px-2.5 py-1.5 shadow-2xs focus:ring-2 focus:ring-blue-500 cursor-pointer"
                         aria-label="Target Account for Karix Whitelisting"
                       >
-                        {accounts.map((acc) => (
-                          <option key={acc.id} value={acc.id}>
-                            {acc.name} ({acc.id.toUpperCase()})
-                          </option>
-                        ))}
+                        {accounts.map((acc) => {
+                          const rcsInfo = getRcsDetails(acc.id, accounts);
+                          return (
+                            <option key={acc.id} value={acc.id}>
+                              {acc.name} ({acc.id.toUpperCase()}) — RCS Bot: {rcsInfo.botName}
+                            </option>
+                          );
+                        })}
                       </select>
-                      <span className="text-[11px] text-gray-400">
-                        (Templates & WABA approvals will be registered on Karix under this account)
+                      <span className="text-[11px] text-gray-500">
+                        {rcsTemplates.length > 0 && waTemplates.length > 0
+                          ? `(WhatsApp ➔ WABA · RCS ➔ Karix Bot '${currentRcs.botName}' / ${currentRcs.rcsUser})`
+                          : rcsTemplates.length > 0
+                          ? `(RCS templates will be submitted to Karix Bot '${currentRcs.botName}' · ${currentRcs.rcsUser} · Bot ID: ${currentRcs.botId})`
+                          : `(WhatsApp templates will be registered on Karix WABA under this account)`}
                       </span>
                     </div>
+
+                    {/* Dedicated RCS Destination Card when RCS templates are present */}
+                    {rcsTemplates.length > 0 && (
+                      <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-950 shadow-2xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
+                            <span className="font-bold uppercase tracking-wider text-[11px] text-blue-900">
+                              🔵 Karix RCS Whitelisting Target:
+                            </span>
+                            <span className="px-2 py-0.5 rounded font-extrabold bg-blue-600 text-white shadow-2xs text-xs">
+                              {currentRcs.botName}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[11px]">
+                            <span className="font-mono text-blue-900 bg-blue-100/90 px-2 py-0.5 rounded border border-blue-200 font-bold">
+                              Bot ID: {currentRcs.botId}
+                            </span>
+                            <span className="font-mono text-blue-800 bg-blue-100/80 px-2 py-0.5 rounded border border-blue-200">
+                              User: {currentRcs.rcsUser}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-blue-900">
+                          <span>🏢 Account: <strong>{currentRcs.name}</strong> ({targetAccount.toUpperCase()})</span>
+                          <span>🏛️ DLT Entity: <strong>{currentRcs.entity}</strong></span>
+                          <span>📡 API: <strong className="font-mono">Karix RCS Bot Builder</strong></span>
+                        </div>
+                        {brief.account && brief.account !== targetAccount && (
+                          <div className="mt-1 pt-1.5 border-t border-blue-200/80 flex flex-wrap items-center justify-between gap-2 text-xs bg-amber-50/90 p-2 rounded-lg border border-amber-200 text-amber-900">
+                            <span>
+                              💡 <strong>Notice:</strong> This brief was detected as <strong>{brief.account.toUpperCase()}</strong>, but target account is currently set to <strong>{targetAccount.toUpperCase()}</strong>.
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setTargetAccount(brief.account)}
+                              className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-2xs"
+                            >
+                              Switch to {brief.account.toUpperCase()} ({getRcsDetails(brief.account, accounts).botName})
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                   {/* Selective Submission Action Controls */}
                   <div className="flex flex-wrap items-center gap-2">
@@ -858,11 +917,14 @@ export default function JiraBriefsPage() {
                             onClick={() => requestWhitelist('rcs')}
                             disabled={submitting || selectedRcs.size === 0}
                             className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
-                            title="Submit only the checked RCS templates"
+                            title={`Submit ${selectedRcs.size} RCS template(s) to Karix RCS Bot '${currentRcs.botName}' (ID: ${currentRcs.botId})`}
                           >
                             <span>🔵 Whitelist RCS Only</span>
-                            <span className="bg-blue-500 px-1.5 py-0.2 rounded text-[10px]">
+                            <span className="bg-blue-500 px-1.5 py-0.2 rounded text-[10px] font-bold">
                               {selectedRcs.size}
+                            </span>
+                            <span className="text-[10px] bg-blue-700/90 px-1.5 py-0.2 rounded font-normal opacity-95">
+                              ➔ {currentRcs.botName}
                             </span>
                           </button>
                         )}
@@ -1778,7 +1840,7 @@ export default function JiraBriefsPage() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-2 text-xs text-amber-900">
+          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 space-y-3 text-xs text-amber-900">
             <p>
               You are about to whitelist the selected templates from <strong>{brief.issue_key}</strong>.
             </p>
@@ -1789,10 +1851,68 @@ export default function JiraBriefsPage() {
               {(confirmationMode === 'all' || confirmationMode === 'rcs') && (
                 <li>{selectedRcs.size} RCS template{selectedRcs.size === 1 ? '' : 's'}</li>
               )}
-              <li>Target account: <strong>{accounts.find((account) => account.id === targetAccount)?.name || targetAccount}</strong></li>
             </ul>
+
+            {/* Dedicated RCS Whitelisting Destination breakdown inside modal */}
+            {(confirmationMode === 'all' || confirmationMode === 'rcs') && selectedRcs.size > 0 && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/90 p-3.5 space-y-2.5 text-blue-950">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-xs uppercase tracking-wide text-blue-900 flex items-center gap-1.5">
+                    <span>🔵</span>
+                    <span>RCS Whitelisting Destination</span>
+                  </span>
+                  <span className="font-mono text-[10px] bg-blue-200/90 px-2 py-0.5 rounded text-blue-900 font-bold border border-blue-300">
+                    Bot ID: {currentRcs.botId}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 bg-white/95 p-2.5 rounded-lg border border-blue-200/80 text-xs">
+                  <div>
+                    <span className="text-[10px] text-gray-500 uppercase block font-medium">Target Karix Account</span>
+                    <span className="font-bold text-gray-900">{currentRcs.name} ({targetAccount.toUpperCase()})</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 uppercase block font-medium">RCS Bot Name</span>
+                    <span className="font-bold text-blue-700">{currentRcs.botName}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 uppercase block font-medium">Karix Portal User</span>
+                    <span className="font-mono font-bold text-gray-800">{currentRcs.rcsUser}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-gray-500 uppercase block font-medium">DLT Entity</span>
+                    <span className="font-bold text-gray-800">{currentRcs.entity}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-blue-200/80 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-gray-600 font-medium text-[11px]">Wrong account? Change destination:</span>
+                  <select
+                    value={targetAccount}
+                    onChange={(e) => setTargetAccount(e.target.value)}
+                    className="text-xs font-bold bg-white border border-blue-300 text-blue-900 rounded-lg px-2.5 py-1 shadow-2xs cursor-pointer focus:ring-2 focus:ring-blue-500"
+                  >
+                    {accounts.map((acc) => {
+                      const rcsInfo = getRcsDetails(acc.id, accounts);
+                      return (
+                        <option key={acc.id} value={acc.id}>
+                          {acc.name} — Bot: {rcsInfo.botName}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {(confirmationMode === 'whatsapp' || (confirmationMode === 'all' && selectedWa.size > 0 && selectedRcs.size === 0)) && (
+              <p className="font-semibold text-gray-800">
+                Target account: <strong>{currentRcs.name}</strong> ({targetAccount.toUpperCase()})
+              </p>
+            )}
+
             <p className="pt-2 border-t border-amber-200/80 font-semibold">
-              After you confirm, the application will submit them for whitelisting.
+              After you confirm, the application will submit them to Karix for whitelisting.
             </p>
           </div>
 
