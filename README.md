@@ -42,6 +42,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 2. **Phase 2 — Multi-Channel Submission & Tracking**:
    - **WhatsApp**: Submits via Karix Portal API or Official WABA API with parameter checking and aspect-ratio validation.
    - **RCS**: Submits Rich Cards and Carousels (Google RCS / Jio) with compliant aspect ratio and button validation.
+   - **RCS destination safety**: Account labels and bot IDs come from the effective backend configuration, including overrides. Spreadsheet RCS submission keeps the selected account (no automatic re-routing) and rejects a submission if its bot changed since preview; an account without a verified bot cannot be submitted from the UI.
    - **SMS**: End-to-end DLT template compliance, AES-256 CBC PII encryption (`sms_crypto.py`), and real-time DLR forwarding callbacks.
    - **Dashboard resilience**: When Karix's WhatsApp inventory is unavailable,
      the dashboard keeps tenant-scoped local submission history visible and marks
@@ -50,6 +51,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 
 3. **Phase 3 — Operational Work Management & Sync**:
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
+   - Mixed Wealth briefs can submit WhatsApp to `tcl_promo` and RCS to `wealth` in one request. The confirmation shows both destinations; the backend authorizes each account and rejects a changed RCS bot before either channel is submitted.
    - Jira Briefs counts Push / App only when the parsed brief identifies a Push campaign (`channel_counts.push`). MoEngage staging metadata may exist for SMS or Email tickets and does not imply a Push campaign; Push title/body are empty when no Push campaign was identified.
    - Jira brief-status filters (including the chat prompt "Show pending Jira briefs") scan successive Jira search pages until the requested number of matching briefs is found or Jira has no more pages. Results remain newest-first; unfiltered listings use a single page.
    - MoEngage attribute resolver and automated template catalog sync.
