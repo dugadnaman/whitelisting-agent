@@ -2113,9 +2113,16 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
     items: list[dict[str, Any]] = []
     channel_blocks: list[dict[str, Any]] = []
     curr_block: dict[str, Any] = {"channel": None, "tier": "General", "lines": []}
-    chan_names = {"whatsapp": "WA", "wa": "WA", "sms": "SMS", "email": "EMAIL", "rcs": "RCS"}
+    chan_names = {
+        "whatsapp": "WA", "wa": "WA", "sms": "SMS", "email": "EMAIL", "rcs": "RCS",
+        "pn": "PN", "push": "PN", "push notification": "PN"
+    }
 
     for p in paras:
+        clean_p = p.strip()
+        low = clean_p.lower()
+        norm_chan = re.sub(r"[\s\-–—:]+$", "", low).strip()
+
         # Check tier header (e.g. 1. Customers at or below 50% LTV...)
         if re.match(r"^\d+\.\s+Customers?", p, re.IGNORECASE):
             if curr_block["channel"] and curr_block["lines"]:
@@ -2123,15 +2130,19 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
             curr_block = {"channel": None, "tier": p, "lines": []}
             continue
 
-        low = p.lower().strip()
-        if low in chan_names:
+        if norm_chan in chan_names:
             if curr_block["channel"] and curr_block["lines"]:
                 channel_blocks.append(curr_block)
-            curr_block = {"channel": chan_names[low], "tier": curr_block.get("tier", "General"), "lines": []}
+            curr_block = {"channel": chan_names[norm_chan], "tier": curr_block.get("tier", "General"), "lines": []}
+            continue
+
+        # Handle section headers like 'Content to Referrer–', 'Not Contactable –'
+        if clean_p.endswith(("-", "–", "—", ":")) and len(clean_p) < 40 and not any(k in low for k in ("t&c", "link", "tatacapital", "dear", "hello", "hi")):
+            curr_block["tier"] = clean_p.rstrip("-–—: ").strip()
             continue
 
         if curr_block["channel"]:
-            curr_block["lines"].append(p)
+            curr_block["lines"].append(clean_p)
 
     if curr_block["channel"] and curr_block["lines"]:
         channel_blocks.append(curr_block)
@@ -2144,34 +2155,81 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
             continue
         header = None
         if chan == "WA":
-            m_hdr = re.match(r"^(?:Header|Title)\s*[:\-–]\s*(.+)$", lines[0], re.IGNORECASE)
-            if m_hdr and len(lines) >= 2:
-                header = m_hdr.group(1).strip()
-                body = "\n".join(lines[1:])
-            else:
-                body = "\n".join(lines)
-            if is_valid_template_copy(body):
-                items.append(
-                    {
+            current_wa: list[str] = []
+            for line in lines:
+                is_new_wa = bool(
+                    re.match(r"^(?:dear|hi|hello|hey|namaste)\b", line.lower())
+                    and current_wa and len("\n".join(current_wa)) > 60
+                )
+                if is_new_wa and current_wa:
+                    combined = "\n".join(current_wa).strip()
+                    if is_valid_template_copy(combined):
+                        decomp = decompose_content(combined)
+                        items.append({
+                            "channel": "WA",
+                            "header": decomp["header_text"],
+                            "text": decomp["body"],
+                            "button_text": decomp["button_text"],
+                            "button_url": decomp["button_url"],
+                            "variant": tier,
+                            "source": f"docx_{Path(docx_path).stem}",
+                        })
+                    current_wa = [line]
+                else:
+                    current_wa.append(line)
+            if current_wa:
+                combined = "\n".join(current_wa).strip()
+                if is_valid_template_copy(combined):
+                    decomp = decompose_content(combined)
+                    items.append({
                         "channel": "WA",
-                        "header": header,
-                        "text": body,
+                        "header": decomp["header_text"],
+                        "text": decomp["body"],
+                        "button_text": decomp["button_text"],
+                        "button_url": decomp["button_url"],
                         "variant": tier,
                         "source": f"docx_{Path(docx_path).stem}",
-                    }
-                )
+                    })
         elif chan == "SMS":
-            body = "\n".join(lines)
-            if is_valid_template_copy(body):
-                items.append(
-                    {
+            current_sms: list[str] = []
+            for line in lines:
+                is_new_message = bool(
+                    re.match(r"^(?:dear|hi|hello|hey|know someone|you have been|up to|unexpected|more orders|urgent)\b", line.lower())
+                    or (current_sms and len("\n".join(current_sms)) > 150)
+                )
+                if is_new_message and current_sms:
+                    combined = "\n".join(current_sms).strip()
+                    if is_valid_template_copy(combined):
+                        items.append({
+                            "channel": "SMS",
+                            "header": None,
+                            "text": combined,
+                            "variant": tier,
+                            "source": f"docx_{Path(docx_path).stem}",
+                        })
+                    current_sms = [line]
+                else:
+                    current_sms.append(line)
+            if current_sms:
+                combined = "\n".join(current_sms).strip()
+                if is_valid_template_copy(combined):
+                    items.append({
                         "channel": "SMS",
                         "header": None,
-                        "text": body,
+                        "text": combined,
                         "variant": tier,
                         "source": f"docx_{Path(docx_path).stem}",
-                    }
-                )
+                    })
+        elif chan in ("PN", "PUSH"):
+            for line in lines:
+                if len(line) >= 15:
+                    items.append({
+                        "channel": "PN",
+                        "header": line,
+                        "text": line,
+                        "variant": tier,
+                        "source": f"docx_{Path(docx_path).stem}",
+                    })
         elif chan == "EMAIL":
             subject = None
             body_lines = []
@@ -2180,15 +2238,13 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
                     subject = l.split(":", 1)[1].strip()
                 else:
                     body_lines.append(l)
-            items.append(
-                {
-                    "channel": "EMAIL",
-                    "header": subject,
-                    "text": "\n".join(body_lines),
-                    "variant": tier,
-                    "source": f"docx_{Path(docx_path).stem}",
-                }
-            )
+            items.append({
+                "channel": "EMAIL",
+                "header": subject,
+                "text": "\n".join(body_lines),
+                "variant": tier,
+                "source": f"docx_{Path(docx_path).stem}",
+            })
 
     return items
 
@@ -2692,7 +2748,19 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     for att in mapped_attachments:
         fn = att.get("filename", "")
         lower_fn = fn.lower()
-        if lower_fn.endswith((".zip", ".docx", ".doc", ".html")):
+        is_email_doc = (
+            lower_fn.endswith(".zip")
+            or lower_fn.endswith(".html")
+            or (
+                lower_fn.endswith((".docx", ".doc"))
+                and (
+                    is_email_campaign
+                    or has_mailers_zip
+                    or any(k in lower_fn for k in ("subject", "mailer", "preheader", "email"))
+                )
+            )
+        )
+        if is_email_doc:
             f_type = (
                 "HTML Mailer Package"
                 if lower_fn.endswith(".zip")

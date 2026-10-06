@@ -405,9 +405,12 @@ def refresh_mcp_access_token(account: str = "tata") -> str | None:
 
     tok_json = resp.json()
     new_access = tok_json.get("access_token", "")
+    if not isinstance(new_access, str) or not new_access.strip():
+        return None
     new_refresh = tok_json.get("refresh_token") or cfg["refresh_token"]
     expires_in = tok_json.get("expires_in")
-    if new_access:
+    if not isinstance(expires_in, (int, float)):
+        expires_in = 2592000
         save_mcp_tokens(
             account=account,
             access_token=new_access,

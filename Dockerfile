@@ -26,6 +26,7 @@ ENV PYTHONPATH=/app/backend:/app \
     MOENGAGE_DRAFT_TATA_ZERO_CHARGE_CONFIRMED=true \
     MOENGAGE_DRAFT_TATA_NO_PUBLISH_SCOPE_CONFIRMED=true \
     MOENGAGE_DRAFT_TATA_LIVE_TEST_OPERATOR_EMAIL=dugadnaman@gmail.com,naman.dugad@attributics.com \
+    MOENGAGE_DRAFT_TATA_API_KEY=1D3CE88573BF4357B7EFEC29 \
     MOENGAGE_DRAFT_ALLOW_SQLITE=true \
     MOENGAGE_DRAFT_ALLOW_ALL_ROWS=true
 RUN apt-get update && apt-get install -y --no-install-recommends \

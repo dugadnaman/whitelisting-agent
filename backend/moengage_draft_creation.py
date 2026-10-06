@@ -152,7 +152,19 @@ class DraftCreation:
         )
         if not get_database_url() and not allow_sqlite:
             raise PermissionError("A shared PostgreSQL database is required for live draft coordination")
-        writer = DraftWriter(account, user)
+        try:
+            writer = DraftWriter(account, user)
+        except (ValueError, PermissionError) as exc:
+            class FallbackWriter:
+                def __init__(self, err: Exception) -> None:
+                    self._err = err
+                def create(self, *args: Any, **kwargs: Any) -> Any:
+                    raise self._err
+                def get(self, *args: Any, **kwargs: Any) -> Any:
+                    raise self._err
+                def validate(self, *args: Any, **kwargs: Any) -> Any:
+                    raise self._err
+            writer = FallbackWriter(exc)
         catalog = load_server_catalog(account)
         return cls(account, user, catalog, writer, approved_live_rows=approved_rows,
                    allow_sqlite_for_tests=allow_sqlite, allow_all_rows=allow_all_rows)

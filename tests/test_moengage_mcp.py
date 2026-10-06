@@ -98,6 +98,10 @@ def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
         resp.ok = True
         resp.status_code = 200
         resp.headers = {"Content-Type": "text/event-stream", "Mcp-Session-Id": "sess_moe_1"}
+        if "oauth2/token" in str(url):
+            resp.json.return_value = {"access_token": "valid_mcp_token_refreshed", "expires_in": 86400}
+            resp.text = '{"access_token": "valid_mcp_token_refreshed"}'
+            return resp
 
         if method == "initialize":
             payload = {
