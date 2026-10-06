@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import json
 import re
 from collections import Counter
 from datetime import date, datetime, time, timedelta
@@ -28,6 +29,8 @@ _ROW_FIELDS = frozenset({
     "push_message", "click_url", "push_image_asset_id", "whatsapp_sender", "whatsapp_template_id",
     "source_attachments", "_row_error", "body", "message", "whatsapp_message",
     "Message Body", "File Name on FileZilla", "Date of Trigger", "Time of Trigger", "Emp Count", "Teams Link", "Sr. No",
+    "whatsapp_template_name", "whatsapp_sender_id", "whatsapp_placeholders",
+    "matched_template_name", "matched_template_id", "matched_template_confidence",
 })
 _EMAIL_FIELDS = frozenset({
     "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
@@ -40,12 +43,13 @@ _DISPLAY_FIELDS = (
     "content_type", "from_address", "subject", "html_content", "email_template_id",
     "push_platform", "push_title", "push_message", "click_url", "whatsapp_sender", "whatsapp_template_id",
     "Emp Count", "Teams Link", "File Name on FileZilla", "Message Body",
+    "matched_template_name", "matched_template_confidence",
 )
-_MAX_FILE_BYTES = 5 * 1024 * 1024
 _IOS_FLAGS = (
     "send_to_all_eligible_device", "exclude_provisional_push_devices",
     "send_to_only_provisional_push_enabled_devices",
 )
+_MAX_FILE_BYTES = 5 * 1024 * 1024
 
 
 def _text(row: dict[str, Any], field: str) -> str:
@@ -233,9 +237,21 @@ def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: l
     sender = _select(senders, "sender_name", sender_name, "whatsapp sender", errors) if (senders and sender_name) else None
     if not sender_name and not sender:
         errors.append("whatsapp_sender is required")
-    template = _select(templates, "id", template_id, "whatsapp template", errors) if (templates and template_id) else None
+
+    is_live_id = bool(template_id and (len(template_id) == 24 and all(c in "0123456789abcdefABCDEF" for c in template_id)))
+    if is_live_id or row.get("matched_template_id"):
+        template = {"id": template_id, "name": row.get("whatsapp_template_name") or row.get("matched_template_name") or template_id}
+    else:
+        template = _select(templates, "id", template_id, "whatsapp template", errors) if (templates and template_id) else None
     if not template_id and not template:
         errors.append("whatsapp_template_id is required")
+
+    ph_raw = row.get("whatsapp_placeholders")
+    try:
+        body_placeholders = json.loads(ph_raw) if ph_raw else {}
+    except Exception:
+        body_placeholders = {}
+
     return {
         "basic_details": {"name": name},
         "campaign_content": {
@@ -245,12 +261,13 @@ def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: l
                     "phone_number": sender.get("phone_number") if sender else "",
                     "provider": sender.get("provider", "KARIX") if sender else "KARIX",
                     "template_id": template.get("id") if template else template_id,
-                    "template_name": template.get("name") if template else template_id,
+                    "template_name": template.get("name") if template else (row.get("whatsapp_template_name") or template_id),
+                    "sender_id": row.get("whatsapp_sender_id") or "685a47bfadfdfd854f960ab5",
+                    "body_placeholders": body_placeholders,
                 }
             }
         },
     }
-
 
 
 def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creator: str, *, source_type: str) -> dict[str, Any]:
@@ -494,6 +511,30 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
 
     # 5. Channel-specific defaults
     if row.get("channel") == "WHATSAPP":
+        body_text = str(
+            row.get("Message Body")
+            or row.get("whatsapp_message")
+            or row.get("body")
+            or row.get("message")
+            or ""
+        ).strip()
+        if body_text and not row.get("matched_template_id"):
+            try:
+                from template_identifier import match_whatsapp_template_and_variables
+                matched = match_whatsapp_template_and_variables(body_text, account=account)
+                if matched and matched.get("matched"):
+                    row["whatsapp_template_id"] = matched["template_id"]
+                    row["whatsapp_template_name"] = matched["template_name"]
+                    row["whatsapp_sender_id"] = matched["sender_id"]
+                    row["whatsapp_placeholders"] = json.dumps(matched["placeholders"])
+                    row["matched_template_name"] = matched["template_name"]
+                    row["matched_template_id"] = matched["template_id"]
+                    row["matched_template_confidence"] = f"{int(matched['confidence'] * 100)}%"
+                    for pk, pv in matched.get("placeholders", {}).items():
+                        row[f"param_{pk.strip('{}')}"] = pv
+            except Exception:
+                pass
+
         row.setdefault("whatsapp_sender", "Tata Capital Financial Services Limited")
         row.setdefault("whatsapp_template_id", "test_1234")
     elif row.get("channel") == "EMAIL":
@@ -506,7 +547,6 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
         row.setdefault("push_platform", "ANDROID")
         row.setdefault("push_title", row.get("campaign_name", "Special Offer")[:30])
         row.setdefault("push_message", row.get("Message Body", "Click to explore offer"))
-
     return row
 
 

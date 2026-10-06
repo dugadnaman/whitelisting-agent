@@ -228,6 +228,142 @@ def evaluate_semantic_equivalence_typesafe(master_text: str, live_text: str) -> 
     return (sim >= 0.88), sim, "FUZZY_TOKEN"
 
 
+_CACHED_MOENGAGE_WHATSAPP_TEMPLATES: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+
+
+def fetch_cached_moengage_whatsapp_templates(account: str = "tata", max_age_sec: int = 300) -> list[dict[str, Any]]:
+    """Fetch all live MoEngage WhatsApp templates with in-memory TTL caching and disk fallback."""
+    import json
+    import time
+    from pathlib import Path
+
+    now = time.time()
+    cached = _CACHED_MOENGAGE_WHATSAPP_TEMPLATES.get(account)
+    if cached and (now - cached[0]) < max_age_sec:
+        return cached[1]
+
+    disk_cache = Path(f"data/whatsapp_templates_cache_{account}.json")
+
+    try:
+        import requests
+        from moengage_sync import get_moengage_auth_headers, get_moengage_config
+        headers = get_moengage_auth_headers(account)
+        headers["page"] = "whatsapp/create/one-time"
+        cfg = get_moengage_config(account)
+        headers["origin"] = cfg["base_url"]
+        url = f"{cfg['base_url']}/template_metadata?template_type=whatsapp"
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.ok:
+            data = resp.json().get("data", [])
+            templates_with_body = []
+            for t in data:
+                tbody = t.get("meta_data", {}).get("content", {}).get("body", "")
+                if tbody and len(tbody.strip()) > 15:
+                    sender_list = t.get("meta_data", {}).get("sender_ids") or []
+                    templates_with_body.append({
+                        "id": t["id"],
+                        "name": t.get("name") or t.get("display_name", ""),
+                        "body": tbody,
+                        "sender_id": sender_list[0] if sender_list else "6516baa397c87500027529a3",
+                        "provider": t.get("meta_data", {}).get("provider", "Karix"),
+                    })
+            if templates_with_body:
+                _CACHED_MOENGAGE_WHATSAPP_TEMPLATES[account] = (now, templates_with_body)
+                try:
+                    disk_cache.parent.mkdir(parents=True, exist_ok=True)
+                    disk_cache.write_text(json.dumps(templates_with_body, ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    pass
+                return templates_with_body
+    except Exception as exc:
+        logger.debug("Could not fetch live MoEngage WhatsApp templates for matching: %s", exc)
+
+    # Disk cache fallback
+    if disk_cache.exists():
+        try:
+            disk_data = json.loads(disk_cache.read_text(encoding="utf-8"))
+            if isinstance(disk_data, list) and disk_data:
+                _CACHED_MOENGAGE_WHATSAPP_TEMPLATES[account] = (now, disk_data)
+                return disk_data
+        except Exception:
+            pass
+
+    fallback = cached[1] if cached else []
+    _CACHED_MOENGAGE_WHATSAPP_TEMPLATES[account] = (now, fallback)
+    return fallback
+
+def extract_variables_from_template_body(client_text: str, tpl_text: str) -> dict[str, str]:
+    """Extract {{1}}, {{2}} placeholder values by matching literal prefixes before each tag."""
+    tags = re.findall(r"\{\{(\d+)\}\}", tpl_text)
+    if not tags:
+        return {}
+
+    placeholders: dict[str, str] = {}
+    for tag in set(tags):
+        m = re.search(r"([^\n\r{}]+?)\s*\{\{" + tag + r"\}\}", tpl_text)
+        if m:
+            prefix = re.escape(m.group(1).strip())
+            m_val = re.search(prefix + r"\s*[:\-–]?\s*([^\n\r]+)", client_text, re.IGNORECASE)
+            if m_val:
+                tag_key = "{{" + str(tag) + "}}"
+                placeholders[tag_key] = m_val.group(1).strip()
+
+    urls = re.findall(r"https?://[^\s]+", client_text)
+    for tag in tags:
+        key = "{{" + str(tag) + "}}"
+        if key not in placeholders or not placeholders[key]:
+            if urls:
+                placeholders[key] = urls[0]
+            else:
+                placeholders[key] = ""
+
+    return placeholders
+
+
+def match_whatsapp_template_and_variables(
+    client_body: str,
+    account: str = "tata",
+    min_confidence: float = 0.40,
+) -> dict[str, Any] | None:
+    """
+    Given a raw message body from a client spreadsheet, match it against live whitelisted
+    templates in MoEngage, return the matched template ID, name, sender ID, and extracted placeholders.
+    """
+    if not client_body or len(client_body.strip()) < 15:
+        return None
+
+    templates = fetch_cached_moengage_whatsapp_templates(account)
+    if not templates:
+        return None
+
+    norm_client = normalize_template_text(client_body)
+    best_sim = 0.0
+    best_match = None
+
+    for t in templates:
+        norm_t = normalize_template_text(t["body"])
+        sim = compute_text_similarity(norm_client, norm_t)
+        if sim > best_sim:
+            best_sim = sim
+            best_match = t
+            if sim >= 0.95:
+                break
+
+    if best_match and best_sim >= min_confidence:
+        placeholders = extract_variables_from_template_body(client_body, best_match["body"])
+        return {
+            "matched": True,
+            "template_id": best_match["id"],
+            "template_name": best_match["name"],
+            "sender_id": best_match["sender_id"],
+            "provider": best_match.get("provider", "Karix"),
+            "confidence": round(best_sim, 3),
+            "placeholders": placeholders,
+            "matched_template_body": best_match["body"],
+        }
+
+    return None
+
 def identify_master_templates(
     master_submissions: list[TemplateSubmission | dict[str, Any]],
     client: str = "bajaj",

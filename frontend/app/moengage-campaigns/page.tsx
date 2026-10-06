@@ -195,8 +195,16 @@ function RowCard({
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Template</dt>
-              <dd className="text-gray-900 mt-0.5 font-medium">
-                📋 {source.whatsapp_template_id || 'test_1234 (EN)'}
+              <dd className="text-gray-900 mt-0.5 font-medium flex flex-wrap items-center gap-1.5">
+                <span>📋 {source.matched_template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'test_1234 (EN)'}</span>
+                {source.matched_template_id && (
+                  <span className="text-[11px] font-mono text-gray-500">({source.matched_template_id})</span>
+                )}
+                {source.matched_template_confidence && (
+                  <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
+                    🎯 {source.matched_template_confidence} Match
+                  </span>
+                )}
               </dd>
             </div>
           </>

@@ -325,3 +325,77 @@ def test_jira_brief_without_segment_override_blocks_only_audience():
     assert "Specify exactly one of segment_id or segment_name; never all users" in issues
     assert not any("campaign_name is required" in i for i in issues)
     assert not any("scheduled_at and timezone are required" in i for i in issues)
+
+def test_whatsapp_body_template_matching_and_placeholder_extraction(monkeypatch):
+    from template_identifier import (
+        extract_variables_from_template_body,
+        match_whatsapp_template_and_variables,
+        _CACHED_MOENGAGE_WHATSAPP_TEMPLATES,
+    )
+    sample_tpl = {
+        "id": "6a9a6585f5b9b18f8c972b54",
+        "name": "hr_btp_updated_7thsept_en",
+        "body": (
+            "Dear Colleague,\n \n"
+            "You have been invited to attend the Behvaioural training program \n"
+            "Program Name : {{1}} \n \n"
+            "🗓 Session Date: {{2}}\n"
+            "🕙 Time: {{3}}\n"
+            "📍 Platform: MS Teams \n"
+            "👉 {{4}}\n\n"
+            "Attendance is mandatory. Please ensure you join on time.Non-attendance will lead to strict disciplinary action.\n\n"
+            "Regards, \nL&D – Tata Capital Ltd."
+        ),
+        "sender_id": "685a47bfadfdfd854f960ab5",
+        "provider": "Karix",
+    }
+    monkeypatch.setitem(_CACHED_MOENGAGE_WHATSAPP_TEMPLATES, "tata", (9999999999.0, [sample_tpl]))
+
+    client_msg = (
+        "Dear Colleague,\n \n"
+        "You have been invited to attend the Behvaioural training program \n"
+        "Program Name : Thrive to Amplify - Building teams that drive the Impact\n \n"
+        "🗓 Session Date: 09th October 2026_TOMMORROW\n"
+        "🕙 Time: 11:00 am - 01:00 pm\n"
+        "📍 Platform: MS Teams \n"
+        "👉 https://teams.microsoft.com/meet/43017094361739?p=test1234\n\n"
+        "Attendance is mandatory. Please ensure you join on time.Non-attendance will lead to strict disciplinary action.\n\n"
+        "Regards, \nL&D – Tata Capital Ltd."
+    )
+
+    match = match_whatsapp_template_and_variables(client_msg, account="tata")
+    assert match is not None
+    assert match["matched"] is True
+    assert match["template_id"] == "6a9a6585f5b9b18f8c972b54"
+    assert match["template_name"] == "hr_btp_updated_7thsept_en"
+    assert "Thrive to Amplify" in match["placeholders"]["{{1}}"]
+    assert "09th October 2026" in match["placeholders"]["{{2}}"]
+    assert "11:00 am - 01:00 pm" in match["placeholders"]["{{3}}"]
+    assert "https://teams.microsoft.com/meet" in match["placeholders"]["{{4}}"]
+
+    # Test via rows_from_file & prepare_batch
+    csv_content = (
+        "channel,campaign_name,Message Body,Date of Trigger,Time of Trigger\n"
+        f"WHATSAPP,Test_WA_Campaign,\"{client_msg}\",2026-10-09,11:00 AM\n"
+    )
+    rows = rows_from_file("wa.csv", csv_content.encode("utf-8"), "tata")
+    assert len(rows) == 1
+    row0 = rows[0]
+    assert row0["whatsapp_template_id"] == "6a9a6585f5b9b18f8c972b54"
+    assert row0["matched_template_name"] == "hr_btp_updated_7thsept_en"
+
+    catalog = {
+        "account": "tata",
+        "workspace_id": "WS123",
+        "segments": [{"id": "65cf4af4d4c88174e5ad186e", "name": "Test_FSTP_Pranav_1602"}],
+        "whatsapp_senders": [{"sender_name": "Tata Capital Financial Services Limited", "provider": "KARIX"}],
+        "whatsapp_templates": [{"id": "6a9a6585f5b9b18f8c972b54", "name": "hr_btp_updated_7thsept_en"}],
+    }
+    batch = prepare_batch(rows, "tata", catalog, "tester@example.com", source_type="spreadsheet")
+    assert batch["ready"] == 1
+    assert batch["blocked"] == 0
+    cand = batch["items"][0]["candidate_v5_payload"]
+    wa_conf = cand["campaign_content"]["content"]["whatsapp"]
+    assert wa_conf["template_id"] == "6a9a6585f5b9b18f8c972b54"
+    assert wa_conf["template_name"] == "hr_btp_updated_7thsept_en"
+    assert wa_conf["body_placeholders"]["{{1}}"] == match["placeholders"]["{{1}}"]

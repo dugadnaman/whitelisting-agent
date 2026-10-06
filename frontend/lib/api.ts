@@ -1198,6 +1198,11 @@ export type MoEngageDraftSourceFields = {
   click_url?: string;
   whatsapp_sender?: string;
   whatsapp_template_id?: string;
+  whatsapp_template_name?: string;
+  matched_template_name?: string;
+  matched_template_id?: string;
+  matched_template_confidence?: string;
+  [key: string]: string | undefined;
 };
 
 export type MoEngageDraftRow = {

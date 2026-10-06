@@ -251,6 +251,8 @@ class DraftCreation:
         wa_content = payload.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
         raw_tpl = wa_content.get("template_id") or "6516c13f43500232b272e627"
         raw_sender = wa_content.get("sender_id") or "6516baa397c87500027529a3"
+        raw_placeholders = wa_content.get("body_placeholders")
+        body_placeholders = raw_placeholders if isinstance(raw_placeholders, dict) and raw_placeholders else {"{{1}}": "", "{{2}}": "", "{{3}}": ""}
         from moengage_whatsapp_worker import resolve_moengage_whatsapp_template_id, resolve_moengage_whatsapp_sender_id
         template_id = resolve_moengage_whatsapp_template_id(raw_tpl, self.account)
         sender_id, sender = resolve_moengage_whatsapp_sender_id(raw_sender, self.account)
@@ -278,7 +280,7 @@ class DraftCreation:
                     "sender_id": sender_id,
                     "sender": sender,
                     "template_id": template_id,
-                    "body_placeholders": {"{{1}}": "", "{{2}}": "", "{{3}}": ""},
+                    "body_placeholders": body_placeholders,
                     "bypass_opt_in_preference": False,
                 },
                 "stepStatus": True,
