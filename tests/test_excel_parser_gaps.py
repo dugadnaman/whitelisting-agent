@@ -161,9 +161,9 @@ def test_extract_templates_from_excel_column0_channel_layout(tmp_path):
     extracted = extract_templates_from_excel_file(file_path)
     channels = [item["channel"] for item in extracted]
 
-    # Exactly 4 SMS, 4 RCS, and 0 WhatsApp templates
+    # Exactly 4 SMS, 2 RCS (1 richcard + 1 carousel), and 0 WhatsApp templates
     assert channels.count("SMS") == 4
-    assert channels.count("RCS") == 4
+    assert channels.count("RCS") == 2
     assert channels.count("WA") == 0
 
     sms_items = [item for item in extracted if item["channel"] == "SMS"]
@@ -174,9 +174,11 @@ def test_extract_templates_from_excel_column0_channel_layout(tmp_path):
     assert "personal loan offer is still waiting" in sms_items[3]["text"]
 
     rcs_items = [item for item in extracted if item["channel"] == "RCS"]
-    assert len(rcs_items) == 4
-    assert any("celebrate your festive season" in item["text"] for item in rcs_items)
-
+    assert len(rcs_items) == 2
+    rich_item = next(i for i in rcs_items if i.get("template_type") != "carousel")
+    assert "celebrate your festive season" in rich_item["text"]
+    carousel_item = next(i for i in rcs_items if i.get("template_type") == "carousel")
+    assert len(carousel_item["carousel_cards"]) == 3
 
 def test_real_smpl_campaign_file_if_available():
     """Verify real /Users/naman/Downloads/SMPL campaign.xlsx extracts 4 SMS, 5 RCS, and 0 WA."""
@@ -192,7 +194,9 @@ def test_real_smpl_campaign_file_if_available():
 
     assert channels.count("WA") == 0, f"Expected 0 WA templates, got {channels.count('WA')}"
     assert channels.count("SMS") == 4, f"Expected 4 SMS templates, got {channels.count('SMS')}"
-    assert channels.count("RCS") == 5, f"Expected 5 RCS templates, got {channels.count('RCS')}"
+    assert channels.count("RCS") == 2, f"Expected 2 RCS templates (1 richcard + 1 carousel), got {channels.count('RCS')}"
+    carousel_item = next(i for i in extracted if i.get("template_type") == "carousel")
+    assert len(carousel_item["carousel_cards"]) == 4
 
 def test_tcn_551_pa_bl_gst_internal_real_file_if_available():
     """Verify TCN-551 / PA BL GST Internal.xlsx extracts 3 WA (split from 1./2.), 1 RCS, 4 SMS, and embedded creatives."""

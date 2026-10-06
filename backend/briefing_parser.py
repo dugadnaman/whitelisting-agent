@@ -79,7 +79,8 @@ class RcsTemplateDraft:
     sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
     source_origin: str = "jira"
-
+    template_type: str = "richcard"  # "text" | "richcard" | "carousel"
+    carousel_cards: list[dict[str, Any]] = field(default_factory=list)
 
 @dataclass
 class SmsTemplateDraft:
@@ -2278,15 +2279,60 @@ def extract_templates_from_excel_file(
             sheet_items = _parse_dlt_sms_sheet(raw_rows, sname, filename=filepath.name)
         else:
             sheet_items = _parse_raw_sheet_rows(raw_rows, sname, sheet_images=sheet_imgs)
-        for item in sheet_items:
-            raw_t = item.get("raw_text") or item.get("text", "")
-            if not is_valid_template_copy(raw_t):
-                continue
-            norm_key = re.sub(r"\s+", " ", raw_t).strip().lower()
-            if norm_key and norm_key not in seen_texts:
-                seen_texts.add(norm_key)
-                all_items.append(item)
-
+        is_carousel_sheet = "carousal" in sname.lower() or "carousel" in sname.lower()
+        if is_carousel_sheet and len(sheet_items) >= 2:
+            c_cards = []
+            for c_idx, card in enumerate(sheet_items, 1):
+                raw_desc = card.get("text") or card.get("body") or ""
+                c_title = card.get("card_title") or card.get("header") or derive_clean_card_title(raw_desc) or f"Card {c_idx}"
+                lines = raw_desc.strip().splitlines()
+                c_desc = raw_desc
+                if len(lines) > 1 and lines[0].strip().strip("*_#~ ").lower() == c_title.lower():
+                    c_desc = "\n".join(lines[1:]).strip()
+                c_btn = card.get("button_text") or "Explore Now"
+                c_url = card.get("button_url") or "https://u3.mnge.co/"
+                c_media = card.get("media_file")
+                c_media_fn = card.get("media_filename")
+                c_cards.append({
+                    "card_title": c_title,
+                    "card_description": c_desc,
+                    "media_url": c_media,
+                    "media_filename": c_media_fn,
+                    "button_text": c_btn,
+                    "button_url": c_url,
+                    "suggestions": [
+                        {
+                            "suggestionType": "url_action",
+                            "text": c_btn,
+                            "postbackData": c_btn,
+                            "url": c_url,
+                        }
+                    ],
+                })
+            carousel_item = {
+                "channel": "RCS",
+                "template_type": "carousel",
+                "variant": "Carousel",
+                "card_title": c_cards[0]["card_title"],
+                "text": c_cards[0]["card_description"],
+                "raw_text": "\n---\n".join(c["card_description"] for c in c_cards),
+                "button_text": c_cards[0]["button_text"],
+                "button_url": c_cards[0]["button_url"],
+                "media_file": c_cards[0]["media_url"],
+                "media_filename": c_cards[0]["media_filename"],
+                "carousel_cards": c_cards,
+                "source": f"excel_carousel_{sname}",
+            }
+            all_items.append(carousel_item)
+        else:
+            for item in sheet_items:
+                raw_t = item.get("raw_text") or item.get("text", "")
+                if not is_valid_template_copy(raw_t):
+                    continue
+                norm_key = re.sub(r"\s+", " ", raw_t).strip().lower()
+                if norm_key and norm_key not in seen_texts:
+                    seen_texts.add(norm_key)
+                    all_items.append(item)
     return all_items
 
 
@@ -3080,7 +3126,9 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
 
         elif chan == "RCS":
             img = rcs_creatives[(rcs_counter - 1) % len(rcs_creatives)] if rcs_creatives else None
-            tname = item.get("template_name") or _clean_template_name(base_name, "rcs", rcs_counter)
+            is_car = item.get("template_type") == "carousel" or bool(item.get("carousel_cards"))
+            t_suffix = "rcs_carousel" if is_car else "rcs"
+            tname = item.get("template_name") or _clean_template_name(base_name, t_suffix, rcs_counter)
             clean_body, cta_btn_text, cta_btn_url, _ = extract_and_strip_cta(
                 norm_text,
                 existing_btn_text=item.get("button_text"),
@@ -3125,6 +3173,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     action_type=item.get("button_type") or "URL",
                     action_label=cta_btn_text,
                     action_url=cta_btn_url,
+                    template_type="carousel" if is_car else ("richcard" if (item.get("media_file") or img) else "text"),
+                    carousel_cards=item.get("carousel_cards", []),
                     variables=item.get("variables") or var_tags,
                     sample_values=item.get("sample_values") or resolved_samples[: len(var_tags)],
                     raw_source=clean_content,

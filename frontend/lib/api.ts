@@ -930,6 +930,15 @@ export type JiraRcsDraft = {
   action_url: string;
   variables: string[];
   raw_source: string;
+  template_type?: "text" | "richcard" | "carousel" | string;
+  carousel_cards?: Array<{
+    card_title: string;
+    card_description: string;
+    media_url?: string | null;
+    media_filename?: string | null;
+    button_text?: string;
+    button_url?: string;
+  }>;
 };
 
 export type JiraSmsDraft = {

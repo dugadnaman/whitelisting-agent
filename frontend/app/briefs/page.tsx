@@ -1704,9 +1704,15 @@ export default function JiraBriefsPage() {
                                   ) : (
                                     <span className="font-mono font-bold text-xs text-gray-900">{rcs.template_name}</span>
                                   )}
-                                  <span className="text-[10px] px-2 py-0.2 rounded-full bg-blue-100 text-blue-800 font-semibold uppercase">
-                                    Standalone Card
-                                  </span>
+                                  {rcs.template_type === 'carousel' || (rcs.carousel_cards && rcs.carousel_cards.length > 0) ? (
+                                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-bold uppercase flex items-center gap-1">
+                                      <span>🎠</span> Carousel Template ({rcs.carousel_cards?.length || 0} Cards)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] px-2 py-0.2 rounded-full bg-blue-100 text-blue-800 font-semibold uppercase">
+                                      Standalone Card
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div className="flex items-center gap-2">
@@ -1849,6 +1855,30 @@ export default function JiraBriefsPage() {
                                       <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
                                         🔗 {rcs.action_label || 'Apply Now'} ({rcs.action_url || 'https://u3.mnge.co/'})
                                       </span>
+                                    </div>
+                                  )}
+                                  {rcs.carousel_cards && rcs.carousel_cards.length > 0 && (
+                                    <div className="pt-3 border-t border-gray-100 space-y-2">
+                                      <div className="flex items-center justify-between text-[11px] font-bold text-gray-700">
+                                        <span>🎠 Carousel Cards ({rcs.carousel_cards.length}):</span>
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                        {rcs.carousel_cards.map((card, cIdx) => (
+                                          <div key={`card-${cIdx}`} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs space-y-1.5">
+                                            <div className="font-bold text-gray-900 text-[11px] flex items-center justify-between">
+                                              <span>Card {cIdx + 1}: {card.card_title}</span>
+                                              {card.media_filename && (
+                                                <span className="text-[10px] font-mono text-emerald-700 font-normal">🖼️ {card.media_filename}</span>
+                                              )}
+                                            </div>
+                                            <p className="text-[11px] text-gray-700 line-clamp-3 whitespace-pre-wrap">{card.card_description}</p>
+                                            <div className="text-[10px] text-blue-700 font-semibold bg-white p-1 rounded border border-blue-100 flex items-center gap-1">
+                                              <span>🔗 {card.button_text || 'Explore'}</span>
+                                              <span className="text-gray-400 font-mono truncate font-normal">({card.button_url})</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
                                   )}
                                 </div>

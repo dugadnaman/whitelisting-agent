@@ -3990,9 +3990,17 @@ async def submit_jira_brief_endpoint(
                 )
 
             has_media = bool(rcs.get("media_file"))
-            rcs_type = "richcard" if has_media else "text"
-            card_title = (rcs.get("card_title") or parsed.summary[:32]) if has_media else None
-            card_desc = rcs["body"] if has_media else None
+            c_cards = rcs.get("carousel_cards") or []
+            is_carousel = rcs.get("template_type") in ("carousel", "carousal") or len(c_cards) >= 2
+            if is_carousel:
+                rcs_type = "carousel"
+            elif has_media:
+                rcs_type = "richcard"
+            else:
+                rcs_type = "text"
+
+            card_title = (rcs.get("card_title") or parsed.summary[:32]) if (has_media or is_carousel) else None
+            card_desc = rcs["body"] if (has_media or is_carousel) else None
             text_msg = rcs["body"]
 
             rcs_sub = RcsTemplateSubmission(
@@ -4005,6 +4013,7 @@ async def submit_jira_brief_endpoint(
                 text_message=text_msg,
                 media_url=rcs.get("media_file"),
                 suggestions=suggestions,
+                carousel_cards=c_cards,
                 source_ref=f"{issue_key}_{rcs['template_name']}",
             )
             try:
