@@ -21,7 +21,9 @@ export default function SettingsPage() {
     isTenantLocked,
   } = useApp();
   // Selected config tab
-  const [selectedAccount, setSelectedAccount] = useState<Account>(activeAccount);
+  const [selectedAccount, setSelectedAccount] = useState<Account>(
+    activeAccount === 'all' ? 'tcl_promo' : activeAccount
+  );
   const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
 
   // New Account Modal state
@@ -367,8 +369,9 @@ export default function SettingsPage() {
     setSaving(true);
     setBanner(null);
     try {
+      const targetAcc = selectedAccount === 'all' ? 'tcl_promo' : selectedAccount;
       const res = await saveMoEngageCredentials(
-        selectedAccount,
+        targetAcc,
         moeBearerToken.trim(),
         moeCookie.trim(),
         moeBaseUrl.trim(),
@@ -377,7 +380,7 @@ export default function SettingsPage() {
       setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
       setBanner({
         type: 'success',
-        message: `MoEngage credentials saved for ${selectedAccount}${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
+        message: `MoEngage credentials saved for ${targetAcc}${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
       });
     } catch (err) {
       setBanner({
@@ -393,12 +396,13 @@ export default function SettingsPage() {
     setTesting(true);
     setBanner(null);
     try {
-      const res = await testMoEngageConnection(selectedAccount);
+      const targetAcc = selectedAccount === 'all' ? 'tcl_promo' : selectedAccount;
+      const res = await testMoEngageConnection(targetAcc);
       if (res.ok) {
         setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
         setBanner({
           type: 'success',
-          message: `MoEngage connection verified for ${selectedAccount} — ${res.template_count ?? 0} RCS templates visible in Settings.`,
+          message: `MoEngage connection verified for ${targetAcc} — ${res.template_count ?? 0} RCS templates visible in Settings.`,
         });
       } else {
         setBanner({

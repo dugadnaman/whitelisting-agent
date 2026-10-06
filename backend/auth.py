@@ -449,8 +449,8 @@ def require_tenant_access(account: str, user: dict[str, Any]) -> None:
     if user_tenant == target:
         return
 
-    # If user belongs to Tata Master account ("tata"), they can access all Tata sub-accounts
-    if user_tenant == "tata" and target in TATA_SUB_ACCOUNTS:
+    # If user belongs to Tata Master account ("tata"), they can access all Tata sub-accounts and "all" view
+    if user_tenant == "tata" and (target in TATA_SUB_ACCOUNTS or target == "all"):
         return
 
     user_name = user.get("name") or user.get("email") or "Operator"

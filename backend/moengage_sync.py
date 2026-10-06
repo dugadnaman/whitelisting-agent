@@ -34,7 +34,8 @@ DEFAULT_TCFSL_PROMO_SENDER_ID = "68888420892e852255fca466"
 def get_moengage_config(account: str = "tata") -> dict[str, str]:
     """Resolve MoEngage workspace config for an account (base URL, token, cookie, sender)."""
     _load_env_file()
-    prefix = _account_prefix(account)
+    acc = "tata" if (account or "").lower().strip() in ("all", "") else (account or "tata").lower().strip()
+    prefix = _account_prefix(acc)
 
     base_url = (
         os.environ.get(f"{prefix}_MOENGAGE_BASE_URL") or os.environ.get("MOENGAGE_BASE_URL") or MOENGAGE_API_BASE

@@ -4290,7 +4290,7 @@ class MoEngageCredentialUpdate(BaseModel):
     sender_id: str | None = None
 
 
-_TATA_MOENGAGE_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
+_TATA_MOENGAGE_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy", "all"}
 
 
 def _moengage_credential_keys(account: str) -> dict[str, str]:
@@ -4348,15 +4348,21 @@ def update_moengage_credentials_endpoint(
     _require_moengage_account_access(req.account, current_user)
     keys = _moengage_credential_keys(req.account)
     mapping: dict[str, str] = {}
+    acc = req.account.lower().strip()
     if req.base_url and req.base_url.strip():
         mapping[keys["base_url"]] = req.base_url.strip().rstrip("/")
     if req.bearer_token and req.bearer_token.strip():
         mapping[keys["bearer_token"]] = req.bearer_token.strip()
+        if acc in _TATA_MOENGAGE_ACCOUNTS:
+            mapping["TATA_MOENGAGE_BEARER_TOKEN"] = req.bearer_token.strip()
+            mapping["MOENGAGE_BEARER_TOKEN"] = req.bearer_token.strip()
     if req.cookie and req.cookie.strip():
         mapping[keys["cookie"]] = req.cookie.strip()
+        if acc in _TATA_MOENGAGE_ACCOUNTS:
+            mapping["TATA_MOENGAGE_COOKIE"] = req.cookie.strip()
+            mapping["MOENGAGE_COOKIE"] = req.cookie.strip()
     if req.sender_id and req.sender_id.strip():
         mapping[keys["sender_id"]] = req.sender_id.strip()
-
     if not mapping:
         return {"ok": True, "updated_keys": []}
 
