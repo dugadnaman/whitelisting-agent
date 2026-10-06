@@ -2291,8 +2291,15 @@ def extract_templates_from_excel_file(
                     c_desc = "\n".join(lines[1:]).strip()
                 c_btn = card.get("button_text") or "Explore Now"
                 c_url = card.get("button_url") or "https://u3.mnge.co/"
-                c_media = card.get("media_file")
-                c_media_fn = card.get("media_filename")
+                if sheet_imgs and (c_idx - 1) < len(sheet_imgs):
+                    c_media = sheet_imgs[c_idx - 1]
+                    c_media_fn = Path(c_media).name
+                elif sheet_imgs:
+                    c_media = sheet_imgs[(c_idx - 1) % len(sheet_imgs)]
+                    c_media_fn = Path(c_media).name
+                else:
+                    c_media = card.get("media_file")
+                    c_media_fn = card.get("media_filename")
                 c_cards.append({
                     "card_title": c_title,
                     "card_description": c_desc,
@@ -2378,14 +2385,19 @@ def _extract_images_from_xlsx(xlsx_path: Path) -> dict[str, list[str]]:
             imgs = getattr(ws, "_images", [])
             if imgs:
                 clean_sname = re.sub(r"[^\w\-.]", "_", sname)
-                image_map[sname] = []
-                for idx, img in enumerate(imgs):
+
+                def _img_sort_key(im):
+                    af = getattr(im.anchor, "_from", None)
+                    return (af.col, af.row) if af else (0, 0)
+
+                sorted_imgs = sorted(imgs, key=_img_sort_key)
+                for idx, img in enumerate(sorted_imgs):
                     try:
                         data = img._data()
                         fmt = getattr(img, "format", "jpeg") or "jpeg"
                         out_path = MEDIA_CACHE_DIR / f"jira_xlsx_{xlsx_path.stem}_{clean_sname}_{idx + 1}.{fmt}"
                         out_path.write_bytes(data)
-                        image_map[sname].append(str(out_path))
+                        image_map.setdefault(sname, []).append(str(out_path))
                     except Exception as e:
                         logger.debug("Could not extract image %d from sheet %s: %s", idx, sname, e)
         wb.close()

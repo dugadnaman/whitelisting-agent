@@ -290,6 +290,7 @@ class DraftCreation:
             }
         }
 
+        http_error = None
         try:
             import requests
 
@@ -304,10 +305,16 @@ class DraftCreation:
                 cid = resp.json().get("data", {}).get("id")
                 if cid and isinstance(cid, str):
                     return cid
-        except Exception:
-            pass
+            else:
+                if resp.status_code == 401:
+                    http_error = "MoEngage session expired (401 Unauthorized). Please update Bearer token in Settings -> MoEngage."
+                else:
+                    http_error = f"MoEngage API returned HTTP {resp.status_code}: {resp.text[:160]}"
+        except Exception as exc:
+            http_error = str(exc)
 
         # Fallback to headless Playwright worker to create real draft in MoEngage web studio
+        playwright_error = None
         try:
             from moengage_whatsapp_worker import automate_single_whatsapp_draft_row
             real_cid = automate_single_whatsapp_draft_row(
@@ -319,10 +326,14 @@ class DraftCreation:
             )
             if real_cid and isinstance(real_cid, str):
                 return real_cid
-        except Exception:
-            pass
+        except Exception as exc:
+            playwright_error = str(exc)
 
-        return "WA-" + idempotency_key[:8].upper()
+        if self.allow_sqlite_for_tests:
+            return "WA-" + idempotency_key[:8].upper()
+
+        err_summary = http_error or playwright_error or "Direct API and studio automation both unconfirmed"
+        raise RuntimeError(f"MoEngage WhatsApp draft creation failed: {err_summary}")
 
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         """Never reissue an attempted POST, including after timeout or process crash."""
@@ -344,9 +355,13 @@ class DraftCreation:
         campaign_id = stored.get("campaign_id")
         if fresh or (payload.get("channel") == "WHATSAPP" and state in ("UNCERTAIN", "MAYBE_SENT") and not campaign_id):
             if payload.get("channel") == "WHATSAPP":
-                campaign_id = self._create_whatsapp_draft(payload, stored["idempotency_key"])
-                self._record(source_ref, row_id, "VALIDATED", campaign_id=campaign_id)
-                return self._result(source_ref, row_id, "VALIDATED", campaign_id, None, "[]")
+                try:
+                    campaign_id = self._create_whatsapp_draft(payload, stored["idempotency_key"])
+                    self._record(source_ref, row_id, "VALIDATED", campaign_id=campaign_id)
+                    return self._result(source_ref, row_id, "VALIDATED", campaign_id, None, "[]")
+                except Exception as wa_err:
+                    self._record(source_ref, row_id, "UNCERTAIN", issue=str(wa_err)[:255])
+                    return self._result(source_ref, row_id, "UNCERTAIN", None, str(wa_err)[:255])
             try:
                 created = self.writer.create(payload, idempotency_key=stored["idempotency_key"])
             except Exception:

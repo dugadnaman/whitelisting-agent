@@ -800,6 +800,44 @@ export default function JiraBriefsPage() {
       setUploadingCreative((prev) => ({ ...prev, [key]: false }));
     }
   };
+  const handleReplaceCarouselCardCreative = async (rcsIdx: number, cardIdx: number, file: File) => {
+    const key = `rcs_${rcsIdx}_card_${cardIdx}`;
+    try {
+      setUploadingCreative((prev) => ({ ...prev, [key]: true }));
+      const res = await uploadJiraCreative(file);
+      setRcsTemplates((prev) => {
+        const next = [...prev];
+        const rcs = { ...next[rcsIdx] };
+        if (rcs.carousel_cards) {
+          const nextCards = [...rcs.carousel_cards];
+          nextCards[cardIdx] = {
+            ...nextCards[cardIdx],
+            media_url: res.local_path,
+            media_filename: res.filename,
+          };
+          rcs.carousel_cards = nextCards;
+          if (cardIdx === 0) {
+            rcs.media_file = res.local_path;
+            rcs.media_filename = res.filename;
+          }
+        }
+        next[rcsIdx] = rcs;
+        return next;
+      });
+      setFeedback({
+        message: `Replaced creative for Carousel Card ${cardIdx + 1} with '${res.filename}'${res.dimensions ? ` (${res.dimensions})` : ''}.`,
+        type: 'success',
+      });
+    } catch (err) {
+      setFeedback({
+        message: `Failed to upload creative for Card ${cardIdx + 1}: ${formatError(err)}`,
+        type: 'error',
+      });
+    } finally {
+      setUploadingCreative((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
   const handleSyncRcsToMoEngage = async (rcs: JiraRcsDraft) => {
     try {
       setSyncingRcs((prev) => ({ ...prev, [rcs.template_name]: true }));
@@ -2224,15 +2262,91 @@ export default function JiraBriefsPage() {
                                       </div>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                                         {rcs.carousel_cards.map((card, cIdx) => (
-                                          <div key={`card-${cIdx}`} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs space-y-1.5">
+                                          <div key={`card-${cIdx}`} className="p-3 bg-white rounded-xl border border-gray-200 text-xs space-y-2 shadow-2xs">
                                             <div className="font-bold text-gray-900 text-[11px] flex items-center justify-between">
                                               <span>Card {cIdx + 1}: {card.card_title}</span>
-                                              {card.media_filename && (
-                                                <span className="text-[10px] font-mono text-emerald-700 font-normal">🖼️ {card.media_filename}</span>
-                                              )}
+                                              <span className="text-[10px] px-1.5 py-0.2 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                                Card {cIdx + 1}
+                                              </span>
                                             </div>
+
+                                            {/* Card Creative Image Preview & Individual Upload */}
+                                            <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col">
+                                              {card.media_url ? (
+                                                <div className="relative h-28 w-full bg-white flex items-center justify-center group overflow-hidden">
+                                                  <img
+                                                    src={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true })}
+                                                    alt={card.media_filename || `Card ${cIdx + 1} creative`}
+                                                    className="w-full h-full object-cover group-hover:scale-105 transition cursor-pointer"
+                                                    onClick={() => {
+                                                      const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
+                                                      setPreviewCreativeModal({
+                                                        url,
+                                                        filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
+                                                        channel: `RCS Card ${cIdx + 1}`,
+                                                      });
+                                                    }}
+                                                    onError={(e) => {
+                                                      (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                                    }}
+                                                  />
+                                                  <div
+                                                    onClick={() => {
+                                                      const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
+                                                      setPreviewCreativeModal({
+                                                        url,
+                                                        filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
+                                                        channel: `RCS Card ${cIdx + 1}`,
+                                                      });
+                                                    }}
+                                                    className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold cursor-pointer"
+                                                  >
+                                                    <span>🔍 Preview Image</span>
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <div className="h-16 flex items-center justify-center text-[10px] text-gray-400 italic bg-gray-50">
+                                                  No creative attached
+                                                </div>
+                                              )}
+
+                                              <div className="p-1.5 bg-gray-100/70 border-t border-gray-200 flex items-center justify-between text-[10px]">
+                                                <span className="font-mono text-gray-600 truncate max-w-[120px]" title={card.media_filename || ''}>
+                                                  {card.media_filename || 'None'}
+                                                </span>
+                                                <div className="flex items-center gap-1.5">
+                                                  {card.media_url && (
+                                                    <a
+                                                      href={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename })}
+                                                      download={card.media_filename || `card_${cIdx + 1}.png`}
+                                                      target="_blank"
+                                                      rel="noopener noreferrer"
+                                                      className="px-1.5 py-0.5 rounded bg-white hover:bg-gray-50 text-blue-700 border border-blue-200 font-semibold text-[9px]"
+                                                      title="Download this card's creative"
+                                                    >
+                                                      ⬇️ Get
+                                                    </a>
+                                                  )}
+                                                  <label className="px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[9px] cursor-pointer transition flex items-center gap-0.5">
+                                                    <span>{uploadingCreative[`rcs_${idx}_card_${cIdx}`] ? '⏳...' : card.media_url ? '🔄 Replace' : '📤 Upload'}</span>
+                                                    <input
+                                                      type="file"
+                                                      accept="image/png,image/jpeg,image/webp"
+                                                      className="hidden"
+                                                      disabled={uploadingCreative[`rcs_${idx}_card_${cIdx}`]}
+                                                      onChange={(e) => {
+                                                        const f = e.target.files?.[0];
+                                                        if (f) handleReplaceCarouselCardCreative(idx, cIdx, f);
+                                                        e.target.value = '';
+                                                      }}
+                                                    />
+                                                  </label>
+                                                </div>
+                                              </div>
+                                            </div>
+
                                             <p className="text-[11px] text-gray-700 line-clamp-3 whitespace-pre-wrap">{card.card_description}</p>
-                                            <div className="text-[10px] text-blue-700 font-semibold bg-white p-1 rounded border border-blue-100 flex items-center gap-1">
+                                            <div className="text-[10px] text-blue-700 font-semibold bg-blue-50/50 p-1 rounded border border-blue-100 flex items-center gap-1">
                                               <span>🔗 {card.button_text || 'Explore'}</span>
                                               <span className="text-gray-400 font-mono truncate font-normal">({card.button_url})</span>
                                             </div>
