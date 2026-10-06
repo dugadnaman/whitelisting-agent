@@ -117,3 +117,71 @@ def test_parse_excel_grid_messages_does_not_split_on_blank_row():
     rcs_item = next(i for i in items if i["channel"] == "RCS")
     assert "Upgrade to a luxurious apartment" in rcs_item["text"]
     assert "Fast approvals" in rcs_item["text"]
+def test_extract_templates_from_excel_column0_channel_layout(tmp_path):
+    """Verify sheets like 'Content' in SMPL campaign.xlsx where Column 0 has channel tags and Column 1 has text."""
+    from briefing_parser import extract_templates_from_excel_file
+
+    wb = openpyxl.Workbook()
+    # 1. Planner sheet to be ignored
+    ws_plan = wb.active
+    ws_plan.title = "Planner"
+    ws_plan.append(["Campaign Name", "2026-10-05"])
+    ws_plan.append(["Channel", "SMS"])
+
+    # 2. Content sheet with Column 0 channel tags and Column 1 copies
+    ws_content = wb.create_sheet(title="Content")
+    ws_content.append(["SMS", "Dear Customer, festival personal loan offer of up to Rs. 7.5 Lakhs. Click https://tcl.in T&Cs apply."])
+    ws_content.append(["", "Dear Customer, simplify your finances with Tata Capital pre-approved personal loan. Click https://tcl.in T&C apply."])
+    ws_content.append(["", "Unexpected expenses? No problem! Avail pre-qualified loan today. Click https://tcl.in T&Cs apply."])
+    ws_content.append(["SMS Retargeting", "Hi Customer, your personal loan offer is still waiting. Apply now before it expires: https://tcl.in T&Cs apply."])
+    ws_content.append(["RCS", "Hey Customer, celebrate your festive season with Tata Capital personal loan up to Rs. 7.5 Lakhs. Apply: https://tcl.in"])
+
+    # 3. Carousel sheet with multiple cards
+    ws_rcs = wb.create_sheet(title="RCS Carousal ")
+    # Put 3 cards in row 10 in different columns
+    row_data = [None] * 15
+    row_data[1] = "Dear Customer, make every dream closer. Upgrade your lifestyle and enjoy a pre-qualified personal loan offer up to Rs. 5 Lakhs. Tap to proceed: https://tcl.in"
+    row_data[6] = "From dreams to emergencies, get funds instantly with a Tata Capital pre-qualified personal loan. Tap below to check eligibility: https://tcl.in"
+    row_data[11] = "Your dreams deserve flexibility, so do your repayments. Unlock your Tata Capital pre-qualified personal loan offer today. Tap to claim: https://tcl.in"
+    for _ in range(9):
+        ws_rcs.append([None] * 15)
+    ws_rcs.append(row_data)
+
+    file_path = tmp_path / "SMPL_test.xlsx"
+    wb.save(file_path)
+
+    extracted = extract_templates_from_excel_file(file_path)
+    channels = [item["channel"] for item in extracted]
+
+    # Exactly 4 SMS, 4 RCS, and 0 WhatsApp templates
+    assert channels.count("SMS") == 4
+    assert channels.count("RCS") == 4
+    assert channels.count("WA") == 0
+
+    sms_items = [item for item in extracted if item["channel"] == "SMS"]
+    assert len(sms_items) == 4
+    assert "festival personal loan offer" in sms_items[0]["text"]
+    assert "simplify your finances" in sms_items[1]["text"]
+    assert "Unexpected expenses" in sms_items[2]["text"]
+    assert "personal loan offer is still waiting" in sms_items[3]["text"]
+
+    rcs_items = [item for item in extracted if item["channel"] == "RCS"]
+    assert len(rcs_items) == 4
+    assert any("celebrate your festive season" in item["text"] for item in rcs_items)
+
+
+def test_real_smpl_campaign_file_if_available():
+    """Verify real /Users/naman/Downloads/SMPL campaign.xlsx extracts 4 SMS, 5 RCS, and 0 WA."""
+    from pathlib import Path
+    from briefing_parser import extract_templates_from_excel_file
+
+    real_path = Path("/Users/naman/Downloads/SMPL campaign.xlsx")
+    if not real_path.is_file():
+        return
+
+    extracted = extract_templates_from_excel_file(real_path)
+    channels = [item["channel"] for item in extracted]
+
+    assert channels.count("WA") == 0, f"Expected 0 WA templates, got {channels.count('WA')}"
+    assert channels.count("SMS") == 4, f"Expected 4 SMS templates, got {channels.count('SMS')}"
+    assert channels.count("RCS") == 5, f"Expected 5 RCS templates, got {channels.count('RCS')}"

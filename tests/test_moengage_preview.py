@@ -248,3 +248,80 @@ def test_preview_routes_are_authenticated_and_never_call_providers():
             assert jira.json()["items"][0]["status"] == "blocked"
         finally:
             app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_parse_jira_execution_datetime():
+    from moengage_preview import parse_jira_execution_datetime
+
+    assert parse_jira_execution_datetime("25.09.2026 & 11:00 AM") == "2026-09-25T11:00:00+05:30"
+    assert parse_jira_execution_datetime("25-09-2026 11:00 AM") == "2026-09-25T11:00:00+05:30"
+    assert parse_jira_execution_datetime("25/09/2026 2:30 PM") == "2026-09-25T14:30:00+05:30"
+    assert parse_jira_execution_datetime("01-10-2026 @ 09:00") == "2026-10-01T09:00:00+05:30"
+    assert parse_jira_execution_datetime("2026-10-06") == "2026-10-06T11:00:00+05:30"
+    assert parse_jira_execution_datetime("immediate") is None
+    assert parse_jira_execution_datetime("asap") is None
+    assert parse_jira_execution_datetime("N/A") is None
+
+
+def test_jira_brief_with_kv_table_extracts_campaign_fields():
+    brief = {
+        "issue_key": "SWCM-105",
+        "summary": "TCLService_CSFD_EWP Revamp - Communication Campaign - Corporate Services portal - Revamp",
+        "account": "tcl_promo",
+        "email_templates": [{"html_content": "<p>New Portal is Live</p>", "template_name": "Portal_Mailer"}],
+        "channel_counts": {"email": 1},
+        "campaign_metadata": {
+            "campaign_name": "CSFD_EWP_Corporate_portal_Sept’26",
+            "scheduled_at": "2026-09-25T11:00:00+05:30",
+            "timezone": "Asia/Kolkata",
+            "email_subject": "Our New Portal is Live!",
+        },
+    }
+    overrides = {
+        "segment_id": "seg-vip",
+        "from_address": "mail@example.com",
+    }
+    rows = rows_from_jira_brief(brief, overrides, "tata")
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["campaign_name"] == "CSFD_EWP_Corporate_portal_Sept’26"
+    assert row["scheduled_at"] == "2026-09-25T11:00:00+05:30"
+    assert row["timezone"] == "Asia/Kolkata"
+    assert row["subject"] == "Our New Portal is Live!"
+    assert row["content_type"] == "PROMOTIONAL"
+    assert row["subscription_category"] == "Offers"
+
+    batch = preview(rows)
+    assert batch["ready"] == 1
+    assert batch["blocked"] == 0
+    candidate = batch["items"][0]["candidate_v5_payload"]
+    assert candidate["basic_details"]["name"] == "CSFD_EWP_Corporate_portal_Sept’26"
+    assert candidate["scheduling_details"]["start_time"] == "2026-09-25T11:00:00"
+    assert candidate["scheduling_details"]["timezone"] == "Asia/Kolkata"
+    assert candidate["campaign_content"]["content"]["email"]["subject"] == "Our New Portal is Live!"
+
+
+def test_jira_brief_without_segment_override_blocks_only_audience():
+    brief = {
+        "issue_key": "SWCM-105",
+        "summary": "TCLService_CSFD_EWP Revamp - Communication Campaign - Corporate Services portal - Revamp",
+        "account": "tcl_promo",
+        "description_text": (
+            "Campaign Name | CSFD_EWP_Corporate_portal_Sept’26\n"
+            "Date & Time of execution | 25.09.2026 & 11:00 AM\n"
+            "Email Text | Subject: Our New Portal is Live!\n"
+        ),
+        "email_templates": [{"html_content": "<p>New Portal is Live</p>", "template_name": "Portal_Mailer"}],
+        "channel_counts": {"email": 1},
+    }
+    # Operator provides from_address but forgets segment_id
+    overrides = {"from_address": "mail@example.com"}
+    rows = rows_from_jira_brief(brief, overrides, "tata")
+    batch = preview(rows)
+    assert batch["ready"] == 0
+    assert batch["blocked"] == 1
+    issues = batch["items"][0]["issues"]
+    # Must fail only on segment specification, NOT on campaign_name or schedule!
+    assert "Specify exactly one of segment_id or segment_name; never all users" in issues
+    assert not any("campaign_name is required" in i for i in issues)
+    assert not any("scheduled_at and timezone are required" in i for i in issues)

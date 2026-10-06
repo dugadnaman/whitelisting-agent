@@ -961,6 +961,7 @@ export type JiraBriefData = {
     file_type?: string;
     body?: string;
     local_path?: string | null;
+    html_content?: string;
     target_channel?: string;
   }>;
   moengage_campaign: {
@@ -972,6 +973,7 @@ export type JiraBriefData = {
     push_title?: string | null;
     push_body?: string | null;
     status: string;
+    email_subject?: string | null;
   };
   attachments_mapped: Array<{
     id: string;

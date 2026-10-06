@@ -380,11 +380,13 @@ export default function JiraBriefsPage() {
           setMoeWaTemplateId(waList[0].template_name || '');
         } else if (data.is_email_campaign || (data.email_templates?.length || 0) > 0) {
           setMoeChannel('EMAIL');
-          setMoeEmailSubject(data.summary || '');
+          setMoeEmailSubject(data.moengage_campaign?.email_subject || data.summary || '');
+          if (data.email_templates?.[0]?.html_content) {
+            setMoeEmailContent(data.email_templates[0].html_content);
+          }
         } else {
           setMoeChannel('PUSH');
         }
-        setMoeStagingStatus('DRAFT');
         setMoeResultCampaignId(null);
         setMoeBatchId(null);
         setMoeError(null);

@@ -113,7 +113,7 @@ class ParsedJiraBrief:
     comments: list[dict[str, Any]] = field(default_factory=list)
     comment_updates: list[dict[str, Any]] = field(default_factory=list)
     channel_counts: dict[str, int] = field(default_factory=dict)
-
+    campaign_metadata: dict[str, Any] = field(default_factory=dict)
 
 def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
     """Infer the correct Tata Capital sub-account from product keywords."""
@@ -981,6 +981,69 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
     return extracted_items
 
 
+def _extract_kv_metadata_from_adf_or_text(
+    adf_doc: dict[str, Any] | None, desc_text: str
+) -> dict[str, Any]:
+    """Extract structured campaign metadata table (e.g. SWCM-105 / SWCM-61 key-value tables)."""
+    meta: dict[str, Any] = {}
+    raw_pairs: list[tuple[str, str]] = []
+
+    if adf_doc:
+        for tbl in _find_adf_tables(adf_doc):
+            rows = tbl.get("content", [])
+            for r in rows:
+                cells = [_extract_text_from_adf_node(c).strip() for c in r.get("content", [])]
+                if len(cells) >= 2 and cells[0] and cells[1]:
+                    raw_pairs.append((cells[0], cells[1]))
+
+    if not raw_pairs and desc_text:
+        for line in desc_text.splitlines():
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|", 1)]
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    raw_pairs.append((parts[0], parts[1]))
+
+    for key_raw, val_raw in raw_pairs:
+        k = key_raw.lower().strip()
+        v = val_raw.strip()
+        if not v or v.upper() in ("N/A", "NA", "--", "-", "NONE"):
+            continue
+
+        if k == "campaign name":
+            meta["campaign_name"] = v
+        elif k in ("date & time of execution", "date & time", "date and time of execution", "date and time"):
+            meta["execution_date_raw"] = v
+            from moengage_preview import parse_jira_execution_datetime
+
+            parsed_dt = parse_jira_execution_datetime(v)
+            if parsed_dt:
+                meta["scheduled_at"] = parsed_dt
+                meta["timezone"] = "Asia/Kolkata"
+        elif k in ("email text", "email content", "mailer text"):
+            subj_m = re.search(r"subject\s*:\s*(.+)", v, re.IGNORECASE)
+            if subj_m:
+                meta["email_subject"] = subj_m.group(1).splitlines()[0].strip()
+            preheader_m = re.search(r"pre-?header\s*:\s*(.+)", v, re.IGNORECASE)
+            if preheader_m:
+                meta["email_preheader"] = preheader_m.group(1).splitlines()[0].strip()
+        elif k in ("subject", "email subject", "mail subject"):
+            meta["email_subject"] = v
+        elif k in ("database", "database path", "sftp path", "base path"):
+            meta["database_source"] = v
+        elif k in ("testing email id :", "testing email", "testing email id", "test email"):
+            meta["testing_email"] = v
+        elif k in ("campaign tag", "campaign type", "tag"):
+            meta["campaign_tag"] = v
+        elif k == "product":
+            meta["product"] = v
+        elif k == "sub product":
+            meta["sub_product"] = v
+        elif k in ("from email", "from address", "sender email"):
+            meta["from_address"] = v
+
+    return meta
+
+
 # ---------------------------------------------------------------------------
 # Excel Spreadsheet Extraction Engine
 # ---------------------------------------------------------------------------
@@ -1458,30 +1521,60 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
     if header_row_idx is None:
         chan_tags_in_col0 = sum(1 for row in raw_rows if row and _normalize_channel_tag(row[0]) is not None)
         if chan_tags_in_col0 >= 1:
-            header_row_idx = 0 if _normalize_channel_tag(raw_rows[0][0]) is None else -1
-
-    header_row = (
-        [str(c or "").strip() for c in raw_rows[header_row_idx]]
-        if header_row_idx is not None and 0 <= header_row_idx < len(raw_rows)
-        else []
-    )
-
-    col_map = _identify_sheet_columns(header_row) if header_row else {}
-    chan_col_idx = col_map.get("channel")
-    template_name_col_idx = col_map.get("template_name")
-    header_col_idx = col_map.get("header")
-    header_type_col_idx = col_map.get("header_type")
-    footer_col_idx = col_map.get("footer")
-    btn_text_col_idx = col_map.get("button_text")
-    btn_url_col_idx = col_map.get("button_url")
-    btn_type_col_idx = col_map.get("button_type")
-    category_col_idx = col_map.get("category")
-    media_url_col_idx = col_map.get("media_url")
-    language_col_idx = col_map.get("language")
-    content_cols = col_map.get("content_cols", [])
-
-    has_columnar_structure = bool(header_row_idx is not None and (any(col_map.values()) or chan_col_idx is not None))
-    start_idx = (header_row_idx + 1) if (has_columnar_structure and header_row_idx >= 0) else len(raw_rows)
+            chan_col_idx = 0
+            has_columnar_structure = True
+            start_idx = 0 if _normalize_channel_tag(raw_rows[0][0]) is not None else 1
+            content_cols = [
+                c_idx
+                for c_idx in range(1, max(len(r) for r in raw_rows))
+                if any(len(str(r[c_idx] or "")) > 25 for r in raw_rows if c_idx < len(r))
+            ]
+            header_row = []
+            col_map = {"channel": 0, "content_cols": content_cols}
+            template_name_col_idx = None
+            header_col_idx = None
+            header_type_col_idx = None
+            footer_col_idx = None
+            btn_text_col_idx = None
+            btn_url_col_idx = None
+            btn_type_col_idx = None
+            category_col_idx = None
+            media_url_col_idx = None
+            language_col_idx = None
+        else:
+            header_row = []
+            col_map = {}
+            chan_col_idx = None
+            template_name_col_idx = None
+            header_col_idx = None
+            header_type_col_idx = None
+            footer_col_idx = None
+            btn_text_col_idx = None
+            btn_url_col_idx = None
+            btn_type_col_idx = None
+            category_col_idx = None
+            media_url_col_idx = None
+            language_col_idx = None
+            content_cols = []
+            has_columnar_structure = False
+            start_idx = len(raw_rows)
+    else:
+        header_row = [str(c or "").strip() for c in raw_rows[header_row_idx]]
+        col_map = _identify_sheet_columns(header_row) if header_row else {}
+        chan_col_idx = col_map.get("channel")
+        template_name_col_idx = col_map.get("template_name")
+        header_col_idx = col_map.get("header")
+        header_type_col_idx = col_map.get("header_type")
+        footer_col_idx = col_map.get("footer")
+        btn_text_col_idx = col_map.get("button_text")
+        btn_url_col_idx = col_map.get("button_url")
+        btn_type_col_idx = col_map.get("button_type")
+        category_col_idx = col_map.get("category")
+        media_url_col_idx = col_map.get("media_url")
+        language_col_idx = col_map.get("language")
+        content_cols = col_map.get("content_cols", [])
+        has_columnar_structure = bool(any(col_map.values()) or chan_col_idx is not None)
+        start_idx = (header_row_idx + 1) if has_columnar_structure else len(raw_rows)
     current_channel = sheet_chan
 
     targeting_header_keywords = (
@@ -1638,8 +1731,9 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                     neighbor_cta=neighbor_cta,
                 )
 
+                row_chan = _normalize_channel_tag(row[0]) if (row and row[0]) else None
                 item_dict = {
-                    "channel": sheet_chan or ("RCS" if decomp.get("header_text") else "WA"),
+                    "channel": sheet_chan or row_chan or ("RCS" if decomp.get("header_text") else "WA"),
                     "text": decomp["body"],
                     "header": decomp["header_text"],
                     "footer": decomp["footer_text"],
@@ -2385,15 +2479,35 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 if lower_fn.endswith(".zip")
                 else ("Subject Lines & Preheaders" if lower_fn.endswith((".docx", ".doc")) else "HTML Template")
             )
-            email_drafts.append(
-                {
-                    "template_name": Path(fn).stem,
-                    "filename": fn,
-                    "file_type": f_type,
-                    "local_path": att.get("local_path"),
-                    "target_channel": "EMAIL",
-                }
-            )
+            html_code: str | None = None
+            lpath = att.get("local_path")
+            if lower_fn.endswith(".zip") and lpath and Path(lpath).exists():
+                try:
+                    import zipfile
+
+                    with zipfile.ZipFile(lpath, "r") as zf:
+                        for zname in zf.namelist():
+                            if zname.lower().endswith((".html", ".htm")) and not zname.startswith("__MACOSX"):
+                                html_code = zf.read(zname).decode("utf-8", errors="ignore")
+                                break
+                except Exception as exc:
+                    logger.warning("Could not read HTML from mailer zip %s: %s", fn, exc)
+            elif lower_fn.endswith((".html", ".htm")) and lpath and Path(lpath).exists():
+                try:
+                    html_code = Path(lpath).read_text(encoding="utf-8", errors="ignore")
+                except Exception as exc:
+                    logger.warning("Could not read HTML file %s: %s", fn, exc)
+
+            email_item: dict[str, Any] = {
+                "template_name": Path(fn).stem,
+                "filename": fn,
+                "file_type": f_type,
+                "local_path": lpath,
+                "target_channel": "EMAIL",
+            }
+            if html_code:
+                email_item["html_content"] = html_code
+            email_drafts.append(email_item)
     base_name = f"{key.lower().replace('-', '_')}_{re.sub(r'[^a-z0-9]', '_', summary.lower())[:16]}".strip("_")
 
     # 2. Extract templates from attached Word (.docx) and Excel (.xlsx) files
@@ -2788,12 +2902,18 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     push_count = 1 if has_push else 0
 
     # 5. Build MoEngage Campaign Staging payload
+    campaign_metadata = _extract_kv_metadata_from_adf_or_text(desc_raw, desc_text)
+    approved_cname = campaign_metadata.get("campaign_name") if campaign_metadata else None
+    approved_sched = campaign_metadata.get("scheduled_at") if campaign_metadata else None
+    approved_subj = campaign_metadata.get("email_subject") if campaign_metadata else None
     moengage_campaign = {
-        "campaign_name": f"{key} - {summary}",
+        "campaign_name": approved_cname or f"{key} - {summary}",
         "target_account": sub_account,
-        "scheduled_date": issue_data.get("duedate"),
+        "scheduled_date": approved_sched or issue_data.get("duedate"),
         "whatsapp_template": wa_drafts[0].template_name if wa_drafts else None,
         "sms_content": sms_drafts[0].text if sms_drafts else None,
+        "email_subject": approved_subj,
+        "database_source": campaign_metadata.get("database_source") if campaign_metadata else None,
         "push_title": f"Tata Capital: {summary[:30]}" if has_push else None,
         "push_body": (sms_drafts[0].text if sms_drafts else (wa_drafts[0].body if wa_drafts else summary))[:120] if has_push else None,
         "status": "DRAFT",
@@ -2836,4 +2956,5 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         comments=raw_comments,
         comment_updates=comment_updates,
         channel_counts=ch_counts,
+        campaign_metadata=campaign_metadata,
     )

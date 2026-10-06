@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import html
 import io
+import re
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -376,6 +377,46 @@ def _sheet_rows(records: Any, filename: str, account: str, sheet: str = "") -> l
 _TATA_SUB_ACCOUNTS = frozenset({"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"})
 
 
+def parse_jira_execution_datetime(raw_dt: str) -> str | None:
+    """Parse common Jira date/time execution formats into ISO 8601 with Asia/Kolkata offset."""
+    if not raw_dt or not isinstance(raw_dt, str):
+        return None
+    cleaned = raw_dt.strip().lower()
+    if cleaned in ("n/a", "na", "immediate", "asap", "none", "-"):
+        return None
+    text = raw_dt.replace("&", " ").replace("at", " ").replace("@", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+    patterns = [
+        ("%d.%m.%Y %I:%M %p", True),
+        ("%d-%m-%Y %I:%M %p", True),
+        ("%d/%m/%Y %I:%M %p", True),
+        ("%Y-%m-%d %I:%M %p", True),
+        ("%d.%m.%Y %H:%M", True),
+        ("%d-%m-%Y %H:%M", True),
+        ("%d/%m/%Y %H:%M", True),
+        ("%Y-%m-%d %H:%M", True),
+        ("%d.%m.%Y", False),
+        ("%d-%m-%Y", False),
+        ("%d/%m/%Y", False),
+        ("%Y-%m-%d", False),
+    ]
+    for fmt, has_time in patterns:
+        try:
+            dt = datetime.strptime(text, fmt)
+            if not has_time:
+                dt = dt.replace(hour=11, minute=0, second=0)
+            return dt.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+        except ValueError:
+            continue
+    try:
+        iso_dt = datetime.fromisoformat(text)
+        if iso_dt.tzinfo is None:
+            return iso_dt.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+        return iso_dt.isoformat()
+    except ValueError:
+        return None
+
+
 def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], account: str) -> list[dict[str, Any]]:
     """Adapt an already-parsed Jira brief; never use inferred staging copy or fetch Jira."""
     key = str(brief.get("issue_key") or "").strip()
@@ -395,6 +436,59 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
         if isinstance(item, dict)
     ]
     counts = brief.get("channel_counts") or {}
+
+    # Extract structured campaign metadata if present in brief
+    c_meta = brief.get("campaign_metadata")
+    if not isinstance(c_meta, dict):
+        c_meta = {}
+    if not c_meta and brief.get("description_text"):
+        desc_text = str(brief.get("description_text") or "")
+        extracted_kv = {}
+        for line in desc_text.splitlines():
+            if "|" in line:
+                parts = [p.strip() for p in line.split("|", 1)]
+                if len(parts) == 2 and parts[0] and parts[1]:
+                    k = parts[0].lower().strip()
+                    v = parts[1].strip()
+                    if k == "campaign name" and v.upper() not in ("N/A", "NA", "--", "-", "NONE"):
+                        extracted_kv["campaign_name"] = v
+                    elif k in ("date & time of execution", "date & time", "date and time of execution", "date and time"):
+                        extracted_kv["execution_date_raw"] = v
+                        pdt = parse_jira_execution_datetime(v)
+                        if pdt:
+                            extracted_kv["scheduled_at"] = pdt
+                            extracted_kv["timezone"] = "Asia/Kolkata"
+                    elif k in ("email text", "email content", "mailer text"):
+                        subj_m = re.search(r"subject\s*:\s*(.+)", v, re.IGNORECASE)
+                        if subj_m:
+                            extracted_kv["email_subject"] = subj_m.group(1).splitlines()[0].strip()
+                    elif k in ("subject", "email subject", "mail subject"):
+                        extracted_kv["email_subject"] = v
+                    elif k in ("from email", "from address", "sender email"):
+                        extracted_kv["from_address"] = v
+        c_meta = extracted_kv
+
+    summary = str(brief.get("summary") or "").strip()
+    candidate_cname = overrides.get("campaign_name") or c_meta.get("campaign_name")
+    if not candidate_cname and brief.get("moengage_campaign"):
+        moe_cname = str(brief["moengage_campaign"].get("campaign_name") or "").strip()
+        if moe_cname and moe_cname != summary and moe_cname != f"{key} - {summary}":
+            candidate_cname = moe_cname
+
+    candidate_sched = overrides.get("scheduled_at") or c_meta.get("scheduled_at")
+    if not candidate_sched and brief.get("moengage_campaign"):
+        candidate_sched = parse_jira_execution_datetime(str(brief["moengage_campaign"].get("scheduled_date") or ""))
+    if not candidate_sched and brief.get("duedate"):
+        candidate_sched = parse_jira_execution_datetime(str(brief["duedate"]))
+
+    candidate_tz = overrides.get("timezone") or c_meta.get("timezone") or ("Asia/Kolkata" if candidate_sched else "")
+    candidate_subj = (
+        overrides.get("subject")
+        or c_meta.get("email_subject")
+        or (brief.get("moengage_campaign") and brief["moengage_campaign"].get("email_subject"))
+    )
+    candidate_from = overrides.get("from_address") or c_meta.get("from_address")
+
     rows = []
     for channel, field in (("EMAIL", "email_templates"), ("PUSH", "push_templates"), ("WHATSAPP", "whatsapp_templates")):
         templates = brief.get(field) or []
@@ -433,8 +527,29 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
                 body = item.get("body")
                 if channel == "EMAIL" and isinstance(body, str) and body.strip():
                     row.setdefault("html_content", "<p>" + html.escape(body.strip()).replace("\n", "<br>") + "</p>")
+
+            if channel == "EMAIL":
+                if candidate_subj and not row.get("subject"):
+                    row["subject"] = candidate_subj
+                if candidate_from and not row.get("from_address"):
+                    row["from_address"] = candidate_from
+                if "content_type" not in row:
+                    row["content_type"] = overrides.get("content_type") or "PROMOTIONAL"
+                if row.get("content_type") == "PROMOTIONAL" and "subscription_category" not in row:
+                    row["subscription_category"] = overrides.get("subscription_category") or "Offers"
+
+            if candidate_sched and not row.get("scheduled_at"):
+                row["scheduled_at"] = candidate_sched
+                row["timezone"] = candidate_tz
+
             if not row.get("campaign_name"):
-                row["campaign_name"] = str(item.get("template_name") or "") if isinstance(item, dict) and item.get("template_name") else ""
+                if candidate_cname:
+                    row["campaign_name"] = candidate_cname
+                elif isinstance(item, dict) and item.get("template_name"):
+                    row["campaign_name"] = str(item["template_name"])
+                else:
+                    row["campaign_name"] = ""
+
             if channel == "WHATSAPP":
                 row.setdefault("whatsapp_sender", overrides.get("whatsapp_sender") or "Tata Capital Financial Services Limited")
             rows.append(row)

@@ -34,7 +34,7 @@ def load_server_catalog(account: str) -> dict[str, Any]:
     if not catalog_file.is_file() or catalog_file.stat().st_size > 1024 * 1024:
         raise ValueError("Account catalog must be a local JSON file of at most 1 MiB")
     catalog = json.loads(catalog_file.read_text(encoding="utf-8"))
-    workspace = os.environ.get(prefix + "WORKSPACE_ID", "").strip()
+    workspace = os.environ.get(prefix + "WORKSPACE_ID", "").strip() or str(catalog.get("workspace_id") or "")
     if not workspace:
         raise PermissionError("Server-owned workspace ID required")
     if (not isinstance(catalog, dict) or catalog.get("account") != account
@@ -96,11 +96,18 @@ class DraftCreation:
         row_id = os.environ.get(prefix + "LIVE_TEST_ROW_ID", "").strip()
         email = user.get("email")
         allowed_operators = [e.strip().casefold() for e in operator.split(",") if e.strip()]
-        if allowed_operators:
-            if "*" not in allowed_operators and "all" not in allowed_operators:
-                if not isinstance(email, str) or email.casefold() not in allowed_operators:
-                    raise PermissionError("Only the designated live test operator may create a draft")
-        elif source_ref or rows_json or segment_id or row_id:
+        is_wildcard = (
+            "*" in allowed_operators
+            or "all" in allowed_operators
+            or "any" in allowed_operators
+            or any("any logged-in" in op for op in allowed_operators)
+            or any("to allow any" in op for op in allowed_operators)
+            or any("allow any" in op for op in allowed_operators)
+        )
+        if allowed_operators and not is_wildcard:
+            if not isinstance(email, str) or email.casefold() not in allowed_operators:
+                raise PermissionError("Only the designated live test operator may create a draft")
+        elif not allowed_operators and (source_ref or rows_json or segment_id or row_id):
             raise PermissionError("Only the designated live test operator may create a draft")
         approved_rows: dict[tuple[str, str], tuple[str | None, str]] | None = None
         if rows_json:
