@@ -385,6 +385,18 @@ def extract_and_strip_cta(
     # Clean URL regex (excluding surrounding whitespace and brackets)
     url_pat = r"(https?://[^\s()\[\]]+|<link>|\{link\}|\[link\]|<url>|\{url\}|\[url\])"
 
+    btn_bracket_pat = re.compile(
+        r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*(?:Button)?\s*[:\-–]?\s*)?(?:\[|<|\()(?:\s*CTA\s*[:\-–]?\s*)?\s*([^\s>\]\)][^>\]\)]*?)\s*(?:\]|>|\))\s*(?:->|=>|–|—|\||:)?\s*(?:"
+        + url_pat
+        + r")\s*$",
+        re.IGNORECASE,
+    )
+
+    directive_pat = re.compile(
+        r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:tap|click|press)\s+(?:here|below|down)?\s*(?:to|on)?\s*(.+?)(?:\s*[⬇️👇📲👉🔗▶️\s])*$",
+        re.IGNORECASE,
+    )
+
     cta_inline_pat = re.compile(
         r"(?:[👉🔗▶️📍📲➡️✅]\s*)?"
         r"(?:\*|_)?\s*"
@@ -401,18 +413,80 @@ def extract_and_strip_cta(
 
         lower_line = sline.lower()
 
-        # 1. Standalone T&C disclaimer line (e.g. '_T&Cs apply https://..._' or '_T&Cs apply {{1}}_')
-        # T&Cs apply MUST remain in the message body without surrounding _/* markdown,
-        # while keeping any {{1}} variable at the end.
+        # 1. Standalone bracket/angle CTA button tag (e.g. CTA Button <Check Eligibility> <url> or [Know more] <url>)
+        m_btn = btn_bracket_pat.match(sline)
+        if m_btn:
+            lbl = m_btn.group(1).strip("*_~ ")
+            u_val = m_btn.group(2).strip()
+            if lbl and len(lbl) <= 25:
+                extracted_btn_text = lbl.title()
+            if u_val.startswith("http"):
+                extracted_url = u_val
+            elif not extracted_url or extracted_url == DEFAULT_CTA_URL:
+                extracted_url = DEFAULT_CTA_URL
+            continue
+
+        # 2. Standalone T&C disclaimer line
         clean_tc = sline.strip("*_ \t").lower()
         if clean_tc.startswith(("t&c", "t & c", "terms", "conditions apply", "disclaimer")):
             tc_clean = sline.strip("*_ \t")
+            m_u = re.search(url_pat, tc_clean)
+            if m_u:
+                c_url = m_u.group(1).rstrip('.,_*_`"').strip()
+                if c_url.startswith("http"):
+                    extracted_url = c_url
             tc_clean = re.sub(url_pat, "", tc_clean)
             tc_clean = re.sub(r"https?://[^\s()\[\]_]+", "", tc_clean)
             tc_clean = re.sub(r"[ \t]+", " ", tc_clean).strip("*_ \t:-–")
             if tc_clean:
                 cleaned_lines.append(tc_clean)
             continue
+
+        # 2b. Line containing 'T&Cs apply <url>' with leading directive like:
+        # '👉 Apply below & double the joy. T&Cs apply https://u3.mnge.co/'
+        m_tc_inline = re.search(
+            r"(?:T\s*&\s*Cs?\s+apply\.?|Terms\s*(?:and|&)\s*Conditions\s+apply\.?)\s*(?:" + url_pat + r")?",
+            sline,
+            re.IGNORECASE,
+        )
+        if m_tc_inline and any(k in lower_line for k in ("apply below", "click below", "tap below", "apply now")):
+            m_u = re.search(url_pat, sline)
+            if m_u and m_u.group(1).startswith("http"):
+                extracted_url = m_u.group(1)
+            if not extracted_btn_text or extracted_btn_text in ("Check Offer", "Proceed"):
+                if "apply" in lower_line:
+                    extracted_btn_text = "Apply Now"
+                elif "explore" in lower_line:
+                    extracted_btn_text = "Explore Now"
+            cleaned_lines.append("T&Cs apply")
+            continue
+
+        # 2c. Standalone tap/click directive (e.g. 'Tap below to check eligibility⬇️' or 'Tap to proceed ⬇️')
+        m_dir = directive_pat.match(sline)
+        if m_dir:
+            action_raw = m_dir.group(1).strip()
+            clean_act = re.sub(r"[⬇️👇📲👉🔗▶️\s]+$", "", action_raw).strip()
+            m_u = re.search(url_pat, clean_act)
+            if m_u:
+                extracted_url = m_u.group(1)
+                clean_act = re.sub(url_pat, "", clean_act).strip()
+            if not extracted_btn_text or extracted_btn_text in ("Check Offer", "Proceed"):
+                if clean_act.lower() in ("proceed", "continue"):
+                    extracted_btn_text = "Proceed"
+                elif "eligibility" in clean_act.lower():
+                    extracted_btn_text = "Check Eligibility"
+                elif "apply" in clean_act.lower():
+                    extracted_btn_text = "Apply Now"
+                elif "explore" in clean_act.lower():
+                    extracted_btn_text = "Explore Now"
+                elif "know more" in clean_act.lower():
+                    extracted_btn_text = "Know More"
+                elif len(clean_act) <= 25 and len(clean_act) >= 3:
+                    extracted_btn_text = clean_act.title()
+            if not extracted_url:
+                extracted_url = DEFAULT_CTA_URL
+            continue
+
         m_cta_var = re.match(
             r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*Button|CTA|Button|Link|Apply)\s*[:\-–]?\s*(\{\{[^{}]+\}\}|\{#[^#]+#\}|\[[^\[\]]+\])\s*$",
             sline,

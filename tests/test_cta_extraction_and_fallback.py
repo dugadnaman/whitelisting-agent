@@ -279,3 +279,61 @@ def test_customer_messages_with_embedded_urls_preserve_body():
     assert "Dear {{1}}" in clean_31
     assert "Successful referrals unlock exclusive" in clean_31
     assert url_31 == "https://u3.mnge.co/"
+
+def test_smpl_carousel_and_standalone_cta_extraction_and_stripping():
+    """Verify SMPL campaign CTA patterns (angle brackets, bracket buttons, tap below directives) are stripped from body."""
+    # 1. Bracket button: [Know more] <url>
+    card_1 = (
+        "Dear {{1}}, ✨\n"
+        "Make every dream a little closer.\n\n"
+        "Tap to proceed ⬇️\n"
+        "[Know more] https://u3.mnge.co/\n"
+        "T&Cs apply"
+    )
+    c1, bt1, u1, _ = extract_and_strip_cta(card_1)
+    assert bt1 == "Know More"
+    assert u1 == "https://u3.mnge.co/"
+    assert "[Know more]" not in c1
+    assert "Tap to proceed" not in c1
+    assert c1.endswith("T&Cs apply")
+
+    # 2. Angle bracket: CTA Button <Check Eligibility> <url>
+    card_2 = (
+        "From Dreams to Emergencies — Get funds instantly.\n\n"
+        "Tap below to check eligibility⬇️\n"
+        "T&Cs Apply.\n"
+        "CTA Button <Check Eligibility> https://u3.mnge.co/"
+    )
+    c2, bt2, u2, _ = extract_and_strip_cta(card_2)
+    assert bt2 == "Check Eligibility"
+    assert u2 == "https://u3.mnge.co/"
+    assert "CTA Button" not in c2
+    assert "<Check Eligibility>" not in c2
+    assert "Tap below" not in c2
+    assert c2.endswith("T&Cs Apply.")
+
+    # 3. Angle bracket without space: CTA button< Apply Now> <url>
+    card_3 = (
+        "Unlock your Tata Capital Personal Loan offer.\n\n"
+        "Click below to Apply Now⬇️\n"
+        "T&Cs Apply.\n"
+        "CTA button< Apply Now> https://u3.mnge.co/"
+    )
+    c3, bt3, u3, _ = extract_and_strip_cta(card_3)
+    assert bt3 == "Apply Now"
+    assert u3 == "https://u3.mnge.co/"
+    assert "CTA button" not in c3
+    assert "Click below" not in c3
+    assert c3.endswith("T&Cs Apply.")
+
+    # 4. Leading directive with trailing T&C and URL: 👉 Apply below & double the joy. T&Cs apply <url>
+    row_5 = (
+        "Hey {{1}},\n"
+        "Celebrate your festive season with Tata Capital personal loan.\n\n"
+        "👉 Apply below & double the joy. T&Cs apply https://u3.mnge.co/"
+    )
+    c5, bt5, u5, _ = extract_and_strip_cta(row_5)
+    assert bt5 == "Apply Now"
+    assert u5 == "https://u3.mnge.co/"
+    assert "👉 Apply below" not in c5
+    assert c5.endswith("T&Cs apply")
