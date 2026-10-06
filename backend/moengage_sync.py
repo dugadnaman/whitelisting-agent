@@ -30,12 +30,15 @@ MOENGAGE_API_BASE = "https://dashboard-03.moengage.com"
 # Default sender ID for TCFSL Promotional in MoEngage
 DEFAULT_TCFSL_PROMO_SENDER_ID = "68888420892e852255fca466"
 
+_TATA_MOENGAGE_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy", "all"}
+
 
 def get_moengage_config(account: str = "tata") -> dict[str, str]:
     """Resolve MoEngage workspace config for an account (base URL, token, cookie, sender)."""
     _load_env_file()
-    acc = "tata" if (account or "").lower().strip() in ("all", "") else (account or "tata").lower().strip()
-    prefix = _account_prefix(acc)
+    acc = (account or "tata").lower().strip()
+    is_tata = acc in _TATA_MOENGAGE_ACCOUNTS or acc == ""
+    prefix = "TATA" if is_tata else _account_prefix(acc)
 
     base_url = (
         os.environ.get(f"{prefix}_MOENGAGE_BASE_URL") or os.environ.get("MOENGAGE_BASE_URL") or MOENGAGE_API_BASE
@@ -58,7 +61,12 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
                 token = mcp_bearer
         except Exception:
             pass
-    cookie = os.environ.get(f"{prefix}_MOENGAGE_COOKIE") or os.environ.get("MOENGAGE_COOKIE") or ""
+    cookie = (
+        os.environ.get(f"{prefix}_MOENGAGE_COOKIE")
+        or os.environ.get("MOENGAGE_COOKIE")
+        or (os.environ.get("TATA_MOENGAGE_COOKIE") if is_tata else "")
+        or ""
+    )
 
     sender_id = (
         os.environ.get(f"{prefix}_MOENGAGE_SENDER_ID")
