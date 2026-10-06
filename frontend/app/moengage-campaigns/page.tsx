@@ -391,7 +391,12 @@ export default function MoEngageCampaignsPage() {
         if (active) showBatch(result, storageKey);
       })
       .catch((cause: unknown) => {
-        if (active) setError(`Unable to load batch ${id}: ${cause instanceof Error ? cause.message : String(cause)}.`);
+        if (active) {
+          localStorage.removeItem(storageKey);
+          const url = new URL(window.location.href);
+          url.searchParams.delete('batch');
+          window.history.replaceState(null, '', url.toString());
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
