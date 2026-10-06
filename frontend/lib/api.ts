@@ -1369,15 +1369,26 @@ export async function saveMoEngageCredentials(
   return res.json();
 }
 
-export async function testMoEngageConnection(account: string = "tata"): Promise<{
+export async function testMoEngageConnection(
+  account: string = "tata",
+  creds?: {
+    bearer_token?: string;
+    cookie?: string;
+    base_url?: string;
+    sender_id?: string;
+  }
+): Promise<{
   ok: boolean;
   error?: string;
   template_count?: number;
   expired?: boolean;
   remaining_min?: number | null;
 }> {
-  const res = await fetchWithRetry(getApiUrl(`/api/moengage/test?account=${encodeURIComponent(account)}`), {
+  const qs = new URLSearchParams({ account }).toString();
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/test?${qs}`), {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: creds ? JSON.stringify(creds) : undefined,
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

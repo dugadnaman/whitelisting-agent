@@ -4466,18 +4466,36 @@ def update_moengage_credentials_endpoint(
     )
 
 
+class MoEngageTestConnectionRequest(BaseModel):
+    bearer_token: str | None = None
+    cookie: str | None = None
+    base_url: str | None = None
+    sender_id: str | None = None
+
+
 @app.post("/api/moengage/test")
 def test_moengage_connection_endpoint(
     account: str = Query("tata"),
+    body: MoEngageTestConnectionRequest | None = None,
     current_user: dict = Depends(get_current_user),
 ):
-    """Test an account's MoEngage token validity by listing RCS templates."""
+    """Test an account's MoEngage token validity by querying live templates."""
     _require_moengage_account_access(account, current_user)
     from moengage_sync import test_moengage_connection
 
-    result = test_moengage_connection(account)
-    return _json_safe(result)
+    token = (body.bearer_token or "").strip() if body and body.bearer_token else None
+    cookie = (body.cookie or "").strip() if body and body.cookie else None
+    base_url = (body.base_url or "").strip() if body and body.base_url else None
+    sender_id = (body.sender_id or "").strip() if body and body.sender_id else None
 
+    result = test_moengage_connection(
+        account,
+        token_override=token,
+        cookie_override=cookie,
+        base_url_override=base_url,
+        sender_id_override=sender_id,
+    )
+    return _json_safe(result)
 
 @app.post("/api/moengage/rcs/sync-karix")
 def sync_karix_rcs_to_moengage_endpoint(

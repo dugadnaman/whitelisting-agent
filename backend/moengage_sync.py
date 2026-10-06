@@ -127,8 +127,63 @@ def get_moengage_credentials(account: str = "tata") -> dict[str, Any]:
     }
 
 
-def test_moengage_connection(account: str = "tata") -> dict[str, Any]:
-    """Verify MoEngage token validity for an account by listing RCS templates."""
+def test_moengage_connection(
+    account: str = "tata",
+    token_override: str | None = None,
+    cookie_override: str | None = None,
+    base_url_override: str | None = None,
+    sender_id_override: str | None = None,
+) -> dict[str, Any]:
+    """Verify MoEngage token validity for an account by querying MoEngage template metadata."""
+    clean_token = (token_override or "").strip()
+    if clean_token:
+        expiry = decode_moengage_token_expiry(clean_token)
+        cfg = get_moengage_config(account)
+        creds = {
+            "account": account,
+            "base_url": (base_url_override or cfg["base_url"]).rstrip("/"),
+            "sender_id": (sender_id_override or cfg["sender_id"]).strip(),
+            "bearer_token": clean_token,
+            "cookie": (cookie_override or cfg["cookie"]).strip(),
+            "has_token": True,
+            "has_cookie": bool(cookie_override or cfg["cookie"]),
+            **expiry,
+        }
+        if expiry.get("expired") is True:
+            return {
+                "ok": False,
+                "error": f"MoEngage Bearer token expired for {account}. Paste a fresh token (Settings -> MoEngage).",
+                **creds,
+            }
+        auth_val = clean_token if clean_token.lower().startswith("bearer ") else f"Bearer {clean_token}"
+        headers = {
+            "authorization": auth_val,
+            "content-type": "application/json",
+            "origin": creds["base_url"],
+            "page": "whatsapp/create/one-time",
+            "accept": "application/json",
+            "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
+        }
+        if creds["cookie"]:
+            headers["cookie"] = creds["cookie"]
+        try:
+            url = f"{creds['base_url']}/template_metadata?template_type=whatsapp"
+            resp = requests.get(url, headers=headers, timeout=15)
+            if not resp.ok:
+                raise RuntimeError(f"MoEngage API rejected credentials ({resp.status_code}): {resp.text[:150]}")
+            templates = resp.json().get("data", [])
+            return {
+                "ok": True,
+                "template_count": len(templates),
+                **creds,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                **creds,
+            }
+
     creds = get_moengage_credentials(account)
     if creds.get("expired") is True:
         return {

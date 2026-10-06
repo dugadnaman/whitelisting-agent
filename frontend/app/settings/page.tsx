@@ -397,12 +397,17 @@ export default function SettingsPage() {
     setBanner(null);
     try {
       const targetAcc = selectedAccount === 'all' ? 'tcl_promo' : selectedAccount;
-      const res = await testMoEngageConnection(targetAcc);
+      const res = await testMoEngageConnection(targetAcc, {
+        bearer_token: moeBearerToken.trim() || undefined,
+        cookie: moeCookie.trim() || undefined,
+        base_url: moeBaseUrl.trim() || undefined,
+        sender_id: moeSenderId.trim() || undefined,
+      });
       if (res.ok) {
         setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
         setBanner({
           type: 'success',
-          message: `MoEngage connection verified for ${targetAcc} — ${res.template_count ?? 0} RCS templates visible in Settings.`,
+          message: `MoEngage connection verified for ${targetAcc} — ${res.template_count ?? 0} templates accessible live in MoEngage.`,
         });
       } else {
         setBanner({
