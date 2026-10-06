@@ -868,7 +868,18 @@ export default function SettingsPage() {
                 id="moe_bearer_token"
                 type="password"
                 value={moeBearerToken}
-                onChange={(e) => setMoeBearerToken(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value.trim();
+                  if (val.includes('cookieyes-') || val.includes('moe_uuid=') || (val.includes(';') && !val.startsWith('eyJ'))) {
+                    setMoeCookie(val);
+                    setBanner({
+                      type: 'error',
+                      message: 'Notice: You pasted the Session Cookie into the Bearer Token box! It was moved to the Session Cookie box below. Please paste the JWT (starting with eyJ...) in this box.',
+                    });
+                  } else {
+                    setMoeBearerToken(e.target.value);
+                  }
+                }}
                 placeholder="Paste the Authorization: Bearer <JWT> header from MoEngage DevTools..."
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
@@ -885,7 +896,18 @@ export default function SettingsPage() {
                 id="moe_cookie"
                 type="password"
                 value={moeCookie}
-                onChange={(e) => setMoeCookie(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value.trim();
+                  if (val.startsWith('eyJ') || val.startsWith('Bearer eyJ')) {
+                    setMoeBearerToken(val);
+                    setBanner({
+                      type: 'error',
+                      message: 'Notice: You pasted the Bearer Token (JWT) into the Cookie box! It was moved to the Bearer Token box above. Please paste the full cookie string in this box.',
+                    });
+                  } else {
+                    setMoeCookie(e.target.value);
+                  }
+                }}
                 placeholder="Copy the full cookie header from DevTools (optional but recommended)..."
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />

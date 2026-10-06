@@ -526,6 +526,34 @@ export default function JiraBriefsPage() {
     });
   };
 
+  const updateCarouselCardField = (
+    rcsIdx: number,
+    cardIdx: number,
+    field: 'card_title' | 'card_description' | 'button_text' | 'button_url',
+    val: string
+  ) => {
+    setRcsTemplates((prev) => {
+      const next = [...prev];
+      const rcs = { ...next[rcsIdx] };
+      if (rcs.carousel_cards) {
+        const nextCards = [...rcs.carousel_cards];
+        nextCards[cardIdx] = {
+          ...nextCards[cardIdx],
+          [field]: val,
+        };
+        rcs.carousel_cards = nextCards;
+        if (cardIdx === 0) {
+          if (field === 'card_title') rcs.card_title = val;
+          if (field === 'card_description') rcs.body = val;
+          if (field === 'button_text') rcs.action_label = val;
+          if (field === 'button_url') rcs.action_url = val;
+        }
+      }
+      next[rcsIdx] = rcs;
+      return next;
+    });
+  };
+
   const updateSmsField = <K extends keyof JiraSmsDraft>(idx: number, field: K, val: JiraSmsDraft[K]) => {
     setSmsTemplates((prev) => {
       const next = [...prev];
@@ -2260,98 +2288,161 @@ export default function JiraBriefsPage() {
                                       <div className="flex items-center justify-between text-[11px] font-bold text-gray-700">
                                         <span>🎠 Carousel Cards ({rcs.carousel_cards.length}):</span>
                                       </div>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                                        {rcs.carousel_cards.map((card, cIdx) => (
-                                          <div key={`card-${cIdx}`} className="p-3 bg-white rounded-xl border border-gray-200 text-xs space-y-2 shadow-2xs">
-                                            <div className="font-bold text-gray-900 text-[11px] flex items-center justify-between">
-                                              <span>Card {cIdx + 1}: {card.card_title}</span>
-                                              <span className="text-[10px] px-1.5 py-0.2 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                                Card {cIdx + 1}
-                                              </span>
-                                            </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {rcs.carousel_cards.map((card, cIdx) => {
+                                          const isCardEditing = isEditing || editingCard[`rcs_${idx}_card_${cIdx}`] || false;
+                                          return (
+                                            <div key={`card-${cIdx}`} className={`p-3 bg-white rounded-xl border text-xs space-y-2.5 shadow-2xs transition ${isCardEditing ? 'border-indigo-400 ring-2 ring-indigo-50' : 'border-gray-200'}`}>
+                                              <div className="flex items-center justify-between gap-2">
+                                                <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                                  Card {cIdx + 1}
+                                                </span>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => toggleEditCard(`rcs_${idx}_card_${cIdx}`)}
+                                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition ${
+                                                    isCardEditing
+                                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                                                      : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                                  }`}
+                                                >
+                                                  {isCardEditing ? '✓ Done' : '✏️ Edit Card'}
+                                                </button>
+                                              </div>
 
-                                            {/* Card Creative Image Preview & Individual Upload */}
-                                            <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col">
-                                              {card.media_url ? (
-                                                <div className="relative h-28 w-full bg-white flex items-center justify-center group overflow-hidden">
-                                                  <img
-                                                    src={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true })}
-                                                    alt={card.media_filename || `Card ${cIdx + 1} creative`}
-                                                    className="w-full h-full object-cover group-hover:scale-105 transition cursor-pointer"
-                                                    onClick={() => {
-                                                      const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
-                                                      setPreviewCreativeModal({
-                                                        url,
-                                                        filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
-                                                        channel: `RCS Card ${cIdx + 1}`,
-                                                      });
-                                                    }}
-                                                    onError={(e) => {
-                                                      (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                                    }}
-                                                  />
-                                                  <div
-                                                    onClick={() => {
-                                                      const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
-                                                      setPreviewCreativeModal({
-                                                        url,
-                                                        filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
-                                                        channel: `RCS Card ${cIdx + 1}`,
-                                                      });
-                                                    }}
-                                                    className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold cursor-pointer"
-                                                  >
-                                                    <span>🔍 Preview Image</span>
+                                              {/* Card Creative Image Preview & Individual Upload */}
+                                              <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col">
+                                                {card.media_url ? (
+                                                  <div className="relative h-28 w-full bg-white flex items-center justify-center group overflow-hidden">
+                                                    <img
+                                                      src={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true })}
+                                                      alt={card.media_filename || `Card ${cIdx + 1} creative`}
+                                                      className="w-full h-full object-cover group-hover:scale-105 transition cursor-pointer"
+                                                      onClick={() => {
+                                                        const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
+                                                        setPreviewCreativeModal({
+                                                          url,
+                                                          filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
+                                                          channel: `RCS Card ${cIdx + 1}`,
+                                                        });
+                                                      }}
+                                                      onError={(e) => {
+                                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
+                                                      }}
+                                                    />
+                                                    <div
+                                                      onClick={() => {
+                                                        const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
+                                                        setPreviewCreativeModal({
+                                                          url,
+                                                          filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
+                                                          channel: `RCS Card ${cIdx + 1}`,
+                                                        });
+                                                      }}
+                                                      className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold cursor-pointer"
+                                                    >
+                                                      <span>🔍 Preview Image</span>
+                                                    </div>
+                                                  </div>
+                                                ) : (
+                                                  <div className="h-16 flex items-center justify-center text-[10px] text-gray-400 italic bg-gray-50">
+                                                    No creative attached
+                                                  </div>
+                                                )}
+
+                                                <div className="p-1.5 bg-gray-100/70 border-t border-gray-200 flex items-center justify-between text-[10px]">
+                                                  <span className="font-mono text-gray-600 truncate max-w-[120px]" title={card.media_filename || ''}>
+                                                    {card.media_filename || 'None'}
+                                                  </span>
+                                                  <div className="flex items-center gap-1.5">
+                                                    {card.media_url && (
+                                                      <a
+                                                        href={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename })}
+                                                        download={card.media_filename || `card_${cIdx + 1}.png`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="px-1.5 py-0.5 rounded bg-white hover:bg-gray-50 text-blue-700 border border-blue-200 font-semibold text-[9px]"
+                                                        title="Download this card's creative"
+                                                      >
+                                                        ⬇️ Get
+                                                      </a>
+                                                    )}
+                                                    <label className="px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[9px] cursor-pointer transition flex items-center gap-0.5">
+                                                      <span>{uploadingCreative[`rcs_${idx}_card_${cIdx}`] ? '⏳...' : card.media_url ? '🔄 Replace' : '📤 Upload'}</span>
+                                                      <input
+                                                        type="file"
+                                                        accept="image/png,image/jpeg,image/webp"
+                                                        className="hidden"
+                                                        disabled={uploadingCreative[`rcs_${idx}_card_${cIdx}`]}
+                                                        onChange={(e) => {
+                                                          const f = e.target.files?.[0];
+                                                          if (f) handleReplaceCarouselCardCreative(idx, cIdx, f);
+                                                          e.target.value = '';
+                                                        }}
+                                                      />
+                                                    </label>
+                                                  </div>
+                                                </div>
+                                              </div>
+
+                                              {isCardEditing ? (
+                                                <div className="space-y-2 pt-1">
+                                                  <div>
+                                                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">Card Title:</label>
+                                                    <input
+                                                      type="text"
+                                                      value={card.card_title}
+                                                      onChange={(e) => updateCarouselCardField(idx, cIdx, 'card_title', e.target.value)}
+                                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold outline-none focus:ring-1 focus:ring-indigo-500"
+                                                      placeholder="Card Title"
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">Card Description:</label>
+                                                    <textarea
+                                                      rows={3}
+                                                      value={card.card_description}
+                                                      onChange={(e) => updateCarouselCardField(idx, cIdx, 'card_description', e.target.value)}
+                                                      className="w-full p-2 font-mono text-xs border border-gray-300 rounded bg-white outline-none focus:ring-1 focus:ring-indigo-500"
+                                                      placeholder="Card Description / Body copy"
+                                                    />
+                                                  </div>
+                                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    <div>
+                                                      <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">CTA Button Label:</label>
+                                                      <input
+                                                        type="text"
+                                                        value={card.button_text || ''}
+                                                        onChange={(e) => updateCarouselCardField(idx, cIdx, 'button_text', e.target.value)}
+                                                        placeholder="e.g. Apply Now"
+                                                        className="w-full text-xs px-2 py-1 border border-gray-300 rounded bg-white font-medium outline-none focus:ring-1 focus:ring-indigo-500"
+                                                      />
+                                                    </div>
+                                                    <div>
+                                                      <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">CTA URL:</label>
+                                                      <input
+                                                        type="text"
+                                                        value={card.button_url || ''}
+                                                        onChange={(e) => updateCarouselCardField(idx, cIdx, 'button_url', e.target.value)}
+                                                        placeholder="https://u3.mnge.co/"
+                                                        className="w-full text-xs px-2 py-1 border border-gray-300 rounded bg-white font-mono outline-none focus:ring-1 focus:ring-indigo-500"
+                                                      />
+                                                    </div>
                                                   </div>
                                                 </div>
                                               ) : (
-                                                <div className="h-16 flex items-center justify-center text-[10px] text-gray-400 italic bg-gray-50">
-                                                  No creative attached
+                                                <div className="space-y-1.5 pt-0.5">
+                                                  <h5 className="font-bold text-xs text-gray-900">{card.card_title}</h5>
+                                                  <p className="text-[11px] text-gray-700 line-clamp-3 whitespace-pre-wrap leading-relaxed">{card.card_description}</p>
+                                                  <div className="text-[10px] text-blue-700 font-semibold bg-blue-50/50 p-1.5 rounded border border-blue-100 flex items-center gap-1">
+                                                    <span>🔗 {card.button_text || 'Explore'}</span>
+                                                    <span className="text-gray-400 font-mono truncate font-normal">({card.button_url})</span>
+                                                  </div>
                                                 </div>
                                               )}
-
-                                              <div className="p-1.5 bg-gray-100/70 border-t border-gray-200 flex items-center justify-between text-[10px]">
-                                                <span className="font-mono text-gray-600 truncate max-w-[120px]" title={card.media_filename || ''}>
-                                                  {card.media_filename || 'None'}
-                                                </span>
-                                                <div className="flex items-center gap-1.5">
-                                                  {card.media_url && (
-                                                    <a
-                                                      href={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename })}
-                                                      download={card.media_filename || `card_${cIdx + 1}.png`}
-                                                      target="_blank"
-                                                      rel="noopener noreferrer"
-                                                      className="px-1.5 py-0.5 rounded bg-white hover:bg-gray-50 text-blue-700 border border-blue-200 font-semibold text-[9px]"
-                                                      title="Download this card's creative"
-                                                    >
-                                                      ⬇️ Get
-                                                    </a>
-                                                  )}
-                                                  <label className="px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[9px] cursor-pointer transition flex items-center gap-0.5">
-                                                    <span>{uploadingCreative[`rcs_${idx}_card_${cIdx}`] ? '⏳...' : card.media_url ? '🔄 Replace' : '📤 Upload'}</span>
-                                                    <input
-                                                      type="file"
-                                                      accept="image/png,image/jpeg,image/webp"
-                                                      className="hidden"
-                                                      disabled={uploadingCreative[`rcs_${idx}_card_${cIdx}`]}
-                                                      onChange={(e) => {
-                                                        const f = e.target.files?.[0];
-                                                        if (f) handleReplaceCarouselCardCreative(idx, cIdx, f);
-                                                        e.target.value = '';
-                                                      }}
-                                                    />
-                                                  </label>
-                                                </div>
-                                              </div>
                                             </div>
-
-                                            <p className="text-[11px] text-gray-700 line-clamp-3 whitespace-pre-wrap">{card.card_description}</p>
-                                            <div className="text-[10px] text-blue-700 font-semibold bg-blue-50/50 p-1 rounded border border-blue-100 flex items-center gap-1">
-                                              <span>🔗 {card.button_text || 'Explore'}</span>
-                                              <span className="text-gray-400 font-mono truncate font-normal">({card.button_url})</span>
-                                            </div>
-                                          </div>
-                                        ))}
+                                          );
+                                        })}
                                       </div>
                                     </div>
                                   )}

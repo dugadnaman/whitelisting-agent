@@ -3994,6 +3994,28 @@ async def submit_jira_brief_endpoint(
             is_carousel = rcs.get("template_type") in ("carousel", "carousal") or len(c_cards) >= 2
             if is_carousel:
                 rcs_type = "carousel"
+                formatted_cards = []
+                for card in c_cards:
+                    btn_label = card.get("button_text") or card.get("action_label") or "Explore Now"
+                    btn_link = card.get("button_url") or card.get("action_url") or "https://u3.mnge.co/"
+                    formatted_cards.append({
+                        **card,
+                        "card_title": card.get("card_title") or "Offer",
+                        "card_description": card.get("card_description") or card.get("body") or "",
+                        "media_url": card.get("media_url"),
+                        "media_filename": card.get("media_filename"),
+                        "button_text": btn_label,
+                        "button_url": btn_link,
+                        "suggestions": [
+                            {
+                                "suggestionType": "url_action",
+                                "text": btn_label,
+                                "postbackData": btn_label,
+                                "url": btn_link,
+                            }
+                        ],
+                    })
+                c_cards = formatted_cards
             elif has_media:
                 rcs_type = "richcard"
             else:
@@ -4349,18 +4371,31 @@ def update_moengage_credentials_endpoint(
     keys = _moengage_credential_keys(req.account)
     mapping: dict[str, str] = {}
     acc = req.account.lower().strip()
+    raw_token = (req.bearer_token or "").strip()
+    raw_cookie = (req.cookie or "").strip()
+
+    # Auto-detect if user swapped or pasted cookie in token field
+    if raw_token and ("cookieyes-" in raw_token or ";" in raw_token or "moe_uuid=" in raw_token):
+        if not raw_cookie:
+            raw_cookie = raw_token
+        raw_token = ""
+    if raw_cookie and (raw_cookie.startswith("eyJ") or raw_cookie.startswith("Bearer eyJ")):
+        if not raw_token:
+            raw_token = raw_cookie
+        raw_cookie = ""
+
     if req.base_url and req.base_url.strip():
         mapping[keys["base_url"]] = req.base_url.strip().rstrip("/")
-    if req.bearer_token and req.bearer_token.strip():
-        mapping[keys["bearer_token"]] = req.bearer_token.strip()
+    if raw_token:
+        mapping[keys["bearer_token"]] = raw_token
         if acc in _TATA_MOENGAGE_ACCOUNTS:
-            mapping["TATA_MOENGAGE_BEARER_TOKEN"] = req.bearer_token.strip()
-            mapping["MOENGAGE_BEARER_TOKEN"] = req.bearer_token.strip()
-    if req.cookie and req.cookie.strip():
-        mapping[keys["cookie"]] = req.cookie.strip()
+            mapping["TATA_MOENGAGE_BEARER_TOKEN"] = raw_token
+            mapping["MOENGAGE_BEARER_TOKEN"] = raw_token
+    if raw_cookie:
+        mapping[keys["cookie"]] = raw_cookie
         if acc in _TATA_MOENGAGE_ACCOUNTS:
-            mapping["TATA_MOENGAGE_COOKIE"] = req.cookie.strip()
-            mapping["MOENGAGE_COOKIE"] = req.cookie.strip()
+            mapping["TATA_MOENGAGE_COOKIE"] = raw_cookie
+            mapping["MOENGAGE_COOKIE"] = raw_cookie
     if req.sender_id and req.sender_id.strip():
         mapping[keys["sender_id"]] = req.sender_id.strip()
     if not mapping:

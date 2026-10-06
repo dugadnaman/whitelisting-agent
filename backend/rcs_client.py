@@ -239,11 +239,16 @@ def _build_rcs_carousel_vi_template(
         c_desc_norm, desc_params, next_var_idx = _extract_and_number_rcs_variables(c_desc_raw, start_index=next_var_idx)
         all_params.extend(desc_params)
 
-        raw_suggs = card.get("suggestions") or (
-            _build_single_suggestion(payload)
-            if getattr(payload, "button_text", None)
-            else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
-        )
+        if card.get("button_text") or card.get("button_url"):
+            btn_txt = card.get("button_text") or "Apply Now"
+            btn_url = card.get("button_url") or "https://u3.mnge.co/"
+            raw_suggs = [{"suggestionType": "url_action", "text": btn_txt, "postbackData": btn_txt, "url": btn_url}]
+        else:
+            raw_suggs = card.get("suggestions") or (
+                _build_single_suggestion(payload)
+                if getattr(payload, "button_text", None)
+                else [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://www.tatacapital.com"}]
+            )
         clean_suggs, next_var_idx = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
 
         c_entry: dict = {"cardTitle": c_title_norm, "cardDescription": c_desc_norm, "suggestions": clean_suggs}
