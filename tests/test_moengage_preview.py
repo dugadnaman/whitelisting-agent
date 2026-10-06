@@ -399,3 +399,36 @@ def test_whatsapp_body_template_matching_and_placeholder_extraction(monkeypatch)
     assert wa_conf["template_id"] == "6a9a6585f5b9b18f8c972b54"
     assert wa_conf["template_name"] == "hr_btp_updated_7thsept_en"
     assert wa_conf["body_placeholders"]["{{1}}"] == match["placeholders"]["{{1}}"]
+
+def test_google_sheets_export_with_trailing_empty_columns_and_auxiliary_sheets():
+    from openpyxl import Workbook
+    import io
+
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Campaigns"
+    # Simulate Google Sheets row 1 with 7 headers + 3 trailing empty cells (columns H, I, J)
+    ws1.append(["Sr. No", "Message Body", "File Name on FileZilla", "Emp Count", "Date of Trigger", "Time of Trigger", "Teams Link", None, None, ""])
+    # Simulate data row with 7 values + 3 trailing empty cells
+    ws1.append(["1", "Hello message body", "FileZilla_Batch", "100", "2026-10-09", "11:00 AM", "https://teams.microsoft.com/meet/123", None, None, ""])
+    # Add an empty auxiliary sheet (like Sheet2)
+    ws2 = wb.create_sheet(title="EmptySheet")
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    data = bio.getvalue()
+
+    # Must succeed without raising "Spreadsheet headers must be unique, non-empty"
+    parsed = rows_from_file("google_sheets_export.xlsx", data, "tata")
+    assert len(parsed) == 1
+    row = parsed[0]
+    assert row["Sr. No"] == "1"
+    assert row["Message Body"] == "Hello message body"
+    assert row["File Name on FileZilla"] == "FileZilla_Batch"
+    assert row["Emp Count"] == "100"
+    assert row["Date of Trigger"] == "2026-10-09"
+    assert row["Time of Trigger"] == "11:00 AM"
+    assert row["Teams Link"] == "https://teams.microsoft.com/meet/123"
+    # Verify trailing empty headers were stripped and not assigned
+    assert None not in row
+    assert "" not in row

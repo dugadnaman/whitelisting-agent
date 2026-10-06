@@ -364,9 +364,20 @@ def rows_from_file(filename: str, data: bytes, account: str) -> list[dict[str, A
         except (BadZipFile, ValueError) as exc:
             raise ValueError("Invalid XLSX file") from exc
         try:
-            return [row for sheet in book.worksheets for row in _sheet_rows(
-                enumerate(sheet.iter_rows(values_only=True), 1), name, account, sheet.title
-            )]
+            all_rows = []
+            for sheet in book.worksheets:
+                try:
+                    sheet_data = _sheet_rows(
+                        enumerate(sheet.iter_rows(values_only=True), 1), name, account, sheet.title
+                    )
+                    all_rows.extend(sheet_data)
+                except ValueError as err:
+                    if "Spreadsheet has no header" in str(err):
+                        continue
+                    raise
+            if not all_rows and book.worksheets:
+                raise ValueError("Spreadsheet has no header")
+            return all_rows
         finally:
             book.close()
     raise ValueError("Only CSV and XLSX files are supported")
@@ -556,19 +567,36 @@ def _sheet_rows(records: Any, filename: str, account: str, sheet: str = "") -> l
         _, headers = next(rows)
     except StopIteration as exc:
         raise ValueError("Spreadsheet has no header") from exc
-    columns = [str(value).strip() if value is not None else "" for value in headers]
-    if not all(columns) or len(columns) != len(set(columns)) or set(columns) & {"source_ref", "row_id"}:
+    raw_columns = [str(value).strip() if value is not None else "" for value in headers]
+    # Strip trailing empty columns (standard in Google Sheets & Excel exports with trailing empty cells/formatting)
+    while raw_columns and not raw_columns[-1]:
+        raw_columns.pop()
+
+    if not raw_columns:
+        raise ValueError("Spreadsheet has no header")
+
+    if not all(raw_columns) or len(raw_columns) != len(set(raw_columns)) or set(raw_columns) & {"source_ref", "row_id"}:
         raise ValueError("Spreadsheet headers must be unique, non-empty, and exclude source_ref/row_id")
+
+    columns = raw_columns
     result = []
     for num, values in rows:
         if not any(value is not None and str(value).strip() for value in values):
             continue
         identity = f"{sheet + '!' if sheet else ''}{num}"
-        if len(values) != len(columns):
+        val_list = [str(value).strip() if value is not None else "" for value in values]
+        # Trim trailing empty values beyond columns length
+        while len(val_list) > len(columns) and not val_list[-1]:
+            val_list.pop()
+        # Pad if row has fewer values than columns
+        if len(val_list) < len(columns):
+            val_list.extend([""] * (len(columns) - len(val_list)))
+
+        if len(val_list) != len(columns):
             result.append({"source_ref": filename, "row_id": identity, "account": account,
                            "_row_error": "Spreadsheet row has a different column count"})
             continue
-        row = {header: str(value).strip() if value is not None else "" for header, value in zip(columns, values, strict=True)}
+        row = {header: val for header, val in zip(columns, val_list, strict=True)}
         row["source_ref"] = filename
         row["row_id"] = identity
         row.setdefault("account", account)
