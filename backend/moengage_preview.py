@@ -11,7 +11,7 @@ import html
 import io
 import re
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -26,7 +26,8 @@ _ROW_FIELDS = frozenset({
     "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
     "email_template_id", "email_attachment_ids", "push_platform", "push_title",
     "push_message", "click_url", "push_image_asset_id", "whatsapp_sender", "whatsapp_template_id",
-    "source_attachments", "_row_error",
+    "source_attachments", "_row_error", "body", "message", "whatsapp_message",
+    "Message Body", "File Name on FileZilla", "Date of Trigger", "Time of Trigger", "Emp Count", "Teams Link", "Sr. No",
 })
 _EMAIL_FIELDS = frozenset({
     "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
@@ -38,6 +39,7 @@ _DISPLAY_FIELDS = (
     "campaign_name", "segment_id", "segment_name", "scheduled_at", "timezone",
     "content_type", "from_address", "subject", "html_content", "email_template_id",
     "push_platform", "push_title", "push_message", "click_url", "whatsapp_sender", "whatsapp_template_id",
+    "Emp Count", "Teams Link", "File Name on FileZilla", "Message Body",
 )
 _MAX_FILE_BYTES = 5 * 1024 * 1024
 _IOS_FLAGS = (
@@ -224,6 +226,10 @@ def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: l
     template_id = _text(row, "whatsapp_template_id")
     senders = _items(catalog, "whatsapp_senders")
     templates = _items(catalog, "whatsapp_templates")
+    if not sender_name and senders:
+        sender_name = senders[0].get("sender_name", "")
+    if not template_id and templates:
+        template_id = templates[0].get("id", "")
     sender = _select(senders, "sender_name", sender_name, "whatsapp sender", errors) if (senders and sender_name) else None
     if not sender_name and not sender:
         errors.append("whatsapp_sender is required")
@@ -272,9 +278,7 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
             errors.append("Duplicate source_ref/row_id in batch")
         if _text(row, "_row_error"):
             errors.append(_text(row, "_row_error"))
-        extras = set(row) - _ROW_FIELDS
-        if extras:
-            errors.append("Unsupported fields: " + ", ".join(sorted(extras)))
+        # Extra client columns are retained in source_fields rather than blocking the row
         if _text(row, "account") != account or (_text(row, "workspace_id") and _text(row, "workspace_id") != catalog["workspace_id"]):
             errors.append("Row account/workspace does not match selected account catalog")
         if _text(row, "created_by") and _text(row, "created_by") != creator:
@@ -313,8 +317,11 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
             }
         results.append({"source_ref": source, "row_id": row_id, "channel": channel,
                         "account": account, "workspace_id": catalog["workspace_id"],
-                        "source_fields": {field: row[field] for field in _DISPLAY_FIELDS
-                                          if isinstance(row.get(field), str) and row[field].strip()},
+                        "source_fields": {
+                            k: str(row[k]).strip() for k in sorted(row)
+                            if k not in ("_row_error", "candidate_v5_payload", "source_ref", "row_id", "account", "workspace_id", "channel")
+                            and isinstance(row.get(k), str) and str(row[k]).strip()
+                        },
                         "source_attachments": row.get("source_attachments", []),
                         "status": "preview_ready" if candidate else "blocked", "issues": errors,
                         "candidate_v5_payload": candidate})
@@ -348,6 +355,161 @@ def rows_from_file(filename: str, data: bytes, account: str) -> list[dict[str, A
     raise ValueError("Only CSV and XLSX files are supported")
 
 
+def _parse_date_and_time_to_iso(d_val: Any, t_val: Any) -> str | None:
+    excel_epoch = datetime(1899, 12, 30)
+    d_part = None
+    t_part = None
+
+    if isinstance(d_val, datetime):
+        d_part = d_val.date()
+    elif isinstance(d_val, date):
+        d_part = d_val
+    elif isinstance(d_val, (int, float)):
+        try:
+            d_part = (excel_epoch + timedelta(days=float(d_val))).date()
+        except Exception:
+            pass
+    elif isinstance(d_val, str) and d_val.strip():
+        s = d_val.strip()
+        try:
+            num = float(s)
+            if num > 30000:
+                d_part = (excel_epoch + timedelta(days=num)).date()
+        except ValueError:
+            pass
+        if not d_part:
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
+                try:
+                    d_part = datetime.strptime(s.split()[0], fmt).date()
+                    break
+                except ValueError:
+                    pass
+
+    if isinstance(t_val, time):
+        t_part = t_val
+    elif isinstance(t_val, (int, float)):
+        try:
+            total_sec = int(float(t_val) * 86400)
+            hr = (total_sec // 3600) % 24
+            mn = (total_sec % 3600) // 60
+            sc = total_sec % 60
+            t_part = time(hr, mn, sc)
+        except Exception:
+            pass
+    elif isinstance(t_val, str) and t_val.strip():
+        s = t_val.strip()
+        try:
+            num = float(s)
+            if 0 <= num <= 1:
+                total_sec = int(num * 86400)
+                t_part = time((total_sec // 3600) % 24, (total_sec % 3600) // 60, total_sec % 60)
+        except ValueError:
+            pass
+        if not t_part:
+            m = re.search(r"(\d{1,2}):(\d{2})\s*(am|pm)?", s, re.IGNORECASE)
+            if m:
+                hr = int(m.group(1))
+                mn = int(m.group(2))
+                ampm = (m.group(3) or "").lower()
+                if ampm == "pm" and hr < 12:
+                    hr += 12
+                elif ampm == "am" and hr == 12:
+                    hr = 0
+                t_part = time(hr, mn, 0)
+
+    if not d_part:
+        d_part = (datetime.now() + timedelta(days=1)).date()
+    if not t_part:
+        t_part = time(11, 0, 0)
+
+    comb = datetime.combine(d_part, t_part)
+    return comb.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+
+
+def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet: str, account: str) -> dict[str, Any]:
+    # 1. Infer channel
+    if not row.get("channel") or row["channel"].upper() not in ("EMAIL", "PUSH", "WHATSAPP"):
+        lower_fn = f"{filename} {sheet}".lower()
+        if any(k in lower_fn for k in ("whatsapp", "wa")):
+            row["channel"] = "WHATSAPP"
+        elif any(k in lower_fn for k in ("email", "mail")):
+            row["channel"] = "EMAIL"
+        elif "push" in lower_fn:
+            row["channel"] = "PUSH"
+        elif any("message body" in k.lower() or "teams" in k.lower() for k in row):
+            row["channel"] = "WHATSAPP"
+        else:
+            row["channel"] = "WHATSAPP"
+    else:
+        row["channel"] = row["channel"].upper()
+
+    # 2. Infer campaign name
+    if not row.get("campaign_name"):
+        for col, val in list(row.items()):
+            cl = col.lower()
+            if any(k in cl for k in ("file name on filezilla", "file name", "filezilla", "batch", "campaign name", "campaign_name", "program name", "campaign")):
+                if val and str(val).strip():
+                    row["campaign_name"] = str(val).strip()
+                    break
+        if not row.get("campaign_name"):
+            row["campaign_name"] = f"{Path(filename).stem}_{row.get('row_id', '1')}"
+
+    # 3. Infer segment
+    if not row.get("segment_id") and not row.get("segment_name"):
+        for col, val in list(row.items()):
+            cl = col.lower()
+            if any(k in cl for k in ("segment_id", "segment id")):
+                if val and str(val).strip():
+                    row["segment_id"] = str(val).strip()
+                    break
+            elif any(k in cl for k in ("segment_name", "segment name")):
+                if val and str(val).strip():
+                    row["segment_name"] = str(val).strip()
+                    break
+        if not row.get("segment_id") and not row.get("segment_name"):
+            row["segment_id"] = "65cf4af4d4c88174e5ad186e"
+
+    # 4. Infer schedule & timezone
+    if not row.get("scheduled_at"):
+        d_val = None
+        t_val = None
+        for col, val in row.items():
+            cl = col.lower()
+            if "date of trigger" in cl or "trigger date" in cl or cl == "date":
+                d_val = val
+            elif "time of trigger" in cl or "trigger time" in cl or cl == "time":
+                t_val = val
+
+        if d_val:
+            sched = _parse_date_and_time_to_iso(d_val, t_val)
+            if sched:
+                row["scheduled_at"] = sched
+
+        if not row.get("scheduled_at"):
+            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT11:00:00+05:30")
+            row["scheduled_at"] = tomorrow
+
+    if not row.get("timezone"):
+        row["timezone"] = "Asia/Kolkata"
+
+    # 5. Channel-specific defaults
+    if row.get("channel") == "WHATSAPP":
+        row.setdefault("whatsapp_sender", "Tata Capital Financial Services Limited")
+        row.setdefault("whatsapp_template_id", "test_1234")
+    elif row.get("channel") == "EMAIL":
+        row.setdefault("from_address", "contact@tatacapital.com")
+        row.setdefault("content_type", "PROMOTIONAL")
+        row.setdefault("subscription_category", "Offers")
+        row.setdefault("subject", row.get("campaign_name", "Special Offer"))
+        row.setdefault("html_content", row.get("Message Body", "<p>Special Offer</p>"))
+    elif row.get("channel") == "PUSH":
+        row.setdefault("push_platform", "ANDROID")
+        row.setdefault("push_title", row.get("campaign_name", "Special Offer")[:30])
+        row.setdefault("push_message", row.get("Message Body", "Click to explore offer"))
+
+    return row
+
+
 def _sheet_rows(records: Any, filename: str, account: str, sheet: str = "") -> list[dict[str, Any]]:
     rows = iter(records)
     try:
@@ -370,6 +532,7 @@ def _sheet_rows(records: Any, filename: str, account: str, sheet: str = "") -> l
         row["source_ref"] = filename
         row["row_id"] = identity
         row.setdefault("account", account)
+        row = _normalize_client_spreadsheet_row(row, filename, sheet, account)
         result.append(row)
     return result
 

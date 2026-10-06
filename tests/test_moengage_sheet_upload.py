@@ -94,3 +94,46 @@ def test_xlsx_push_preview_keeps_worksheet_row_and_channel_specific_content(tmp_
         assert payload["campaign_content"]["content"]["push"]["android"]["basic_details"]["message"] == "Review your offer"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+def test_client_whatsapp_spreadsheet_auto_normalization(tmp_path, monkeypatch):
+    """Verify client spreadsheets with custom columns (Date/Time of Trigger, File Name on FileZilla) parse to 100% ready."""
+    catalog = {
+        **CATALOG,
+        "whatsapp_senders": [{"sender_name": "Tata Capital Financial Services Limited", "provider": "KARIX"}],
+        "whatsapp_templates": [{"id": "test_1234", "name": "test_1234"}],
+        "segments": [{"id": "65cf4af4d4c88174e5ad186e", "name": "Test_FSTP_Pranav_1602"}],
+    }
+    catalog_path = tmp_path / "account-catalog.json"
+    catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
+    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_CATALOG_FILE", str(catalog_path))
+    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_WORKSPACE_ID", CATALOG["workspace_id"])
+
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Sheet1"
+    sheet.append(["Sr. No", "Message Body", "File Name on FileZilla", "Emp Count", "Date of Trigger", "Time of Trigger", "Teams Link"])
+    sheet.append([1, "Dear Colleague, attend training", "TTA_BATCH04_09102026", 109, "46303", "0.625", "https://teams.microsoft.com/meet/123"])
+    sheet.append([2, "Dear Colleague, attend session", "TTA_BATCH05_09102026", 32, "46304", "0.45486", "https://teams.microsoft.com/meet/456"])
+
+    buffer = io.BytesIO()
+    book.save(buffer)
+    client = TestClient(app)
+    app.dependency_overrides[get_current_user] = lambda: USER
+    try:
+        result = client.post(
+            "/api/moengage/drafts/preview-upload",
+            data={"account": "tata"},
+            files={"file": ("Whatsapp message - File_BL&D_OCT.xlsx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert result.status_code == 200, result.text
+        data = result.json()
+        assert (data["ready"], data["blocked"]) == (2, 0)
+        item1 = data["items"][0]
+        assert item1["status"] == "preview_ready"
+        assert item1["channel"] == "WHATSAPP"
+        assert item1["source_fields"]["campaign_name"] == "TTA_BATCH04_09102026"
+        assert item1["source_fields"]["Emp Count"] == "109"
+        assert "2026-10-08T15:00:00" in item1["source_fields"]["scheduled_at"]
+        assert item1["candidate_v5_payload"]["campaign_delivery_type"] == "ONE_TIME"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
