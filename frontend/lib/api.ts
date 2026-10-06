@@ -1104,6 +1104,8 @@ export function getJiraCreativeDownloadUrl(params: {
   if (params.attachmentId) qs.set("attachment_id", params.attachmentId);
   if (params.filename) qs.set("filename", params.filename);
   if (params.inline) qs.set("inline", "true");
+  const token = getAuthToken();
+  if (token) qs.set("token", token);
   return getApiUrl(`/api/jira/creative/download?${qs.toString()}`);
 }
 

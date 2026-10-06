@@ -199,6 +199,8 @@ class DraftCreation:
                 stored = dict(existing)
                 if stored["payload_hash"] != digest:
                     raise ValueError("Source row already reserved with different campaign content")
+                if stored.get("state") in ("UNCERTAIN", "MAYBE_SENT") and not stored.get("campaign_id"):
+                    return stored, True
                 return stored, False
             if self.approved_live_rows is not None:
                 count = conn.execute(

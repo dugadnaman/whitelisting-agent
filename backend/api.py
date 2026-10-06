@@ -4075,10 +4075,18 @@ def download_jira_creative_endpoint(
     attachment_id: str | None = Query(None),
     filename: str | None = Query(None),
     inline: bool = Query(False),
+    token: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     """Download or preview a creative attachment from a Jira brief."""
-    _require_tata_jira_access(current_user)
+    user = current_user
+    if token:
+        from auth import decode_access_token
+
+        decoded = decode_access_token(token)
+        if decoded:
+            user = decoded
+    _require_tata_jira_access(user)
     import mimetypes
     from fastapi.responses import FileResponse
     from jira_client import MEDIA_CACHE_DIR, download_jira_attachment

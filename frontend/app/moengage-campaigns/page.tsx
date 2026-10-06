@@ -462,14 +462,21 @@ export default function MoEngageCampaignsPage() {
   };
 
   const createRow = async (row: MoEngageDraftRow) => {
-    if (!batch || batchScope !== storageKey || busy || createInFlight.current || row.status !== 'preview_ready' || uncertainRows.includes(row.row_id)) return;
+    if (!batch || batchScope !== storageKey || busy || createInFlight.current) return;
+    if (row.status !== 'preview_ready' && row.status !== 'UNCERTAIN') return;
+
+    const isRetry = row.status === 'UNCERTAIN';
     const name = row.source_fields?.campaign_name || row.candidate_v5_payload?.basic_details?.name || 'unnamed campaign';
-    if (!window.confirm(`Create MoEngage ${row.channel} DRAFT for ${account.toUpperCase()}?
+    const confirmPrompt = isRetry
+      ? `Retry creating MoEngage ${row.channel} DRAFT for ${account.toUpperCase()}?\n\nCampaign: ${name}\nRow: ${row.row_id}`
+      : `Create MoEngage ${row.channel} DRAFT for ${account.toUpperCase()}?\n\nCampaign: ${name}\nPhysical Row: ${row.row_id}\n\nThis will create a confirmed DRAFT in your MoEngage workspace. It will NOT publish, send, or dispatch messages to customers.`;
 
-Campaign: ${name}
-Physical Row: ${row.row_id}
+    if (!window.confirm(confirmPrompt)) return;
 
-This will create a confirmed DRAFT in your MoEngage workspace. It will NOT publish, send, or dispatch messages to customers.`)) return;
+    if (isRetry && currentUser) {
+      localStorage.removeItem(`moengage_draft_uncertain:${currentUser.id}:${account}:${batch.batch_id}:${row.row_id}`);
+      setUncertainRows((rows) => rows.filter((r) => r !== row.row_id));
+    }
 
     createInFlight.current = true;
     setBusy(true);

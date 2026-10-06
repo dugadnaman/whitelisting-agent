@@ -21,6 +21,7 @@ import {
   type JiraBriefData,
   type JiraWhatsAppDraft,
   type JiraRcsDraft,
+  type JiraSmsDraft,
 } from '@/lib/api';
 import { formatError, formatDate } from '@/lib/format';
 
@@ -88,11 +89,13 @@ export default function JiraBriefsPage() {
   // Editable template drafts and selection sets
   const [waTemplates, setWaTemplates] = useState<JiraWhatsAppDraft[]>([]);
   const [rcsTemplates, setRcsTemplates] = useState<JiraRcsDraft[]>([]);
+  const [smsTemplates, setSmsTemplates] = useState<JiraSmsDraft[]>([]);
   const [selectedWa, setSelectedWa] = useState<Set<number>>(new Set());
   const [selectedRcs, setSelectedRcs] = useState<Set<number>>(new Set());
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
+  const [previewCreativeModal, setPreviewCreativeModal] = useState<{ url: string; filename: string; channel?: string } | null>(null);
   const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
   const currentRcs = getRcsDetails(targetAccount, accounts);
   const whatsappAccount = targetAccount === 'wealth' ? 'tcl_promo' : targetAccount;
@@ -358,8 +361,10 @@ export default function JiraBriefsPage() {
       }
       const waList = data.whatsapp_templates || [];
       const rcsList = data.rcs_templates || [];
+      const smsList = data.sms_templates || [];
       setWaTemplates(waList);
       setRcsTemplates(rcsList);
+      setSmsTemplates(smsList);
       setSelectedWa(new Set(waList.map((_, idx) => idx)));
       setSelectedRcs(new Set(rcsList.map((_, idx) => idx)));
       setEditingCard({});
@@ -518,6 +523,193 @@ export default function JiraBriefsPage() {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: val };
       return next;
+    });
+  };
+
+  const updateSmsField = <K extends keyof JiraSmsDraft>(idx: number, field: K, val: JiraSmsDraft[K]) => {
+    setSmsTemplates((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: val };
+      if (field === 'text') {
+        next[idx].char_count = String(val || '').length;
+      }
+      return next;
+    });
+  };
+
+  const moveTemplate = (
+    fromChannel: 'whatsapp' | 'rcs' | 'sms',
+    fromIndex: number,
+    toChannel: 'whatsapp' | 'rcs' | 'sms'
+  ) => {
+    if (fromChannel === toChannel) return;
+
+    let templateName = '';
+
+    if (fromChannel === 'whatsapp') {
+      const wa = waTemplates[fromIndex];
+      if (!wa) return;
+      templateName = wa.template_name;
+      setWaTemplates((prev) => prev.filter((_, i) => i !== fromIndex));
+      setSelectedWa((prev) => {
+        const next = new Set<number>();
+        prev.forEach((idx) => {
+          if (idx < fromIndex) next.add(idx);
+          else if (idx > fromIndex) next.add(idx - 1);
+        });
+        return next;
+      });
+
+      if (toChannel === 'rcs') {
+        const newRcs: JiraRcsDraft = {
+          template_name: wa.template_name.replace(/_wa(?:_[a-z]{2})?_\d+$/, '_rcs_1').replace(/_wa$/, '_rcs') || `${wa.template_name}_rcs`,
+          card_title: wa.header_text || wa.body.split('\n')[0].slice(0, 32) || 'Special Offer',
+          body: wa.body,
+          media_file: wa.media_file,
+          media_filename: wa.media_filename,
+          action_type: wa.button_type || 'URL',
+          action_label: wa.button_text || 'Check Offer',
+          action_url: wa.button_url || 'https://u3.mnge.co/',
+          variables: wa.variables || [],
+          raw_source: wa.raw_source || wa.body,
+          template_type: wa.media_file ? 'richcard' : 'text',
+        };
+        setRcsTemplates((prev) => {
+          const next = [...prev, newRcs];
+          setSelectedRcs((s) => new Set(s).add(next.length - 1));
+          return next;
+        });
+        setActiveTab('rcs');
+      } else if (toChannel === 'sms') {
+        const newSms: JiraSmsDraft = {
+          template_name: wa.template_name.replace(/_wa(?:_[a-z]{2})?_\d+$/, '_sms_1').replace(/_wa$/, '_sms') || `${wa.template_name}_sms`,
+          text: wa.body,
+          char_count: wa.body.length,
+          variant: 'Converted from WA',
+          variables: wa.variables || [],
+          raw_source: wa.raw_source || wa.body,
+        };
+        setSmsTemplates((prev) => [...prev, newSms]);
+        setActiveTab('sms');
+      }
+    } else if (fromChannel === 'rcs') {
+      const rcs = rcsTemplates[fromIndex];
+      if (!rcs) return;
+      templateName = rcs.template_name;
+      setRcsTemplates((prev) => prev.filter((_, i) => i !== fromIndex));
+      setSelectedRcs((prev) => {
+        const next = new Set<number>();
+        prev.forEach((idx) => {
+          if (idx < fromIndex) next.add(idx);
+          else if (idx > fromIndex) next.add(idx - 1);
+        });
+        return next;
+      });
+
+      if (toChannel === 'whatsapp') {
+        const newWa: JiraWhatsAppDraft = {
+          template_name: rcs.template_name.replace(/_rcs(?:_carousel)?_\d+$/, '_wa_1').replace(/_rcs$/, '_wa') || `${rcs.template_name}_wa`,
+          category: 'MARKETING',
+          language: 'en',
+          header_type: rcs.media_file ? 'IMAGE' : (rcs.card_title ? 'TEXT' : 'NONE'),
+          header_text: rcs.media_file ? null : (rcs.card_title || null),
+          body: rcs.body,
+          footer_text: null,
+          media_file: rcs.media_file,
+          media_filename: rcs.media_filename,
+          button_type: rcs.action_url ? 'URL' : 'NONE',
+          button_text: rcs.action_label || 'Check Offer',
+          button_url: rcs.action_url || 'https://u3.mnge.co/',
+          variables: rcs.variables || [],
+          sample_values: [],
+          raw_source: rcs.raw_source || rcs.body,
+        };
+        setWaTemplates((prev) => {
+          const next = [...prev, newWa];
+          setSelectedWa((s) => new Set(s).add(next.length - 1));
+          return next;
+        });
+        setActiveTab('whatsapp');
+      } else if (toChannel === 'sms') {
+        const newSms: JiraSmsDraft = {
+          template_name: rcs.template_name.replace(/_rcs(?:_carousel)?_\d+$/, '_sms_1').replace(/_rcs$/, '_sms') || `${rcs.template_name}_sms`,
+          text: rcs.body,
+          char_count: rcs.body.length,
+          variant: 'Converted from RCS',
+          variables: rcs.variables || [],
+          raw_source: rcs.raw_source || rcs.body,
+        };
+        setSmsTemplates((prev) => [...prev, newSms]);
+        setActiveTab('sms');
+      }
+    } else if (fromChannel === 'sms') {
+      const sms = smsTemplates[fromIndex];
+      if (!sms) return;
+      templateName = sms.template_name;
+      setSmsTemplates((prev) => prev.filter((_, i) => i !== fromIndex));
+
+      if (toChannel === 'whatsapp') {
+        const newWa: JiraWhatsAppDraft = {
+          template_name: sms.template_name.replace(/_sms_\d+$/, '_wa_1').replace(/_sms$/, '_wa') || `${sms.template_name}_wa`,
+          category: 'MARKETING',
+          language: 'en',
+          header_type: 'NONE',
+          header_text: null,
+          body: sms.text,
+          footer_text: null,
+          button_type: 'NONE',
+          variables: sms.variables || [],
+          sample_values: [],
+          raw_source: sms.raw_source || sms.text,
+        };
+        setWaTemplates((prev) => {
+          const next = [...prev, newWa];
+          setSelectedWa((s) => new Set(s).add(next.length - 1));
+          return next;
+        });
+        setActiveTab('whatsapp');
+      } else if (toChannel === 'rcs') {
+        const newRcs: JiraRcsDraft = {
+          template_name: sms.template_name.replace(/_sms_\d+$/, '_rcs_1').replace(/_sms$/, '_rcs') || `${sms.template_name}_rcs`,
+          card_title: sms.text.split('\n')[0].slice(0, 32) || 'Special Offer',
+          body: sms.text,
+          action_type: 'URL',
+          action_label: 'Check Offer',
+          action_url: 'https://u3.mnge.co/',
+          variables: sms.variables || [],
+          raw_source: sms.raw_source || sms.text,
+          template_type: 'text',
+        };
+        setRcsTemplates((prev) => {
+          const next = [...prev, newRcs];
+          setSelectedRcs((s) => new Set(s).add(next.length - 1));
+          return next;
+        });
+        setActiveTab('rcs');
+      }
+    }
+
+    setBrief((prev) => {
+      if (!prev) return prev;
+      const curWa = fromChannel === 'whatsapp' ? waTemplates.length - 1 : (toChannel === 'whatsapp' ? waTemplates.length + 1 : waTemplates.length);
+      const curRcs = fromChannel === 'rcs' ? rcsTemplates.length - 1 : (toChannel === 'rcs' ? rcsTemplates.length + 1 : rcsTemplates.length);
+      const curSms = fromChannel === 'sms' ? smsTemplates.length - 1 : (toChannel === 'sms' ? smsTemplates.length + 1 : smsTemplates.length);
+      return {
+        ...prev,
+        channel_counts: {
+          whatsapp: Math.max(0, curWa),
+          rcs: Math.max(0, curRcs),
+          sms: Math.max(0, curSms),
+          email: prev.channel_counts?.email ?? 0,
+          push: prev.channel_counts?.push ?? 0,
+          total: Math.max(0, curWa) + Math.max(0, curRcs) + Math.max(0, curSms) + (prev.channel_counts?.email ?? 0) + (prev.channel_counts?.push ?? 0),
+        },
+      };
+    });
+
+    setFeedback({
+      message: `Successfully moved template '${templateName}' from ${fromChannel.toUpperCase()} to ${toChannel.toUpperCase()}.`,
+      type: 'success',
     });
   };
 
@@ -1153,32 +1345,158 @@ export default function JiraBriefsPage() {
                   </div>
                 </div>
 
-                {/* Creatives Attachment Strip */}
+                {/* Creatives Attachment Strip & Image Preview Gallery */}
                 {brief.attachments_mapped.length > 0 && (
-                  <div className="pt-3 border-t border-gray-100 flex items-center gap-2 overflow-x-auto">
-                    <span className="text-[11px] font-semibold text-gray-500 uppercase shrink-0">Creatives Mapped:</span>
-                    {brief.attachments_mapped.map((att) => (
-                      <div
-                        key={att.id || att.filename}
-                        className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-gray-50 border border-gray-200 text-[11px] font-mono text-gray-700 shrink-0"
-                        title={att.filename}
-                      >
-                        <span>{att.target_channel === 'WHATSAPP' ? '🟢 WA' : att.target_channel === 'RCS' ? '🔵 RCS' : '📎'}</span>
-                        <span className="max-w-[160px] truncate">{att.filename}</span>
-                        {(att.local_path || att.id) && (
-                          <a
-                            href={getJiraCreativeDownloadUrl({ path: att.local_path, attachmentId: att.id, filename: att.filename })}
-                            download={att.filename}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-1 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[9px] font-sans font-bold transition"
-                            title={`Download ${att.filename}`}
-                          >
-                            ⬇️ Download
-                          </a>
-                        )}
+                  <div className="pt-3 border-t border-gray-100 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🖼️</span>
+                        <span className="font-bold text-gray-800 uppercase tracking-wider text-[11px]">
+                          Attached Creatives & Assets ({brief.attachments_mapped.length}):
+                        </span>
                       </div>
-                    ))}
+                      <span className="text-[11px] text-gray-400">
+                        Click any image thumbnail to inspect full-size preview
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 overflow-x-auto pb-1.5 scrollbar-thin">
+                      {brief.attachments_mapped.map((att) => {
+                        const fn = att.filename || '';
+                        const isImg = Boolean(
+                          att.mime?.startsWith('image/') ||
+                          /\.(png|jpe?g|webp|gif|svg)$/i.test(fn)
+                        );
+                        const downloadUrl = getJiraCreativeDownloadUrl({
+                          path: att.local_path,
+                          attachmentId: att.id,
+                          filename: att.filename,
+                        });
+                        const previewUrl = getJiraCreativeDownloadUrl({
+                          path: att.local_path,
+                          attachmentId: att.id,
+                          filename: att.filename,
+                          inline: true,
+                        });
+
+                        if (isImg) {
+                          return (
+                            <div
+                              key={att.id || att.filename}
+                              className="group relative flex flex-col w-36 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden shadow-2xs hover:shadow-md hover:border-blue-400 transition"
+                            >
+                              <div
+                                onClick={() =>
+                                  setPreviewCreativeModal({
+                                    url: previewUrl,
+                                    filename: fn,
+                                    channel: att.target_channel,
+                                  })
+                                }
+                                className="relative h-24 w-full bg-gray-50 flex items-center justify-center cursor-pointer overflow-hidden"
+                                title="Click to view full-size image"
+                              >
+                                <img
+                                  src={previewUrl}
+                                  alt={fn}
+                                  className="h-full w-full object-cover group-hover:scale-105 transition duration-200"
+                                  onError={(e) => {
+                                    (e.currentTarget as HTMLImageElement).src =
+                                      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text y="50" font-size="12">Preview Unavailable</text></svg>';
+                                  }}
+                                />
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1">
+                                  <span>🔍 Preview</span>
+                                </div>
+                                <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/90 text-gray-800 shadow-2xs">
+                                  {att.target_channel === 'WHATSAPP'
+                                    ? '🟢 WA'
+                                    : att.target_channel === 'RCS'
+                                    ? '🔵 RCS'
+                                    : '📎 Mapped'}
+                                </span>
+                              </div>
+
+                              <div className="p-2 flex flex-col justify-between gap-1 text-[10px]">
+                                <span
+                                  className="font-mono text-gray-900 truncate font-semibold"
+                                  title={fn}
+                                >
+                                  {fn}
+                                </span>
+                                <div className="flex items-center justify-between gap-1 pt-1 border-t border-gray-100">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPreviewCreativeModal({
+                                        url: previewUrl,
+                                        filename: fn,
+                                        channel: att.target_channel,
+                                      })
+                                    }
+                                    className="text-blue-600 hover:text-blue-800 font-bold"
+                                  >
+                                    View
+                                  </button>
+                                  <a
+                                    href={downloadUrl}
+                                    download={fn}
+                                    className="text-gray-500 hover:text-gray-900 font-semibold flex items-center gap-0.5"
+                                    title="Download file"
+                                  >
+                                    <span>⬇️</span> Download
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        // Non-image file (e.g. spreadsheet, docx brief, mailer zip)
+                        const isSpreadsheet = /\.(xlsx|xls|csv)$/i.test(fn);
+                        const isDocx = /\.(docx|doc)$/i.test(fn);
+                        const isZip = /\.zip$/i.test(fn);
+                        return (
+                          <div
+                            key={att.id || att.filename}
+                            className="flex flex-col justify-between w-40 shrink-0 p-2.5 rounded-xl border border-gray-200 bg-gray-50/70 text-[11px] shadow-2xs hover:bg-gray-100/70 transition space-y-1.5"
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-base">
+                                {isSpreadsheet ? '📊' : isDocx ? '📄' : isZip ? '📦' : '📎'}
+                              </span>
+                              <span
+                                className="font-mono font-semibold text-gray-800 truncate"
+                                title={fn}
+                              >
+                                {fn}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-gray-500 font-sans">
+                              {isSpreadsheet
+                                ? 'Spreadsheet Brief'
+                                : isDocx
+                                ? 'Document Copy'
+                                : isZip
+                                ? 'HTML Mailer ZIP'
+                                : att.target_channel || 'Attachment'}
+                            </span>
+                            <div className="pt-1 border-t border-gray-200/80 flex items-center justify-between">
+                              <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-white text-gray-600 border">
+                                {att.target_channel || 'BRIEF'}
+                              </span>
+                              <a
+                                href={downloadUrl}
+                                download={fn}
+                                className="px-2 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[10px] border border-blue-200"
+                              >
+                                ⬇️ Get
+                              </a>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1462,6 +1780,22 @@ export default function JiraBriefsPage() {
                                   >
                                     {isEditing ? '✓ Done Editing' : '✏️ Edit'}
                                   </button>
+                                  <select
+                                    defaultValue=""
+                                    onChange={(e) => {
+                                      const target = e.target.value as 'rcs' | 'sms';
+                                      if (target) {
+                                        moveTemplate('whatsapp', idx, target);
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                    className="text-[11px] font-semibold bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition shadow-2xs"
+                                    title="Move this template to another channel"
+                                  >
+                                    <option value="" disabled>⇄ Move Channel...</option>
+                                    <option value="rcs">🔵 Move to RCS (DLT)</option>
+                                    <option value="sms">🟣 Move to SMS (DLT)</option>
+                                  </select>
                                 </div>
                               </div>
 
@@ -1511,7 +1845,12 @@ export default function JiraBriefsPage() {
                                     <img
                                       src={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename, inline: true })}
                                       alt={wa.media_filename || 'Creative preview'}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white"
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white cursor-pointer hover:opacity-90 transition shadow-2xs"
+                                      title="Click to preview full-size"
+                                      onClick={() => {
+                                        const url = getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename, inline: true });
+                                        setPreviewCreativeModal({ url, filename: wa.media_filename || 'whatsapp_creative.jpg', channel: 'WhatsApp (16:9 / 1.91:1)' });
+                                      }}
                                       onError={(e) => {
                                         (e.currentTarget as HTMLImageElement).style.display = 'none';
                                       }}
@@ -1743,6 +2082,22 @@ export default function JiraBriefsPage() {
                                   >
                                     {isEditing ? '✓ Done Editing' : '✏️ Edit'}
                                   </button>
+                                  <select
+                                    defaultValue=""
+                                    onChange={(e) => {
+                                      const target = e.target.value as 'whatsapp' | 'sms';
+                                      if (target) {
+                                        moveTemplate('rcs', idx, target);
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                    className="text-[11px] font-semibold bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition shadow-2xs"
+                                    title="Move this template to another channel"
+                                  >
+                                    <option value="" disabled>⇄ Move Channel...</option>
+                                    <option value="whatsapp">🟢 Move to WhatsApp</option>
+                                    <option value="sms">🟣 Move to SMS (DLT)</option>
+                                  </select>
                                 </div>
                               </div>
 
@@ -1791,7 +2146,12 @@ export default function JiraBriefsPage() {
                                     <img
                                       src={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename, inline: true })}
                                       alt={rcs.media_filename || 'Creative preview'}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white"
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white cursor-pointer hover:opacity-90 transition shadow-2xs"
+                                      title="Click to preview full-size"
+                                      onClick={() => {
+                                        const url = getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename, inline: true });
+                                        setPreviewCreativeModal({ url, filename: rcs.media_filename || 'rcs_creative.jpg', channel: 'RCS (2:1 / 1440x720)' });
+                                      }}
                                       onError={(e) => {
                                         (e.currentTarget as HTMLImageElement).style.display = 'none';
                                       }}
@@ -1893,38 +2253,86 @@ export default function JiraBriefsPage() {
                   {/* SMS Panel */}
                   {activeTab === 'sms' && (
                     <div className="space-y-4">
-                      {brief.sms_templates.length === 0 ? (
+                      {smsTemplates.length === 0 ? (
                         <p className="py-8 text-center text-xs text-gray-400">No SMS variants detected in this brief.</p>
                       ) : (
-                        brief.sms_templates.map((sms) => (
-                          <div key={sms.template_name} className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 space-y-2.5">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono font-bold text-xs text-gray-900">{sms.template_name}</span>
-                                <span className="text-[10px] px-2 py-0.2 rounded bg-purple-100 text-purple-800 font-semibold">
-                                  {sms.variant}
-                                </span>
+                        smsTemplates.map((sms, idx) => {
+                          const isEditing = editingCard[`sms-${idx}`] || false;
+                          return (
+                            <div key={`sms-card-${idx}`} className="p-4 rounded-xl border border-gray-200 bg-white space-y-2.5 shadow-2xs">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  {isEditing ? (
+                                    <input
+                                      type="text"
+                                      value={sms.template_name}
+                                      onChange={(e) => updateSmsField(idx, 'template_name', e.target.value)}
+                                      className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
+                                    />
+                                  ) : (
+                                    <span className="font-mono font-bold text-xs text-gray-900">{sms.template_name}</span>
+                                  )}
+                                  <span className="text-[10px] px-2 py-0.2 rounded bg-purple-100 text-purple-800 font-semibold">
+                                    {sms.variant}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                                      sms.char_count <= 160
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                    }`}
+                                  >
+                                    {sms.char_count} chars ({Math.ceil(sms.char_count / 160)} SMS segment)
+                                  </span>
+                                  <button
+                                    onClick={() => toggleEditCard(`sms-${idx}`)}
+                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
+                                      isEditing
+                                        ? 'bg-purple-50 text-purple-700 border-purple-300'
+                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {isEditing ? '✓ Done Editing' : '✏️ Edit'}
+                                  </button>
+                                  <select
+                                    defaultValue=""
+                                    onChange={(e) => {
+                                      const target = e.target.value as 'whatsapp' | 'rcs';
+                                      if (target) {
+                                        moveTemplate('sms', idx, target);
+                                        e.target.value = '';
+                                      }
+                                    }}
+                                    className="text-[11px] font-semibold bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition shadow-2xs"
+                                    title="Move this template to another channel"
+                                  >
+                                    <option value="" disabled>⇄ Move Channel...</option>
+                                    <option value="whatsapp">🟢 Move to WhatsApp</option>
+                                    <option value="rcs">🔵 Move to RCS (DLT)</option>
+                                  </select>
+                                </div>
                               </div>
-                              <span
-                                className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                                  sms.char_count <= 160
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                }`}
-                              >
-                                {sms.char_count} chars ({Math.ceil(sms.char_count / 160)} SMS segment)
-                              </span>
-                            </div>
 
-                            <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-                              {sms.text}
+                              {isEditing ? (
+                                <textarea
+                                  rows={4}
+                                  value={sms.text}
+                                  onChange={(e) => updateSmsField(idx, 'text', e.target.value)}
+                                  className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-purple-500"
+                                />
+                              ) : (
+                                <div className="bg-gray-50 p-3.5 rounded-lg border border-gray-200/80 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                  {sms.text}
+                                </div>
+                              )}
                             </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   )}
-
                   {/* Email Packages & Templates Panel */}
                   {activeTab === 'email' && (
                     <div className="space-y-4">
@@ -2458,6 +2866,58 @@ export default function JiraBriefsPage() {
             >
               {submitting ? 'Whitelisting...' : 'Confirm & Whitelist'}
             </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {/* Full-Resolution Creative Lightbox Modal */}
+    {previewCreativeModal && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
+        onClick={() => setPreviewCreativeModal(null)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="creative-lightbox-title"
+      >
+        <div
+          className="relative max-w-4xl max-h-[92vh] w-full bg-gray-900 border border-gray-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-3.5 bg-gray-950/90 border-b border-gray-800 flex items-center justify-between text-white text-xs">
+            <div className="flex items-center gap-2 font-mono">
+              <span className="text-base">🖼️</span>
+              <span id="creative-lightbox-title" className="font-bold truncate max-w-md">
+                {previewCreativeModal.filename}
+              </span>
+              {previewCreativeModal.channel && (
+                <span className="px-2 py-0.5 rounded text-[10px] bg-white/10 font-sans font-semibold text-gray-200">
+                  {previewCreativeModal.channel}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <a
+                href={previewCreativeModal.url}
+                download={previewCreativeModal.filename}
+                className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-sans text-xs font-semibold shadow-2xs transition"
+              >
+                ⬇️ Download Creative
+              </a>
+              <button
+                onClick={() => setPreviewCreativeModal(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 text-base font-bold px-2.5 transition"
+                title="Close preview"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          <div className="p-4 overflow-auto flex items-center justify-center bg-black/50 min-h-[300px]">
+            <img
+              src={previewCreativeModal.url}
+              alt={previewCreativeModal.filename}
+              className="max-h-[75vh] max-w-full object-contain rounded-lg shadow-md"
+            />
           </div>
         </div>
       </div>
