@@ -1,0 +1,23 @@
+[
+  {
+    "id": "6a9a6585f5b9b18f8c972b54",
+    "name": "hr_btp_updated_7thsept_en",
+    "body": "Dear Colleague,\n \nYou have been invited to attend the Behvaioural training program \nProgram Name : {{1}} \n \n🗓 Session Date: {{2}}\n🕙 Time: {{3}}\n📍 Platform: MS Teams \n👉 {{4}}\n\nAttendance is mandatory. Please ensure you join on time.Non-attendance will lead to strict disciplinary action.\n\nRegards, \nL&D – Tata Capital Ltd.",
+    "sender_id": "685a47bfadfdfd854f960ab5",
+    "provider": "Karix"
+  },
+  {
+    "id": "6a7449d75fb134aeedd8f2da",
+    "name": "2699_btp_6and7aug_en",
+    "body": "Dear Colleague,\n \nYou have been invited to attend the Behvaioural training program \nProgram Name : {{1}} \n \n Session Date: {{2}}\n Time: {{3}}\n Platform: MS Teams \n {{4}}\n\nRegards, \nL&D – Tata Capital Ltd.",
+    "sender_id": "685a47bfadfdfd854f960ab5",
+    "provider": "Karix"
+  },
+  {
+    "id": "6a4ca510e0366a33a2c9827f",
+    "name": "2606_hr_9thjuly_en",
+    "body": "Dear Colleague,\n \nYou have been invited to attend the Behvaioural training program \nProgram Name : {{1}} \n \n Session Date: {{2}}\n Time: {{3}}\n Platform: MS Teams \n {{4}}\n\nAttendance is mandatory.",
+    "sender_id": "685a47bfadfdfd854f960ab5",
+    "provider": "Karix"
+  }
+]

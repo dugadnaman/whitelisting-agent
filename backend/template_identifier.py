@@ -241,7 +241,7 @@ def fetch_cached_moengage_whatsapp_templates(account: str = "tata", max_age_sec:
     cached = _CACHED_MOENGAGE_WHATSAPP_TEMPLATES.get(account)
     if cached and (now - cached[0]) < max_age_sec:
         return cached[1]
-
+    tracked_cache = Path(__file__).resolve().parent / f"templates_cache_{account}.json"
     disk_cache = Path(f"data/whatsapp_templates_cache_{account}.json")
 
     try:
@@ -269,24 +269,20 @@ def fetch_cached_moengage_whatsapp_templates(account: str = "tata", max_age_sec:
                     })
             if templates_with_body:
                 _CACHED_MOENGAGE_WHATSAPP_TEMPLATES[account] = (now, templates_with_body)
-                try:
-                    disk_cache.parent.mkdir(parents=True, exist_ok=True)
-                    disk_cache.write_text(json.dumps(templates_with_body, ensure_ascii=False), encoding="utf-8")
-                except Exception:
-                    pass
                 return templates_with_body
     except Exception as exc:
         logger.debug("Could not fetch live MoEngage WhatsApp templates for matching: %s", exc)
 
-    # Disk cache fallback
-    if disk_cache.exists():
-        try:
-            disk_data = json.loads(disk_cache.read_text(encoding="utf-8"))
-            if isinstance(disk_data, list) and disk_data:
-                _CACHED_MOENGAGE_WHATSAPP_TEMPLATES[account] = (now, disk_data)
-                return disk_data
-        except Exception:
-            pass
+    # Tracked file fallback (baked into repository & container)
+    for p in (tracked_cache, disk_cache):
+        if p.exists():
+            try:
+                disk_data = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(disk_data, list) and disk_data:
+                    _CACHED_MOENGAGE_WHATSAPP_TEMPLATES[account] = (now, disk_data)
+                    return disk_data
+            except Exception:
+                pass
 
     fallback = cached[1] if cached else []
     _CACHED_MOENGAGE_WHATSAPP_TEMPLATES[account] = (now, fallback)
@@ -302,11 +298,14 @@ def extract_variables_from_template_body(client_text: str, tpl_text: str) -> dic
     for tag in set(tags):
         m = re.search(r"([^\n\r{}]+?)\s*\{\{" + tag + r"\}\}", tpl_text)
         if m:
-            prefix = re.escape(m.group(1).strip())
-            m_val = re.search(prefix + r"\s*[:\-–]?\s*([^\n\r]+)", client_text, re.IGNORECASE)
-            if m_val:
-                tag_key = "{{" + str(tag) + "}}"
-                placeholders[tag_key] = m_val.group(1).strip()
+            raw_prefix = m.group(1).strip()
+            words = re.findall(r"[a-zA-Z]+", raw_prefix)
+            if words:
+                pat = r"(?:^|\n)[^\w\n]*\b" + r"\s+".join(words) + r"\b\s*[:\-–]?\s*([^\n\r]+)"
+                m_val = re.search(pat, client_text, re.IGNORECASE)
+                if m_val:
+                    tag_key = "{{" + str(tag) + "}}"
+                    placeholders[tag_key] = m_val.group(1).strip()
 
     urls = re.findall(r"https?://[^\s]+", client_text)
     for tag in tags:

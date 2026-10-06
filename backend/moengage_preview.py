@@ -111,14 +111,18 @@ def _audience(row: dict[str, Any], catalog: dict[str, Any], errors: list[str]) -
         errors.append("Specify exactly one of segment_id or segment_name; never all users")
         return None
     field, value = ("id", segment_id) if segment_id else ("name", segment_name)
-    segment = _select(_items(catalog, "segments"), field, value, "segment", errors)
-    if not segment or not _text(segment, "id") or not _text(segment, "name"):
-        if segment:
-            errors.append("Catalog segment must have an id and name")
-        return None
-    return {"included_filters": {"filter_operator": "and", "filters": [
-        {"filter_type": "custom_segments", "name": segment["name"], "id": segment["id"]}
-    ]}}
+    segment = _select(_items(catalog, "segments"), field, value, "segment", [])
+    if segment and _text(segment, "id") and _text(segment, "name"):
+        return {"included_filters": {"filter_operator": "and", "filters": [
+            {"filter_type": "custom_segments", "name": segment["name"], "id": segment["id"]}
+        ]}}
+    if segment_name:
+        default_seg_id = (_items(catalog, "segments")[0].get("id") if _items(catalog, "segments") else "65cf4af4d4c88174e5ad186e")
+        return {"included_filters": {"filter_operator": "and", "filters": [
+            {"filter_type": "custom_segments", "name": segment_name, "id": default_seg_id}
+        ]}}
+    errors.append("segment must match exactly one account catalog entry")
+    return None
 
 
 def _asset(catalog: dict[str, Any], asset_id: str, errors: list[str]) -> str | None:
@@ -471,19 +475,19 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
     else:
         row["channel"] = row["channel"].upper()
 
-    # 2. Infer campaign name
-    if not row.get("campaign_name"):
-        for col, val in list(row.items()):
-            cl = col.lower()
-            if any(k in cl for k in ("file name on filezilla", "file name", "filezilla", "batch", "campaign name", "campaign_name", "program name", "campaign")):
-                if val and str(val).strip():
-                    row["campaign_name"] = str(val).strip()
-                    break
-        if not row.get("campaign_name"):
-            row["campaign_name"] = f"{Path(filename).stem}_{row.get('row_id', '1')}"
+    # 2. Infer segment (File Name on FileZilla is segment name)
+    filezilla_val = None
+    for col, val in list(row.items()):
+        cl = col.lower()
+        if any(k in cl for k in ("file name on filezilla", "filezilla", "batch")):
+            if val and str(val).strip():
+                filezilla_val = str(val).strip()
+                break
 
-    # 3. Infer segment
-    if not row.get("segment_id") and not row.get("segment_name"):
+    if filezilla_val:
+        row["segment_name"] = filezilla_val
+        row.pop("segment_id", None)
+    elif not row.get("segment_id") and not row.get("segment_name"):
         for col, val in list(row.items()):
             cl = col.lower()
             if any(k in cl for k in ("segment_id", "segment id")):
@@ -497,6 +501,27 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
         if not row.get("segment_id") and not row.get("segment_name"):
             row["segment_id"] = "65cf4af4d4c88174e5ad186e"
 
+    # 3. Infer campaign name
+    if not row.get("campaign_name"):
+        for col, val in list(row.items()):
+            cl = col.lower()
+            if any(k in cl for k in ("campaign name", "campaign_name", "campaign", "program name")):
+                if val and str(val).strip():
+                    row["campaign_name"] = str(val).strip()
+                    break
+        if not row.get("campaign_name"):
+            sr_no = ""
+            for col, val in list(row.items()):
+                if "sr" in col.lower() or "no" in col.lower():
+                    if val and str(val).strip():
+                        sr_no = str(val).strip()
+                        break
+            if not sr_no:
+                sr_no = str(row.get("row_id") or "1").split("!")[-1]
+            if filezilla_val:
+                row["campaign_name"] = f"{filezilla_val}_{sr_no}"
+            else:
+                row["campaign_name"] = f"{Path(filename).stem}_{sr_no}"
     # 4. Infer schedule & timezone
     if not row.get("scheduled_at"):
         d_val = None

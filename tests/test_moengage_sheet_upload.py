@@ -131,7 +131,8 @@ def test_client_whatsapp_spreadsheet_auto_normalization(tmp_path, monkeypatch):
         item1 = data["items"][0]
         assert item1["status"] == "preview_ready"
         assert item1["channel"] == "WHATSAPP"
-        assert item1["source_fields"]["campaign_name"] == "TTA_BATCH04_09102026"
+        assert item1["source_fields"]["campaign_name"] == "TTA_BATCH04_09102026_1"
+        assert item1["source_fields"]["segment_name"] == "TTA_BATCH04_09102026"
         assert item1["source_fields"]["Emp Count"] == "109"
         assert "2026-10-08T15:00:00" in item1["source_fields"]["scheduled_at"]
         assert item1["candidate_v5_payload"]["campaign_delivery_type"] == "ONE_TIME"
