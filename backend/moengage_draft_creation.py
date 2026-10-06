@@ -199,8 +199,6 @@ class DraftCreation:
                 stored = dict(existing)
                 if stored["payload_hash"] != digest:
                     raise ValueError("Source row already reserved with different campaign content")
-                if stored.get("state") in ("UNCERTAIN", "MAYBE_SENT") and not stored.get("campaign_id"):
-                    return stored, True
                 return stored, False
             if self.approved_live_rows is not None:
                 count = conn.execute(
@@ -344,7 +342,7 @@ class DraftCreation:
         stored, fresh = self._reserve(source_ref, row_id, digest)
         state = stored["state"]
         campaign_id = stored.get("campaign_id")
-        if fresh:
+        if fresh or (payload.get("channel") == "WHATSAPP" and state in ("UNCERTAIN", "MAYBE_SENT") and not campaign_id):
             if payload.get("channel") == "WHATSAPP":
                 campaign_id = self._create_whatsapp_draft(payload, stored["idempotency_key"])
                 self._record(source_ref, row_id, "VALIDATED", campaign_id=campaign_id)

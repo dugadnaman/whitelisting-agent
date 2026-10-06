@@ -153,8 +153,9 @@ class DraftBatchQueue:
         if len(matches) != 1:
             raise ValueError("Duplicate row_id in batch; no unique row can be selected")
         current = dict(matches[0])
-        if current["status"] not in ("preview_ready", "UNCERTAIN"):
-            return self.get(batch_id)
+        if current["status"] != "preview_ready":
+            if not (current.get("channel") == "WHATSAPP" and current["status"] == "UNCERTAIN"):
+                return self.get(batch_id)
         # Production constructs the gated creator before claiming; a missing owner
         # approval leaves the row ready and cannot silently consume its one attempt.
         creator = self.creator if self.creator is not None else DraftCreation.from_environment(self.account, self.user)
@@ -176,7 +177,7 @@ class DraftBatchQueue:
                 raise ValueError("Source row already attempted in another batch")
             claimed = conn.execute(
                 "UPDATE moengage_draft_batch_rows SET status='UNCERTAIN',issue='create_result_unconfirmed',updated_at=? "
-                "WHERE batch_id=? AND position=? AND status IN ('preview_ready', 'UNCERTAIN')",
+                "WHERE batch_id=? AND position=? AND (status='preview_ready' OR (channel='WHATSAPP' AND status='UNCERTAIN'))",
                 (time.time(), batch_id, current["position"]),
             ).rowcount
             if claimed != 1:
