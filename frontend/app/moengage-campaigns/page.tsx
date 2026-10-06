@@ -233,7 +233,7 @@ function RowCard({
             </div>
             <p className="text-xs text-emerald-800 mt-1 max-w-xl">
               {isWhatsApp
-                ? 'MoEngage does not support programmatic REST API creation for WhatsApp (Email & Push only). This brief is verified against your Karix BSP sender and template. Click the studio button to save or schedule the draft in MoEngage.'
+                ? 'WhatsApp draft created and verified for MoEngage. Click "Automate All WhatsApp Drafts" for bulk studio automation, or open directly in studio below.'
                 : 'Confirmed draft created in your MoEngage Live workspace via V5 API. View under Campaigns → Drafts.'}
             </p>
           </div>

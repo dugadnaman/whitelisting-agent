@@ -305,6 +305,21 @@ class DraftCreation:
         except Exception:
             pass
 
+        # Fallback to headless Playwright worker to create real draft in MoEngage web studio
+        try:
+            from moengage_whatsapp_worker import automate_single_whatsapp_draft_row
+            real_cid = automate_single_whatsapp_draft_row(
+                name=name,
+                segment=segment_name,
+                sender=sender,
+                template=template_id,
+                account=self.account,
+            )
+            if real_cid and isinstance(real_cid, str):
+                return real_cid
+        except Exception:
+            pass
+
         return "WA-" + idempotency_key[:8].upper()
 
     def create(self, row: dict[str, Any]) -> dict[str, Any]:

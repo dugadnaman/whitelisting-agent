@@ -31,6 +31,109 @@ def parse_cookie_string(cookie_raw: str, domain: str = ".moengage.com") -> list[
     return cookies
 
 
+def automate_single_whatsapp_draft_row(
+    name: str,
+    segment: str = "Test_FSTP_Pranav_1602",
+    sender: str = "Tata Capital Financial Services Limited",
+    template: str = "test_1234",
+    account: str = "tata",
+) -> str | None:
+    """Launch headless Chromium, open MoEngage studio, fill fields, and click 'Save as draft'."""
+    prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
+    raw_cookie = (
+        os.environ.get(prefix + "COOKIE")
+        or os.environ.get(f"{account.upper()}_MOENGAGE_COOKIE")
+        or os.environ.get("MOENGAGE_COOKIE")
+        or ""
+    )
+    base_url = (
+        os.environ.get(prefix + "DASHBOARD_URL")
+        or "https://dashboard-03.moengage.com"
+    )
+    if not raw_cookie:
+        logger.warning("No MoEngage cookie found for headless automation")
+        return None
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.warning("Playwright is not installed for headless automation")
+        return None
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+            context = browser.new_context(
+                viewport={"width": 1366, "height": 768},
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            )
+            cookies = parse_cookie_string(raw_cookie, domain=".moengage.com")
+            if cookies:
+                context.add_cookies(cookies)
+
+            page = context.new_page()
+            page.goto(f"{base_url}/v4/whatsapp/create/one-time/", timeout=35000)
+            page.wait_for_timeout(3000)
+
+            if "/login" in page.url:
+                browser.close()
+                raise PermissionError("MoEngage session expired or invalid. Update MOENGAGE_COOKIE in Settings.")
+
+            name_input = page.locator('input[placeholder*="Campaign Name"]')
+            name_input.wait_for(timeout=15000)
+            name_input.fill(name)
+
+            segment_btn = page.locator('button:has-text("Custom segment")')
+            if segment_btn.is_visible():
+                segment_btn.click()
+                page.wait_for_timeout(1000)
+                search_box = page.locator('input[placeholder*="Search to select"]')
+                if search_box.is_visible():
+                    search_box.fill(segment[:15])
+                    page.wait_for_timeout(1500)
+                    opt = page.locator(f'*:has-text("{segment}")').last
+                    if opt.is_visible():
+                        opt.click()
+
+            page.wait_for_timeout(1000)
+            page.locator('button:has-text("Next")').click()
+            page.wait_for_timeout(3000)
+
+            sender_dropdown = page.locator('[data-testid="whatsapp-sender-dropdown"]')
+            if sender_dropdown.is_visible():
+                sender_dropdown.click()
+                page.keyboard.press("ArrowDown")
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(1000)
+
+            template_dropdown = page.locator('[data-testid="whatsapp-template-dropdown"]')
+            if template_dropdown.is_visible():
+                template_dropdown.click()
+                page.keyboard.press("ArrowDown")
+                page.keyboard.press("Enter")
+                page.wait_for_timeout(1000)
+
+            save_btn = page.locator('button:has-text("Save as draft")')
+            if save_btn.is_visible():
+                save_btn.click()
+                page.wait_for_timeout(4000)
+
+            browser.close()
+            import re
+            clean_tag = re.sub(r"[^A-Za-z0-9]", "_", name)[:18].upper()
+            return f"WA-{clean_tag}"
+    except Exception as exc:
+        logger.error("Single row headless WhatsApp automation failed: %s", exc)
+        return None
+
 def automate_whatsapp_draft_batch(
     batch_id: str,
     account: str,
