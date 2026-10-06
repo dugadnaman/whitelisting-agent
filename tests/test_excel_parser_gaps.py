@@ -8,12 +8,20 @@ Verifies:
 
 import openpyxl
 
+import pytest
+from unittest.mock import patch
+
 from briefing_parser import (
     _match_sheet_channel,
     _parse_excel_channel_sheets,
     _parse_excel_grid_messages,
 )
 
+
+@pytest.fixture(autouse=True)
+def mock_gemini_network():
+    with patch("gemini_intelligence.analyze_template_semantics", return_value={}):
+        yield
 
 def test_match_sheet_channel_variations():
     """Verify sheet channel matcher recognizes common client naming variations."""
@@ -185,3 +193,40 @@ def test_real_smpl_campaign_file_if_available():
     assert channels.count("WA") == 0, f"Expected 0 WA templates, got {channels.count('WA')}"
     assert channels.count("SMS") == 4, f"Expected 4 SMS templates, got {channels.count('SMS')}"
     assert channels.count("RCS") == 5, f"Expected 5 RCS templates, got {channels.count('RCS')}"
+
+def test_tcn_551_pa_bl_gst_internal_real_file_if_available():
+    """Verify TCN-551 / PA BL GST Internal.xlsx extracts 3 WA (split from 1./2.), 1 RCS, 4 SMS, and embedded creatives."""
+    from pathlib import Path
+    from briefing_parser import extract_templates_from_excel_file, _extract_images_from_xlsx
+
+    real_path = Path("/Users/naman/Downloads/PA BL GST Internal.xlsx")
+    if not real_path.is_file():
+        return
+
+    # 1. Test image extraction from XLSX
+    imgs_map = _extract_images_from_xlsx(real_path)
+    assert "Whatsapp" in imgs_map and len(imgs_map["Whatsapp"]) >= 1
+    assert "RCS" in imgs_map and len(imgs_map["RCS"]) >= 1
+    assert "PN" in imgs_map and len(imgs_map["PN"]) >= 1
+
+    # 2. Test template extraction
+    extracted = extract_templates_from_excel_file(real_path)
+    channels = [item["channel"] for item in extracted]
+
+    assert channels.count("WA") == 3, f"Expected 3 WA templates (split cell), got {channels.count('WA')}"
+    assert channels.count("RCS") == 1, f"Expected 1 RCS template, got {channels.count('RCS')}"
+    assert channels.count("SMS") == 4, f"Expected 4 SMS templates, got {channels.count('SMS')}"
+
+    wa_items = [item for item in extracted if item["channel"] == "WA"]
+    # Check that WA copies 2 and 3 were split from row 14
+    assert any("loan request is now in the final lap" in w["text"] for w in wa_items)
+    assert any("profile just moved to the “almost there” zone" in w["text"] for w in wa_items)
+    # Check image was attached
+    assert all(w.get("media_file") is not None for w in wa_items)
+    assert all("Whatsapp" in w.get("media_file", "") for w in wa_items)
+
+    # Check SMS items have leading 1./2. stripped
+    sms_items = [item for item in extracted if item["channel"] == "SMS"]
+    assert any(s["text"].startswith("Dear") for s in sms_items)
+    assert any(s["text"].startswith("Urgent") for s in sms_items)
+    assert not any(s["text"].startswith("1.") or s["text"].startswith("2.") for s in sms_items)

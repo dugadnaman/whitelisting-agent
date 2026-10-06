@@ -69,6 +69,7 @@ class DraftCreation:
         clock: Callable[[], float] = time.time,
         allow_sqlite_for_tests: bool = False,
         approved_live_rows: dict[tuple[str, str], tuple[str | None, str]] | None = None,
+        allow_all_rows: bool = False,
     ) -> None:
         authorize_draft_account(account, user)
         if catalog.get("account") != account or not isinstance(catalog.get("workspace_id"), str) or not catalog["workspace_id"]:
@@ -80,6 +81,7 @@ class DraftCreation:
         self.clock = clock
         self.allow_sqlite_for_tests = allow_sqlite_for_tests
         self.approved_live_rows = approved_live_rows
+        self.allow_all_rows = allow_all_rows
 
     @classmethod
     def from_environment(cls, account: str, user: dict[str, Any]) -> DraftCreation:
@@ -109,6 +111,12 @@ class DraftCreation:
                 raise PermissionError("Only the designated live test operator may create a draft")
         elif not allowed_operators and (source_ref or rows_json or segment_id or row_id):
             raise PermissionError("Only the designated live test operator may create a draft")
+        allow_all_rows = (
+            os.environ.get(prefix + "ALLOW_ALL_ROWS") == "true"
+            or os.environ.get("MOENGAGE_DRAFT_ALLOW_ALL_ROWS") == "true"
+            or os.environ.get(prefix + "DISABLE_ROW_LOCK") == "true"
+            or os.environ.get("MOENGAGE_DRAFT_DISABLE_ROW_LOCK") == "true"
+        )
         approved_rows: dict[tuple[str, str], tuple[str | None, str]] | None = None
         if rows_json:
             try:
@@ -128,10 +136,16 @@ class DraftCreation:
             channels = {ch for ch, _ in approved_rows.values()}
             if not channels.issubset({"EMAIL", "PUSH", "WHATSAPP"}) or len(approved_rows) != len(selected):
                 raise PermissionError("Approved live rows must contain distinct Email, Push, or WhatsApp source rows")
-        elif source_ref or row_id or segment_id:
-            if not source_ref or not row_id or not segment_id:
+        elif source_ref and row_id:
+            if not segment_id:
                 raise PermissionError("One approved live test source row and segment are required")
             approved_rows = {(source_ref, row_id): (None, segment_id)}
+        elif source_ref or row_id:
+            raise PermissionError("One approved live test source row and segment are required")
+        else:
+            approved_rows = None
+        if allow_all_rows:
+            approved_rows = None
         allow_sqlite = (
             os.environ.get("MOENGAGE_DRAFT_ALLOW_SQLITE") == "true"
             or os.environ.get(f"MOENGAGE_DRAFT_{account.upper()}_ALLOW_SQLITE") == "true"
@@ -141,7 +155,7 @@ class DraftCreation:
         writer = DraftWriter(account, user)
         catalog = load_server_catalog(account)
         return cls(account, user, catalog, writer, approved_live_rows=approved_rows,
-                   allow_sqlite_for_tests=allow_sqlite)
+                   allow_sqlite_for_tests=allow_sqlite, allow_all_rows=allow_all_rows)
 
     def _db(self):
         conn = get_db()
@@ -283,9 +297,9 @@ class DraftCreation:
 
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         """Never reissue an attempted POST, including after timeout or process crash."""
-        if self.approved_live_rows is not None:
+        if self.approved_live_rows is not None and not self.allow_all_rows:
             selected = self.approved_live_rows.get((row.get("source_ref"), row.get("row_id")))
-            if (selected is None or row.get("segment_id") != selected[1]
+            if (selected is None or (selected[1] is not None and row.get("segment_id") != selected[1])
                     or (selected[0] is not None and row.get("channel") != selected[0])):
                 raise PermissionError("This source row, channel or audience is not approved for the live draft test")
         preview = prepare_batch([row], self.account, self.catalog, self.user["email"], source_type="server_catalog")

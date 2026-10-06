@@ -391,6 +391,10 @@ def extract_and_strip_cta(
         + r")\s*$",
         re.IGNORECASE,
     )
+    btn_only_pat = re.compile(
+        r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:CTA\s*(?:Button)?\s*[:\-–]?\s*)?(?:\[|<|\()(?:\s*CTA\s*[:\-–]?\s*)?\s*([A-Za-z0-9\s]{3,25})\s*(?:\]|>|\))\s*$",
+        re.IGNORECASE,
+    )
 
     directive_pat = re.compile(
         r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:tap|click|press)\s+(?:here|below|down)?\s*(?:to|on)?\s*(.+?)(?:\s*[⬇️👇📲👉🔗▶️\s])*$",
@@ -425,6 +429,14 @@ def extract_and_strip_cta(
             elif not extracted_url or extracted_url == DEFAULT_CTA_URL:
                 extracted_url = DEFAULT_CTA_URL
             continue
+        # 1b. Standalone bracket/angle button tag without URL (e.g. <CHECK YOUR OFFER> or [Apply Now])
+        m_btn_only = btn_only_pat.match(sline)
+        if m_btn_only:
+            lbl = m_btn_only.group(1).strip("*_~ ")
+            if lbl and len(lbl) <= 25:
+                extracted_btn_text = lbl.title()
+            continue
+
 
         # 2. Standalone T&C disclaimer line
         clean_tc = sline.strip("*_ \t").lower()
@@ -442,23 +454,39 @@ def extract_and_strip_cta(
                 cleaned_lines.append(tc_clean)
             continue
 
-        # 2b. Line containing 'T&Cs apply <url>' with leading directive like:
+        # 2b. Line containing 'T&Cs apply <url>' with leading directive or customer copy like:
         # '👉 Apply below & double the joy. T&Cs apply https://u3.mnge.co/'
+        # 'More orders are calling... Apply now: <url> T&Cs apply'
         m_tc_inline = re.search(
             r"(?:T\s*&\s*Cs?\s+apply\.?|Terms\s*(?:and|&)\s*Conditions\s+apply\.?)\s*(?:" + url_pat + r")?",
             sline,
             re.IGNORECASE,
         )
-        if m_tc_inline and any(k in lower_line for k in ("apply below", "click below", "tap below", "apply now")):
+        if m_tc_inline and any(k in lower_line for k in ("apply below", "click below", "tap below", "apply now", "view your offer", "check your offer")):
             m_u = re.search(url_pat, sline)
             if m_u and m_u.group(1).startswith("http"):
                 extracted_url = m_u.group(1)
             if not extracted_btn_text or extracted_btn_text in ("Check Offer", "Proceed"):
                 if "apply" in lower_line:
                     extracted_btn_text = "Apply Now"
+                elif "view" in lower_line:
+                    extracted_btn_text = "View Your Offer"
+                elif "check" in lower_line:
+                    extracted_btn_text = "Check Offer"
                 elif "explore" in lower_line:
                     extracted_btn_text = "Explore Now"
-            cleaned_lines.append("T&Cs apply")
+
+            m_dir_start = re.match(r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:apply|click|tap)\s+below.*?(?:T\s*&\s*Cs?\s+apply|Terms)", sline, re.IGNORECASE)
+            if m_dir_start:
+                cleaned_lines.append("T&Cs apply")
+            else:
+                clean_l = re.sub(r"(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:apply|click|tap|check|view|explore)\s+(?:now|online|here|below)?\s*[:\-–]?\s*https?://\S+", "", sline, flags=re.IGNORECASE)
+                clean_l = re.sub(url_pat, "", clean_l)
+                clean_l = re.sub(r"\s+", " ", clean_l).strip()
+                if clean_l:
+                    cleaned_lines.append(clean_l)
+                else:
+                    cleaned_lines.append("T&Cs apply")
             continue
 
         # 2c. Standalone tap/click directive (e.g. 'Tap below to check eligibility⬇️' or 'Tap to proceed ⬇️')
@@ -618,7 +646,7 @@ def extract_and_strip_cta(
 
         is_standalone_cta_line = bool(
             re.match(
-                r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:\*|_)?\s*(?:CTA(?:\s*Button)?|Link|URL|Website|Portal|Apply(?:\s*Now|\s*Online)?|Check\s+(?:Your\s+|My\s+)?Offer|Explore(?:\s*Now)?|View\s*Offer)\s*[:\-–]?\s*(?:\*|_)?\s*(?:"
+                r"^\s*(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:\*|_)?\s*(?:CTA(?:\s*Button)?|Link|URL|Website|Portal|Apply(?:\s*Now|\s*Online)?|(?:Check|View|Claim|Explore|Avail|Get|Grab)\s*(?:Your\s+|My\s+)?Offer|Explore(?:\s*Now)?|(?:Continue|Complete|Apply|Register|Proceed)\s+(?:Here|Now|Online|Below|Ahead))\s*[:\-–]?\s*(?:\*|_)?\s*(?:"
                 + url_pat
                 + r")\s*$",
                 sline,
@@ -693,6 +721,43 @@ def is_cta_cell(val: str) -> bool:
     ):
         return True
     return False
+
+
+def split_multi_campaign_cell(text: str) -> list[str]:
+    """
+    Split a single spreadsheet cell into multiple separate campaign template copies
+    when a copywriter placed numbered variants (e.g. 1. ... 2. ...) in one cell.
+    Strips leading option numbers (e.g. '1. Hello' -> 'Hello') so templates begin
+    cleanly with customer greetings.
+    """
+    clean = text.strip()
+    if not clean:
+        return []
+
+    split_pattern = r"(?:^|\n+)(?:(?:Option|Variant|Campaign|Draft)\s*)?([1-9]\d*)[.)\-:]\s*"
+    matches = list(re.finditer(split_pattern, clean, re.IGNORECASE))
+    if len(matches) >= 2:
+        numbers = [int(m.group(1)) for m in matches]
+        if numbers == list(range(1, len(numbers) + 1)):
+            parts = []
+            for i, m in enumerate(matches):
+                start = m.end()
+                end = matches[i + 1].start() if i + 1 < len(matches) else len(clean)
+                segment = clean[start:end].strip()
+                if len(segment) > 25:
+                    parts.append(segment)
+            if len(parts) >= 2:
+                return parts
+
+    m_single = re.match(
+        r"^\s*(?:(?:Option|Variant|Campaign|Draft)\s*)?[1-9]\d*[.)\-:]\s*(.+)$",
+        clean,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if m_single:
+        return [m_single.group(1).strip()]
+
+    return [clean]
 
 
 def decompose_content(
@@ -801,6 +866,7 @@ def decompose_content(
             candidate_header=header_text,
             candidate_cta_text=cta_btn,
             candidate_cta_url=cta_url,
+            timeout=2,
         )
         if ai_res.get("category"):
             cat = ai_res["category"]
@@ -1561,7 +1627,7 @@ def _identify_sheet_columns(header_row: list[str]) -> dict[str, Any]:
 
     mapping["content_cols"] = content_cols
     return mapping
-def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[str, str]]:
+def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str, sheet_images: list[str] | None = None) -> list[dict[str, Any]]:
     """
     Universally parse template content from 2D raw string rows of any sheet.
     Supports:
@@ -1716,49 +1782,56 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
             col_hdr = header_row[c_idx] if c_idx < len(header_row) else ""
             item_chan = _normalize_channel_tag(col_hdr) or active_chan or ("WA" if _normalize_channel_tag(sname) is None else _normalize_channel_tag(sname))
 
-            variant = "General"
+            base_variant = "General"
             if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
-                variant = row[0].upper()
+                base_variant = row[0].upper()
             elif col_hdr and col_hdr not in ("content", "message", "copy", "text", "body"):
-                variant = col_hdr.title()
+                base_variant = col_hdr.title()
 
-            item_dict: dict[str, str] = {
-                "channel": item_chan,
-                "text": body_val,
-                "raw_text": body_val,
-                "variant": variant,
-                "source": f"excel_{sname}_r{r_num}_c{c_idx + 1}",
-            }
-            if template_name_col_idx is not None and template_name_col_idx < len(row) and row[template_name_col_idx]:
-                item_dict["template_name"] = row[template_name_col_idx].strip()
-            if header_col_idx is not None and header_col_idx < len(row) and row[header_col_idx]:
-                item_dict["header"] = row[header_col_idx].strip()
-            if header_type_col_idx is not None and header_type_col_idx < len(row) and row[header_type_col_idx]:
-                item_dict["header_type"] = row[header_type_col_idx].strip().upper()
-            if footer_col_idx is not None and footer_col_idx < len(row) and row[footer_col_idx]:
-                item_dict["footer"] = row[footer_col_idx].strip()
-            if btn_text_col_idx is not None and btn_text_col_idx < len(row) and row[btn_text_col_idx]:
-                item_dict["button_text"] = row[btn_text_col_idx].strip()
-            if btn_url_col_idx is not None and btn_url_col_idx < len(row) and row[btn_url_col_idx]:
-                item_dict["button_url"] = row[btn_url_col_idx].strip()
-            if btn_type_col_idx is not None and btn_type_col_idx < len(row) and row[btn_type_col_idx]:
-                item_dict["button_type"] = row[btn_type_col_idx].strip().upper()
-            if category_col_idx is not None and category_col_idx < len(row) and row[category_col_idx]:
-                item_dict["category"] = row[category_col_idx].strip().upper()
-            if media_url_col_idx is not None and media_url_col_idx < len(row) and row[media_url_col_idx]:
-                item_dict["media_url"] = row[media_url_col_idx].strip()
-            if language_col_idx is not None and language_col_idx < len(row) and row[language_col_idx]:
-                item_dict["language"] = row[language_col_idx].strip()
+            copies = split_multi_campaign_cell(body_val)
+            for copy_idx, copy_text in enumerate(copies):
+                variant = base_variant if len(copies) == 1 else f"{base_variant} (Option {copy_idx + 1})"
+                item_dict: dict[str, Any] = {
+                    "channel": item_chan,
+                    "text": copy_text,
+                    "raw_text": copy_text,
+                    "variant": variant,
+                    "source": f"excel_{sname}_r{r_num}_c{c_idx + 1}" + (f"_opt_{copy_idx + 1}" if len(copies) > 1 else ""),
+                }
+                if sheet_images:
+                    img_path = sheet_images[copy_idx % len(sheet_images)]
+                    item_dict["media_file"] = img_path
+                    item_dict["media_filename"] = Path(img_path).name
+                if template_name_col_idx is not None and template_name_col_idx < len(row) and row[template_name_col_idx]:
+                    item_dict["template_name"] = row[template_name_col_idx].strip()
+                if header_col_idx is not None and header_col_idx < len(row) and row[header_col_idx]:
+                    item_dict["header"] = row[header_col_idx].strip()
+                if header_type_col_idx is not None and header_type_col_idx < len(row) and row[header_type_col_idx]:
+                    item_dict["header_type"] = row[header_type_col_idx].strip().upper()
+                if footer_col_idx is not None and footer_col_idx < len(row) and row[footer_col_idx]:
+                    item_dict["footer"] = row[footer_col_idx].strip()
+                if btn_text_col_idx is not None and btn_text_col_idx < len(row) and row[btn_text_col_idx]:
+                    item_dict["button_text"] = row[btn_text_col_idx].strip()
+                if btn_url_col_idx is not None and btn_url_col_idx < len(row) and row[btn_url_col_idx]:
+                    item_dict["button_url"] = row[btn_url_col_idx].strip()
+                if btn_type_col_idx is not None and btn_type_col_idx < len(row) and row[btn_type_col_idx]:
+                    item_dict["button_type"] = row[btn_type_col_idx].strip().upper()
+                if category_col_idx is not None and category_col_idx < len(row) and row[category_col_idx]:
+                    item_dict["category"] = row[category_col_idx].strip().upper()
+                if media_url_col_idx is not None and media_url_col_idx < len(row) and row[media_url_col_idx]:
+                    item_dict["media_url"] = row[media_url_col_idx].strip()
+                if language_col_idx is not None and language_col_idx < len(row) and row[language_col_idx]:
+                    item_dict["language"] = row[language_col_idx].strip()
 
-            if "Title:" in body_val and "Body:" in body_val:
-                title_m = re.search(r"Title:\s*([^\n]+)", body_val)
-                body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", body_val, re.DOTALL)
-                if title_m:
-                    item_dict["title"] = title_m.group(1).strip()
-                if body_m:
-                    item_dict["text"] = body_m.group(1).strip()
+                if "Title:" in copy_text and "Body:" in copy_text:
+                    title_m = re.search(r"Title:\s*([^\n]+)", copy_text)
+                    body_m = re.search(r"Body:?\s*(.*?)(?:CTA:|$)", copy_text, re.DOTALL)
+                    if title_m:
+                        item_dict["title"] = title_m.group(1).strip()
+                    if body_m:
+                        item_dict["text"] = body_m.group(1).strip()
 
-            items.append(item_dict)
+                items.append(item_dict)
     # 3. Pass 3: Universal Spatial Matrix Scanner (The "Arrive Anyhow" Engine)
     # If no templates were extracted from Pass 1 or Pass 2 (e.g. unformatted A1/A2/B1/B2 layouts)
     if not items:
@@ -1799,25 +1872,30 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str) -> list[dict[st
                         and not is_internal_identifier(top_c, sheet_name=sname)
                     ):
                         neighbor_header = top_c
-                decomp = decompose_content(
-                    clean_cell,
-                    explicit_header=neighbor_header,
-                    neighbor_cta=neighbor_cta,
-                )
+                copies = split_multi_campaign_cell(clean_cell)
+                for copy_idx, copy_text in enumerate(copies):
+                    decomp = decompose_content(
+                        copy_text,
+                        explicit_header=neighbor_header,
+                        neighbor_cta=neighbor_cta,
+                    )
 
-                row_chan = _normalize_channel_tag(row[0]) if (row and row[0]) else None
-                item_dict = {
-                    "channel": sheet_chan or row_chan or ("RCS" if decomp.get("header_text") else "WA"),
-                    "text": decomp["body"],
-                    "header": decomp["header_text"],
-                    "footer": decomp["footer_text"],
-                    "button_text": decomp["button_text"],
-                    "button_url": decomp["button_url"],
-                    "variant": f"Cell_{r_idx + 1}_{c_idx + 1}",
-                    "source": f"excel_spatial_{sname}_r{r_idx + 1}_c{c_idx + 1}",
-                }
-                items.append(item_dict)
-
+                    row_chan = _normalize_channel_tag(row[0]) if (row and row[0]) else None
+                    item_dict = {
+                        "channel": sheet_chan or row_chan or ("RCS" if decomp.get("header_text") else "WA"),
+                        "text": decomp["body"],
+                        "header": decomp["header_text"],
+                        "footer": decomp["footer_text"],
+                        "button_text": decomp["button_text"],
+                        "button_url": decomp["button_url"],
+                        "variant": f"Cell_{r_idx + 1}_{c_idx + 1}" + (f"_opt_{copy_idx + 1}" if len(copies) > 1 else ""),
+                        "source": f"excel_spatial_{sname}_r{r_idx + 1}_c{c_idx + 1}",
+                    }
+                    if sheet_images:
+                        img_path = sheet_images[copy_idx % len(sheet_images)]
+                        item_dict["media_file"] = img_path
+                        item_dict["media_filename"] = Path(img_path).name
+                    items.append(item_dict)
     return items
 
 
@@ -2115,7 +2193,11 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
     return items
 
 
-def extract_templates_from_excel_file(filepath: Path, target_month: str | None = None) -> list[dict[str, str]]:
+def extract_templates_from_excel_file(
+    filepath: Path,
+    target_month: str | None = None,
+    sheet_images_map: dict[str, list[str]] | None = None,
+) -> list[dict[str, Any]]:
     """
     Inspect and extract template items from any client spreadsheet (.xlsx, .csv, .xls) across all sheets.
     Combines channel-tagged tables, section headers, grid messages, and key-value blocks.
@@ -2126,16 +2208,20 @@ def extract_templates_from_excel_file(filepath: Path, target_month: str | None =
     if not sheets:
         return []
 
-    all_items: list[dict[str, str]] = []
+    if sheet_images_map is None and filepath.suffix.lower() == ".xlsx":
+        sheet_images_map = _extract_images_from_xlsx(filepath)
+
+    all_items: list[dict[str, Any]] = []
     seen_texts: set[str] = set()
 
     for sname, raw_rows in sheets.items():
         if should_skip_sheet(sname, target_month=target_month):
             continue
+        sheet_imgs = (sheet_images_map or {}).get(sname, [])
         if _is_dlt_sms_sheet(raw_rows, filename=filepath.name):
             sheet_items = _parse_dlt_sms_sheet(raw_rows, sname, filename=filepath.name)
         else:
-            sheet_items = _parse_raw_sheet_rows(raw_rows, sname)
+            sheet_items = _parse_raw_sheet_rows(raw_rows, sname, sheet_images=sheet_imgs)
         for item in sheet_items:
             raw_t = item.get("raw_text") or item.get("text", "")
             if not is_valid_template_copy(raw_t):
@@ -2170,6 +2256,41 @@ def _extract_images_from_zip(zip_path: Path) -> list[str]:
     except Exception as exc:
         logger.warning("Could not extract ZIP %s: %s", zip_path, exc)
     return images
+
+def _extract_images_from_xlsx(xlsx_path: Path) -> dict[str, list[str]]:
+    """
+    Extract embedded drawing images from an Excel (.xlsx) file sheet-by-sheet,
+    saving raw image bytes to MEDIA_CACHE_DIR and returning a map of
+    {sheet_name: [saved_image_paths]}.
+    """
+    image_map: dict[str, list[str]] = {}
+    if not xlsx_path.exists():
+        return image_map
+
+    try:
+        import openpyxl
+
+        wb = openpyxl.load_workbook(xlsx_path, data_only=True)
+        for sname in wb.sheetnames:
+            ws = wb[sname]
+            imgs = getattr(ws, "_images", [])
+            if imgs:
+                clean_sname = re.sub(r"[^\w\-.]", "_", sname)
+                image_map[sname] = []
+                for idx, img in enumerate(imgs):
+                    try:
+                        data = img._data()
+                        fmt = getattr(img, "format", "jpeg") or "jpeg"
+                        out_path = MEDIA_CACHE_DIR / f"jira_xlsx_{xlsx_path.stem}_{clean_sname}_{idx + 1}.{fmt}"
+                        out_path.write_bytes(data)
+                        image_map[sname].append(str(out_path))
+                    except Exception as e:
+                        logger.debug("Could not extract image %d from sheet %s: %s", idx, sname, e)
+        wb.close()
+    except Exception as exc:
+        logger.debug("Could not extract embedded images from xlsx %s: %s", xlsx_path, exc)
+
+    return image_map
 
 
 def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None, summary: str = "") -> list[dict[str, Any]]:
@@ -2472,6 +2593,18 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             p = Path(local_path)
             if fn.lower().endswith((".xlsx", ".xls", ".csv")):
                 excel_attachment_paths.append(p)
+                if fn.lower().endswith(".xlsx"):
+                    xlsx_imgs = _extract_images_from_xlsx(p)
+                    for s_name, img_paths in xlsx_imgs.items():
+                        zip_creative_paths.extend(img_paths)
+                        for ip in img_paths:
+                            mapped_attachments.append({
+                                "id": Path(ip).stem,
+                                "filename": Path(ip).name,
+                                "local_path": ip,
+                                "mime": "image/jpeg",
+                                "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
+                            })
             elif fn.lower().endswith((".docx", ".doc")):
                 docx_attachment_paths.append(p)
             elif fn.lower().endswith(".zip"):
@@ -2482,6 +2615,18 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 local_path = str(p)
                 if fn.lower().endswith((".xlsx", ".xls", ".csv")):
                     excel_attachment_paths.append(p)
+                    if fn.lower().endswith(".xlsx"):
+                        xlsx_imgs = _extract_images_from_xlsx(p)
+                        for s_name, img_paths in xlsx_imgs.items():
+                            zip_creative_paths.extend(img_paths)
+                            for ip in img_paths:
+                                mapped_attachments.append({
+                                    "id": Path(ip).stem,
+                                    "filename": Path(ip).name,
+                                    "local_path": ip,
+                                    "mime": "image/jpeg",
+                                    "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
+                                })
                 elif fn.lower().endswith((".docx", ".doc")):
                     docx_attachment_paths.append(p)
                 elif fn.lower().endswith(".zip"):
@@ -2849,11 +2994,11 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     category=cat,
                     language=lang,
                     body=clean_body,
-                    header_type=item.get("header_type") or ("IMAGE" if img else ("TEXT" if wa_header else "NONE")),
-                    header_text=wa_header,
+                    header_type=item.get("header_type") or ("IMAGE" if (item.get("media_file") or img) else ("TEXT" if wa_header else "NONE")),
+                    header_text=None if (item.get("media_file") or img) else wa_header,
                     footer_text=None,
-                    media_file=img.get("local_path") if img else None,
-                    media_filename=img.get("filename") if img else None,
+                    media_file=item.get("media_file") or (img.get("local_path") if img else None),
+                    media_filename=item.get("media_filename") or (img.get("filename") if img else None),
                     button_type=b_type,
                     button_text=b_text,
                     button_url=b_url,
@@ -2907,8 +3052,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     template_name=tname,
                     card_title=rcs_card_title,
                     body=clean_body,
-                    media_file=img.get("local_path") if img else None,
-                    media_filename=img.get("filename") if img else None,
+                    media_file=item.get("media_file") or (img.get("local_path") if img else None),
+                    media_filename=item.get("media_filename") or (img.get("filename") if img else None),
                     action_type=item.get("button_type") or "URL",
                     action_label=cta_btn_text,
                     action_url=cta_btn_url,
