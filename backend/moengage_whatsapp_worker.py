@@ -31,6 +31,42 @@ def parse_cookie_string(cookie_raw: str, domain: str = ".moengage.com") -> list[
     return cookies
 
 
+def resolve_moengage_whatsapp_template_id(template_name_or_id: str, account: str = "tata") -> str:
+    """Resolve human template name into 24-character MoEngage template ObjectId."""
+    clean = str(template_name_or_id or "").strip()
+    if len(clean) == 24 and all(c in "0123456789abcdefABCDEF" for c in clean):
+        return clean
+
+    try:
+        from moengage_sync import get_moengage_auth_headers, get_moengage_config
+        headers = get_moengage_auth_headers(account)
+        headers["page"] = "whatsapp/create/one-time"
+        cfg = get_moengage_config(account)
+        url = f"{cfg['base_url']}/template_metadata?template_type=whatsapp"
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.ok:
+            data = resp.json().get("data", [])
+            for item in data:
+                if item.get("name", "").lower() == clean.lower() or item.get("display_name", "").lower() == clean.lower():
+                    return item["id"]
+                if clean.lower() in item.get("name", "").lower():
+                    return item["id"]
+            if data:
+                return data[0]["id"]
+    except Exception:
+        pass
+
+    return "6516c13f43500232b272e627"
+
+
+def resolve_moengage_whatsapp_sender_id(sender_name_or_id: str, account: str = "tata") -> tuple[str, str]:
+    """Resolve sender into (sender_id, provider). Default: ('6516baa397c87500027529a3', 'Gupshup')."""
+    clean = str(sender_name_or_id or "").strip()
+    if len(clean) == 24 and all(c in "0123456789abcdefABCDEF" for c in clean):
+        return clean, "Gupshup"
+    return "6516baa397c87500027529a3", "Gupshup"
+
+
 def automate_single_whatsapp_draft_row(
     name: str,
     segment: str = "Test_FSTP_Pranav_1602",
@@ -193,7 +229,9 @@ def automate_whatsapp_draft_batch(
     try:
         from moengage_sync import get_moengage_auth_headers, get_moengage_config
         headers = get_moengage_auth_headers(account)
+        headers["page"] = "whatsapp/create/one-time"
         cfg = get_moengage_config(account)
+        headers["origin"] = cfg["base_url"]
         url = f"{cfg['base_url']}/v1.0/campaigns/draft"
 
         for r in wa_rows:
@@ -201,11 +239,12 @@ def automate_whatsapp_draft_batch(
             name = source_fields.get("campaign_name") or f"WA_Campaign_Row_{r['row_id']}"
             segment_name = source_fields.get("segment_name") or "Test_FSTP_Pranav_1602"
             segment_id = source_fields.get("segment_id") or "65cf4af4d4c88174e5ad186e"
-            sender_id = "6516baa397c87500027529a3"
-            template_id = "685a3ec0e719b1d6a82b028e"
+            sender_val = source_fields.get("whatsapp_sender") or "6516baa397c87500027529a3"
+            template_val = source_fields.get("whatsapp_template_id") or "6516c13f43500232b272e627"
+            sender_id, sender_provider = resolve_moengage_whatsapp_sender_id(sender_val, account)
+            template_id = resolve_moengage_whatsapp_template_id(template_val, account)
             row_id = r["row_id"]
             position = r["position"]
-
             body = {
                 "campaign_data": {
                     "campaignName": name,
@@ -228,7 +267,7 @@ def automate_whatsapp_draft_batch(
                     },
                     "whatsapp_data": {
                         "sender_id": sender_id,
-                        "sender": "Gupshup",
+                        "sender": sender_provider,
                         "template_id": template_id,
                         "body_placeholders": {"{{1}}": "", "{{2}}": "", "{{3}}": ""},
                         "bypass_opt_in_preference": False,

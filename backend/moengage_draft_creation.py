@@ -249,10 +249,11 @@ class DraftCreation:
         segment_name = seg.get("name") or "Test_FSTP_Pranav_1602"
 
         wa_content = payload.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
-        template_id = wa_content.get("template_id") or "685a3ec0e719b1d6a82b028e"
-        sender_id = wa_content.get("sender_id") or "6516baa397c87500027529a3"
-        sender = wa_content.get("provider") or "Gupshup"
-
+        raw_tpl = wa_content.get("template_id") or "6516c13f43500232b272e627"
+        raw_sender = wa_content.get("sender_id") or "6516baa397c87500027529a3"
+        from moengage_whatsapp_worker import resolve_moengage_whatsapp_template_id, resolve_moengage_whatsapp_sender_id
+        template_id = resolve_moengage_whatsapp_template_id(raw_tpl, self.account)
+        sender_id, sender = resolve_moengage_whatsapp_sender_id(raw_sender, self.account)
         body = {
             "campaign_data": {
                 "campaignName": name,
@@ -293,9 +294,10 @@ class DraftCreation:
             import requests
 
             from moengage_sync import get_moengage_auth_headers, get_moengage_config
-
             headers = get_moengage_auth_headers(self.account)
+            headers["page"] = "whatsapp/create/one-time"
             cfg = get_moengage_config(self.account)
+            headers["origin"] = cfg["base_url"]
             url = f"{cfg['base_url']}/v1.0/campaigns/draft"
             resp = requests.post(url, headers=headers, json=body, timeout=25)
             if resp.ok:

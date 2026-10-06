@@ -19,6 +19,7 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONPATH=/app/backend:/app \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     MOENGAGE_DRAFT_TATA_CATALOG_FILE=/app/tata_catalog.json \
     MOENGAGE_DRAFT_TATA_WORKSPACE_ID=0KYUNUW5WODKX5ZFVAGPVL0U \
     MOENGAGE_DRAFT_TATA_DATA_CENTER=03 \
@@ -39,7 +40,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python backend dependencies
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt && \
+    mkdir -p /ms-playwright && \
     playwright install --with-deps chromium && \
+    chmod -R 777 /ms-playwright && \
     rm -rf /var/lib/apt/lists/*
 # Copy Python backend code and static assets. Runtime secrets, SQLite, and JSONL
 # logs are supplied through environment variables/volumes at deployment time.
