@@ -856,7 +856,7 @@ export default function SettingsPage() {
                   type="text"
                   value={moeSenderId}
                   onChange={(e) => setMoeSenderId(e.target.value)}
-                  placeholder="24-char sender ID from MoEngage Sender configuration"
+                  placeholder="MoEngage Sender Profile ID or Karix Bot ID (e.g. P7hzkqCcW3x96I6T)"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">

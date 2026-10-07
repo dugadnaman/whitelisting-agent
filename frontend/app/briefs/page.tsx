@@ -870,6 +870,7 @@ export default function JiraBriefsPage() {
     try {
       setSyncingRcs((prev) => ({ ...prev, [rcs.template_name]: true }));
       const res = await syncRcsTemplateToMoEngage({
+        account: targetAccount,
         template_name: rcs.template_name,
         template_id: rcs.template_name,
         card_title: rcs.card_title || brief?.summary || 'Tata Capital Offer',

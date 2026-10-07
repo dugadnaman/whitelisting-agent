@@ -68,12 +68,15 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
         or ""
     )
 
+    from rcs_config import DEFAULT_RCS_BOT_IDS
+
     sender_id = (
         os.environ.get(f"{prefix}_MOENGAGE_SENDER_ID")
+        or os.environ.get(f"{prefix}_RCS_BOT_ID")
         or os.environ.get("MOENGAGE_SENDER_ID")
-        or ("I3KVDLD7LKKVEKU4961P1CID" if account.lower() == "apparel" else DEFAULT_TCFSL_PROMO_SENDER_ID)
+        or DEFAULT_RCS_BOT_IDS.get(acc, "")
+        or (DEFAULT_TCFSL_PROMO_SENDER_ID if is_tata else "")
     )
-
     return {
         "base_url": base_url,
         "bearer_token": token,
@@ -270,20 +273,22 @@ def create_moengage_rcs_template(
     clean_name = re.sub(r"[^\w\-.]", "_", template_name.strip()).strip("_")
     clean_id = str(template_id or clean_name).strip()
     resolved_sender = sender_id or cfg["sender_id"]
+    resolved_cta_url = cta_url
+    if not resolved_cta_url or (resolved_cta_url == "https://www.tatacapital.com" and account.lower() == "apparel"):
+        resolved_cta_url = "https://u3.mnge.co/"
 
     suggestions = []
-    if cta_url:
+    if resolved_cta_url:
         suggestions.append(
             {
                 "type": "OPEN_URL",
                 "text": (cta_text or "Check Offer")[:25],
                 "postback_data": (cta_text or "Check Offer")[:120],
-                "url": cta_url.strip(),
+                "url": resolved_cta_url.strip(),
                 "application": "BROWSER",
                 "webview_view_mode": "",
             }
         )
-
     clean_media_url = (
         media_url.strip() if media_url else "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
     )

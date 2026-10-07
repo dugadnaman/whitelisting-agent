@@ -11,6 +11,7 @@ import {
   deleteTemplatesFromFile,
   syncKarixRcsToMoEngage,
   syncRcsTemplateToMoEngage,
+  fetchMoEngageCredentials,
 } from '@/lib/api';
 import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -107,16 +108,39 @@ export default function DashboardPage() {
   const [syncRcsFeedback, setSyncRcsFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [syncingSingleRcs, setSyncingSingleRcs] = useState<Record<string, boolean>>({});
   const [syncedSingleRcs, setSyncedSingleRcs] = useState<Record<string, string>>({});
+  const [moeStatus, setMoeStatus] = useState<{ has_token?: boolean; expired?: boolean; remaining_min?: number | null } | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    if (account === 'apparel') {
+      fetchMoEngageCredentials('apparel')
+        .then((res) => {
+          if (!ignore) {
+            setMoeStatus({
+              has_token: res.has_token,
+              expired: res.expired,
+              remaining_min: res.remaining_min,
+            });
+          }
+        })
+        .catch(() => {});
+    } else {
+      setMoeStatus(null);
+    }
+    return () => { ignore = true; };
+  }, [account]);
 
   const handleSyncSingleRcsToMoEngage = async (t: Template) => {
     const tName = t.template_name;
     try {
       setSyncingSingleRcs((prev) => ({ ...prev, [tName]: true }));
       const res = await syncRcsTemplateToMoEngage({
+        account,
         template_name: tName,
         template_id: t.template_id || tName,
-        card_title: t.template_name,
+        card_title: t.card_title || tName,
         card_description: t.template_message || tName,
+        sender_id: t.sender_ids?.[0],
       });
       setSyncedSingleRcs((prev) => ({ ...prev, [tName]: res.moengage_id }));
       setSyncRcsFeedback({
@@ -162,25 +186,31 @@ export default function DashboardPage() {
       setSyncRcsFeedback(null);
       let successCount = 0;
       let failCount = 0;
+      const errors: string[] = [];
       const targets = templates.filter((t) => selectedTemplates.has(t.template_name));
 
       for (const t of targets) {
         try {
           await syncRcsTemplateToMoEngage({
+            account,
             template_name: t.template_name,
             template_id: t.template_id || t.template_name,
-            card_title: t.template_name,
+            card_title: t.card_title || t.template_name,
             card_description: t.template_message || t.template_name,
+            sender_id: t.sender_ids?.[0],
           });
           setSyncedSingleRcs((prev) => ({ ...prev, [t.template_name]: 'synced' }));
           successCount++;
-        } catch {
+        } catch (itemErr) {
           failCount++;
+          const msg = itemErr instanceof Error ? itemErr.message : String(itemErr);
+          if (!errors.includes(msg)) errors.push(msg);
         }
       }
 
+      const errDetail = errors.length > 0 ? ` (${errors.join('; ')})` : '';
       setSyncRcsFeedback({
-        message: `Successfully synced ${successCount} selected RCS template(s) to MoEngage Settings${failCount > 0 ? ` (${failCount} failed)` : ''}.`,
+        message: `Successfully synced ${successCount} selected RCS template(s) to MoEngage Settings${failCount > 0 ? ` (${failCount} failed${errDetail})` : ''}.`,
         type: successCount > 0 ? 'success' : 'error',
       });
       setSelectedTemplates(new Set());
@@ -566,7 +596,7 @@ export default function DashboardPage() {
         <div className="bg-gradient-to-br from-purple-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-xl border border-purple-800/40 space-y-5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
             <div className="space-y-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xl">👗</span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/30">
                   RCS Sync Only • Apparel Workspace
@@ -574,6 +604,27 @@ export default function DashboardPage() {
                 <span className="text-xs text-purple-300 font-medium">
                   Karix RCS Bot &rarr; MoEngage Apparel Workspace
                 </span>
+                {moeStatus && (
+                  moeStatus.expired ? (
+                    <a
+                      href="/settings"
+                      className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors flex items-center gap-1.5"
+                    >
+                      <span>⚠️</span> MoEngage Token Expired (Click to Refresh in Settings)
+                    </a>
+                  ) : moeStatus.has_token ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 flex items-center gap-1.5">
+                      <span>✅</span> MoEngage Token Active {moeStatus.remaining_min != null ? `(~${moeStatus.remaining_min}m remaining)` : ''}
+                    </span>
+                  ) : (
+                    <a
+                      href="/settings"
+                      className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-500/20 text-red-200 border border-red-500/40 hover:bg-red-500/30 transition-colors flex items-center gap-1.5"
+                    >
+                      <span>⚠️</span> MoEngage Token Missing (Click to Add in Settings)
+                    </a>
+                  )
+                )}
               </div>
               <h2 className="text-xl font-bold text-white tracking-tight">
                 Apparel Brand — Karix RCS to MoEngage Sync Hub

@@ -66,6 +66,7 @@ export type Template = {
   template_message_type?: string;
   template_message?: string;
   entity_id?: string;
+  card_title?: string;
 };
 
 export type KarixHealth = {
@@ -211,7 +212,7 @@ export type ActivityStats = {
   action_breakdown: Record<string, number>;
   recent_activities: ActivityLog[];
 };
-function getApiUrl(path: string): string {
+export function getApiUrl(path: string): string {
   if (typeof window !== "undefined") {
     // In browser: relative URL (proxied by Next.js rewrites to backend)
     return path;
@@ -244,7 +245,7 @@ export function clearAuthToken(): void {
   }
 }
 
-async function fetchWithRetry(
+export async function fetchWithRetry(
   input: RequestInfo | URL,
   init?: RequestInit,
   retries = 2,
@@ -298,7 +299,7 @@ async function fetchWithRetry(
   throw lastError instanceof Error ? lastError : new Error(String(lastError || "Network request timed out or failed"));
 }
 
-async function getErrorMessage(res: Response): Promise<string> {
+export async function getErrorMessage(res: Response): Promise<string> {
   // Read the body ONCE — calling res.json() then res.text() on a failed
   // parse consumes the stream and loses the real server error.
   const text = await res.text().catch(() => "");
@@ -1135,8 +1136,10 @@ export async function syncRcsTemplateToMoEngage(params: {
   cta_text?: string;
   cta_url?: string;
   sender_id?: string;
+  account?: string;
 }): Promise<{ ok: boolean; name: string; template_id: string; moengage_id: string }> {
-  const res = await fetchWithRetry(getApiUrl("/api/moengage/rcs/sync"), {
+  const qs = params.account ? `?account=${encodeURIComponent(params.account)}` : "";
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/sync${qs}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),

@@ -4238,8 +4238,8 @@ class MoEngageRcsSyncRequest(BaseModel):
     media_url: str | None = None
     cta_text: str = "Explore Now"
     cta_url: str = "https://u3.mnge.co/"
-    sender_id: str = "68888420892e852255fca466"
-
+    sender_id: str | None = None
+    account: str | None = None
 
 def _require_moengage_account_access(account: str, current_user: dict) -> None:
     if current_user.get("sub") in (None, "usr_anon"):
@@ -4250,10 +4250,12 @@ def _require_moengage_account_access(account: str, current_user: dict) -> None:
 @app.post("/api/moengage/rcs/sync")
 async def sync_moengage_rcs_endpoint(
     req: MoEngageRcsSyncRequest,
+    account: str = Query("tata"),
     current_user: dict = Depends(get_current_user),
 ):
     """Register an approved RCS template into MoEngage Settings -> RCS Template Management."""
-    _require_moengage_account_access("tata", current_user)
+    target_account = (req.account or account or "tata").lower().strip()
+    _require_moengage_account_access(target_account, current_user)
     from moengage_sync import create_moengage_rcs_template
 
     try:
@@ -4267,12 +4269,13 @@ async def sync_moengage_rcs_endpoint(
             cta_text=req.cta_text,
             cta_url=req.cta_url,
             sender_id=req.sender_id,
+            account=target_account,
         )
 
         log_activity(
             user=current_user.get("name", "Operator"),
             action="MOENGAGE_RCS_SYNC",
-            account="tata",
+            account=target_account,
             channel="rcs",
             details={
                 "template_name": req.template_name,
@@ -4283,9 +4286,8 @@ async def sync_moengage_rcs_endpoint(
         )
         return _json_safe(res)
     except Exception as exc:
-        logger.exception("Failed to sync RCS template %s to MoEngage: %s", req.template_name, exc)
+        logger.exception("Failed to sync RCS template %s to MoEngage for account %s: %s", req.template_name, target_account, exc)
         raise HTTPException(status_code=500, detail=f"MoEngage sync error: {exc!s}") from exc
-
 
 @app.get("/api/moengage/rcs/templates")
 async def get_moengage_rcs_templates_endpoint(
