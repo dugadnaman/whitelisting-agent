@@ -11,23 +11,17 @@ import pytest
 import api
 
 
-TATA_USER = {"sub": "usr_tata_test", "email": "tata@example.invalid", "tenant_id": "tata", "role": "operator"}
-BAJAJ_USER = {"sub": "usr_bajaj_test", "email": "bajaj@example.invalid", "tenant_id": "bajaj", "role": "operator"}
-APPAREL_USER = {"sub": "usr_apparel_test", "email": "apparel@example.invalid", "tenant_id": "apparel", "role": "operator"}
 
 @pytest.fixture
 def client():
-    api.app.dependency_overrides.pop(api.get_current_user, None)
-    try:
-        yield TestClient(api.app)
-    finally:
-        api.app.dependency_overrides.pop(api.get_current_user, None)
+    return TestClient(api.app)
 
 
-@pytest.mark.parametrize("user,expected", [(None, 401), (BAJAJ_USER, 403)])
-def test_tata_jira_briefs_and_creatives_reject_other_tenants(client, user, expected):
-    if user is not None:
-        api.app.dependency_overrides[api.get_current_user] = lambda: user
+@pytest.mark.parametrize("tenant,expected", [(None, 401), ("bajaj", 403)])
+def test_tata_jira_briefs_and_creatives_reject_other_tenants(client, provision_user, tenant, expected):
+    if tenant is not None:
+        _, headers = provision_user(tenant=tenant, role="operator")
+        client.headers.update(headers)
     with (
         patch("jira_client.list_jira_issues") as list_issues,
         patch("jira_client.fetch_jira_issue") as fetch_issue,
@@ -47,8 +41,9 @@ def test_tata_jira_briefs_and_creatives_reject_other_tenants(client, user, expec
     download.assert_not_called()
 
 
-def test_tata_creative_download_cannot_read_other_temp_files(client):
-    api.app.dependency_overrides[api.get_current_user] = lambda: TATA_USER
+def test_tata_creative_download_cannot_read_other_temp_files(client, provision_user):
+    _, headers = provision_user(tenant="tata", role="operator")
+    client.headers.update(headers)
     with tempfile.NamedTemporaryFile(mode="w", prefix="jira-creative-probe-", delete=False) as handle:
         handle.write("private local content")
         path = Path(handle.name)
@@ -60,8 +55,9 @@ def test_tata_creative_download_cannot_read_other_temp_files(client):
         path.unlink()
 
 
-def test_tata_jira_brief_cannot_submit_to_bajaj(client):
-    api.app.dependency_overrides[api.get_current_user] = lambda: TATA_USER
+def test_tata_jira_brief_cannot_submit_to_bajaj(client, provision_user):
+    _, headers = provision_user(tenant="tata", role="operator")
+    client.headers.update(headers)
     with (
         patch("jira_client.fetch_jira_issue", return_value={"key": "TCN-999"}),
         patch("briefing_parser.parse_jira_brief", return_value=SimpleNamespace(account="tcl_promo")),
@@ -72,8 +68,9 @@ def test_tata_jira_brief_cannot_submit_to_bajaj(client):
     submit.assert_not_called()
 
 
-def test_bajaj_cannot_read_or_update_tata_moengage_credentials_or_sync_rcs(client):
-    api.app.dependency_overrides[api.get_current_user] = lambda: BAJAJ_USER
+def test_bajaj_cannot_read_or_update_tata_moengage_credentials_or_sync_rcs(client, provision_user):
+    _, headers = provision_user(tenant="bajaj", role="operator")
+    client.headers.update(headers)
     with (
         patch("moengage_sync.get_moengage_credentials") as credentials,
         patch("moengage_sync.test_moengage_connection") as connection,
@@ -93,16 +90,27 @@ def test_bajaj_cannot_read_or_update_tata_moengage_credentials_or_sync_rcs(clien
     create.assert_not_called()
 
 
-def test_tata_can_still_access_own_moengage_credentials(client):
-    api.app.dependency_overrides[api.get_current_user] = lambda: TATA_USER
+def test_tata_can_still_access_own_moengage_credentials(client, provision_user):
+    _, headers = provision_user(tenant="tata", role="admin")
+    client.headers.update(headers)
     with patch("moengage_sync.get_moengage_credentials", return_value={"has_token": True}) as credentials:
         response = client.get("/api/moengage/credentials?account=tata")
     assert response.status_code == 200
     assert response.json()["has_token"] is True
     credentials.assert_called_once_with("tata")
 
-def test_apparel_can_sync_rcs_to_apparel_moengage(client):
-    api.app.dependency_overrides[api.get_current_user] = lambda: APPAREL_USER
+def test_tata_operator_cannot_read_own_moengage_credentials(client, provision_user):
+    _, headers = provision_user(tenant="tata", role="operator")
+    client.headers.update(headers)
+    with patch("moengage_sync.get_moengage_credentials") as credentials:
+        response = client.get("/api/moengage/credentials?account=tata")
+    assert response.status_code == 403
+    credentials.assert_not_called()
+
+
+def test_apparel_can_sync_rcs_to_apparel_moengage(client, provision_user):
+    _, headers = provision_user(tenant="apparel", role="operator")
+    client.headers.update(headers)
     with patch("moengage_sync.create_moengage_rcs_template", return_value={"ok": True, "moengage_id": "moe_apparel_123"}) as create:
         response = client.post(
             "/api/moengage/rcs/sync",
@@ -118,19 +126,20 @@ def test_apparel_can_sync_rcs_to_apparel_moengage(client):
     assert response.json()["moengage_id"] == "moe_apparel_123"
     create.assert_called_once_with(
         template_name="festive_sale",
-        template_id="festive_sale_01",
+        template_id="festive_sale",
         card_title="Festive Offer",
         card_description="Shop 50% off",
         media_url=None,
-        cta_text="Explore Now",
-        cta_url="https://u3.mnge.co/",
+        cta_text="Visit Store",
+        cta_url=None,
         sender_id=None,
         account="apparel",
     )
 
 
-def test_apparel_cannot_sync_rcs_to_tata_moengage(client):
-    api.app.dependency_overrides[api.get_current_user] = lambda: APPAREL_USER
+def test_apparel_cannot_sync_rcs_to_tata_moengage(client, provision_user):
+    _, headers = provision_user(tenant="apparel", role="operator")
+    client.headers.update(headers)
     with patch("moengage_sync.create_moengage_rcs_template") as create:
         response = client.post(
             "/api/moengage/rcs/sync",

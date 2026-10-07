@@ -32,6 +32,22 @@ export type AuthResponse = {
   token: string;
 };
 
+export function canAccessAccount(user: AuthUser | null, account: string): boolean {
+  if (!user) return false;
+  const target = account.toLowerCase().trim();
+  if (user.role === "superadmin") return Boolean(target);
+  if (!target || target === "all" || user.tenant_id === "all") return false;
+  return target === user.tenant_id || (
+    user.tenant_id === "tata" && ["tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"].includes(target)
+  );
+}
+
+export function authorizedAccount(user: AuthUser, savedAccount: string | null): string {
+  const saved = savedAccount?.toLowerCase().trim();
+  if (saved && canAccessAccount(user, saved)) return saved;
+  return user.role === "superadmin" ? "all" : user.tenant_id === "tata" ? "tcl_promo" : user.tenant_id;
+}
+
 export type UserItem = {
   id: string;
   name: string;
@@ -67,6 +83,9 @@ export type Template = {
   template_message?: string;
   entity_id?: string;
   card_title?: string;
+  media_url?: string;
+  cta_text?: string;
+  cta_url?: string;
 };
 
 export type KarixHealth = {
@@ -717,15 +736,6 @@ export async function fetchUsers(): Promise<UserItem[]> {
   return res.json();
 }
 
-export async function registerUser(name: string, role: string = "Operator"): Promise<UserItem> {
-  const res = await fetchWithRetry(getApiUrl("/api/users"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, role }),
-  });
-  if (!res.ok) throw new Error(await getErrorMessage(res));
-  return res.json();
-}
 
 export type AgentChatAction = {
   tool: string;
@@ -763,7 +773,7 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
-  });
+  }, 0);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   const data: AuthResponse = await res.json();
   if (data.token) {
@@ -772,24 +782,6 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
   return data;
 }
 
-export async function signupUser(
-  email: string,
-  password: string,
-  name: string,
-  tenant_id: string = "bajaj"
-): Promise<AuthResponse> {
-  const res = await fetchWithRetry(getApiUrl("/api/auth/signup"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, name, tenant_id }),
-  });
-  if (!res.ok) throw new Error(await getErrorMessage(res));
-  const data: AuthResponse = await res.json();
-  if (data.token) {
-    setAuthToken(data.token);
-  }
-  return data;
-}
 
 export async function fetchMe(): Promise<AuthUser> {
   const res = await fetchWithRetry(getApiUrl("/api/auth/me"));
@@ -797,8 +789,9 @@ export async function fetchMe(): Promise<AuthUser> {
   return res.json();
 }
 
-export async function fetchTeam(): Promise<AuthUser[]> {
-  const res = await fetchWithRetry(getApiUrl("/api/auth/team"));
+export async function fetchTeam(tenantId?: string): Promise<AuthUser[]> {
+  const query = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  const res = await fetchWithRetry(getApiUrl(`/api/auth/team${query}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -807,15 +800,17 @@ export async function inviteColleague(
   email: string,
   password: string,
   name: string,
-  role: string = "operator"
+  role: string = "operator",
+  tenantId?: string
 ): Promise<AuthUser> {
   const res = await fetchWithRetry(getApiUrl("/api/auth/team/invite"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, name, role }),
-  });
+    body: JSON.stringify({ email, password, name, role, tenant_id: tenantId }),
+  }, 0);
   if (!res.ok) throw new Error(await getErrorMessage(res));
-  return res.json();
+  const data: { user: AuthUser } = await res.json();
+  return data.user;
 }
 
 export type DeleteTemplatesResult = {

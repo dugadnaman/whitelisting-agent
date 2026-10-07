@@ -10,6 +10,7 @@ import collections
 import json
 import logging
 import os
+import secrets
 import re
 import tempfile
 import uuid
@@ -20,7 +21,7 @@ from typing import Any
 import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from db_queue import (
@@ -35,10 +36,8 @@ from queue_manager import QUEUE_MANAGER
 logger = logging.getLogger(__name__)
 from activity_tracker import (
     get_activity_summary,
-    get_all_users,
     load_activities,
     log_activity,
-    register_or_update_user,
 )
 from auth import (
     TATA_SUB_ACCOUNTS,
@@ -47,6 +46,8 @@ from auth import (
     list_tenant_team,
     register_user,
     require_tenant_access,
+    security,
+    require_admin,
 )
 from config import (
     BAJAJ_WABA_ID,
@@ -124,6 +125,7 @@ from sms_tracker import (
 )
 from submission_client import _GOVERNOR, _STATUS_MAP, delete_templates_bulk
 from tracker import load_log, log_result, pending_entries
+from apparel_attribution import router as apparel_attribution_router
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -140,6 +142,31 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=True,
 )
+
+
+@app.middleware("http")
+async def authenticate_api_requests(request: Request, call_next):
+    """Protect every API handler, including legacy routes without an auth dependency."""
+    path, method = request.url.path, request.method
+    public = (
+        method == "OPTIONS"
+        or method in ("GET", "HEAD") and path in ("/api/health", "/healthz")
+        or method == "POST" and path in ("/api/auth/login", "/api/auth/signup")
+        or method in ("GET", "HEAD") and re.fullmatch(r"/api/media/[^/]+", path)
+        or method == "POST" and re.fullmatch(r"/api/webhooks/karix/[a-z0-9_]+", path)
+        or method == "POST" and path in ("/api/sms/dlr", "/api/sms/click")
+        or method == "GET" and path == "/api/moengage/mcp/oauth/callback"
+    )
+    if (path == "/api" or path.startswith("/api/")) and not public:
+        try:
+            identity = await get_current_user(request, await security(request))
+            request.state.current_user = identity
+            if path == "/api/work-management" or path.startswith("/api/work-management/"):
+                require_tenant_access("tata", identity)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+    return await call_next(request)
+app.include_router(apparel_attribution_router)
 
 LOG_PATH = "submission_log.jsonl"
 RCS_LOG_PATH = "rcs_submission_log.jsonl"
@@ -186,55 +213,42 @@ def _init_media_cache():
 @app.api_route("/api/media/{filename}", methods=["GET", "HEAD"])
 def get_public_media(filename: str):
     """Serve cached template header images/videos/documents directly to Karix, Meta, and frontend previews."""
-    clean_fn = Path(filename).name
-    file_p = MEDIA_CACHE_DIR / clean_fn
-    if not file_p.exists() and clean_fn.startswith("jira_"):
-        m = re.match(r"^jira_(\d+)_(.+)$", clean_fn)
-        if m:
-            att_id = m.group(1)
-            orig_fn = m.group(2)
-            try:
-                from jira_client import download_jira_attachment
-
-                download_jira_attachment(att_id, orig_fn)
-            except Exception as dl_err:
-                logger.warning("Could not on-demand download Jira attachment %s: %s", att_id, dl_err)
-
-    if not file_p.exists():
-        # Check root directory fallback
-        root_p = Path(clean_fn)
-        if root_p.exists():
-            file_p = root_p
-        else:
+    allowed_types = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4", ".pdf": "application/pdf",
+    }
+    if filename != Path(filename).name or "\\" in filename or Path(filename).suffix.lower() not in allowed_types:
+        raise HTTPException(status_code=404, detail="Media not found")
+    file_p = MEDIA_CACHE_DIR / filename
+    cache_root = MEDIA_CACHE_DIR.resolve()
+    if file_p.is_symlink() or file_p.resolve().parent != cache_root:
+        raise HTTPException(status_code=404, detail="Media not found")
+    if not file_p.is_file():
+        # Only these generated legacy sample assets may live outside the media cache.
+        if filename not in ("default_sample_header.png", "default_sample_header.mp4", "default_sample_header.pdf"):
+            raise HTTPException(status_code=404, detail="Media not found")
+        file_p = Path(filename)
+        if file_p.is_symlink() or not file_p.is_file():
             raise HTTPException(status_code=404, detail="Media not found")
 
-    media_type = "image/png"
-    lower_fn = clean_fn.lower()
-    if lower_fn.endswith((".jpg", ".jpeg")):
+    # Validate actual content, not a misleading extension on a configuration/source file.
+    with file_p.open("rb") as media_file:
+        header = media_file.read(16)
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        media_type = "image/png"
+    elif header.startswith(b"\xff\xd8\xff"):
         media_type = "image/jpeg"
-    elif lower_fn.endswith(".gif"):
+    elif header.startswith((b"GIF87a", b"GIF89a")):
         media_type = "image/gif"
-    elif lower_fn.endswith(".mp4"):
-        media_type = "video/mp4"
-    elif lower_fn.endswith(".pdf"):
+    elif header.startswith(b"%PDF"):
         media_type = "application/pdf"
+    elif len(header) >= 12 and header[4:8] == b"ftyp":
+        media_type = "video/mp4"
+    elif header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        media_type = "image/webp"
     else:
-        # Inspect magic bytes to detect real media format regardless of extension
-        try:
-            with open(file_p, "rb") as f:
-                header = f.read(16)
-            if header.startswith(b"\xff\xd8\xff"):
-                media_type = "image/jpeg"
-            elif header.startswith(b"\x89PNG\r\n\x1a\n"):
-                media_type = "image/png"
-            elif header.startswith((b"GIF87a", b"GIF89a")):
-                media_type = "image/gif"
-            elif header.startswith(b"%PDF"):
-                media_type = "application/pdf"
-        except Exception:
-            pass
-
-    return FileResponse(str(file_p), media_type=media_type)
+        raise HTTPException(status_code=404, detail="Media not found")
+    return FileResponse(str(file_p), media_type=media_type, headers={"X-Content-Type-Options": "nosniff"})
 
 
 # ---------------------------------------------------------------------------
@@ -393,9 +407,6 @@ class AccountCreate(BaseModel):
     id: str | None = None
 
 
-class UserRegister(BaseModel):
-    name: str
-    role: str | None = "Operator"
 
 
 class CredentialUpdate(BaseModel):
@@ -531,12 +542,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class SignupRequest(BaseModel):
-    email: str
-    password: str
-    name: str
-    tenant_id: str = "bajaj"
-    role: str = "operator"
 
 
 class TeamInviteRequest(BaseModel):
@@ -544,33 +549,13 @@ class TeamInviteRequest(BaseModel):
     name: str
     password: str
     role: str = "operator"
+    tenant_id: str | None = None
 
 
 @app.post("/api/auth/signup")
-def signup_endpoint(body: SignupRequest):
-    """Register a new user account bound to a specific tenant organization."""
-    try:
-        auth_res = register_user(
-            email=body.email,
-            password=body.password,
-            name=body.name,
-            tenant_id=body.tenant_id,
-            role=body.role,
-        )
-        log_activity(
-            user=body.name,
-            action="USER_SIGNUP",
-            account=body.tenant_id,
-            channel="all",
-            details={"email": body.email, "tenant": body.tenant_id, "role": body.role},
-            status="success",
-        )
-        return _json_safe(auth_res)
-    except ValueError as val_err:
-        raise HTTPException(status_code=400, detail=str(val_err)) from val_err
-    except Exception as exc:
-        logger.exception("Signup error: %s", exc)
-        raise HTTPException(status_code=500, detail="Internal server error during registration.") from exc
+def signup_endpoint():
+    """Public registration is closed; admins provision colleagues through team invite."""
+    raise HTTPException(status_code=403, detail="Public signup is disabled. Ask your organization administrator to provision your account.")
 
 
 @app.post("/api/auth/login")
@@ -599,19 +584,27 @@ def get_me_endpoint(current_user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/auth/team")
-def get_team_endpoint(current_user: dict = Depends(get_current_user)):
-    """List team members within user's assigned organization."""
-    tenant = current_user.get("tenant_id", "bajaj")
-    members = list_tenant_team(tenant)
-    return _json_safe(members)
+def get_team_endpoint(
+    tenant_id: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """List members only within an authorized concrete organization."""
+    tenant = tenant_id or current_user["tenant_id"]
+    require_tenant_access(tenant, current_user)
+    if tenant == "all":
+        raise HTTPException(status_code=400, detail="Select a concrete organization to view its team.")
+    return _json_safe(list_tenant_team(tenant))
 
 
 @app.post("/api/auth/team/invite")
 def invite_team_member(body: TeamInviteRequest, current_user: dict = Depends(get_current_user)):
     """Organization admins can onboard colleagues to their organization."""
-    tenant = current_user.get("tenant_id", "bajaj")
-    if current_user.get("role") not in ("admin", "superadmin"):
-        raise HTTPException(status_code=403, detail="Only organization admins can invite team members.")
+    require_admin(current_user)
+    tenant = (body.tenant_id or current_user["tenant_id"]).lower().strip()
+    if current_user["role"] != "superadmin" and tenant != current_user["tenant_id"]:
+        raise HTTPException(status_code=403, detail="Admins may provision only their own organization.")
+    if tenant == "all" or body.role.lower().strip() not in ("operator", "admin"):
+        raise HTTPException(status_code=400, detail="Choose a concrete organization and an operator or admin role.")
 
     try:
         new_user = register_user(
@@ -621,7 +614,7 @@ def invite_team_member(body: TeamInviteRequest, current_user: dict = Depends(get
             tenant_id=tenant,
             role=body.role,
         )
-        return _json_safe(new_user)
+        return _json_safe({"user": new_user})
     except ValueError as val_err:
         raise HTTPException(status_code=400, detail=str(val_err)) from val_err
 
@@ -815,19 +808,38 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
         carousel_cards = vi.get("carouselCard", [])
         card_title = ""
         msg = vi.get("textMessage", "")
+        media_url = ""
+        cta_text = ""
+        cta_url = ""
+        suggestions = []
+
         if carousel_cards:
             t_type = f"carousel ({len(carousel_cards)} cards)"
             card_title = " | ".join([c.get("cardTitle", "") for c in carousel_cards if c.get("cardTitle")])
             msg = " | ".join([c.get("cardDescription", "") for c in carousel_cards if c.get("cardDescription")])
+            c0 = carousel_cards[0] if carousel_cards else {}
+            media_url = c0.get("mediaUrl") or c0.get("media_url") or ""
+            suggestions = c0.get("suggestions") or []
         elif vi.get("standaloneCard"):
             t_type = "richcard"
-            card_title = vi.get("standaloneCard", {}).get("cardTitle", "")
-            msg = vi.get("standaloneCard", {}).get("cardDescription", "")
+            sc = vi.get("standaloneCard", {})
+            card_title = sc.get("cardTitle", "")
+            msg = sc.get("cardDescription", "")
+            media_url = sc.get("mediaUrl") or sc.get("media_url") or ""
+            suggestions = sc.get("suggestions") or []
+        else:
+            media_url = vi.get("mediaUrl") or vi.get("media_url") or ""
+            suggestions = vi.get("suggestions") or []
+
+        if suggestions and isinstance(suggestions, list):
+            s0 = suggestions[0] if suggestions else {}
+            cta_text = s0.get("text") or s0.get("postbackData") or s0.get("postback_data") or ""
+            cta_url = s0.get("url") or ""
 
         entry = {
             "source_ref": name,
             "template_name": name,
-            "template_id": str(lt.get("templateId", "")),
+            "template_id": name,
             "template_type": t_type,
             "card_title": card_title,
             "template_message": msg,
@@ -842,6 +854,10 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
             "source_file": None,
             "live": True,
             "exists_on_waba": True,
+            "media_url": media_url or None,
+            "cta_text": cta_text or None,
+            "cta_url": cta_url or None,
+            "suggestions": suggestions,
         }
         merged_entries.append(entry)
         seen_names.add(name.lower())
@@ -2103,11 +2119,7 @@ async def karix_webhook_endpoint(
     3. Updates database via monotonic state precedence (APPROVED/REJECTED are immutable).
     """
     clean_tenant = tenant.lower().strip()
-    configured_secret = (
-        os.environ.get(f"{_account_prefix(clean_tenant)}_WEBHOOK_SECRET")
-        or os.environ.get("KARIX_WEBHOOK_SECRET")
-        or "karix_webhook_secret_2026"
-    )
+    configured_secret = os.environ.get(f"{_account_prefix(clean_tenant)}_WEBHOOK_SECRET") or os.environ.get("KARIX_WEBHOOK_SECRET")
 
     auth_header = (
         authorization.replace("Bearer ", "").strip()
@@ -2115,7 +2127,11 @@ async def karix_webhook_endpoint(
         else authorization
     )
     incoming_token = x_webhook_token or x_karix_token or auth_header or token
-    if incoming_token != configured_secret:
+    if not incoming_token:
+        raise HTTPException(status_code=401, detail="Invalid webhook authentication token.")
+    if not configured_secret:
+        raise HTTPException(status_code=503, detail="Configure the account webhook secret before accepting provider callbacks.")
+    if not secrets.compare_digest(incoming_token.encode("utf-8"), configured_secret.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid webhook authentication token.")
 
     try:
@@ -2423,7 +2439,7 @@ def get_accounts(current_user: dict = Depends(get_current_user)):
     accs = load_accounts()
     tenant = str(current_user.get("tenant_id", "all")).lower().strip()
     role = str(current_user.get("role", "operator")).lower().strip()
-    if tenant != "all" and role != "superadmin":
+    if role != "superadmin":
         allowed = TATA_SUB_ACCOUNTS if tenant == "tata" else {tenant}
         accs = [a for a in accs if a.get("id") in allowed]
 
@@ -2472,7 +2488,10 @@ def _verify_rcs_destination(account: str, expected_bot_id: str | None) -> None:
 
 
 @app.post("/api/accounts")
-def create_account(body: AccountCreate, user: str = Query("Anonymous Operator")):
+def create_account(body: AccountCreate, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "superadmin":
+        raise HTTPException(status_code=403, detail="Only platform administrators may create organizations.")
+    user = current_user["name"]
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Account name is required.")
@@ -2505,7 +2524,10 @@ def create_account(body: AccountCreate, user: str = Query("Anonymous Operator"))
 
 
 @app.delete("/api/accounts/{account_id}")
-def delete_account(account_id: str, user: str = Query("Anonymous Operator")):
+def delete_account(account_id: str, current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "superadmin":
+        raise HTTPException(status_code=403, detail="Only platform administrators may delete organizations.")
+    user = current_user["name"]
     acc_id = account_id.lower().strip()
     if acc_id in ("bajaj", "tata"):
         raise HTTPException(status_code=400, detail=f"Cannot delete built-in account '{acc_id}'.")
@@ -2566,6 +2588,7 @@ def get_credentials(
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
+    require_admin(current_user)
     """
     Return saved credentials from the server so any device/operator on the team
     instantly shares the single source of truth without re-entering keys.
@@ -2691,7 +2714,7 @@ def get_credentials(
         "rcs_auth_token": rcs_auth_token,
         "rcs_esmeaddr": rcs_esmeaddr,
         "esmeaddr": esmeaddr,
-        "gemini_api_key": os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "",
+        "gemini_api_key": (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "") if current_user["role"] == "superadmin" else "",
         "is_configured": is_configured,
         "permanent_defaults": {
             "waba_id": DEFAULT_WABA_IDS.get(acc, BAJAJ_WABA_ID if is_bajaj else ""),
@@ -2795,6 +2818,9 @@ def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str, acc: st
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get_current_user)):
     require_tenant_access(creds.account, current_user)
+    require_admin(current_user)
+    if creds.gemini_api_key is not None and current_user["role"] != "superadmin":
+        raise HTTPException(status_code=403, detail="Only platform administrators may change shared Gemini credentials.")
     env_path = Path(".env")
     acc = creds.account.lower().strip()
     chan = creds.channel.lower().strip()
@@ -2867,7 +2893,7 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     gh_status = _commit_credentials_to_github() if mapping else None
 
     log_activity(
-        user=creds.user_name or "Anonymous Operator",
+        user=current_user["name"],
         action="CREDENTIALS_UPDATE",
         account=acc,
         channel=chan,
@@ -3052,6 +3078,7 @@ def test_credentials(
     body_fields = creds.model_fields_set if creds else set()
     acc = (creds.account if creds and "account" in body_fields else account).lower().strip()
     require_tenant_access(acc, current_user)
+    require_admin(current_user)
     chan = (creds.channel if creds and "channel" in body_fields else channel).lower().strip()
     acc_name = get_account_name(acc)
     prefix = _account_prefix(acc)
@@ -3136,27 +3163,11 @@ def get_activity_logs(
 
 
 @app.get("/api/users")
-def list_users():
-    """Return all registered operator accounts."""
-    return [_json_safe(u) for u in get_all_users()]
-
-
-@app.post("/api/users")
-def register_user_endpoint(body: UserRegister):
-    """Create or switch operator profile."""
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="User name cannot be empty.")
-    u = register_or_update_user(name, body.role or "Operator")
-    log_activity(
-        user=name,
-        action="USER_LOGIN",
-        account="all",
-        channel="all",
-        details={"name": name, "role": body.role or "Operator"},
-        status="success",
-    )
-    return _json_safe(u)
+def list_users(current_user: dict = Depends(get_current_user)):
+    """Return authorized tenant users, not legacy name-only operator identities."""
+    if current_user["tenant_id"] == "all":
+        raise HTTPException(status_code=400, detail="Select an organization using /api/auth/team?tenant_id=...")
+    return _json_safe(list_tenant_team(current_user["tenant_id"]))
 
 
 @app.get("/api/activity/stats")
@@ -3406,6 +3417,17 @@ async def upload_and_send_sms_file_endpoint(
             os.unlink(tmp_path)
 
 
+def _require_sms_callback_token(account: str, authorization: str | None) -> None:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="SMS callback authentication required.")
+    expected = get_sms_dlr_auth_token(account)
+    if not expected:
+        raise HTTPException(status_code=503, detail="Configure the account SMS DLR authentication token before accepting callbacks.")
+    incoming = authorization[6:].strip() if authorization.lower().startswith("basic ") else authorization.strip()
+    if not secrets.compare_digest(incoming.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Invalid SMS callback authentication token.")
+
+
 @app.post("/api/sms/dlr")
 async def receive_sms_dlr_webhook(
     request: Request,
@@ -3418,6 +3440,8 @@ async def receive_sms_dlr_webhook(
     - Plain HTTPs Callback API (JSON Format)
     - Encrypted HTTPs Callback API (AES GCM Mode)
     """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="SMS callback authentication required.")
     body_bytes = await request.body()
     if not body_bytes:
         raise HTTPException(status_code=400, detail="Empty DLR request body")
@@ -3428,12 +3452,18 @@ async def receive_sms_dlr_webhook(
     except Exception as exc:
         logger.warning("Invalid JSON received in SMS DLR: %s", exc)
         raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="SMS callback payload must be an object.")
 
     # 2. Check and decrypt if AES-GCM encrypted
     if isinstance(data, dict) and (data.get("aes_mode") == "GCM" or "payload" in data):
-        gcm_key = data.get("key") or get_sms_dlr_gcm_key("bajaj")
-        gcm_iv = data.get("iv_key") or get_sms_dlr_gcm_iv("bajaj")
+        envelope_account = "tata" if "tata" in str(data.get("acode") or data.get("uname") or "").lower() else "bajaj"
+        _require_sms_callback_token(envelope_account, authorization)
+        gcm_key = get_sms_dlr_gcm_key(envelope_account)
+        gcm_iv = get_sms_dlr_gcm_iv(envelope_account)
         payload_b64 = data.get("payload") or ""
+        if not payload_b64 or not gcm_key or not gcm_iv:
+            raise HTTPException(status_code=503, detail="Configure the account SMS DLR encryption key and IV before accepting encrypted callbacks.")
         if payload_b64 and gcm_key and gcm_iv:
             try:
                 decrypted_text = decrypt_dlr_gcm(payload_b64, gcm_key, gcm_iv)
@@ -3441,17 +3471,14 @@ async def receive_sms_dlr_webhook(
             except Exception as exc:
                 logger.error("Failed to decrypt GCM DLR payload: %s", exc)
                 raise HTTPException(status_code=400, detail=f"Failed to decrypt GCM payload: {exc}") from exc
+            if not isinstance(data, dict):
+                raise HTTPException(status_code=400, detail="Decrypted SMS callback payload must be an object.")
 
     # 3. Determine client from account code (acode)
     acode = str(data.get("acode") or data.get("uname") or "").strip()
     client_name = "tata" if "tata" in acode.lower() else "bajaj"
 
-    # 4. Optional authorization token check
-    expected_token = get_sms_dlr_auth_token(client_name)
-    if expected_token and authorization:
-        clean_auth = authorization.replace("Basic ", "").strip()
-        if clean_auth != expected_token and authorization.strip() != expected_token:
-            logger.warning("DLR callback auth verification mismatch for client '%s'", client_name)
+    _require_sms_callback_token(client_name, authorization)
 
     # 5. Extract DLR parameters
     report = SmsDlrReport(
@@ -3497,18 +3524,23 @@ async def receive_sms_dlr_webhook(
 
 
 @app.post("/api/sms/click")
-async def receive_sms_click_webhook(request: Request):
+async def receive_sms_click_webhook(request: Request, authorization: str | None = Header(None)):
     """
     Karix SMS Click Report Webhook Callback.
     Logs URL link clicks from shortened URLs in SMS messages.
     """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="SMS callback authentication required.")
     try:
         data = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid JSON body: {exc}") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="SMS callback payload must be an object.")
 
     sender_id = str(data.get("senderid") or "")
     client_name = "tata" if "tata" in sender_id.lower() else "bajaj"
+    _require_sms_callback_token(client_name, authorization)
 
     report = SmsClickReport(
         mobile_number=str(data.get("mobile_number") or ""),
@@ -3617,6 +3649,8 @@ def test_gemini_endpoint(
     from gemini_intelligence import analyze_template_semantics, get_gemini_api_key
 
     if payload and payload.api_key and payload.api_key.strip():
+        if current_user["role"] != "superadmin":
+            raise HTTPException(status_code=403, detail="Only platform administrators may change shared Gemini credentials.")
         key = payload.api_key.strip()
         os.environ["GEMINI_API_KEY"] = key
         os.environ["GOOGLE_API_KEY"] = key
@@ -4232,12 +4266,12 @@ async def upload_jira_creative_endpoint(
 
 class MoEngageRcsSyncRequest(BaseModel):
     template_name: str
-    template_id: str
+    template_id: str | None = None
     card_title: str
     card_description: str
     media_url: str | None = None
-    cta_text: str = "Explore Now"
-    cta_url: str = "https://u3.mnge.co/"
+    cta_text: str | None = None
+    cta_url: str | None = None
     sender_id: str | None = None
     account: str | None = None
 
@@ -4262,11 +4296,11 @@ async def sync_moengage_rcs_endpoint(
         res = await asyncio.to_thread(
             create_moengage_rcs_template,
             template_name=req.template_name,
-            template_id=req.template_id,
+            template_id=req.template_name,
             card_title=req.card_title,
             card_description=req.card_description,
             media_url=req.media_url,
-            cta_text=req.cta_text,
+            cta_text=req.cta_text or ("Visit Store" if target_account == "apparel" else "Explore Now"),
             cta_url=req.cta_url,
             sender_id=req.sender_id,
             account=target_account,
@@ -4343,6 +4377,7 @@ def get_moengage_credentials_endpoint(
 ):
     """Return MoEngage credential state (token, cookie, expiry) for an account."""
     _require_moengage_account_access(account, current_user)
+    require_admin(current_user)
     from moengage_sync import get_moengage_credentials
 
     creds = get_moengage_credentials(account)
@@ -4370,6 +4405,7 @@ def update_moengage_credentials_endpoint(
 ):
     """Persist an account's MoEngage workspace credentials to .env and credentials.json."""
     _require_moengage_account_access(req.account, current_user)
+    require_admin(current_user)
     keys = _moengage_credential_keys(req.account)
     mapping: dict[str, str] = {}
     acc = req.account.lower().strip()
@@ -4967,6 +5003,7 @@ def get_moengage_mcp_status_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Get MoEngage MCP server URL, OAuth status, and generic MCP config JSON."""
+    _require_moengage_account_access(account, current_user)
     from moengage_mcp import get_mcp_status
 
     return _json_safe(get_mcp_status(account))
@@ -4978,6 +5015,8 @@ def save_moengage_mcp_token_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Save MoEngage MCP access/refresh token or server URL."""
+    _require_moengage_account_access(body.account, current_user)
+    require_admin(current_user)
     from moengage_mcp import save_mcp_tokens
 
     status = save_mcp_tokens(
@@ -4996,6 +5035,8 @@ def start_moengage_mcp_oauth_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Initiate OAuth 2.0 + PKCE flow against https://moeauth.moengage.com for https://mcp.moengage.com."""
+    _require_moengage_account_access(body.account, current_user)
+    require_admin(current_user)
     from moengage_mcp import start_mcp_oauth
 
     redirect_uri = body.redirect_uri

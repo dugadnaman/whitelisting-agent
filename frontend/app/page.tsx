@@ -137,10 +137,13 @@ export default function DashboardPage() {
       const res = await syncRcsTemplateToMoEngage({
         account,
         template_name: tName,
-        template_id: t.template_id || tName,
+        template_id: tName,
         card_title: t.card_title || tName,
         card_description: t.template_message || tName,
-        sender_id: t.sender_ids?.[0],
+        media_url: t.media_url,
+        cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
+        cta_url: t.cta_url,
+        sender_id: account === 'apparel' ? 'RB RCS' : t.sender_ids?.[0],
       });
       setSyncedSingleRcs((prev) => ({ ...prev, [tName]: res.moengage_id }));
       setSyncRcsFeedback({
@@ -194,10 +197,13 @@ export default function DashboardPage() {
           await syncRcsTemplateToMoEngage({
             account,
             template_name: t.template_name,
-            template_id: t.template_id || t.template_name,
+            template_id: t.template_name,
             card_title: t.card_title || t.template_name,
             card_description: t.template_message || t.template_name,
-            sender_id: t.sender_ids?.[0],
+            media_url: t.media_url,
+            cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
+            cta_url: t.cta_url,
+            sender_id: account === 'apparel' ? 'RB RCS' : t.sender_ids?.[0],
           });
           setSyncedSingleRcs((prev) => ({ ...prev, [t.template_name]: 'synced' }));
           successCount++;

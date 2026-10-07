@@ -72,6 +72,7 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
 
     sender_id = (
         os.environ.get(f"{prefix}_MOENGAGE_SENDER_ID")
+        or ("RB RCS" if acc == "apparel" else None)
         or os.environ.get(f"{prefix}_RCS_BOT_ID")
         or os.environ.get("MOENGAGE_SENDER_ID")
         or DEFAULT_RCS_BOT_IDS.get(acc, "")
@@ -271,27 +272,46 @@ def create_moengage_rcs_template(
     """
     cfg = get_moengage_config(account)
     clean_name = re.sub(r"[^\w\-.]", "_", template_name.strip()).strip("_")
-    clean_id = str(template_id or clean_name).strip()
-    resolved_sender = sender_id or cfg["sender_id"]
-    resolved_cta_url = cta_url
-    if not resolved_cta_url or (resolved_cta_url == "https://www.tatacapital.com" and account.lower() == "apparel"):
-        resolved_cta_url = "https://u3.mnge.co/"
+    # In MoEngage, template ID and template name are always the exact same
+    clean_id = clean_name
+
+    if account.lower() == "apparel":
+        # In MoEngage, the Apparel brand sender profile is "RB RCS"
+        resolved_sender = (
+            sender_id if sender_id and sender_id not in ("P7hzkqCcW3x96I6T", "Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID) else None
+        ) or cfg["sender_id"] or "RB RCS"
+        if resolved_sender in ("P7hzkqCcW3x96I6T", "Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID):
+            resolved_sender = "RB RCS"
+    else:
+        resolved_sender = sender_id or cfg["sender_id"]
+
+    resolved_cta_url = (cta_url or "").strip()
+    if not resolved_cta_url or resolved_cta_url in ("https://u3.mnge.co/", "https://www.tatacapital.com"):
+        if account.lower() == "apparel":
+            resolved_cta_url = "https://www.randbfashion.in/randbfashion-Store-Locater.html"
+        else:
+            resolved_cta_url = "https://www.tatacapital.com"
 
     suggestions = []
     if resolved_cta_url:
+        resolved_cta_text = (cta_text or ("Visit Store" if account.lower() == "apparel" else "Explore Now"))[:25]
         suggestions.append(
             {
                 "type": "OPEN_URL",
-                "text": (cta_text or "Check Offer")[:25],
-                "postback_data": (cta_text or "Check Offer")[:120],
+                "text": resolved_cta_text,
+                "postback_data": resolved_cta_text[:120],
                 "url": resolved_cta_url.strip(),
                 "application": "BROWSER",
                 "webview_view_mode": "",
             }
         )
-    clean_media_url = (
-        media_url.strip() if media_url else "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
-    )
+
+    clean_media_url = (media_url or "").strip()
+    if not clean_media_url:
+        if account.lower() == "apparel":
+            clean_media_url = "https://rm.virbm.com/P7hzkqCcW3x96I6T/d11c5b30238a401da9d653e48936045e.jpeg"
+        else:
+            clean_media_url = "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
 
     payload = {
         "template_type": "rcs",
@@ -355,11 +375,13 @@ def _extract_rcs_media_url(vi_template: dict[str, Any]) -> str | None:
         card = cards[0] if cards else {}
     if card.get("mediaUrl"):
         return str(card["mediaUrl"])
-    if card.get("fileName"):
-        # fileName is a Karix RCS media handle, not a public URL — fall back to default creative
-        return None
+    if card.get("media_url"):
+        return str(card["media_url"])
+    if vi_template.get("mediaUrl"):
+        return str(vi_template["mediaUrl"])
+    if vi_template.get("media_url"):
+        return str(vi_template["media_url"])
     return None
-
 
 def sync_karix_rcs_to_moengage(
     account: str = "tata",
@@ -459,15 +481,20 @@ def sync_karix_rcs_to_moengage(
                 logger.debug("MoEngage attribute resolution bypassed: %s", ex)
 
         # CTA from first suggestion if present
-        suggestions = card.get("suggestions", []) or []
-        first_sugg = suggestions[0] if suggestions else {}
-        cta_text = str(first_sugg.get("text") or first_sugg.get("postback_data") or "Explore Now")
-        cta_url = str(first_sugg.get("url") or "https://www.tatacapital.com")
+        suggestions = card.get("suggestions", []) or vi.get("suggestions", []) or []
+        first_sugg = suggestions[0] if (suggestions and isinstance(suggestions, list)) else {}
+        cta_text = str(
+            first_sugg.get("text")
+            or first_sugg.get("postbackData")
+            or first_sugg.get("postback_data")
+            or ("Visit Store" if account.lower() == "apparel" else "Explore Now")
+        )
+        cta_url = str(first_sugg.get("url") or "")
 
         try:
             res = create_moengage_rcs_template(
                 template_name=name,
-                template_id=template_id or name,
+                template_id=name,
                 card_title=card_title,
                 card_description=card_description,
                 media_url=media_url,
