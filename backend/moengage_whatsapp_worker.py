@@ -66,6 +66,30 @@ def resolve_moengage_whatsapp_sender_id(sender_name_or_id: str, account: str = "
         return clean, "Gupshup"
     return "6516baa397c87500027529a3", "Gupshup"
 
+def _update_row_status(
+    batch_id: str,
+    position: int,
+    account: str,
+    workspace_id: str,
+    source_ref: str,
+    row_id: str,
+    status: str,
+    campaign_id: str | None = None,
+    issue: str | None = None,
+) -> None:
+    now = time.time()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE moengage_draft_batch_rows SET status='blocked', issue='superseded_by_newer_batch', updated_at=? "
+            "WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=? AND batch_id<>? AND status NOT IN ('preview_ready', 'blocked')",
+            (now, account, workspace_id, source_ref, row_id, batch_id),
+        )
+        conn.execute(
+            "UPDATE moengage_draft_batch_rows SET status=?, campaign_id=?, issue=?, updated_at=? "
+            "WHERE batch_id=? AND position=?",
+            (status, campaign_id, issue, now, batch_id, position),
+        )
+
 
 def automate_single_whatsapp_draft_row(
     name: str,
@@ -236,15 +260,24 @@ def automate_whatsapp_draft_batch(
 
         for r in wa_rows:
             source_fields = json.loads(r["source_fields_json"]) if r.get("source_fields_json") else {}
+            candidate = json.loads(r["candidate_json"]) if r.get("candidate_json") else {}
+            wa_conf = candidate.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
+            seg = candidate.get("segmentation_details", {}).get("included_filters", {}).get("filters", [{}])[0]
+
             name = source_fields.get("campaign_name") or f"WA_Campaign_Row_{r['row_id']}"
-            segment_name = source_fields.get("segment_name") or "Test_FSTP_Pranav_1602"
-            segment_id = source_fields.get("segment_id") or "65cf4af4d4c88174e5ad186e"
-            sender_val = source_fields.get("whatsapp_sender") or "6516baa397c87500027529a3"
-            template_val = source_fields.get("whatsapp_template_id") or "6516c13f43500232b272e627"
+            segment_name = seg.get("name") or source_fields.get("segment_name") or "Test_FSTP_Pranav_1602"
+            segment_id = seg.get("id") or source_fields.get("segment_id") or "65cf4af4d4c88174e5ad186e"
+            sender_val = wa_conf.get("sender_name") or source_fields.get("whatsapp_sender") or "6516baa397c87500027529a3"
+            template_val = wa_conf.get("template_id") or source_fields.get("whatsapp_template_id") or "6516c13f43500232b272e627"
             sender_id, sender_provider = resolve_moengage_whatsapp_sender_id(sender_val, account)
             template_id = resolve_moengage_whatsapp_template_id(template_val, account)
+            raw_ph = wa_conf.get("body_placeholders")
+            body_placeholders = raw_ph if isinstance(raw_ph, dict) and raw_ph else {"{{1}}": "", "{{2}}": "", "{{3}}": ""}
             row_id = r["row_id"]
             position = r["position"]
+            account_val = r.get("account") or account
+            workspace_id = r.get("workspace_id") or "0KYUNUW5WODKX5ZFVAGPVL0U"
+            source_ref = r.get("source_ref") or ""
             body = {
                 "campaign_data": {
                     "campaignName": name,
@@ -269,7 +302,7 @@ def automate_whatsapp_draft_batch(
                         "sender_id": sender_id,
                         "sender": sender_provider,
                         "template_id": template_id,
-                        "body_placeholders": {"{{1}}": "", "{{2}}": "", "{{3}}": ""},
+                        "body_placeholders": body_placeholders,
                         "bypass_opt_in_preference": False,
                     },
                     "stepStatus": True,
@@ -286,13 +319,10 @@ def automate_whatsapp_draft_batch(
                 resp_data = resp.json()
                 cid = resp_data.get("data", {}).get("id")
                 if cid and isinstance(cid, str):
-                    now = time.time()
-                    with get_db() as conn:
-                        conn.execute(
-                            "UPDATE moengage_draft_batch_rows SET status='VALIDATED', "
-                            "campaign_id=?, issue=NULL, updated_at=? WHERE batch_id=? AND position=?",
-                            (cid, now, batch_id, position),
-                        )
+                    _update_row_status(
+                        batch_id, position, account_val, workspace_id, source_ref, row_id,
+                        "VALIDATED", campaign_id=cid,
+                    )
                     created_count += 1
                     results.append({"row_id": row_id, "name": name, "status": "VALIDATED", "id": cid})
                     continue
@@ -411,12 +441,10 @@ def automate_whatsapp_draft_batch(
                 # Record success in DB
                 now = time.time()
                 campaign_id = f"WA-{name[:18].upper()}"
-                with get_db() as conn:
-                    conn.execute(
-                        "UPDATE moengage_draft_batch_rows SET status='VALIDATED', "
-                        "campaign_id=?, issue=NULL, updated_at=? WHERE batch_id=? AND position=?",
-                        (campaign_id, now, batch_id, position),
-                    )
+                _update_row_status(
+                    batch_id, position, r.get("account") or account, r.get("workspace_id") or "0KYUNUW5WODKX5ZFVAGPVL0U",
+                    r.get("source_ref") or "", row_id, "VALIDATED", campaign_id=campaign_id,
+                )
 
                 created_count += 1
                 results.append({"row_id": row_id, "name": name, "status": "VALIDATED", "id": campaign_id})
@@ -425,12 +453,10 @@ def automate_whatsapp_draft_batch(
                 err_msg = str(err)
                 logger.error("Failed to automate row %s (%s): %s", row_id, name, err_msg)
                 failed_count += 1
-                with get_db() as conn:
-                    conn.execute(
-                        "UPDATE moengage_draft_batch_rows SET status='UNCERTAIN', "
-                        "issue=?, updated_at=? WHERE batch_id=? AND position=?",
-                        (err_msg[:255], time.time(), batch_id, position),
-                    )
+                _update_row_status(
+                    batch_id, position, r.get("account") or account, r.get("workspace_id") or "0KYUNUW5WODKX5ZFVAGPVL0U",
+                    r.get("source_ref") or "", row_id, "UNCERTAIN", issue=err_msg[:255],
+                )
                 results.append({"row_id": row_id, "name": name, "status": "UNCERTAIN", "error": err_msg})
                 # If session expired, stop processing rest of batch to avoid cascade
                 if "session expired" in err_msg.lower():
