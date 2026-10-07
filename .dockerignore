@@ -21,3 +21,8 @@ submission_log.jsonl
 rcs_submission_log.jsonl
 activity_log.jsonl
 *.pdf
+**/.env*
+**/google-service-account.json
+agents/apparel-attribution/backend/storage/
+agents/apparel-attribution/backend/credentials/
+agents/apparel-attribution/data/

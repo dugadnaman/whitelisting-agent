@@ -1,0 +1,6 @@
+#!/usr/bin/with-contenv bash
+set -eu
+
+# Derived from the original socat bridge, but bind only assigned private NICs.
+# Never publish 9222 (or loopback 9223) with Docker -p or a Railway TCP proxy.
+exec /usr/local/bin/browser-start --cdp-forward

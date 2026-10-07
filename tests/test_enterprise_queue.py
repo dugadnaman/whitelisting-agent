@@ -160,13 +160,15 @@ def test_circuit_breaker_paused_for_auth_and_auto_resume():
     assert resumed_job["error_message"] is None
 
 
-def test_webhook_authentication_and_targeted_verification():
+def test_webhook_authentication_and_targeted_verification(monkeypatch):
     """
     Verify POST /api/webhooks/karix/{tenant}
     - 401 on invalid/missing secret token
     - Targeted check_status official API probe
     - Monotonic state update in database
     """
+    monkeypatch.setenv("KARIX_WEBHOOK_SECRET", "Configured-test-webhook-secret-123456789")
+    monkeypatch.setenv("TCHFL_WEBHOOK_SECRET", "Configured-test-webhook-secret-123456789")
     # Create target task in database
     tasks = [
         {
@@ -200,7 +202,7 @@ def test_webhook_authentication_and_targeted_verification():
         )
         r_auth = client.post(
             "/api/webhooks/karix/tchfl",
-            headers={"X-Webhook-Token": "karix_webhook_secret_2026"},
+            headers={"X-Webhook-Token": "Configured-test-webhook-secret-123456789"},
             json={"templateName": "hfl_patp_so_030926", "status": "APPROVED"},
         )
 
@@ -215,16 +217,9 @@ def test_webhook_authentication_and_targeted_verification():
     assert tasks_after[0]["provider_ref_id"] == "2010769589580071"
 
 
-def test_job_management_endpoints():
+def test_job_management_endpoints(provision_user):
     """Verify GET /api/jobs/{id} and POST /api/jobs/{id}/resume endpoints."""
-    # Authenticate as tchfl user
-    email = "job_tester@attributics.com"
-    client.post(
-        "/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Job Tester", "tenant_id": "tchfl"}
-    )
-    r_login = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
-    token = r_login.json().get("token") or r_login.json().get("access_token")
-    headers = {"Authorization": f"Bearer {token}"}
+    _, headers = provision_user("tchfl")
 
     tasks = [{"template_name": "tpl_endpoint_test", "source_ref": "ref_end", "status": "PENDING"}]
     job = create_job_with_tasks(

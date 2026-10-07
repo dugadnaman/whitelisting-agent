@@ -418,7 +418,7 @@ def test_ingest_moengage_export_file_zip():
         Path(zip_path).unlink(missing_ok=True)
 
 
-def test_upload_moengage_export_endpoint_zip():
+def test_upload_moengage_export_endpoint_zip(provision_user):
     """Verify POST /api/moengage/ops/upload-export accepts ZIP file and returns accurate metrics."""
     import csv
     import io
@@ -427,15 +427,10 @@ def test_upload_moengage_export_endpoint_zip():
 
     from fastapi.testclient import TestClient
 
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {
-        "email": "tester@attributics.com",
-        "name": "Tester",
-        "tenant_id": "all",
-        "role": "superadmin",
-    }
-    client = TestClient(app)
+    _, headers = provision_user(tenant="all", role="superadmin")
+    client = TestClient(app, headers=headers)
 
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as zip_tmp:
         zip_path = zip_tmp.name
@@ -466,5 +461,4 @@ def test_upload_moengage_export_endpoint_zip():
         assert "metrics" in data
         assert data["metrics"]["account_overview"]["total_campaigns"] >= 1
     finally:
-        app.dependency_overrides.clear()
         Path(zip_path).unlink(missing_ok=True)

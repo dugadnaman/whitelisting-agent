@@ -7,7 +7,7 @@ Verifies:
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,7 +15,6 @@ from fastapi.testclient import TestClient
 
 import api
 
-client = TestClient(api.app)
 
 MOCK_ISSUE_DATA = {
     "key": "TCN-999",
@@ -45,28 +44,14 @@ MOCK_ISSUE_DATA = {
     "labels": ["diwali", "promo"],
 }
 
-MOCK_USER = {
-    "sub": "usr_tata_test",
-    "email": "operator@tatacapital.com",
-    "name": "Briefing Operator",
-    "is_admin": True,
-    "tenant_id": "tata",
-    "role": "admin",
-}
+@pytest.fixture
+def client(provision_user):
+    _, headers = provision_user(tenant="tata", role="operator")
+    return TestClient(api.app, headers=headers)
 
 
-@pytest.fixture(autouse=True)
-def authenticated_jira_operator():
-    api.app.dependency_overrides[api.get_current_user] = lambda: MOCK_USER
-    try:
-        yield
-    finally:
-        api.app.dependency_overrides.pop(api.get_current_user, None)
-
-
-@patch("api.get_current_user", return_value=MOCK_USER)
 @patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA)
-def test_jira_brief_endpoint_resilient_to_waba_fetch_error(mock_fetch_issue, mock_user):
+def test_jira_brief_endpoint_resilient_to_waba_fetch_error(mock_fetch_issue, client):
     """Verify that when fetch_template_list raises an exception, the brief endpoint still succeeds."""
     with patch("submission_client.fetch_template_list", side_effect=OSError("Missing WABA token for sub-account")):
         response = client.get("/api/jira/brief/TCN-999")
@@ -82,9 +67,8 @@ def test_jira_brief_endpoint_resilient_to_waba_fetch_error(mock_fetch_issue, moc
             assert wa["live_status"] == "not_submitted"
 
 
-@patch("api.get_current_user", return_value=MOCK_USER)
 @patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA)
-def test_jira_brief_endpoint_cross_references_live_waba(mock_fetch_issue, mock_user):
+def test_jira_brief_endpoint_cross_references_live_waba(mock_fetch_issue, client):
     """Verify that when fetch_template_list succeeds, matching templates are marked exists_on_waba=True."""
     mock_live = [
         {
@@ -109,9 +93,8 @@ def test_jira_brief_endpoint_cross_references_live_waba(mock_fetch_issue, mock_u
                 assert matching[0]["live_ref_id"] == "9876543210"
 
 
-@patch("api.get_current_user", return_value=MOCK_USER)
 @patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA)
-def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, mock_user):
+def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, client):
     """Verify that submit endpoint preserves TEXT headers, footers, and QUICK_REPLY/PHONE buttons."""
     from models import ApprovalStatus, SubmissionResult, SubmissionStatus
 
@@ -202,17 +185,13 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
 
 
 @pytest.fixture
-def jira_submit_user():
-    """Exercise the real FastAPI dependency rather than patching its import."""
-    def set_user(tenant):
-        api.app.dependency_overrides[api.get_current_user] = lambda: {
-            "sub": "usr_jira_test", "tenant_id": tenant, "role": "operator", "name": "Test Operator"
-        }
+def jira_submit_user(client, provision_user):
+    """Switch callers using real database-backed JWT identities."""
+    def set_user(tenant, role="operator"):
+        _, headers = provision_user(tenant=tenant, role=role)
+        client.headers.update(headers)
 
-    try:
-        yield set_user
-    finally:
-        api.app.dependency_overrides.pop(api.get_current_user, None)
+    return set_user
 
 
 def _mock_parsed_brief():
@@ -238,7 +217,7 @@ def _mixed_submission_payload():
     }
 
 
-def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit_user):
+def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit_user, client):
     from models import ApprovalStatus, SubmissionResult, SubmissionStatus
     from rcs_models import RcsSubmissionResult
 
@@ -302,7 +281,7 @@ def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit
 
 
 @pytest.mark.parametrize("tenant", ["wealth", "tcl_promo"])
-def test_jira_submit_rejects_unauthorized_destination_before_submitting(jira_submit_user, tenant):
+def test_jira_submit_rejects_unauthorized_destination_before_submitting(jira_submit_user, tenant, client):
     jira_submit_user(tenant)
     with (
         patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA),
@@ -319,7 +298,7 @@ def test_jira_submit_rejects_unauthorized_destination_before_submitting(jira_sub
     submit_rcs.assert_not_called()
 
 
-def test_jira_submit_validates_selected_whatsapp_waba(jira_submit_user):
+def test_jira_submit_validates_selected_whatsapp_waba(jira_submit_user, client):
     jira_submit_user("tata")
     with (
         patch("jira_client.fetch_jira_issue", return_value=MOCK_ISSUE_DATA),
@@ -337,7 +316,7 @@ def test_jira_submit_validates_selected_whatsapp_waba(jira_submit_user):
     submit_rcs.assert_not_called()
 
 
-def test_jira_submit_refuses_rcs_bot_changed_since_confirmation(jira_submit_user):
+def test_jira_submit_refuses_rcs_bot_changed_since_confirmation(jira_submit_user, client):
     jira_submit_user("tata")
     payload = _mixed_submission_payload()
     payload["expected_rcs_bot_id"] = "reviewed-wealth-bot"
@@ -356,7 +335,7 @@ def test_jira_submit_refuses_rcs_bot_changed_since_confirmation(jira_submit_user
     submit_rcs.assert_not_called()
 
 
-def test_spreadsheet_submit_refuses_rcs_bot_changed_since_review(jira_submit_user):
+def test_spreadsheet_submit_refuses_rcs_bot_changed_since_review(jira_submit_user, client):
     jira_submit_user("tata")
     with patch("api.get_rcs_bot_id", return_value="different-live-bot"), patch("api._submit_rcs_batch") as submit:
         response = client.post(
@@ -371,8 +350,8 @@ def test_spreadsheet_submit_refuses_rcs_bot_changed_since_review(jira_submit_use
 
 
 
-def test_accounts_expose_effective_rcs_destination_without_secrets_or_persistence(jira_submit_user, monkeypatch):
-    jira_submit_user("all")
+def test_accounts_expose_effective_rcs_destination_without_secrets_or_persistence(jira_submit_user, monkeypatch, client):
+    jira_submit_user("all", role="superadmin")
     monkeypatch.setenv("WEALTH_RCS_BOT_ID", "live-wealth-bot")
     monkeypatch.setenv("WEALTH_RCS_BOT_NAME", "Live Wealth")
     monkeypatch.setenv("WEALTH_RCS_USERNAME", "live-rcs-user")
@@ -407,7 +386,7 @@ def test_accounts_expose_effective_rcs_destination_without_secrets_or_persistenc
     assert accounts[0]["rcs_bot_id"] != wealth["rcs_bot_id"]
 
 
-def test_accounts_only_enrich_visible_tenant_accounts(jira_submit_user, monkeypatch):
+def test_accounts_only_enrich_visible_tenant_accounts(jira_submit_user, monkeypatch, client):
     jira_submit_user("wealth")
     monkeypatch.setenv("WEALTH_RCS_BOT_ID", "wealth-override")
     with (patch("api.load_accounts", return_value=api.DEFAULT_ACCOUNTS), patch("rcs_config._load_env_file")):
@@ -418,7 +397,7 @@ def test_accounts_only_enrich_visible_tenant_accounts(jira_submit_user, monkeypa
     assert response.json()[0]["rcs_bot_id"] == "wealth-override"
 
 
-def test_accounts_do_not_trust_custom_group_for_tenant_visibility(jira_submit_user):
+def test_accounts_do_not_trust_custom_group_for_tenant_visibility(jira_submit_user, client):
     jira_submit_user("tata")
     accounts = [
         {"id": "wealth", "name": "Wealth", "group": "Tata Capital"},
@@ -430,8 +409,7 @@ def test_accounts_do_not_trust_custom_group_for_tenant_visibility(jira_submit_us
     assert response.status_code == 200
     assert [account["id"] for account in response.json()] == ["wealth"]
 
-@patch("api.get_current_user", return_value=MOCK_USER)
-def test_jira_projects_catalog_endpoint(mock_user):
+def test_jira_projects_catalog_endpoint(client):
     """Verify /api/jira/projects returns full Tata Capital project catalog."""
     response = client.get("/api/jira/projects")
     assert response.status_code == 200
@@ -863,12 +841,11 @@ def test_filtered_briefs_return_partial_page_when_jira_is_exhausted():
 
 
 
-def test_jira_creative_upload_and_download():
+def test_jira_creative_upload_and_download(client):
     """Verify users can upload a replacement creative and download/preview it via the Jira creative endpoints."""
     import io
     from pathlib import Path
     from PIL import Image
-    from api import app, get_current_user
 
     # Create a 1280x720 (16:9) PNG image in memory
     img = Image.new("RGB", (1280, 720), color=(20, 90, 200))
@@ -876,7 +853,6 @@ def test_jira_creative_upload_and_download():
     img.save(buf, format="PNG")
     png_bytes = buf.getvalue()
 
-    app.dependency_overrides[get_current_user] = lambda: MOCK_USER
     saved_path: Path | None = None
     try:
         # 1. Upload replacement creative
@@ -911,6 +887,5 @@ def test_jira_creative_upload_and_download():
         assert inline_resp.status_code == 200
         assert inline_resp.content == png_bytes
     finally:
-        app.dependency_overrides.clear()
         if saved_path and saved_path.exists():
             saved_path.unlink()

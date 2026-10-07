@@ -204,20 +204,16 @@ def test_apparel_account_rcs_only_sync():
         assert res["created"][0]["template_name"] == "apparel_festive_collection"
 
 
-def test_apparel_account_blocks_spreadsheet_submission():
+def test_apparel_account_blocks_spreadsheet_submission(provision_user):
     """Verify API blocks spreadsheet submission and preview for apparel account."""
     import io
 
     from fastapi.testclient import TestClient
 
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {
-        "email": "admin@attributics.com",
-        "role": "superadmin",
-        "tenant_id": "all",
-    }
-    client = TestClient(app)
+    _, headers = provision_user(tenant="apparel")
+    client = TestClient(app, headers=headers)
 
     fake_csv = io.BytesIO(b"template_name,body\ntpl_1,hello")
 
@@ -229,4 +225,3 @@ def test_apparel_account_blocks_spreadsheet_submission():
     assert resp_prev.status_code == 400
     assert "RCS Karix-to-MoEngage sync only" in resp_prev.json()["detail"]
 
-    app.dependency_overrides.clear()

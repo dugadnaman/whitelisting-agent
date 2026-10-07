@@ -1,0 +1,15 @@
+# Root source directory/build context. Select this module's config path in Railway.
+# Railway marks config-as-code legacy; dashboard equivalents remain supported.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "agents/apparel-attribution/RailwayBrowser/Dockerfile"
+watchPatterns = ["agents/apparel-attribution/RailwayBrowser/**"]
+
+[deploy]
+numReplicas = 1
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+# Keep the Docker ENTRYPOINT; no start command override.
+# Attach /config volume. Do NOT configure a browser public domain or TCP proxy.
+# A separate HTTPS authenticated reverse proxy reaches private port 3000 for streaming.
+# Worker alone reaches private 9222. Browser DevTools itself stays on loopback 9223.

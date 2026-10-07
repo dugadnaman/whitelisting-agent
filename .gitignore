@@ -50,3 +50,17 @@ omp-session-*.html
 moengage_ops_cache.json
 .claude/
 .agents/skills/
+
+# Apparel attribution credentials, configuration and browser state
+**/.env
+**/.env.*
+!**/.env.example
+**/google-service-account.json
+agents/apparel-attribution/data/
+agents/apparel-attribution/backend/storage/
+agents/apparel-attribution/backend/credentials/
+
+# Apparel Attribution persistence
+agents/apparel-attribution/browser-profile/
+agents/apparel-attribution/data/*.json
+agents/apparel-attribution/data/*.lock

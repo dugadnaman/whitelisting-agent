@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import openpyxl
 import pytest
 from fastapi.testclient import TestClient
-from api import app, get_current_user
+from api import app
 
 import db
 from backend.moengage_draft_creation import DraftCreation
@@ -323,46 +323,37 @@ def test_draft_creation_whatsapp_via_http_api_fallback_on_error(isolated_db):
 # 4. API endpoint tests for /automate-whatsapp
 # -------------------------------------------------------------------------
 
-def test_api_automate_whatsapp_endpoint_success():
-    client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: USER
-    try:
-        with patch("moengage_whatsapp_worker.automate_whatsapp_draft_batch", return_value={"ok": True, "created": 3}):
-            resp = client.post(
-                "/api/moengage/drafts/batches/batch-test-123/automate-whatsapp",
-                data={"account": "tata"},
-            )
-            assert resp.status_code == 200
-            assert resp.json() == {"ok": True, "created": 3}
-    finally:
-        app.dependency_overrides.clear()
+def test_api_automate_whatsapp_endpoint_success(provision_user):
+    _, headers = provision_user(tenant="tata")
+    client = TestClient(app, headers=headers)
+    with patch("moengage_whatsapp_worker.automate_whatsapp_draft_batch", return_value={"ok": True, "created": 3}):
+        resp = client.post(
+            "/api/moengage/drafts/batches/batch-test-123/automate-whatsapp",
+            data={"account": "tata"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "created": 3}
 
 
-def test_api_automate_whatsapp_endpoint_not_found():
-    client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: USER
-    try:
-        with patch("moengage_whatsapp_worker.automate_whatsapp_draft_batch", side_effect=LookupError("Batch not found")):
-            resp = client.post(
-                "/api/moengage/drafts/batches/batch-test-404/automate-whatsapp",
-                data={"account": "tata"},
-            )
-            assert resp.status_code == 404
-            assert "Batch not found" in resp.json()["detail"]
-    finally:
-        app.dependency_overrides.clear()
+def test_api_automate_whatsapp_endpoint_not_found(provision_user):
+    _, headers = provision_user(tenant="tata")
+    client = TestClient(app, headers=headers)
+    with patch("moengage_whatsapp_worker.automate_whatsapp_draft_batch", side_effect=LookupError("Batch not found")):
+        resp = client.post(
+            "/api/moengage/drafts/batches/batch-test-404/automate-whatsapp",
+            data={"account": "tata"},
+        )
+        assert resp.status_code == 404
+        assert "Batch not found" in resp.json()["detail"]
 
 
-def test_api_automate_whatsapp_endpoint_permission_denied():
-    client = TestClient(app)
-    app.dependency_overrides[get_current_user] = lambda: USER
-    try:
-        with patch("moengage_whatsapp_worker.automate_whatsapp_draft_batch", side_effect=PermissionError("Account access denied")):
-            resp = client.post(
-                "/api/moengage/drafts/batches/batch-test-423/automate-whatsapp",
-                data={"account": "tata"},
-            )
-            assert resp.status_code == 423
-            assert "Account access denied" in resp.json()["detail"]
-    finally:
-        app.dependency_overrides.clear()
+def test_api_automate_whatsapp_endpoint_permission_denied(provision_user):
+    _, headers = provision_user(tenant="tata")
+    client = TestClient(app, headers=headers)
+    with patch("moengage_whatsapp_worker.automate_whatsapp_draft_batch", side_effect=PermissionError("Account access denied")):
+        resp = client.post(
+            "/api/moengage/drafts/batches/batch-test-423/automate-whatsapp",
+            data={"account": "tata"},
+        )
+        assert resp.status_code == 423
+        assert "Account access denied" in resp.json()["detail"]

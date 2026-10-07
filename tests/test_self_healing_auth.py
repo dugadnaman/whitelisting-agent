@@ -8,6 +8,8 @@ verify the replacement contract:
 - saving credentials via the API persists to disk and reports GitHub status
 """
 
+import contextlib
+import tempfile
 import json
 import os
 import unittest
@@ -15,6 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import api
+import auth
 from loader import _row_to_submission
 from models import ApprovalStatus, SubmissionStatus, TemplateSubmission
 from submission_client import submit_template
@@ -22,6 +25,7 @@ from submission_client import submit_template
 
 class TestCredentialContract(unittest.TestCase):
     def setUp(self):
+        self.enterContext(patch.dict(os.environ, {}, clear=False))
         # Ensure a clean slate for the account under test
         for k in list(os.environ):
             if k.startswith("TCHFL_"):
@@ -78,29 +82,22 @@ class TestCredentialContract(unittest.TestCase):
 
     def test_update_credentials_persists_and_reports_github_status(self):
         """PUT /api/credentials writes credentials.json and returns github_persisted status."""
-        import os
-
-        os.environ.setdefault("ALLOWED_ORIGINS", "")
         from fastapi.testclient import TestClient
 
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        self.enterContext(contextlib.chdir(directory))
+        self.enterContext(patch("db.DEFAULT_SQLITE_PATH", Path(directory) / "auth.db"))
+        self.enterContext(patch("db.get_database_url", return_value=""))
+        self.enterContext(patch.dict(os.environ, {"JWT_SECRET": "0123456789abcdefFEDCBA9876543210" * 2}))
+        self.enterContext(patch("api._commit_credentials_to_github", return_value=None))
+        self.enterContext(patch("api.QUEUE_MANAGER.notify_credentials_updated"))
+        auth.init_auth_db()
+        user = auth.register_user("cred-contract@example.com", "Credential-password-123", "Company Admin", "tata", "admin")
         client = TestClient(api.app)
-
-        # Snapshot pre-existing values so the test restores them exactly —
-        # never delete real operator credentials.
-        saved_env = {
-            k: os.environ.get(k) for k in ("TCHFL_KARIX_BEARER_TOKEN", "TCHFL_KARIX_SESSION", "TCHFL_KARIX_USER")
-        }
+        response = client.post("/api/auth/login", json={"email": user["email"], "password": "Credential-password-123"})
+        self.assertEqual(response.status_code, 200)
+        H = {"Authorization": f"Bearer {response.json()['token']}"}
         creds_path = Path("credentials.json")
-        saved_file = creds_path.read_text(encoding="utf-8") if creds_path.exists() else None
-
-        email = "cred_contract@attributics.com"
-        client.post(
-            "/api/auth/signup",
-            json={"email": email, "password": "Test@123", "full_name": "CC", "tenant": "tata"},
-        )
-        r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
-        token = r.json().get("token") or r.json().get("access_token")
-        H = {"Authorization": f"Bearer {token}"}
 
         r = client.put(
             "/api/credentials",
@@ -131,16 +128,6 @@ class TestCredentialContract(unittest.TestCase):
         self.assertEqual(h["Authorization"], "Bearer cc_bearer_123")
         self.assertEqual(h["Session"], "cc_session_456")
 
-        # cleanup: restore prior state exactly (values OR absence)
-        for k, v in saved_env.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-        if saved_file is None:
-            creds_path.unlink(missing_ok=True)
-        else:
-            creds_path.write_text(saved_file, encoding="utf-8")
 
 
 if __name__ == "__main__":

@@ -1,13 +1,15 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import {
   fetchAccounts,
-  fetchUsers,
+  fetchTeam,
   fetchMe,
   getAuthToken,
   clearAuthToken,
+  canAccessAccount,
+  authorizedAccount,
 } from './api';
 import type { Account, Channel, AccountItem, AuthUser, UserItem } from './api';
 
@@ -76,7 +78,6 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
 
   const [account, setAccountState] = useState<Account>('tcl_promo');
   const [channel, setChannelState] = useState<Channel>('whatsapp');
@@ -87,7 +88,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [mounted, setMounted] = useState(false);
   const isTenantLocked = Boolean(
-    currentUser && currentUser.tenant_id !== 'all' && currentUser.role !== 'superadmin'
+    currentUser && currentUser.role !== 'superadmin'
   );
 
   const refreshAccounts = useCallback(async () => {
@@ -103,22 +104,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUsers = useCallback(async () => {
     try {
-      const data = await fetchUsers();
+      if (!currentUser || account === 'all') {
+        setUsers([]);
+        return;
+      }
+      const data = await fetchTeam(currentUser.role === 'superadmin' ? account : undefined);
       if (Array.isArray(data)) {
         setUsers(data);
       }
     } catch {
       // Fallback
     }
-  }, []);
+  }, [currentUser, account]);
   const logout = useCallback(() => {
     clearAuthToken();
     setCurrentUser(null);
     setUserState('');
+    setAccounts([]);
+    setUsers([]);
     router.push('/login');
   }, [router]);
 
-  // Authenticate user on mount
   // Authenticate user on initial mount
   useEffect(() => {
     let ignore = false;
@@ -143,47 +149,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setCurrentUser(userProfile);
         setUserState(userProfile.name || userProfile.email);
 
-        // Load saved account preference if valid for tenant
-        const savedAccount = localStorage.getItem('karix_account');
-        if (savedAccount && savedAccount.trim()) {
-          if (userProfile.tenant_id === 'tata') {
-            const isTataSub = ['tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(
-              savedAccount.toLowerCase()
-            );
-            if (isTataSub) {
-              setAccountState(savedAccount);
-            } else {
-              setAccountState('tchfl');
-            }
-          } else if (userProfile.tenant_id === 'bajaj') {
-            setAccountState('bajaj');
-          } else {
-            setAccountState(savedAccount);
-          }
-        } else {
-          setAccountState(userProfile.tenant_id === 'tata' ? 'tcl_promo' : userProfile.tenant_id || 'tcl_promo');
-        }
+        // Clamp saved preferences to the current, server-verified organization.
+        const selectedAccount = authorizedAccount(userProfile, localStorage.getItem('karix_account'));
+        setAccountState(selectedAccount);
+        localStorage.setItem('karix_account', selectedAccount);
 
         const savedChannel = localStorage.getItem('karix_channel') as Channel;
-        if (savedAccount === 'apparel') {
+        if (selectedAccount === 'apparel') {
           setChannelState('rcs');
         } else if (savedChannel === 'whatsapp' || savedChannel === 'rcs' || savedChannel === 'sms') {
           setChannelState(savedChannel);
         }
 
-        if (isAuthPage) {
-          router.push('/');
-        }
+        await refreshAccounts();
+        if (window.location.pathname === '/login') router.push('/');
       } catch (err) {
         console.warn('Session expired or invalid token:', err);
         clearAuthToken();
+        setCurrentUser(null);
+        setAccounts([]);
+        setUsers([]);
         if (!isAuthPage) {
           router.push('/login');
         }
       } finally {
         setAuthLoading(false);
         setMounted(true);
-        refreshAccounts();
       }
     }
 
@@ -196,18 +187,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setAccount = (newAccount: Account) => {
     const cleanAccount = newAccount.toLowerCase();
-    const canViewAll = currentUser?.tenant_id === 'all' || currentUser?.role === 'superadmin';
-    if (cleanAccount === 'all' && !canViewAll) {
-      alert('Access denied: All Accounts is available only to platform administrators.');
+    if (!canAccessAccount(currentUser, cleanAccount)) {
+      alert('Access denied: This account is outside your authorized organization.');
       return;
     }
     if (cleanAccount !== 'all' && accounts.length > 0 && !accounts.some((a) => a.id.toLowerCase() === cleanAccount)) {
       alert(`Access Denied: You do not have permission to access ${newAccount.toUpperCase()}.`);
       return;
     }
-    setAccountState(newAccount);
+    setAccountState(cleanAccount);
     try {
-      localStorage.setItem('karix_account', newAccount);
+      localStorage.setItem('karix_account', cleanAccount);
     } catch {}
     if (cleanAccount === 'apparel') {
       setChannelState('rcs');

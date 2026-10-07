@@ -71,25 +71,19 @@ def test_docker_configuration_integrity():
     assert "./.env:/app/.env" not in dc_content
 
 
-def test_auth_signup_and_login_contract():
-    """Verify signup creates a user and login returns a usable JWT."""
-    import uuid
-
-    email = f"auth_smoke_{uuid.uuid4().hex[:10]}@example.com"
+def test_explicit_provision_and_login_contract(provision_user):
+    """Public signup is closed; explicitly provisioned users receive usable login JWTs."""
+    user, _ = provision_user("bajaj")
     signup = client.post(
         "/api/auth/signup",
-        json={"email": email, "password": "Smoke@123", "name": "Auth Smoke", "tenant_id": "bajaj"},
+        json={"email": "anonymous@example.com", "password": "Anonymous-password-123", "name": "Anonymous", "tenant_id": "bajaj"},
     )
-    assert signup.status_code == 200, signup.text
-    signup_data = signup.json()
-    assert signup_data["user"]["email"] == email
-    assert signup_data["token"]
-
-    login = client.post("/api/auth/login", json={"email": email, "password": "Smoke@123"})
+    assert signup.status_code == 403
+    login = client.post("/api/auth/login", json={"email": user["email"], "password": "Test-only-password-456!"})
     assert login.status_code == 200, login.text
-    login_data = login.json()
-    assert login_data["user"]["id"] == signup_data["user"]["id"]
-    assert login_data["token"]
+    assert login.json()["user"]["id"] == user["id"]
+    token = login.json()["token"]
+    assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 200
 
 
 def test_sqlite_wal_persistence_and_concurrency(monkeypatch):
@@ -116,7 +110,7 @@ def test_sqlite_wal_persistence_and_concurrency(monkeypatch):
         assert row["status"] == "COMPLETED"
 
 
-def test_production_webhook_connectivity():
+def test_production_webhook_connectivity(monkeypatch):
     """
     Verify production webhook connectivity:
     - Rejects unauthorized calls without valid token
@@ -124,6 +118,8 @@ def test_production_webhook_connectivity():
     - Performs targeted upstream verification probe via official API
     - Monotonically updates approval status in the database
     """
+    monkeypatch.setenv("KARIX_WEBHOOK_SECRET", "Configured-test-webhook-secret-123456789")
+    monkeypatch.setenv("BAJAJ_WEBHOOK_SECRET", "Configured-test-webhook-secret-123456789")
     # 1. Reject without token
     r_unauth = client.post("/api/webhooks/karix/bajaj", json={"template_name": "smoke_test_template"})
     assert r_unauth.status_code == 401
@@ -145,7 +141,7 @@ def test_production_webhook_connectivity():
         )
         r_valid = client.post(
             "/api/webhooks/karix/bajaj",
-            headers={"X-Webhook-Token": "karix_webhook_secret_2026"},
+            headers={"X-Webhook-Token": "Configured-test-webhook-secret-123456789"},
             json={"templateName": "smoke_test_template", "status": "APPROVED"},
         )
 

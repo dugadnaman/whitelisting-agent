@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
-from api import app, get_current_user
+from api import app
 from moengage_preview import prepare_batch, rows_from_file, rows_from_jira_brief
 
 USER = {"sub": "user-1", "tenant_id": "tata", "role": "operator", "email": "owner@example.com"}
@@ -218,36 +218,34 @@ def test_empty_batch_bad_file_and_wrong_workspace_are_rejected():
         rows_from_file("bad.csv", b"account,account\nbajaj,tata\n", "tata")
 
 
-def test_preview_routes_are_authenticated_and_never_call_providers():
+def test_preview_routes_are_authenticated_and_never_call_providers(provision_user):
+    _, headers = provision_user(tenant="tata", email=USER["email"])
     client = TestClient(app)
     with patch("requests.request", side_effect=AssertionError("no provider calls")):
         denied = client.post("/api/moengage/drafts/preview", json={"account": "tata", "catalog": CATALOG, "row": BASE})
         assert denied.status_code == 401
-        app.dependency_overrides[get_current_user] = lambda: USER
-        try:
-            denied = client.post("/api/moengage/drafts/preview", json={"account": "bajaj", "catalog": CATALOG, "row": BASE})
-            assert denied.status_code == 403
-            allowed = client.post("/api/moengage/drafts/preview", json={"account": "tata", "catalog": CATALOG, "row": BASE})
-            assert allowed.status_code == 200
-            assert allowed.json()["items"][0]["status"] == "preview_ready"
-            assert allowed.json()["write_eligible"] is False
-            data = io.StringIO()
-            csv.writer(data).writerows([list({k: v for k, v in BASE.items() if k not in ("row_id", "source_ref")}),
-                                        list(v for k, v in BASE.items() if k not in ("row_id", "source_ref"))])
-            file_result = client.post(
-                "/api/moengage/drafts/preview-file",
-                data={"account": "tata", "catalog_json": json.dumps(CATALOG)},
-                files={"file": ("campaigns.csv", data.getvalue().encode(), "text/csv")},
-            )
-            assert file_result.status_code == 200
-            assert file_result.json()["items"][0]["row_id"] == "2"
-            assert file_result.json()["ready"] == 1
-            brief = {"issue_key": "SWCM-200", "account": "tata", "channel_counts": {"push": 1}}
-            jira = client.post("/api/moengage/drafts/preview", json={"account": "tata", "catalog": CATALOG, "brief": brief})
-            assert jira.status_code == 200
-            assert jira.json()["items"][0]["status"] == "blocked"
-        finally:
-            app.dependency_overrides.pop(get_current_user, None)
+        denied = client.post("/api/moengage/drafts/preview", headers=headers, json={"account": "bajaj", "catalog": CATALOG, "row": BASE})
+        assert denied.status_code == 403
+        allowed = client.post("/api/moengage/drafts/preview", headers=headers, json={"account": "tata", "catalog": CATALOG, "row": BASE})
+        assert allowed.status_code == 200
+        assert allowed.json()["items"][0]["status"] == "preview_ready"
+        assert allowed.json()["write_eligible"] is False
+        data = io.StringIO()
+        csv.writer(data).writerows([list({k: v for k, v in BASE.items() if k not in ("row_id", "source_ref")}),
+                                    list(v for k, v in BASE.items() if k not in ("row_id", "source_ref"))])
+        file_result = client.post(
+            "/api/moengage/drafts/preview-file",
+            headers=headers,
+            data={"account": "tata", "catalog_json": json.dumps(CATALOG)},
+            files={"file": ("campaigns.csv", data.getvalue().encode(), "text/csv")},
+        )
+        assert file_result.status_code == 200
+        assert file_result.json()["items"][0]["row_id"] == "2"
+        assert file_result.json()["ready"] == 1
+        brief = {"issue_key": "SWCM-200", "account": "tata", "channel_counts": {"push": 1}}
+        jira = client.post("/api/moengage/drafts/preview", headers=headers, json={"account": "tata", "catalog": CATALOG, "brief": brief})
+        assert jira.status_code == 200
+        assert jira.json()["items"][0]["status"] == "blocked"
 
 
 def test_parse_jira_execution_datetime():

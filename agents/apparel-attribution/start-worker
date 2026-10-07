@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+umask 077
+export STORAGE_DIR="${STORAGE_DIR:-/data}"
+export PORT="${PORT:-8000}"
+mkdir -p "$STORAGE_DIR"
+# Machine-token and integration validation belongs to app Settings, not a second parser.
+exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers 1

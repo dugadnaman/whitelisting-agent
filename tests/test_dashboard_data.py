@@ -9,16 +9,9 @@ import api
 
 
 @pytest.fixture
-def client():
-    api.app.dependency_overrides[api.get_current_user] = lambda: {
-        "email": "operator@example.com",
-        "tenant_id": "bajaj",
-        "role": "operator",
-    }
-    try:
-        yield TestClient(api.app)
-    finally:
-        api.app.dependency_overrides.clear()
+def client(provision_user):
+    _, headers = provision_user(tenant="bajaj", role="operator", email="operator@example.com")
+    return TestClient(api.app, headers=headers)
 
 
 @pytest.mark.parametrize("inventory_result", [([], "Karix HTTP 401"), RuntimeError("Karix unavailable")])

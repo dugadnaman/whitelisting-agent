@@ -193,11 +193,12 @@ class DBConnection:
         self.close()
 
 
-def get_db(timeout_sec: float = 15.0) -> DBConnection:
+def get_db(timeout_sec: float = 15.0, *, strict_backend: bool = False) -> DBConnection:
     """
     Return an active database connection.
     Connects to PostgreSQL if DATABASE_URL is configured, otherwise SQLite.
     """
+    # Authentication callers must not switch identity stores on database outage.
     pg_url = get_database_url()
     if pg_url:
         try:
@@ -211,6 +212,8 @@ def get_db(timeout_sec: float = 15.0) -> DBConnection:
             )
             return DBConnection(conn, is_pg=True)
         except Exception as exc:
+            if strict_backend:
+                raise RuntimeError("Configured PostgreSQL database is unavailable.") from exc
             logger.error(
                 "Failed to connect to PostgreSQL at %s: %s. Falling back to SQLite.", pg_url.split("@")[-1], exc
             )

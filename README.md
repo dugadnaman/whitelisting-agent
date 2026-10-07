@@ -58,6 +58,13 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - SLA kickoff/checkpoint/escalation alerts omit due-today tickets in **Base Pending** or **Content Pending**: these are client-side dependencies, not operator-owned pending work. They are excluded from Google Chat mentions/counts and operator emails until the status changes; if no operator-owned work remains, no Chat webhook is sent. The alert dispatcher does not change Jira assignees.
    - Google Chat SLA webhooks are skipped on Saturdays and Sundays in IST, including manual `force` dispatches. The work-management preview marks Chat as paused and disables Chat-only live dispatch; direct email and dry-run previews remain available. Dispatch summaries distinguish skipped Chat alerts from posted or simulated ones.
 
+
+4. **Phase 4 — Apparel Multi-Channel Attribution Reporting**:
+   - Dedicated `/apparel/attribution` portal under the Apparel account scope.
+   - Multi-channel support (WhatsApp, SMS, RCS) with campaign date-range filtering, preview validation, and warnings.
+   - Integrates with an isolated worker service deployed on Railway with dedicated persistent MoEngage Chromium browser.
+   - Strict tenant isolation: Karix users from Tata or Bajaj cannot access Apparel attribution; authentication is fail-closed.
+   - Overwrite protection (off by default) ensures existing completed attribution figures are never overwritten unintentionally.
 ---
 
 ## 📁 Repository Directory Structure

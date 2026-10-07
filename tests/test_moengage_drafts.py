@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from api import app, get_current_user
+from api import app
 from moengage_drafts import DraftWriter
 
 ACCOUNT = "tata"
@@ -119,27 +119,20 @@ def test_validate_rejects_non_draft_and_missing_status(status):
     assert [call[0] for call in transport.calls] == ["GET"]
 
 
-def test_mcp_generic_route_rejects_writes_before_mcp_transport():
+def test_mcp_generic_route_rejects_writes_before_mcp_transport(provision_user):
+    _, headers = provision_user(tenant="tata")
     client = TestClient(app)
     with patch("moengage_mcp.call_mcp_tool") as call:
-        app.dependency_overrides[get_current_user] = lambda: USER
-        try:
-            for tool in ("create_campaign_draft", "patch_campaign_components", "send_test_campaign", "publish_campaign", "trigger_flow_event"):
-                response = client.post("/api/moengage/mcp/call", json={"account": "tata", "tool_name": tool})
-                assert response.status_code == 403
-            denied = client.post("/api/moengage/mcp/call", json={"account": "bajaj", "tool_name": "search_campaigns"})
-            assert denied.status_code == 403
-            call.assert_not_called()
-            allowed = client.post("/api/moengage/mcp/call", json={"account": "tata", "tool_name": "search_campaigns"})
-            assert allowed.status_code == 200
-            call.assert_called_once()
-        finally:
-            app.dependency_overrides.pop(get_current_user, None)
+        for tool in ("create_campaign_draft", "patch_campaign_components", "send_test_campaign", "publish_campaign", "trigger_flow_event"):
+            response = client.post("/api/moengage/mcp/call", headers=headers, json={"account": "tata", "tool_name": tool})
+            assert response.status_code == 403
+        denied = client.post("/api/moengage/mcp/call", headers=headers, json={"account": "bajaj", "tool_name": "search_campaigns"})
+        assert denied.status_code == 403
+        call.assert_not_called()
+        allowed = client.post("/api/moengage/mcp/call", headers=headers, json={"account": "tata", "tool_name": "search_campaigns"})
+        assert allowed.status_code == 200
+        call.assert_called_once()
 
-        app.dependency_overrides[get_current_user] = lambda: {"sub": "usr_anon", "tenant_id": "all"}
-        try:
-            denied = client.post("/api/moengage/mcp/call", json={"account": "tata", "tool_name": "search_campaigns"})
-            assert denied.status_code == 401
-            call.assert_called_once()
-        finally:
-            app.dependency_overrides.pop(get_current_user, None)
+        denied = client.post("/api/moengage/mcp/call", json={"account": "tata", "tool_name": "search_campaigns"})
+        assert denied.status_code == 401
+        call.assert_called_once()

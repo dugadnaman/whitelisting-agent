@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/lib/context';
 import type { Account, Channel } from '@/lib/api';
+import { canUseApparelAttribution } from '@/lib/apparel-attribution';
 
 const links = [
   {
@@ -88,6 +89,17 @@ const links = [
     ),
   },
   {
+    href: '/apparel/attribution',
+    label: 'Apparel Attribution',
+    subtitle: 'WhatsApp, SMS & RCS reporting',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 3v18h18" />
+        <path d="M7 17v-4M12 17V7M17 17v-7" />
+      </svg>
+    ),
+  },
+  {
     href: '/settings',
     label: 'Settings',
     icon: (
@@ -113,7 +125,7 @@ export default function Nav() {
     isTenantLocked,
     logout,
   } = useApp();
-  const canViewAll = currentUser?.tenant_id === 'all' || currentUser?.role === 'superadmin';
+  const canViewAll = currentUser?.role === 'superadmin';
   const accountOptions = canViewAll
     ? [{ id: 'all', name: 'All Accounts', is_builtin: true }, ...accounts]
     : accounts;
@@ -229,6 +241,7 @@ export default function Nav() {
       {/* Navigation Links */}
       <nav className="flex-1 px-3 py-4 space-y-1">
         {links.map((link) => {
+          if (link.href === '/apparel/attribution' && !canUseApparelAttribution(currentUser, account)) return null;
           const active =
             link.href === '/'
               ? pathname === '/'

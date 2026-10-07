@@ -18,6 +18,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from api import app
@@ -54,6 +56,32 @@ from sms_tracker import (
     log_sms_dlr,
     log_sms_submission,
 )
+
+
+SMS_DLR_TEST_TOKEN = "sms-callback-test-token-456"
+
+
+@pytest.fixture(autouse=True)
+def sms_test_config(monkeypatch):
+    """Keep SMS configuration deterministic without loading local credentials."""
+    import sms_config
+
+    monkeypatch.setattr(sms_config, "_load_env_file", lambda: None)
+    with patch.dict(
+        os.environ,
+        {
+            "BAJAJ_SMS_API_URL": "https://sms.example.test/JsonReceiver",
+            "BAJAJ_SMS_KEY": "test-only-sms-access-key",
+            "BAJAJ_SMS_USERNAME": "test-sms-user",
+            "BAJAJ_SMS_SENDER_ID": "BAJAJF",
+            "BAJAJ_SMS_ENTITY_ID": "TEST_ENTITY",
+            "BAJAJ_SMS_DLR_GCM_KEY": "0123456789abcdef0123456789abcdef",
+            "BAJAJ_SMS_DLR_GCM_IV": "123456789012",
+            "BAJAJ_SMS_DLR_AUTH_TOKEN": SMS_DLR_TEST_TOKEN,
+        },
+        clear=True,
+    ):
+        yield
 
 
 class TestSmsCrypto(unittest.TestCase):
@@ -345,6 +373,12 @@ class TestSmsTracker(unittest.TestCase):
 class TestSmsApiEndpoints(unittest.TestCase):
     """Test FastAPI SMS endpoints via TestClient."""
 
+    @pytest.fixture(autouse=True)
+    def authenticated_identity(self, provision_user):
+        self.provision_user = provision_user
+        _, self.auth_headers = provision_user(tenant="bajaj", role="operator")
+        self.callback_headers = {"Authorization": f"Basic {SMS_DLR_TEST_TOKEN}"}
+
     def setUp(self):
         self.client = TestClient(app)
 
@@ -363,6 +397,7 @@ class TestSmsApiEndpoints(unittest.TestCase):
 
         resp = self.client.post(
             "/api/sms/send",
+            headers=self.auth_headers,
             json={
                 "dest": ["919876543210"],
                 "text": "Your code is 4321",
@@ -389,7 +424,7 @@ class TestSmsApiEndpoints(unittest.TestCase):
             "stime": "2026-09-08 12:00:00",
             "dtime": "2026-09-08 12:00:02",
         }
-        resp = self.client.post("/api/sms/dlr", json=dlr_payload)
+        resp = self.client.post("/api/sms/dlr", json=dlr_payload, headers=self.callback_headers)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "OK")
@@ -415,11 +450,9 @@ class TestSmsApiEndpoints(unittest.TestCase):
 
         payload = {
             "aes_mode": "GCM",
-            "key": gcm_key,
-            "iv_key": gcm_iv,
             "payload": cipher_b64,
         }
-        resp = self.client.post("/api/sms/dlr", json=payload)
+        resp = self.client.post("/api/sms/dlr", json=payload, headers=self.callback_headers)
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "OK")
@@ -436,7 +469,9 @@ class TestSmsApiEndpoints(unittest.TestCase):
             "shorturl": "2.kmbl.in/test",
             "senderid": "BAJAJF",
         }
-        resp = self.client.post("/api/sms/click", json=click_payload)
+        resp = self.client.post(
+            "/api/sms/click", json=click_payload, headers={"Authorization": SMS_DLR_TEST_TOKEN}
+        )
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "OK")
@@ -444,10 +479,54 @@ class TestSmsApiEndpoints(unittest.TestCase):
 
     def test_sample_csv_for_sms(self):
         """Test downloading sample CSV for channel=sms."""
-        resp = self.client.get("/api/sample-csv?channel=sms")
+        resp = self.client.get("/api/sample-csv?channel=sms", headers=self.auth_headers)
         self.assertEqual(resp.status_code, 200)
         self.assertIn("text/csv", resp.headers.get("content-type", ""))
         self.assertIn("dest,text,send", resp.text)
+
+    @patch("api.send_sms")
+    def test_sms_send_requires_authenticated_account_access(self, mock_send):
+        payload = {
+            "dest": ["919876543210"],
+            "text": "Your code is 4321",
+            "send": "BAJAJF",
+            "account": "bajaj",
+        }
+        missing = self.client.post("/api/sms/send", json=payload)
+        self.assertEqual(missing.status_code, 401)
+
+        _, other_tenant_headers = self.provision_user(tenant="tata", role="operator")
+        forbidden = self.client.post("/api/sms/send", json=payload, headers=other_tenant_headers)
+        self.assertEqual(forbidden.status_code, 403)
+        mock_send.assert_not_called()
+
+    def test_sms_callbacks_require_provider_token(self):
+        with patch("api.log_sms_dlr") as log_dlr, patch("api.log_sms_click") as log_click:
+            for route in ("/api/sms/dlr", "/api/sms/click"):
+                with self.subTest(route=route):
+                    missing = self.client.post(route, json={})
+                    self.assertEqual(missing.status_code, 401)
+                    mismatch = self.client.post(
+                        route, json={}, headers={"Authorization": "Basic wrong-test-token"}
+                    )
+                    self.assertEqual(mismatch.status_code, 401)
+                    jwt_only = self.client.post(route, json={}, headers=self.auth_headers)
+                    self.assertEqual(jwt_only.status_code, 401)
+            log_dlr.assert_not_called()
+            log_click.assert_not_called()
+
+    def test_sms_callbacks_fail_closed_without_configured_token(self):
+        with (
+            patch.dict(os.environ, {"BAJAJ_SMS_DLR_AUTH_TOKEN": ""}),
+            patch("api.log_sms_dlr") as log_dlr,
+            patch("api.log_sms_click") as log_click,
+        ):
+            for route in ("/api/sms/dlr", "/api/sms/click"):
+                with self.subTest(route=route):
+                    response = self.client.post(route, json={}, headers=self.callback_headers)
+                    self.assertEqual(response.status_code, 503)
+            log_dlr.assert_not_called()
+            log_click.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from api import app, get_current_user
+from api import app
 from moengage_mcp import (
     call_mcp_tool,
     complete_mcp_oauth,
@@ -18,13 +18,6 @@ from moengage_mcp import (
 )
 from moengage_ops_client import fetch_mcp_ops_records
 
-MOCK_USER = {
-    "id": 1,
-    "email": "operator@attributics.com",
-    "name": "Briefing Operator",
-    "role": "superadmin",
-    "tenant_id": "ALL",
-}
 
 
 def test_mcp_status_and_config_json():
@@ -172,15 +165,12 @@ def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
         assert ops_records[1].type == "Flow"
 
 
-def test_mcp_api_endpoints():
+def test_mcp_api_endpoints(provision_user):
     """Verify FastAPI /api/moengage/mcp/* endpoints."""
-    app.dependency_overrides[get_current_user] = lambda: MOCK_USER
-    client = TestClient(app)
-    try:
-        r = client.get("/api/moengage/mcp/status?account=tata")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["mcp_url"] == "https://mcp.moengage.com"
-        assert body["mcp_config_json"]["mcpServers"]["moengage"]["url"] == "https://mcp.moengage.com"
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
+    _, headers = provision_user(tenant="tata")
+    client = TestClient(app, headers=headers)
+    r = client.get("/api/moengage/mcp/status?account=tata")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mcp_url"] == "https://mcp.moengage.com"
+    assert body["mcp_config_json"]["mcpServers"]["moengage"]["url"] == "https://mcp.moengage.com"

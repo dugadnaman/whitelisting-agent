@@ -88,7 +88,7 @@ def test_list_all_templates():
         assert len(templates) > 0
 
 
-def test_duplicate_submission_skipping():
+def test_duplicate_submission_skipping(provision_user):
     """
     Verify that when skip_duplicates is enabled, templates already active on WABA
     are filtered into DUPLICATE status without hitting Karix/Meta create endpoints.
@@ -103,14 +103,7 @@ def test_duplicate_submission_skipping():
     from models import SubmissionStatus
 
     client = TestClient(api.app)
-    # Sign up/in as tata user
-    email = "dupe_test@attributics.com"
-    client.post(
-        "/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Dupe Tester", "tenant_id": "tata"}
-    )
-    r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
-    token = r.json().get("token") or r.json().get("access_token")
-    H = {"Authorization": f"Bearer {token}"}
+    _, H = provision_user("tata")
 
     # Mock live templates to contain 'existing_template_1'
     mock_live = [
@@ -398,7 +391,7 @@ def test_duplicate_error_reconciliation_to_approved():
     print("✓ test_duplicate_error_reconciliation_to_approved passed!")
 
 
-def test_in_batch_duplicate_skipping_and_row_order():
+def test_in_batch_duplicate_skipping_and_row_order(provision_user):
     """
     Verify that duplicate template names within the same uploaded batch/spreadsheet
     are deduplicated in-batch without sending duplicate requests to Karix/Meta,
@@ -413,13 +406,7 @@ def test_in_batch_duplicate_skipping_and_row_order():
     from models import SubmissionResult, SubmissionStatus
 
     client = TestClient(api.app)
-    email = "batch_dupe_test@attributics.com"
-    client.post(
-        "/api/auth/signup", json={"email": email, "password": "Test@123", "name": "Batch Tester", "tenant_id": "tchfl"}
-    )
-    r = client.post("/api/auth/login", json={"email": email, "password": "Test@123"})
-    token = r.json().get("token") or r.json().get("access_token")
-    H = {"Authorization": f"Bearer {token}"}
+    _, H = provision_user("tchfl")
 
     # 3 rows: row 1 and row 3 have the identical template name
     csv_content = (

@@ -1,0 +1,15 @@
+# Dockerfile-specific allowlist, resolved against the repository-root build context.
+# Do not even send unrelated frontends, customer data, or credentials to the builder.
+**
+!agents/
+!agents/apparel-attribution/
+!agents/apparel-attribution/Dockerfile
+!agents/apparel-attribution/Dockerfile.dockerignore
+!agents/apparel-attribution/start-worker
+!agents/apparel-attribution/Backend/
+!agents/apparel-attribution/Backend/requirements.txt
+!agents/apparel-attribution/Backend/app/
+!agents/apparel-attribution/Backend/app/**/
+!agents/apparel-attribution/Backend/app/**/*.py
+**/__pycache__/**
+**/*.pyc

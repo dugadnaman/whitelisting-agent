@@ -200,28 +200,44 @@ def test_turnaround_and_bottleneck_analytics():
         assert t["aging_days"] >= 0.0
 
 
-def test_api_turnaround_analytics_endpoint():
+def test_api_turnaround_analytics_endpoint(provision_user):
     """Verify GET /api/work-management/turnaround-analytics returns expected analytics payload."""
     from fastapi.testclient import TestClient
 
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "test@attributics.com", "name": "Test User"}
-    client = TestClient(app)
+    _, headers = provision_user(tenant="tata", role="operator", email="test@attributics.com")
+    client = TestClient(app, headers=headers)
 
-    try:
+    issues = [
+        {
+            "key": "SWCM-1",
+            "summary": "WhatsApp creative approved",
+            "status": "Done",
+            "assignee": "Dnyanesh Khawas",
+            "created": "2026-09-01T09:00:00Z",
+            "updated": "2026-09-02T09:00:00Z",
+        },
+        {
+            "key": "SWCM-2",
+            "summary": "SMS audience delivery",
+            "status": "Base Pending",
+            "assignee": "Neel Shah",
+            "created": "2026-09-01T09:00:00Z",
+            "updated": "2026-09-02T09:00:00Z",
+        },
+    ]
+    with patch("work_manager.list_jira_issues", return_value=issues):
         resp = client.get("/api/work-management/turnaround-analytics?project=SWCM&limit=25")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["project"] == "SWCM"
-        assert "team_avg_cycle_time_days" in data
-        assert "roadblock_attribution" in data
-        assert "operator_velocities" in data
-        assert "blocked_tickets" in data
-        assert "team_fastest_hours" in data
-        assert "primary_bottleneck_driver" in data
-    finally:
-        app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["project"] == "SWCM"
+    assert "team_avg_cycle_time_days" in data
+    assert "roadblock_attribution" in data
+    assert "operator_velocities" in data
+    assert "blocked_tickets" in data
+    assert "team_fastest_hours" in data
+    assert "primary_bottleneck_driver" in data
 
 
 def test_bulk_transfer_jira_tickets():
@@ -257,40 +273,34 @@ def test_bulk_transfer_jira_tickets():
         assert mock_transfer.call_count == 3
 
 
-def test_api_bulk_transfer_endpoint():
+def test_api_bulk_transfer_endpoint(provision_user):
     """Verify POST /api/work-management/bulk-transfer accepts batch reassignments."""
     from unittest.mock import patch
 
     from fastapi.testclient import TestClient
 
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {
-        "email": "dnyanesh.khawas@attributics.com",
-        "name": "Dnyanesh Khawas",
-    }
-    client = TestClient(app)
+    _, headers = provision_user(tenant="tata", role="operator", email="dnyanesh.khawas@attributics.com")
+    client = TestClient(app, headers=headers)
 
     with patch("work_manager.transfer_jira_ticket") as mock_transfer:
         mock_transfer.return_value = {"success": True, "issue_key": "SWCM-1", "error": None}
 
-        try:
-            resp = client.post(
-                "/api/work-management/bulk-transfer",
-                json={
-                    "issue_keys": ["SWCM-1", "SWCM-2"],
-                    "to_account_id": "712020:645c853f-intern",
-                    "handover_note": "Reassigning queue",
-                },
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["total_requested"] == 2
-            assert data["transferred_count"] == 2
-            assert data["failed_count"] == 0
-            assert data["to_account_id"] == "712020:645c853f-intern"
-        finally:
-            app.dependency_overrides.clear()
+        resp = client.post(
+            "/api/work-management/bulk-transfer",
+            json={
+                "issue_keys": ["SWCM-1", "SWCM-2"],
+                "to_account_id": "712020:645c853f-intern",
+                "handover_note": "Reassigning queue",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_requested"] == 2
+        assert data["transferred_count"] == 2
+        assert data["failed_count"] == 0
+        assert data["to_account_id"] == "712020:645c853f-intern"
 
 
 def test_unassigned_tickets_auto_assigned_to_neel_shah():
@@ -336,16 +346,16 @@ def test_unassigned_tickets_auto_assigned_to_neel_shah():
         assert neel_u["open_tickets_count"] >= 1
 
 
-def test_assign_unassigned_tickets_to_neel_endpoint():
+def test_assign_unassigned_tickets_to_neel_endpoint(provision_user):
     """Verify POST /api/work-management/assign-unassigned reassigns unassigned tickets to Neel Shah."""
     from unittest.mock import patch
 
     from fastapi.testclient import TestClient
 
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "neel.shah@attributics.com", "name": "Neel Shah"}
-    client = TestClient(app)
+    _, headers = provision_user(tenant="tata", role="operator", email="neel.shah@attributics.com")
+    client = TestClient(app, headers=headers)
 
     with patch("work_manager.assign_unassigned_tickets_to_neel") as mock_assign:
         mock_assign.return_value = {
@@ -356,15 +366,12 @@ def test_assign_unassigned_tickets_to_neel_endpoint():
             "target_assignee": "Neel Shah",
         }
 
-        try:
-            resp = client.post("/api/work-management/assign-unassigned?project=ALL")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["ok"] is True
-            assert data["transferred_count"] == 3
-            assert data["target_assignee"] == "Neel Shah"
-        finally:
-            app.dependency_overrides.clear()
+        resp = client.post("/api/work-management/assign-unassigned?project=ALL")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["transferred_count"] == 3
+        assert data["target_assignee"] == "Neel Shah"
 
 
 def test_soham_mention_routing_in_comments_and_attachments():
@@ -484,47 +491,47 @@ def test_virtual_operational_assignment_soham_and_aadya():
     clear_operational_assignment("SWCM-889")
 
 
-def test_transfer_authorization_policy():
-    """Verify only Dnyanesh, Neel, Mrunalini (and admin) are authorized to transfer tickets."""
+def test_transfer_authorization_policy(provision_user):
+    """Verify only authenticated Tata Jira managers (and admin) can transfer tickets."""
     from fastapi.testclient import TestClient
 
-    from api import app, get_current_user
+    from api import app
 
     client = TestClient(app)
+    payload = {"issue_key": "SWCM-1", "to_account_id": "712020:test"}
+    _, intern_headers = provision_user(tenant="tata", role="operator", email="intern@attributics.com")
+    _, manager_headers = provision_user(tenant="tata", role="operator", email="dnyanesh.khawas@attributics.com")
+    _, other_tenant_headers = provision_user(tenant="bajaj", role="operator", email="neel.shah@attributics.com")
 
-    # 1. Unauthorized operator (e.g. intern or other user)
-    app.dependency_overrides[get_current_user] = lambda: {
-        "email": "intern@attributics.com",
-        "name": "Intern Operator",
-        "role": "operator",
-    }
-    try:
+    with patch("work_manager.transfer_jira_ticket") as mock_transfer:
+        resp_missing = client.post("/api/work-management/transfer", json=payload)
+        assert resp_missing.status_code == 401
+
+        resp_other_tenant = client.post(
+            "/api/work-management/transfer", json=payload, headers=other_tenant_headers
+        )
+        assert resp_other_tenant.status_code == 403
+
+        # 1. Unauthorized operator (e.g. intern or other user)
         resp_unauth = client.post(
-            "/api/work-management/transfer",
-            json={"issue_key": "SWCM-1", "to_account_id": "712020:test"},
+            "/api/work-management/transfer", json=payload, headers=intern_headers
         )
         assert resp_unauth.status_code == 403
         assert "Permission Denied" in resp_unauth.json()["detail"]
+        mock_transfer.assert_not_called()
 
         # 2. Authorized manager (e.g. Dnyanesh Khawas)
-        app.dependency_overrides[get_current_user] = lambda: {
-            "email": "dnyanesh.khawas@attributics.com",
-            "name": "Dnyanesh Khawas",
-            "role": "operator",
-        }
-        with patch("work_manager.transfer_jira_ticket") as mock_transfer:
-            mock_transfer.return_value = {"ok": True, "success": True}
-            resp_auth = client.post(
-                "/api/work-management/transfer",
-                json={"issue_key": "SWCM-1", "to_account_id": "712020:c8914cff-1299-4ad7-989b-e38859cbcdbf"},
-            )
-            assert resp_auth.status_code == 200
-    finally:
-        app.dependency_overrides.clear()
-def test_configurable_work_allocation_and_rebalancing():
+        mock_transfer.return_value = {"ok": True, "success": True}
+        resp_auth = client.post(
+            "/api/work-management/transfer",
+            json={"issue_key": "SWCM-1", "to_account_id": "712020:c8914cff-1299-4ad7-989b-e38859cbcdbf"},
+            headers=manager_headers,
+        )
+        assert resp_auth.status_code == 200
+def test_configurable_work_allocation_and_rebalancing(provision_user):
     """Verify team members can be included/excluded from work allocation, and rebalancing respects it."""
     from fastapi.testclient import TestClient
-    from api import app, get_current_user
+    from api import app
     from work_manager import (
         get_all_allocation_settings,
         set_member_allocation_status,
@@ -532,6 +539,8 @@ def test_configurable_work_allocation_and_rebalancing():
         ai_rebalance_workload,
         _rule_based_rebalance,
     )
+
+    _, headers = provision_user(tenant="tata", role="admin", email="neel.shah@attributics.com")
 
     try:
         # 1. Default state: all members active
@@ -570,12 +579,7 @@ def test_configurable_work_allocation_and_rebalancing():
             assert prop["target_assignee"] != "Dnyanesh Khawas"
 
         # 4. Test API endpoints
-        client = TestClient(app)
-        app.dependency_overrides[get_current_user] = lambda: {
-            "email": "neel.shah@attributics.com",
-            "name": "Neel Shah",
-            "role": "admin",
-        }
+        client = TestClient(app, headers=headers)
 
         # GET allocation settings
         get_res = client.get("/api/work-management/allocation-settings")
@@ -601,7 +605,6 @@ def test_configurable_work_allocation_and_rebalancing():
 
     finally:
         set_member_allocation_status("Dnyanesh Khawas", True)
-        app.dependency_overrides.clear()
 def test_jira_reassignment_confirmation_sync_or_skip():
     """Verify users can choose to confirm Jira update (sync_to_jira=True) or skip Jira update (sync_to_jira=False)."""
     from unittest.mock import patch, MagicMock

@@ -203,54 +203,51 @@ def test_typesafe_semantic_equivalence_offline_fallback():
         assert method == "FUZZY_TOKEN"
 
 
-def test_api_identify_json_endpoint():
+def test_api_identify_json_endpoint(provision_user):
     """Verify POST /api/templates/identify-json returns expected identification payload."""
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "operator@attributics.com", "role": "operator"}
-    client = TestClient(app)
+    _, headers = provision_user(tenant="tata", role="operator", email="operator@attributics.com")
+    client = TestClient(app, headers=headers)
 
-    try:
-        with patch("template_identifier.fetch_template_list") as mock_fetch:
-            mock_fetch.return_value = (
-                [
+    with patch("template_identifier.fetch_template_list") as mock_fetch:
+        mock_fetch.return_value = (
+            [
+                {
+                    "template_name": "demo_live_tpl",
+                    "status": "APPROVED",
+                    "components": [{"type": "BODY", "text": "Live hello."}],
+                }
+            ],
+            None,
+        )
+
+        resp = client.post(
+            "/api/templates/identify-json",
+            json={
+                "account": "tata",
+                "templates": [
                     {
                         "template_name": "demo_live_tpl",
-                        "status": "APPROVED",
+                        "category": "UTILITY",
                         "components": [{"type": "BODY", "text": "Live hello."}],
-                    }
+                    },
+                    {
+                        "template_name": "demo_missing_tpl",
+                        "category": "MARKETING",
+                        "components": [{"type": "BODY", "text": "Brand new copy."}],
+                    },
                 ],
-                None,
-            )
+            },
+        )
 
-            resp = client.post(
-                "/api/templates/identify-json",
-                json={
-                    "account": "tata",
-                    "templates": [
-                        {
-                            "template_name": "demo_live_tpl",
-                            "category": "UTILITY",
-                            "components": [{"type": "BODY", "text": "Live hello."}],
-                        },
-                        {
-                            "template_name": "demo_missing_tpl",
-                            "category": "MARKETING",
-                            "components": [{"type": "BODY", "text": "Brand new copy."}],
-                        },
-                    ],
-                },
-            )
-
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["total_master"] == 2
-            assert data["whitelisted_count"] == 1
-            assert data["missing_count"] == 1
-            assert len(data["missing_templates"]) == 1
-            assert data["missing_templates"][0]["template_name"] == "demo_missing_tpl"
-    finally:
-        app.dependency_overrides.clear()
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total_master"] == 2
+        assert data["whitelisted_count"] == 1
+        assert data["missing_count"] == 1
+        assert len(data["missing_templates"]) == 1
+        assert data["missing_templates"][0]["template_name"] == "demo_missing_tpl"
 
 
 def test_find_template_by_content_exact_and_fuzzy():
@@ -343,39 +340,36 @@ def test_find_template_by_content_handles_karix_raw_template_fields():
     assert res.template_name == "tcl_emi_due_v1"
     assert res.template_id == "karix-123"
     assert res.status == "APPROVED"
-def test_api_search_template_by_content_endpoint():
+def test_api_search_template_by_content_endpoint(provision_user):
     """Verify POST /api/templates/search-by-content endpoint returns matching template name and id."""
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "tester@attributics.com", "name": "Tester"}
-    client = TestClient(app)
+    _, headers = provision_user(tenant="tata", role="operator", email="tester@attributics.com")
+    client = TestClient(app, headers=headers)
 
-    try:
-        mock_templates = [
-            {
-                "template_name": "tata_quick_loan_v3",
-                "fb_template_id": "99887766554433",
-                "status": "APPROVED",
-                "components": [
-                    {"type": "BODY", "text": "Need instant funds? Get approved in 5 minutes with Tata Capital."},
-                ],
-            }
-        ]
-        with patch("submission_client.fetch_template_list", return_value=(mock_templates, None)):
-            resp = client.post(
-                "/api/templates/search-by-content",
-                json={
-                    "content": "Need instant funds? Get approved in 5 minutes with Tata Capital.",
-                    "client": "tata",
-                    "channel": "whatsapp",
-                },
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["found"] is True
-            assert data["template_name"] == "tata_quick_loan_v3"
-            assert data["template_id"] == "99887766554433"
-            assert data["status"] == "APPROVED"
-            assert data["match_type"] == "EXACT"
-    finally:
-        app.dependency_overrides.clear()
+    mock_templates = [
+        {
+            "template_name": "tata_quick_loan_v3",
+            "fb_template_id": "99887766554433",
+            "status": "APPROVED",
+            "components": [
+                {"type": "BODY", "text": "Need instant funds? Get approved in 5 minutes with Tata Capital."},
+            ],
+        }
+    ]
+    with patch("submission_client.fetch_template_list", return_value=(mock_templates, None)):
+        resp = client.post(
+            "/api/templates/search-by-content",
+            json={
+                "content": "Need instant funds? Get approved in 5 minutes with Tata Capital.",
+                "client": "tata",
+                "channel": "whatsapp",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["found"] is True
+        assert data["template_name"] == "tata_quick_loan_v3"
+        assert data["template_id"] == "99887766554433"
+        assert data["status"] == "APPROVED"
+        assert data["match_type"] == "EXACT"

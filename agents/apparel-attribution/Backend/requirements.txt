@@ -1,0 +1,10 @@
+fastapi==0.139.2
+httpx==0.28.1
+openpyxl==3.1.5
+pydantic==2.13.4
+python-dateutil==2.9.0.post0
+python-multipart==0.0.32
+uvicorn==0.51.0
+google-auth==2.56.0
+gspread==6.2.1
+playwright==1.61.0

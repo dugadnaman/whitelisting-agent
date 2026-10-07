@@ -1,0 +1,16 @@
+# Root source directory/build context. Select this module's config path in Railway.
+# Railway marks config-as-code legacy; dashboard equivalents remain supported.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "agents/apparel-attribution/Dockerfile"
+watchPatterns = ["agents/apparel-attribution/Backend/**", "agents/apparel-attribution/Dockerfile", "agents/apparel-attribution/start-worker", "agents/apparel-attribution/railway.toml"]
+
+[deploy]
+# start-worker always executes exactly one uvicorn process, regardless of WEB_CONCURRENCY.
+startCommand = "/usr/local/bin/start-worker"
+numReplicas = 1
+healthcheckPath = "/healthz"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+# Attach a /data volume in service settings. Do not enable autoscaling/multi-region.

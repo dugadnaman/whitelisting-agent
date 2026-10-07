@@ -419,51 +419,72 @@ def test_send_google_chat_sla_alert_ownership_separation():
         assert "Pending with Attributics" in sections[0]["header"]
         assert "Pending with Tata Capital" in sections[1]["header"]
 
-def test_api_alerts_endpoints():
+def test_api_alerts_endpoints(provision_user, monkeypatch):
     """Verify FastAPI preview, dispatch, and scheduler endpoints."""
-    from api import app, get_current_user
+    from api import app
 
-    app.dependency_overrides[get_current_user] = lambda: {"email": "lead@attributics.com", "name": "Team Lead"}
-    client = TestClient(app)
+    _, headers = provision_user(tenant="tata", role="admin", email="lead@attributics.com")
+    client = TestClient(app, headers=headers)
 
-    try:
-        # 1. Preview endpoint
-        resp_preview = client.get("/api/work-management/alerts/preview?project=SWCM&stage=EOD")
-        assert resp_preview.status_code == 200
-        preview_data = resp_preview.json()
-        assert preview_data["ok"] is True
-        assert preview_data["stage"] == "EOD"
-        assert "drafts" in preview_data
+    monkeypatch.setattr(
+        "work_manager.list_jira_issues",
+        lambda **kwargs: [
+            {
+                "key": "SWCM-1",
+                "id": "10001",
+                "summary": "WhatsApp creative review",
+                "status": "In Progress",
+                "assignee": "Dnyanesh Khawas",
+                "duedate": datetime.now(UTC).date().isoformat(),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "email_notifier.get_smtp_sender_info",
+        lambda: {
+            "is_configured": False,
+            "from_email": "alerts@example.test",
+            "smtp_host": "Not configured",
+            "smtp_port": 587,
+            "smtp_user": "Not configured",
+            "mode": "SIMULATION",
+        },
+    )
 
-        # 2. Dispatch endpoint (dry run)
-        resp_dispatch = client.post(
-            "/api/work-management/alerts/dispatch",
-            json={"project": "SWCM", "stage": "EOD", "dry_run": True},
-        )
-        assert resp_dispatch.status_code == 200
-        dispatch_data = resp_dispatch.json()
-        assert dispatch_data["ok"] is True
-        assert dispatch_data["stage"] == "EOD"
-        assert dispatch_data["dry_run"] is True
+    # 1. Preview endpoint
+    resp_preview = client.get("/api/work-management/alerts/preview?project=SWCM&stage=EOD")
+    assert resp_preview.status_code == 200
+    preview_data = resp_preview.json()
+    assert preview_data["ok"] is True
+    assert preview_data["stage"] == "EOD"
+    assert "drafts" in preview_data
 
-        # 3. Scheduler status endpoint
-        resp_status = client.get("/api/work-management/alerts/scheduler-status")
-        assert resp_status.status_code == 200
-        status_data = resp_status.json()
-        assert "enabled" in status_data
-        assert "current_stage" in status_data
+    # 2. Dispatch endpoint (dry run)
+    resp_dispatch = client.post(
+        "/api/work-management/alerts/dispatch",
+        json={"project": "SWCM", "stage": "EOD", "dry_run": True},
+    )
+    assert resp_dispatch.status_code == 200
+    dispatch_data = resp_dispatch.json()
+    assert dispatch_data["ok"] is True
+    assert dispatch_data["stage"] == "EOD"
+    assert dispatch_data["dry_run"] is True
 
-        # 4. Scheduler toggle endpoint
-        resp_toggle = client.post(
-            "/api/work-management/alerts/scheduler-toggle",
-            json={"enabled": True},
-        )
-        assert resp_toggle.status_code == 200
-        toggle_data = resp_toggle.json()
-        assert toggle_data["enabled"] is True
+    # 3. Scheduler status endpoint
+    resp_status = client.get("/api/work-management/alerts/scheduler-status")
+    assert resp_status.status_code == 200
+    status_data = resp_status.json()
+    assert "enabled" in status_data
+    assert "current_stage" in status_data
 
-    finally:
-        app.dependency_overrides.clear()
+    # 4. Scheduler toggle endpoint
+    resp_toggle = client.post(
+        "/api/work-management/alerts/scheduler-toggle",
+        json={"enabled": True},
+    )
+    assert resp_toggle.status_code == 200
+    toggle_data = resp_toggle.json()
+    assert toggle_data["enabled"] is True
 
 
 def test_off_schedule_rejection():

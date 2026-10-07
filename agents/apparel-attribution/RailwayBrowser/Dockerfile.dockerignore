@@ -1,0 +1,9 @@
+# Dockerfile-specific allowlist for the repository-root build context.
+**
+!agents/
+!agents/apparel-attribution/
+!agents/apparel-attribution/RailwayBrowser/
+!agents/apparel-attribution/RailwayBrowser/Dockerfile
+!agents/apparel-attribution/RailwayBrowser/Dockerfile.dockerignore
+!agents/apparel-attribution/RailwayBrowser/browser-start.py
+!agents/apparel-attribution/RailwayBrowser/cdp-forward

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import db
-from api import app, get_current_user
+from api import app
 from moengage_draft_creation import DraftCreation, RateLimitError
 
 USER = {"sub": "operator-1", "tenant_id": "tata", "role": "operator", "email": "owner@example.com"}
@@ -291,32 +291,29 @@ def test_server_catalog_must_match_bound_workspace(offline_db, tmp_path, monkeyp
 
 
 
-def test_create_route_requires_owner_approval_and_uses_server_catalog(offline_db):
+def test_create_route_requires_owner_approval_and_uses_server_catalog(offline_db, provision_user):
+    _, headers = provision_user(tenant="tata", email=USER["email"])
     client = TestClient(app)
     with patch("requests.request", side_effect=AssertionError("No live network call allowed")):
         assert client.post("/api/moengage/drafts/create", json={"account": "tata", "row": ROW}).status_code == 401
-        app.dependency_overrides[get_current_user] = lambda: USER
-        try:
-            assert client.post("/api/moengage/drafts/create", json={"account": "bajaj", "row": ROW}).status_code == 403
-            with patch.dict(os.environ, {"MOENGAGE_DRAFT_TATA_ZERO_CHARGE_CONFIRMED": "",
-                                      "MOENGAGE_DRAFT_TATA_NO_PUBLISH_SCOPE_CONFIRMED": ""}):
-                assert client.post("/api/moengage/drafts/create", json={"account": "tata", "row": ROW}).status_code == 423
-            writer = FakeWriter()
-            with patch("moengage_draft_creation.DraftCreation.from_environment", return_value=service(writer)):
-                result = client.post("/api/moengage/drafts/create", json={"account": "tata", "row": ROW,
-                                                                          "catalog": {"account": "bajaj"}})
-                assert result.status_code == 200 and result.json()["state"] == "VALIDATED"
-                assert writer.calls[0][0] == "create"
-            guarded_writer = FakeWriter()
-            guarded = DraftCreation("tata", USER, CATALOG, guarded_writer,
-                                    allow_sqlite_for_tests=True,
-                                    approved_live_rows={("rows.json", "1"): (None, "seg-vip")})
-            with patch("moengage_draft_creation.DraftCreation.from_environment", return_value=guarded):
-                forbidden = client.post("/api/moengage/drafts/create",
-                                        json={"account": "tata", "row": {**ROW, "row_id": "not-approved"}})
-                assert forbidden.status_code == 423 and guarded_writer.calls == []
-        finally:
-            app.dependency_overrides.pop(get_current_user, None)
+        assert client.post("/api/moengage/drafts/create", headers=headers, json={"account": "bajaj", "row": ROW}).status_code == 403
+        with patch.dict(os.environ, {"MOENGAGE_DRAFT_TATA_ZERO_CHARGE_CONFIRMED": "",
+                                  "MOENGAGE_DRAFT_TATA_NO_PUBLISH_SCOPE_CONFIRMED": ""}):
+            assert client.post("/api/moengage/drafts/create", headers=headers, json={"account": "tata", "row": ROW}).status_code == 423
+        writer = FakeWriter()
+        with patch("moengage_draft_creation.DraftCreation.from_environment", return_value=service(writer)):
+            result = client.post("/api/moengage/drafts/create", headers=headers, json={"account": "tata", "row": ROW,
+                                                                      "catalog": {"account": "bajaj"}})
+            assert result.status_code == 200 and result.json()["state"] == "VALIDATED"
+            assert writer.calls[0][0] == "create"
+        guarded_writer = FakeWriter()
+        guarded = DraftCreation("tata", USER, CATALOG, guarded_writer,
+                                allow_sqlite_for_tests=True,
+                                approved_live_rows={("rows.json", "1"): (None, "seg-vip")})
+        with patch("moengage_draft_creation.DraftCreation.from_environment", return_value=guarded):
+            forbidden = client.post("/api/moengage/drafts/create", headers=headers,
+                                    json={"account": "tata", "row": {**ROW, "row_id": "not-approved"}})
+            assert forbidden.status_code == 423 and guarded_writer.calls == []
 
 
 def test_multi_operator_and_whatsapp_rows_in_live_test_config(offline_db, tmp_path, monkeypatch):

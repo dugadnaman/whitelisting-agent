@@ -2,12 +2,10 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { loginUser } from '@/lib/api';
-import { useApp } from '@/lib/context';
+import { loginUser, authorizedAccount } from '@/lib/api';
 
 
 export default function LoginPage() {
-  const { setCurrentUser, setUser, setAccount } = useApp();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,10 +13,10 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e?: React.FormEvent, customEmail?: string, customPass?: string) => {
-    if (e) e.preventDefault();
-    const finalEmail = (customEmail || email).trim();
-    const finalPass = (customPass || password).trim();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const finalEmail = email.trim();
+    const finalPass = password;
 
     if (!finalEmail || !finalPass) {
       setError('Please enter both work email and password.');
@@ -30,13 +28,9 @@ export default function LoginPage() {
 
     try {
       const res = await loginUser(finalEmail, finalPass);
-      setCurrentUser(res.user);
-      setUser(res.user.name || res.user.email);
 
       // Pre-select the appropriate account in localStorage
-      const tenant = (res.user.tenant_id || 'bajaj').toLowerCase();
-      const targetAccount = tenant === 'tata' ? 'tchfl' : tenant === 'all' ? 'all' : tenant;
-      setAccount(targetAccount);
+      const targetAccount = authorizedAccount(res.user, localStorage.getItem('karix_account'));
       try {
         localStorage.setItem('karix_account', targetAccount);
       } catch {}
@@ -135,7 +129,7 @@ export default function LoginPage() {
         <div className="text-center text-xs text-gray-500 pt-1 border-t border-gray-100">
           <span>Don&apos;t have an account? </span>
           <Link href="/signup" className="text-blue-600 hover:underline font-semibold">
-            Create new account
+            Request company access
           </Link>
         </div>
       </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection } from '@/lib/api';
+import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection, canAccessAccount, authorizedAccount } from '@/lib/api';
 import type { Account, Channel, AccountItem, AuthUser } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
@@ -25,6 +25,12 @@ export default function SettingsPage() {
     activeAccount === 'all' ? 'tcl_promo' : activeAccount
   );
   const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
+  const teamTenant = currentUser?.role === 'superadmin' ? selectedAccount : currentUser?.tenant_id;
+  useEffect(() => {
+    if (currentUser && !canAccessAccount(currentUser, selectedAccount)) {
+      setSelectedAccount(authorizedAccount(currentUser, activeAccount));
+    }
+  }, [currentUser, selectedAccount, activeAccount]);
 
   // New Account Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -128,42 +134,20 @@ export default function SettingsPage() {
           setLoungeCookie(creds.lounge_cookie || '');
           setPortalUsername(creds.portal_username || '');
           setPortalPassword(creds.portal_password || '');
-          setRcsBotId(creds.rcs_bot_id || (selectedAccount === 'apparel' ? 'P7hzkqCcW3x96I6T' : ''));
-          setRcsAuthToken(creds.rcs_auth_token || (selectedAccount === 'apparel' ? 'yzHtsfT8v5DZ6XV3stK4YQ==' : ''));
-          setEsmeaddr(creds.rcs_esmeaddr || creds.esmeaddr || (selectedAccount === 'apparel' ? '71189600000000' : '72434700000000'));
+          setRcsBotId(creds.rcs_bot_id || '');
+          setRcsAuthToken(creds.rcs_auth_token || '');
+          setEsmeaddr(creds.rcs_esmeaddr || creds.esmeaddr || '');
         }
       } catch {
         if (ignore) return;
-        try {
-          const cacheKey = `karix_creds_${selectedAccount}_${selectedChannel}`;
-          const saved = localStorage.getItem(cacheKey);
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (selectedChannel === 'whatsapp') {
-              setWabaAuthToken(parsed.waba_auth_token || '');
-              setWabaId(parsed.waba_id || '');
-              setBearerToken(parsed.bearer_token || '');
-              setSession(parsed.session || '');
-              setUser(parsed.user || '');
-            } else if (selectedChannel === 'sms') {
-              setSmsKey(parsed.sms_key || '');
-              setSmsUsername(parsed.sms_username || '');
-              setSmsEncryptionKey(parsed.sms_encryption_key || '');
-              setSmsSenderId(parsed.sms_sender_id || '');
-              setSmsDlrAuthToken(parsed.sms_dlr_auth_token || '');
-            } else {
-              setEntityId(parsed.entity_id || '');
-              setLoungeCookie(parsed.lounge_cookie || '');
-            }
-          }
-        } catch {}
+        setBanner({ type: 'error', message: 'Credential setup requires an authorized company admin and a working server connection.' });
       }
     }
 
     async function loadTeam() {
       setLoadingTeam(true);
       try {
-        const team = await fetchTeam();
+        const team = await fetchTeam(teamTenant);
         setTeamMembers(team || []);
       } catch {
         setTeamMembers([]);
@@ -177,7 +161,7 @@ export default function SettingsPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedAccount, selectedChannel]);
+  }, [selectedAccount, selectedChannel, teamTenant]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
@@ -335,11 +319,6 @@ export default function SettingsPage() {
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
-      // Save to localStorage cache so it never vanishes on page refresh
-      try {
-        const cacheKey = `karix_creds_${selectedAccount}_${selectedChannel}`;
-        localStorage.setItem(cacheKey, JSON.stringify(credsToSave));
-      } catch {}
 
       // Run immediate test to verify
       const testRes = await testCredentials(selectedAccount, selectedChannel, credsToSave);
@@ -478,7 +457,7 @@ export default function SettingsPage() {
               </span>
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Team accounts registered for <strong>{getAccountLabel(selectedAccount)}</strong> workspace.
+              Team accounts registered for <strong>{getAccountLabel(teamTenant || selectedAccount)}</strong> workspace.
             </p>
           </div>
           {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
@@ -544,22 +523,22 @@ export default function SettingsPage() {
               </button>
             </div>
             <p className="text-xs text-gray-500">
-              Create a new user account for {getAccountLabel(selectedAccount)} with @attributics.com or corporate email.
+              Create a new user account for {getAccountLabel(teamTenant || selectedAccount)}. Share the initial password securely.
             </p>
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
                 setInviting(true);
                 try {
-                  await inviteColleague(inviteEmail.trim(), invitePassword.trim(), inviteName.trim(), inviteRole);
+                  await inviteColleague(inviteEmail.trim(), invitePassword, inviteName.trim(), inviteRole, teamTenant);
                   setShowInviteModal(false);
                   const nameSaved = inviteName.trim();
                   setInviteName('');
                   setInviteEmail('');
                   setInvitePassword('');
-                  const team = await fetchTeam();
+                  const team = await fetchTeam(teamTenant);
                   setTeamMembers(team || []);
-                  setBanner({ type: 'success', message: `Added ${nameSaved} to ${getAccountLabel(selectedAccount)}!` });
+                  setBanner({ type: 'success', message: `Added ${nameSaved} to ${getAccountLabel(teamTenant || selectedAccount)}!` });
                 } catch (err) {
                   setBanner({ type: 'error', message: err instanceof Error ? err.message : String(err) });
                 } finally {
@@ -601,7 +580,9 @@ export default function SettingsPage() {
                 <input
                   type="password"
                   required
-                  placeholder="At least 6 characters"
+                  minLength={12}
+                  autoComplete="new-password"
+                  placeholder="At least 12 characters (maximum 72 UTF-8 bytes)"
                   value={invitePassword}
                   onChange={(e) => setInvitePassword(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
