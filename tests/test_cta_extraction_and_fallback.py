@@ -337,3 +337,88 @@ def test_smpl_carousel_and_standalone_cta_extraction_and_stripping():
     assert u5 == "https://u3.mnge.co/"
     assert "👉 Apply below" not in c5
     assert c5.endswith("T&Cs apply")
+
+
+def test_swcm_114_multi_cta_extraction_and_rcs_suggestions():
+    """Verify SWCM-114 multi-CTA table extracts both CTAs into RCS suggestions with cleaned labels."""
+    from briefing_parser import _parse_swcm_cta
+
+    raw_cta_cell = (
+        "CTA 1: Read Blog! (for both EC & PC)\n\n"
+        "https://www.tatacapital.com/blog/wealth-services/wealth-manager-meaning-and-importance/\n\n"
+        "CTA 2: Learn More (only for PC)\n\n"
+        "https://www.tatacapital.com/wealth/request-callback.html?sourceName=Blog1_RCS_October&subsource=Blog1_RCS_October&cid=sms:wealth:oct26:Blog1_RCS_October::#resident-india"
+    )
+
+    p_text, p_url, all_ctas = _parse_swcm_cta(raw_cta_cell)
+    assert len(all_ctas) == 2
+    assert p_text == "Read Blog!"
+    assert p_url == "https://www.tatacapital.com/blog/wealth-services/wealth-manager-meaning-and-importance/"
+    assert all_ctas[0]["label"] == "Read Blog!"
+    assert all_ctas[0]["url"] == "https://www.tatacapital.com/blog/wealth-services/wealth-manager-meaning-and-importance/"
+    assert all_ctas[1]["label"] == "Learn More"
+    assert "request-callback.html" in all_ctas[1]["url"]
+
+    # Test end-to-end via parse_jira_brief
+    desc_adf = {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "table",
+                "content": [
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Campaign Execution Format"}]}]},
+                            {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "RCS"}]}]},
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Campaign Name"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "swcm_114_wealth_blog_1_em_rcs_1"}]}]},
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Channel"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "RCS"}]}]},
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "RCS Text"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Dear {{1}},\n*Is Your Wealth Working as Hard as You Do?*\nManaging investments is only one part of building wealth.\nT&Cs Apply"}]}]},
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "CTA / LINK"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": raw_cta_cell}]}]},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+
+    issue_data = {
+        "key": "SWCM-114",
+        "summary": "TCL || LAP Cross sell Campaign | PA LAP | Sept'24",
+        "description_raw": desc_adf,
+        "description_text": "Campaign Execution Format",
+        "attachments": [],
+    }
+
+    parsed = parse_jira_brief(issue_data, download_creatives=False)
+    assert len(parsed.rcs_templates) == 1
+    rcs = parsed.rcs_templates[0]
+    assert rcs["action_label"] == "Read Blog!"
+    assert len(rcs["suggestions"]) == 2
+    assert rcs["suggestions"][0]["label"] == "Read Blog!"
+    assert rcs["suggestions"][1]["label"] == "Learn More"

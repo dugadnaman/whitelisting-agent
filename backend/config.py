@@ -49,7 +49,7 @@ def _load_env_file():
         try:
             creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
             for k, v in creds.items():
-                if k and v and (k not in _PREEXISTING_ENV or k not in os.environ):
+                if k and v and k not in os.environ:
                     os.environ[k] = str(v).strip()
         except Exception:
             pass
@@ -64,7 +64,7 @@ def _load_env_file():
             k, v = line.split("=", 1)
             k = k.strip()
             v = v.strip().strip("'\"")
-            if k and v and (k not in _PREEXISTING_ENV or k not in os.environ):
+            if k and v and k not in os.environ:
                 os.environ[k] = v
 
 

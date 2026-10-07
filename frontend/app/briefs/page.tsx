@@ -2018,14 +2018,14 @@ export default function JiraBriefsPage() {
                                     {wa.body}
                                   </div>
 
-                                  {wa.button_type === 'URL' && (
-                                    <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-gray-400">CTA Button:</span>
-                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
-                                        🔗 {wa.button_text || 'Check Offer'} ({wa.button_url || 'https://u3.mnge.co/'})
+                                  {((wa.buttons && wa.buttons.length > 0) ? wa.buttons : (wa.button_type === 'URL' ? [{ label: wa.button_text, text: wa.button_text, url: wa.button_url }] : [])).map((btn, bIdx) => (
+                                    <div key={bIdx} className="flex flex-wrap items-center gap-2 text-xs">
+                                      <span className="text-gray-400 font-medium">{(wa.buttons && wa.buttons.length > 1) ? `CTA ${bIdx + 1}:` : 'CTA Button:'}</span>
+                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60 break-all">
+                                        🔗 {btn.label || btn.text || 'Check Offer'} ({btn.url || 'https://u3.mnge.co/'})
                                       </span>
                                     </div>
-                                  )}
+                                  ))}
 
                                   {wa.button_type === 'QUICK_REPLY' && (
                                     <div className="flex items-center gap-2 text-xs">
@@ -2276,14 +2276,16 @@ export default function JiraBriefsPage() {
                                   <p className="font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
                                     {rcs.body}
                                   </p>
-                                  {(rcs.action_label || rcs.action_url) && (
-                                    <div className="pt-2 border-t border-gray-100 flex items-center gap-2 text-xs">
-                                      <span className="text-gray-400">CTA Button:</span>
-                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60">
-                                        🔗 {rcs.action_label || 'Apply Now'} ({rcs.action_url || 'https://u3.mnge.co/'})
+                                  {((rcs.suggestions && rcs.suggestions.length > 0) ? rcs.suggestions : ((rcs.action_label || rcs.action_url) ? [{ label: rcs.action_label, text: rcs.action_label, url: rcs.action_url }] : [])).map((sugg, sIdx) => (
+                                    <div key={sIdx} className="pt-2 border-t border-gray-100 flex flex-wrap items-center gap-2 text-xs">
+                                      <span className="text-gray-400 font-medium">
+                                        {(rcs.suggestions && rcs.suggestions.length > 1) ? `CTA ${sIdx + 1}:` : 'CTA Button:'}
+                                      </span>
+                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60 break-all">
+                                        🔗 {sugg.label || sugg.text || 'Explore Now'} ({sugg.url || 'https://u3.mnge.co/'})
                                       </span>
                                     </div>
-                                  )}
+                                  ))}
                                   {rcs.carousel_cards && rcs.carousel_cards.length > 0 && (
                                     <div className="pt-3 border-t border-gray-100 space-y-2">
                                       <div className="flex items-center justify-between text-[11px] font-bold text-gray-700">

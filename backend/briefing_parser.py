@@ -58,6 +58,7 @@ class WhatsAppTemplateDraft:
     button_type: str = "NONE"
     button_text: str | None = None
     button_url: str | None = None
+    buttons: list[dict[str, Any]] = field(default_factory=list)
     footer_text: str | None = None
     variables: list[str] = field(default_factory=list)
     sample_values: list[str] = field(default_factory=list)
@@ -75,6 +76,7 @@ class RcsTemplateDraft:
     action_type: str = "URL"
     action_label: str = "Check Offer"
     action_url: str = "https://u3.mnge.co/"
+    suggestions: list[dict[str, Any]] = field(default_factory=list)
     variables: list[str] = field(default_factory=list)
     sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
@@ -2530,37 +2532,88 @@ def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None, summary: str = "
 
     return campaigns
 
-def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[str, str]:
+def _clean_cta_label(label: str) -> str:
+    """Clean internal targeting tags like '(for both EC & PC)', '(only for PC)' from CTA button label."""
+    clean = re.sub(r"\s*\([^)]*(?:ec|pc|rcs|wa|whatsapp|sms)[^)]*\)", "", label, flags=re.IGNORECASE).strip()
+    clean = clean.strip("*_~:- ")
+    return clean or "Explore Now"
+
+
+def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[str, str, list[dict[str, str]]]:
     """
     Parse CTA label and real destination URL from cell text and extracted hyperlink marks.
-    Example: 'CTA: Explore Now!\\nGodrej Majesty-NCR' -> ('Explore Now!', 'https://forms.cloud.microsoft/...')
+    Returns: (primary_button_text, primary_button_url, all_ctas_list)
     """
-    button_text = "Explore Now"
-    button_url = DEFAULT_CTA_URL
+    all_ctas: list[dict[str, str]] = []
+    cta_raw_clean = (cta_raw or "").strip()
+    if not cta_raw_clean and not cta_links:
+        return "", "", []
+    # 1. Check for multi-CTA patterns like 'CTA 1:', 'CTA 2:', 'Button 1:', etc.
+    cta_marker_pat = re.compile(
+        r"(?:^|\n)\s*(?:CTA\s*(\d*)|Button\s*(\d*)|Action\s*(\d*))\s*[:\-–]\s*([^\n\r]+)",
+        re.IGNORECASE,
+    )
+    matches = list(cta_marker_pat.finditer(cta_raw_clean))
 
-    # 1. Use real decoded destination URL if hyperlink mark exists
-    if cta_links and len(cta_links) > 0:
-        valid_links = [l for l in cta_links if l.startswith("http")]
+    if len(matches) >= 2 or (len(matches) == 1 and ("cta 1" in cta_raw_clean.lower() or "cta 2" in cta_raw_clean.lower())):
+        for idx, m in enumerate(matches):
+            raw_label = m.group(4).strip()
+            clean_lbl = _clean_cta_label(raw_label)
+
+            start_pos = m.end()
+            end_pos = matches[idx + 1].start() if idx + 1 < len(matches) else len(cta_raw_clean)
+            block_text = cta_raw_clean[start_pos:end_pos]
+
+            url_match = re.search(r"https?://[^\s]+", block_text)
+            url_val = url_match.group(0).rstrip(".,)") if url_match else None
+
+            if not url_val and cta_links and idx < len(cta_links):
+                url_val = cta_links[idx]
+
+            all_ctas.append({
+                "type": "URL",
+                "label": clean_lbl,
+                "url": url_val or DEFAULT_CTA_URL,
+            })
+    else:
+        lines = [l.strip() for l in cta_raw_clean.split("\n") if l.strip()]
+        button_text = "Explore Now"
+        button_url = DEFAULT_CTA_URL
+
+        for line in lines:
+            if re.match(r"^cta\s*\d*\s*[:\-–]", line, re.IGNORECASE):
+                candidate = re.split(r"[:\-–]", line, 1)[1].strip()
+                if candidate:
+                    button_text = _clean_cta_label(candidate)
+                    break
+            elif "->" in line or "|" in line:
+                parts = re.split(r"\s*(?:->|\|)\s*", line)
+                if len(parts) >= 2:
+                    button_text = _clean_cta_label(parts[0])
+                    break
+
+        raw_urls = re.findall(r"https?://[^\s]+", cta_raw_clean)
+        valid_links = [l.rstrip(".,)") for l in (cta_links or []) if l.startswith("http")] + [u.rstrip(".,)") for u in raw_urls]
         if valid_links:
             button_url = valid_links[0]
 
-    # 2. Extract button text from CTA label
-    lines = [l.strip() for l in cta_raw.split("\n") if l.strip()]
-    for line in lines:
-        if line.lower().startswith("cta:") and ":" in line:
-            candidate = line.split(":", 1)[1].strip()
-            if candidate:
-                button_text = candidate
-                break
+        all_ctas.append({
+            "type": "URL",
+            "label": button_text,
+            "url": button_url,
+        })
 
-    # If no hyperlink mark was attached, fallback to URL in text if any
-    if not cta_links:
-        for line in lines:
-            if line.startswith(("http://", "https://")):
-                button_url = line
-                break
+        if len(valid_links) > 1 and len(all_ctas) == 1:
+            for extra_url in valid_links[1:]:
+                all_ctas.append({
+                    "type": "URL",
+                    "label": "Learn More",
+                    "url": extra_url,
+                })
 
-    return button_text, button_url
+    primary_text = all_ctas[0]["label"] if all_ctas else "Explore Now"
+    primary_url = all_ctas[0]["url"] if all_ctas else DEFAULT_CTA_URL
+    return primary_text, primary_url, all_ctas
 
 
 _LOCATION_KEYWORDS = {
@@ -2926,13 +2979,15 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     swcm_campaigns = _parse_swcm_campaign_tables(desc_raw, summary=summary)
     for idx, campaign in enumerate(swcm_campaigns, start=1):
         c_chan = campaign.get("channel", "WA").upper()
-        cta_text, cta_url = _parse_swcm_cta(campaign.get("cta_text", ""), campaign.get("cta_links", []))
+        cta_text, cta_url, all_ctas = _parse_swcm_cta(campaign.get("cta_text", ""), campaign.get("cta_links", []))
         norm_text, samples = normalize_placeholders(campaign["body"])
         clean_body, swcm_btn_text, swcm_btn_url, swcm_footer = extract_and_strip_cta(
             norm_text,
             existing_btn_text=cta_text,
             existing_btn_url=cta_url,
         )
+        if not all_ctas and (swcm_btn_text or (swcm_btn_url and swcm_btn_url != DEFAULT_CTA_URL)):
+            all_ctas = [{"type": "URL", "label": swcm_btn_text or "Explore Now", "url": swcm_btn_url or DEFAULT_CTA_URL}]
         var_tags = re.findall(r"\{\{(\d+)\}\}", clean_body)
         if len(samples) > len(var_tags):
             samples = samples[: len(var_tags)]
@@ -2956,11 +3011,10 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     media_file=media,
                     media_filename=Path(media).name if media else None,
                     button_type="URL",
-                    button_text=swcm_btn_text,
-                    button_url=swcm_btn_url,
+                    button_text=all_ctas[0]["label"] if all_ctas else swcm_btn_text,
+                    button_url=all_ctas[0]["url"] if all_ctas else swcm_btn_url,
+                    buttons=all_ctas,
                     variables=var_tags,
-                    sample_values=samples,
-                    raw_source=campaign["body"],
                     source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
                 )
             )
@@ -2986,15 +3040,15 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                     media_file=media,
                     media_filename=Path(media).name if media else None,
                     action_type="URL",
-                    action_label=swcm_btn_text,
-                    action_url=swcm_btn_url,
+                    action_label=all_ctas[0]["label"] if all_ctas else swcm_btn_text,
+                    action_url=all_ctas[0]["url"] if all_ctas else swcm_btn_url,
+                    suggestions=all_ctas,
                     variables=var_tags,
                     sample_values=samples,
                     raw_source=campaign["body"],
                     source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
                 )
             )
-            rcs_counter += 1
 
         elif c_chan == "SMS":
             tname = _clean_template_name(base_name, "sms", sms_counter)

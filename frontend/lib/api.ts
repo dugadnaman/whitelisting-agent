@@ -924,6 +924,7 @@ export type JiraRcsDraft = {
   action_type: string;
   action_label: string;
   action_url: string;
+  suggestions?: Array<{ type?: string; label?: string; text?: string; url?: string; phone_number?: string }>;
   variables: string[];
   raw_source: string;
   template_type?: "text" | "richcard" | "carousel" | string;
