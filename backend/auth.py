@@ -102,7 +102,7 @@ def decode_access_token(token: str) -> dict[str, Any] | None:
     secret = configured_jwt_secret()
     try:
         return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM], options={"require": ["sub", "exp", "iat"]})
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, TypeError, ValueError, OverflowError, RecursionError):
         return None
 
 

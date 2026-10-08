@@ -240,9 +240,19 @@ export function getApiUrl(path: string): string {
   return `${base}${path}`;
 }
 
-function delay(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
-  setTimeout(resolve, ms);
+function delay(ms: number, signal?: AbortSignal | null): Promise<void> {
+  signal?.throwIfAborted();
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const timer = setTimeout(() => {
+    signal?.removeEventListener("abort", onAbort);
+    resolve();
+  }, ms);
+  function onAbort() {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+    reject(signal?.reason);
+  }
+  signal?.addEventListener("abort", onAbort, { once: true });
   return promise;
 }
 
@@ -273,6 +283,7 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   let lastError: unknown;
   for (let i = 0; i <= retries; i++) {
+    init?.signal?.throwIfAborted();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort(new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds. The server may still be processing your batch.`));
@@ -288,19 +299,20 @@ export async function fetchWithRetry(
       const customInit: RequestInit = {
         ...init,
         headers,
-        signal: init?.signal || controller.signal,
+        signal: init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal,
       };
 
       const res = await fetch(input, customInit);
       clearTimeout(timeoutId);
       // If server returned 500/502/503/504 (cold start, proxy blip, or temporary container swap), retry
       if ((res.status === 500 || res.status === 502 || res.status === 503 || res.status === 504) && i < retries) {
-        await delay(delayMs * Math.pow(1.5, i));
+        await delay(delayMs * Math.pow(1.5, i), init?.signal);
         continue;
       }
       return res;
     } catch (err) {
       clearTimeout(timeoutId);
+      if (init?.signal?.aborted) throw init.signal.reason;
       if (controller.signal.aborted) {
         lastError =
           controller.signal.reason instanceof Error
@@ -310,7 +322,7 @@ export async function fetchWithRetry(
         lastError = err;
       }
       if (i < retries) {
-        await delay(delayMs * Math.pow(1.5, i));
+        await delay(delayMs * Math.pow(1.5, i), init?.signal);
         continue;
       }
     }

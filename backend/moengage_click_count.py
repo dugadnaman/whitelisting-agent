@@ -1,7 +1,7 @@
 """Tata-only, session-authenticated MoEngage unique click counts."""
 
 from datetime import UTC, date, datetime, timedelta
-from http.cookies import SimpleCookie
+from http.cookies import CookieError, SimpleCookie
 import os
 import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -36,28 +36,45 @@ def base_metadata(base: dict, workspace: dict) -> dict:
     try:
         if not isinstance(created, str):
             raise ValueError
+        if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])?", created):
+            raise ValueError
         instant = datetime.fromisoformat(created.replace("Z", "+00:00"))
         if instant.tzinfo is None:
             instant = instant.replace(tzinfo=UTC)
         timezone = ZoneInfo(workspace["timezone"])
-    except (ValueError, TypeError, KeyError, ZoneInfoNotFoundError):
+        created_at = instant.astimezone(UTC).isoformat()
+        start_date = instant.astimezone(timezone).date().isoformat()
+    except (ValueError, TypeError, KeyError, OverflowError, ZoneInfoNotFoundError):
         raise HTTPException(status_code=502, detail="MoEngage returned an invalid base creation time or workspace timezone.") from None
     return {
         "id": base["id"],
         "name": base["name"],
-        "created_at": instant.astimezone(UTC).isoformat(),
-        "start_date": instant.astimezone(timezone).date().isoformat(),
+        "created_at": created_at,
+        "start_date": start_date,
         "timezone": workspace["timezone"],
     }
 
 
-def click_count_payload(base: dict, end_date: str) -> dict:
+def validate_end_date(end_date: str, timezone: str | None = None) -> date:
     try:
-        if not isinstance(end_date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", end_date):
+        if not isinstance(end_date, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", end_date):
             raise ValueError
         end = date.fromisoformat(end_date)
     except ValueError:
         raise HTTPException(status_code=400, detail="End date must be a valid YYYY-MM-DD date.") from None
+    if timezone is None:
+        return end
+    try:
+        today = datetime.now(ZoneInfo(timezone)).date()
+    except (ValueError, TypeError, ZoneInfoNotFoundError):
+        raise HTTPException(status_code=502, detail="MoEngage returned an invalid workspace timezone.") from None
+    if end > today:
+        raise HTTPException(status_code=400, detail="End date cannot be after today in the selected workspace.")
+    return end
+
+
+def click_count_payload(base: dict, end_date: str) -> dict:
+    end = validate_end_date(end_date, base["timezone"])
     if end < date.fromisoformat(base["start_date"]):
         raise HTTPException(status_code=400, detail="End date cannot be before the imported base's creation date.")
     # Portal absolute ranges encode workspace calendar dates with a literal Z.
@@ -104,7 +121,8 @@ def query_result(row: dict, query_id: str, db_name: str) -> dict:
         count = row.get("user_count")
         reachability = row.get("reachability_count")
         reachable = reachability.get("total_reachable_count") if isinstance(reachability, dict) else None
-        if type(count) is not int or count < 0 or type(reachable) is not int or reachable < 0 or reachable > count:
+        if (type(count) is not int or not 0 <= count <= 9007199254740991
+                or type(reachable) is not int or not 0 <= reachable <= count):
             raise HTTPException(status_code=502, detail="MoEngage completed the query without valid unique and reachable user counts.")
         result.update(user_count=count, reachable_users=reachable)
     elif result["status"] not in ("queued", "running"):
@@ -151,6 +169,8 @@ class ClickCountClient:
             detail = ("MoEngage query submission timed out; it may already be queued. No automatic resubmission was attempted."
                       if method == "POST" and "/count" in path else "MoEngage timed out. Try loading again.")
             raise HTTPException(status_code=504, detail=detail) from None
+        except (requests.exceptions.InvalidHeader, UnicodeError):
+            raise HTTPException(status_code=503, detail="The Tata MoEngage session headers are malformed. Copy the bearer token, refresh token and cookie again in Settings.") from None
         except requests.RequestException:
             raise HTTPException(status_code=502, detail="Cannot reach MoEngage. Check the Tata dashboard URL and network connectivity.") from None
         if response.status_code in (401, 403) or 300 <= response.status_code < 400:
@@ -160,27 +180,36 @@ class ClickCountClient:
         if not response.ok:
             raise HTTPException(status_code=502, detail=f"MoEngage rejected the request (HTTP {response.status_code}). Ask an administrator to check the Tata session.") from None
         if response.cookies:
-            cookies = SimpleCookie()
-            cookies.load(self.headers.get("cookie", ""))
-            for cookie in response.cookies:
-                cookies[cookie.name] = cookie.value
-            self.headers["cookie"] = "; ".join(cookie.OutputString() for cookie in cookies.values())
+            try:
+                cookies = SimpleCookie()
+                cookies.load(self.headers.get("cookie", ""))
+                for cookie in response.cookies:
+                    cookies[cookie.name] = cookie.value
+                self.headers["cookie"] = "; ".join(f"{cookie.key}={cookie.coded_value}" for cookie in cookies.values())
+            except CookieError:
+                raise HTTPException(status_code=502, detail="MoEngage returned invalid session cookies.") from None
         try:
             data = response.json()
-        except ValueError:
+        except (ValueError, RecursionError):
             raise HTTPException(status_code=502, detail="MoEngage returned an invalid response. Refresh the Tata session in Settings.") from None
         if not isinstance(data, dict):
             raise HTTPException(status_code=502, detail="MoEngage returned an unexpected response.")
+        code = data.get("code")
+        if isinstance(code, str) and re.fullmatch(r"[0-9]{3}", code):
+            code = int(code)
+            data["code"] = code
+        if code is not None and type(code) is not int:
+            raise HTTPException(status_code=502, detail="MoEngage returned an invalid response code.")
         # New-auth-stack responses can report the legacy UI-session flag as false.
         # Only their explicit success envelope overrides that flag; schemas below
         # still have to supply the required workspace/base/query data.
-        explicit_success = data.get("code") == 200 and data.get("status") == "success"
+        explicit_success = code == 200 and data.get("status") == "success"
         if (data.get("loggedIn") is False and not explicit_success) or (path.startswith("/dash/auth/") and (
                 data.get("status") in ("failure", "failed", "error")
-                or isinstance(data.get("code"), int) and data["code"] >= 400)):
+                or type(code) is int and code >= 400)):
             raise HTTPException(status_code=503, detail=SESSION_ERROR)
         if (data.get("success") is False or data.get("status") in ("failure", "failed", "error")
-                or isinstance(data.get("code"), int) and data["code"] >= 400):
+                or type(code) is int and code >= 400):
             raise HTTPException(status_code=502, detail="MoEngage could not complete the request. Ask an administrator to check the Tata portal session.")
         return data
 
@@ -192,8 +221,10 @@ class ClickCountClient:
         apps = [row for row in rows if row.get("account_id") == self.account_id
                 and row.get("activated") is True and row.get("is_test") is False]
         if any(not isinstance(row.get("id"), str) or not re.fullmatch(r"[a-fA-F0-9]{24}", row["id"])
-               or not isinstance(row.get("name"), str) or not row["name"] for row in apps):
+               or not isinstance(row.get("name"), str) or not row["name"].strip() for row in apps):
             raise HTTPException(status_code=502, detail="MoEngage returned invalid Tata workspace details.")
+        if len({row["id"] for row in apps}) != len(apps):
+            raise HTTPException(status_code=502, detail="MoEngage returned duplicate Tata workspace identities.")
         if not apps:
             raise HTTPException(status_code=503, detail="The configured portal session has no active workspaces in the authorized Tata account. Ask an administrator to check the session and account ID.")
         return apps
@@ -209,10 +240,14 @@ class ClickCountClient:
             if (row.get("source") != "IMPORT_USERS" or row.get("type") != "FILE_V2"
                     or row.get("deleted") is True or row.get("archived") is True):
                 continue
+            if any(flag in row and type(row[flag]) is not bool for flag in ("deleted", "archived")):
+                raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported-base lifecycle state.")
             if (not isinstance(row.get("id"), str) or not re.fullmatch(r"[a-fA-F0-9]{24}", row["id"])
-                    or not isinstance(row.get("name"), str) or not row["name"]):
+                    or not isinstance(row.get("name"), str) or not row["name"].strip()):
                 raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported base.")
             bases.append({"id": row["id"], "name": row["name"]})
+        if len({row["id"] for row in bases}) != len(bases):
+            raise HTTPException(status_code=502, detail="MoEngage returned duplicate imported-base identities.")
         return bases
 
     def activate(self, app: dict) -> dict:
@@ -258,15 +293,18 @@ class ClickCountClient:
         if (not isinstance(base, dict) or base.get("id") != base_id
                 or base.get("source") != "IMPORT_USERS" or base.get("type") != "FILE_V2"
                 or base.get("deleted") is not False or base.get("archived") is not False
-                or not isinstance(base.get("name"), str) or not base["name"]):
+                or not isinstance(base.get("name"), str) or not base["name"].strip()):
             raise HTTPException(status_code=502, detail="MoEngage returned invalid imported-base metadata.")
         # cs_meta is optional; bind queries to the activated workspace, not cached base counts.
+        return base, self.workspace_database()
+
+    def workspace_database(self) -> str:
         profile = self.request("GET", "/getLoggedInUserData", params={"api": 1}).get("data")
         if (not isinstance(profile, dict) or profile.get("account_id") != self.account_id
                 or not isinstance(profile.get("dbName"), str)
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", profile["dbName"])):
             raise HTTPException(status_code=502, detail="MoEngage returned invalid workspace database metadata.")
-        return base, profile["dbName"]
+        return profile["dbName"]
 
 
 def sign_query(query_id: str, workspace_id: str, db_name: str) -> str:
@@ -279,18 +317,21 @@ def sign_query(query_id: str, workspace_id: str, db_name: str) -> str:
 
 
 def read_query_ticket(ticket: str, workspace_id: str) -> dict:
-    if len(ticket) > 4096:
-        raise HTTPException(status_code=400, detail="Invalid click-count query ID.")
     try:
+        if not isinstance(ticket, str) or not ticket or len(ticket) > 4096:
+            raise jwt.InvalidTokenError
         payload = jwt.decode(ticket, configured_jwt_secret(), algorithms=["HS256"],
                              audience="tata-click-count",
-                             options={"require": ["aud", "purpose", "rq_id", "workspace_id", "db_name", "iat", "exp"]})
+                             options={"strict_aud": True, "require": ["aud", "purpose", "rq_id", "workspace_id", "db_name", "iat", "exp"]})
         if (payload["purpose"] != "tata-click-count" or payload["workspace_id"] != workspace_id
-                or not isinstance(payload["db_name"], str) or not payload["db_name"]
-                or payload["exp"] - payload["iat"] > 86400):
+                or not isinstance(payload["db_name"], str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", payload["db_name"])
+                or type(payload["iat"]) is not int or type(payload["exp"]) is not int
+                or not 0 < payload["exp"] - payload["iat"] <= 86400
+                or not isinstance(payload["rq_id"], str)
+                or not re.fullmatch(r"[a-fA-F0-9]{24}", payload["rq_id"])):
             raise jwt.InvalidTokenError
-        validate_identifier(payload["rq_id"], "query ID", object_id=True)
-    except (jwt.InvalidTokenError, TypeError, KeyError, ValueError):
+    except (jwt.InvalidTokenError, TypeError, KeyError, ValueError, OverflowError, RecursionError):
         raise HTTPException(status_code=404, detail="Query ID is invalid, expired, or belongs to another workspace.") from None
     return payload
 
@@ -303,7 +344,7 @@ def require_click_count_user(user: dict = Depends(get_current_user)) -> dict:
 
 
 class ClickCountQueryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     workspace_id: str
     base_id: str
     end_date: str
@@ -319,6 +360,7 @@ def get_workspaces():
 
 @router.get("/bases")
 def get_bases(workspace_id: str = Query(...)):
+    validate_identifier(workspace_id, "workspace ID", object_id=True)
     client = ClickCountClient()
     client.select_workspace(workspace_id)
     return {"bases": client.bases()}
@@ -326,6 +368,8 @@ def get_bases(workspace_id: str = Query(...)):
 
 @router.get("/bases/{base_id}")
 def get_base(base_id: str, workspace_id: str = Query(...)):
+    validate_identifier(workspace_id, "workspace ID", object_id=True)
+    validate_identifier(base_id, "base ID", object_id=True)
     client = ClickCountClient()
     workspace = client.select_workspace(workspace_id)
     base, _ = client.base(base_id)
@@ -336,8 +380,10 @@ def get_base(base_id: str, workspace_id: str = Query(...)):
 def create_query(body: ClickCountQueryRequest):
     validate_identifier(body.workspace_id, "workspace ID", object_id=True)
     validate_identifier(body.base_id, "base ID", object_id=True)
+    validate_end_date(body.end_date)
     client = ClickCountClient()
     workspace = client.select_workspace(body.workspace_id)
+    validate_end_date(body.end_date, workspace["timezone"])
     raw_base, db_name = client.base(body.base_id)
     base = base_metadata(raw_base, workspace)
     result = client.request("POST", "/segmentation/recent_query/count",
@@ -360,6 +406,8 @@ def get_query(query_id: str, workspace_id: str = Query(...)):
     ticket = read_query_ticket(query_id, workspace_id)
     client = ClickCountClient()
     client.select_workspace(workspace_id)
+    if client.workspace_database() != ticket["db_name"]:
+        raise HTTPException(status_code=404, detail="Query not found in the selected workspace.")
     result = client.request("POST", "/segmentation/recent_query/get_bulk",
                             params={"api": 1}, body={"ids": [ticket["rq_id"]], "query_type": "filter"})
     rows = result.get("data")

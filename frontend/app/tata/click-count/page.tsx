@@ -7,7 +7,8 @@ import { canAccessAccount } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import {
   fetchClickCountWorkspaces, fetchClickCountBases, fetchClickCountBase,
-  startClickCountQuery, fetchClickCountQuery,
+  startClickCountQuery, fetchClickCountQuery, ClickCountApiError,
+  isTerminalClickCountError, isValidClickCountRange, todayInTimezone,
 } from '@/lib/moengage-click-count';
 import type {
   ClickCountWorkspace, ClickCountBase, ClickCountBaseMetadata,
@@ -17,23 +18,21 @@ import type {
 const panel = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm';
 const input = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-500';
 const primary = 'rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50';
+const secondary = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function ErrorNotice({ message }: { message: string }) {
+function ErrorNotice({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
       <p>{message}</p>
+      {onRetry && <button type="button" className={`${secondary} mt-2`} onClick={onRetry}>Retry loading</button>}
     </div>
   );
 }
 
-function todayInTimezone(timezone: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
-  return ['year', 'month', 'day'].map((type) => parts.find((part) => part.type === type)?.value).join('-');
-}
 
 export default function TataClickCountPage() {
   const { currentUser, authLoading } = useApp();
@@ -58,8 +57,11 @@ function ClickCountWorkspacePicker() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
+    setLoading(true);
+    setError('');
     const controller = new AbortController();
     async function load() {
       try {
@@ -73,7 +75,7 @@ function ClickCountWorkspacePicker() {
     }
     void load();
     return () => controller.abort();
-  }, []);
+  }, [reload]);
 
   const workspace = workspaces.find((item) => item.id === workspaceId);
   return (
@@ -95,8 +97,13 @@ function ClickCountWorkspacePicker() {
           </select>
         </div>
         {loading && <p role="status" className="text-sm text-gray-500">Loading Tata workspaces…</p>}
-        {error && <ErrorNotice message={error} />}
-        {!loading && !error && workspaces.length === 0 && <p role="status" className="text-sm text-gray-500">No Tata MoEngage workspaces are available.</p>}
+        {error && <ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} />}
+        {!loading && !error && workspaces.length === 0 && (
+          <div className="space-y-2">
+            <p role="status" className="text-sm text-gray-500">No Tata MoEngage workspaces are available.</p>
+            <button type="button" className={secondary} onClick={() => setReload((value) => value + 1)}>Reload workspaces</button>
+          </div>
+        )}
         {workspace && <ImportedBasePicker key={workspace.id} workspace={workspace} busy={busy} onBusyChange={setBusy} />}
       </section>
     </div>
@@ -109,8 +116,11 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
+    setLoading(true);
+    setError('');
     const controller = new AbortController();
     async function load() {
       try {
@@ -124,7 +134,7 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
     }
     void load();
     return () => controller.abort();
-  }, [workspace.id]);
+  }, [workspace.id, reload]);
 
   const filteredBases = bases.filter((base) => base.id === baseId || base.name.toLowerCase().includes(search.trim().toLowerCase()));
   return (
@@ -143,8 +153,13 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
         </select>
       </div>
       {loading && <p role="status" className="text-sm text-gray-500">Loading imported bases…</p>}
-      {error && <ErrorNotice message={error} />}
-      {!loading && !error && bases.length === 0 && <p role="status" className="text-sm text-gray-500">This workspace has no imported bases.</p>}
+      {error && <ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} />}
+      {!loading && !error && bases.length === 0 && (
+        <div className="space-y-2">
+          <p role="status" className="text-sm text-gray-500">This workspace has no imported bases.</p>
+          <button type="button" className={secondary} onClick={() => setReload((value) => value + 1)}>Reload imported bases</button>
+        </div>
+      )}
       {!loading && bases.length > 0 && filteredBases.length === 0 && <p role="status" className="text-sm text-gray-500">No bases match your search.</p>}
       {baseId && <BaseCountForm key={baseId} workspace={workspace} baseId={baseId} onBusyChange={onBusyChange} />}
     </>
@@ -155,14 +170,20 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
   const [metadata, setMetadata] = useState<ClickCountBaseMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [metadataError, setMetadataError] = useState('');
+  const [metadataReload, setMetadataReload] = useState(0);
+  const [today, setToday] = useState('');
   const [endDate, setEndDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [query, setQuery] = useState<ClickCountQuery | null>(null);
   const [status, setStatus] = useState<ClickCountQueryStatus | null>(null);
   const [queryError, setQueryError] = useState('');
+  const [pollingPaused, setPollingPaused] = useState(false);
+  const [unknownSubmission, setUnknownSubmission] = useState(false);
   const submitLock = useRef(false);
   const requestController = useRef<AbortController | null>(null);
-  const busy = submitting || status?.status === 'queued' || status?.status === 'running';
+  const pollController = useRef<AbortController | null>(null);
+  const pendingQuery = status?.status === 'queued' || status?.status === 'running';
+  const busy = submitting || unknownSubmission || pendingQuery && !pollingPaused;
 
   useEffect(() => {
     onBusyChange(busy);
@@ -172,6 +193,8 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
   useEffect(() => () => requestController.current?.abort(), []);
 
   useEffect(() => {
+    setLoading(true);
+    setMetadataError('');
     const controller = new AbortController();
     async function load() {
       try {
@@ -185,12 +208,32 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
     }
     void load();
     return () => controller.abort();
-  }, [workspace.id, baseId]);
+  }, [workspace.id, baseId, metadataReload]);
 
   useEffect(() => {
-    if (!query) return;
+    if (!metadata) return;
+    const timezone = metadata.timezone;
+    const updateToday = () => setToday(todayInTimezone(timezone));
+    let timer: number;
+    function tick() {
+      updateToday();
+      timer = window.setTimeout(tick, 60000 - Date.now() % 60000);
+    }
+    tick();
+    window.addEventListener('focus', updateToday);
+    document.addEventListener('visibilitychange', updateToday);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', updateToday);
+      document.removeEventListener('visibilitychange', updateToday);
+    };
+  }, [metadata]);
+
+  useEffect(() => {
+    if (!query || pollingPaused) return;
     const activeQuery = query;
     const controller = new AbortController();
+    pollController.current = controller;
     let timer: number | undefined;
     async function poll() {
       try {
@@ -204,25 +247,47 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
         }
       } catch (err) {
         if (controller.signal.aborted) return;
-        setQueryError(`Could not refresh the query status: ${errorMessage(err)}. Status polling will continue; another query cannot be started yet.`);
+        if (isTerminalClickCountError(err)) {
+          submitLock.current = false;
+          setPollingPaused(true);
+          setQueryError(`Status checking stopped: ${errorMessage(err)}. Selections are unlocked; the query may still be running on MoEngage.`);
+          return;
+        }
+        setQueryError(`Could not refresh the query status: ${errorMessage(err)}. Status polling will continue. You can stop checking to unlock selection; this does not cancel the query.`);
       }
       if (!controller.signal.aborted) timer = window.setTimeout(poll, 2500);
     }
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [query]);
+  }, [query, pollingPaused]);
 
-  const today = metadata ? todayInTimezone(metadata.timezone) : '';
-  const validDates = Boolean(metadata && endDate && endDate >= metadata.start_date && endDate <= today);
+  const validDates = Boolean(metadata && today && isValidClickCountRange(metadata.start_date, endDate, metadata.timezone));
+
+  function pausePolling() {
+    pollController.current?.abort();
+    submitLock.current = false;
+    setPollingPaused(true);
+    setQueryError('Status checking stopped. The query may still be running on MoEngage; stopping checks does not cancel it.');
+  }
+
+  function resumePolling() {
+    if (submitLock.current || !query || !pendingQuery) return;
+    submitLock.current = true;
+    onBusyChange(true);
+    setQueryError('');
+    setPollingPaused(false);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitLock.current || busy || !metadata || !validDates) return;
+    if (submitLock.current || busy || !metadata || !isValidClickCountRange(metadata.start_date, endDate, metadata.timezone)) return;
     submitLock.current = true;
     onBusyChange(true);
     const controller = new AbortController();
     requestController.current = controller;
     setSubmitting(true);
+    setPollingPaused(false);
+    setUnknownSubmission(false);
     setQuery(null);
     setStatus(null);
     setQueryError('');
@@ -233,8 +298,10 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
       setStatus({ query_id: accepted.query_id, status: accepted.status, user_count: null, reachable_users: null });
     } catch (err) {
       if (controller.signal.aborted) return;
-      submitLock.current = false;
-      setQueryError(`${errorMessage(err)}. The query-start request was not automatically retried.`);
+      const uncertain = !(err instanceof ClickCountApiError) || err.status === 0 || err.status === 408 || err.status >= 500;
+      submitLock.current = uncertain;
+      setUnknownSubmission(uncertain);
+      setQueryError(`${errorMessage(err)}. The query-start request was not automatically retried.${uncertain ? ' Its outcome is unknown: MoEngage may already have queued it. Confirm before allowing another query.' : ''}`);
     } finally {
       if (!controller.signal.aborted) setSubmitting(false);
     }
@@ -243,7 +310,7 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
   return (
     <>
       {loading && <p role="status" className="text-sm text-gray-500">Loading base creation date…</p>}
-      {metadataError && <ErrorNotice message={metadataError} />}
+      {metadataError && <ErrorNotice message={metadataError} onRetry={() => setMetadataReload((value) => value + 1)} />}
       {metadata && (
         <form onSubmit={submit} className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -253,16 +320,21 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
             </div>
             <div>
               <label htmlFor="click-end" className="mb-1 block text-sm font-medium text-gray-700">End date · inclusive</label>
-              <input id="click-end" type="date" className={input} value={endDate} min={metadata.start_date} max={today} required disabled={busy || metadata.start_date > today} onChange={(event) => { setEndDate(event.target.value); setQuery(null); setStatus(null); setQueryError(''); }} aria-describedby="click-timezone" />
+              <input id="click-end" type="date" className={input} value={endDate} min={metadata.start_date} max={today} required disabled={busy || !today || metadata.start_date > today} onChange={(event) => { pollController.current?.abort(); setEndDate(event.target.value); setQuery(null); setStatus(null); setQueryError(''); setPollingPaused(false); }} aria-describedby="click-timezone" />
             </div>
           </div>
           <p id="click-timezone" className="text-xs text-gray-500">Dates use {metadata.timezone}. The start date is derived by the server from this base’s creation timestamp ({metadata.created_at}); the end date includes the whole selected day.</p>
-          {metadata.start_date > today && <p role="alert" className="text-sm text-red-700">This base’s creation date is after today in its workspace timezone; no valid date range is available yet.</p>}
+          {today && metadata.start_date > today && <p role="alert" className="text-sm text-red-700">This base’s creation date is after today in its workspace timezone; no valid date range is available yet.</p>}
           {endDate && !validDates && <p role="alert" className="text-sm text-red-700">Choose an end date from {metadata.start_date} through {today}.</p>}
-          <button type="submit" className={primary} disabled={!validDates || busy}>{submitting ? 'Starting query…' : busy ? 'Counting unique users…' : 'Count unique users'}</button>
+          <button type="submit" className={primary} disabled={!validDates || busy} onClick={(event) => { if (event.detail > 1) event.preventDefault(); }}>{unknownSubmission ? 'Query outcome unknown' : submitting ? 'Starting query…' : busy ? 'Counting unique users…' : 'Count unique users'}</button>
         </form>
       )}
       {queryError && <ErrorNotice message={queryError} />}
+      {unknownSubmission && (
+        <button type="button" className={secondary} onClick={() => { submitLock.current = false; setUnknownSubmission(false); }}>
+          I understand a query may already exist · unlock selection
+        </button>
+      )}
       {query && status && (
         <section className="rounded-lg border border-blue-200 bg-blue-50 p-4" aria-label="Query result" aria-live="polite" aria-atomic="true">
           <h2 className="text-sm font-semibold text-gray-900">{status.status === 'success' ? 'Unique users who clicked' : 'Click count query'}</h2>
@@ -277,7 +349,16 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
               <p className="mt-1 text-sm text-gray-600">Deduplicated users matching the five click events and imported-base membership.</p>
               {status.reachable_users !== null && <p className="mt-2 text-xs text-gray-500">Reachable users: {status.reachable_users.toLocaleString()} (a separate metric, not the unique-click count).</p>}
             </>
-          ) : status.status === 'failed' ? <ErrorNotice message={status.error || 'The click count query failed.'} /> : <p role="status" className="mt-3 text-sm font-medium text-blue-700">{status.status === 'queued' ? 'Query queued…' : 'Query running…'} Selection is locked until this query finishes.</p>}
+          ) : status.status === 'failed' ? <ErrorNotice message={status.error || 'The click count query failed.'} /> : (
+            <div className="mt-3 space-y-2">
+              <p role="status" className="text-sm font-medium text-blue-700">
+                {pollingPaused ? 'Status checking paused; the final outcome is unknown.' : `${status.status === 'queued' ? 'Query queued…' : 'Query running…'} Selection is locked until this query finishes or you stop checking.`}
+              </p>
+              <button type="button" className={secondary} onClick={pollingPaused ? resumePolling : pausePolling}>
+                {pollingPaused ? 'Check status again' : 'Stop checking and unlock selection'}
+              </button>
+            </div>
+          )}
         </section>
       )}
     </>
