@@ -2022,7 +2022,7 @@ export default function JiraBriefsPage() {
                                     <div key={bIdx} className="flex flex-wrap items-center gap-2 text-xs">
                                       <span className="text-gray-400 font-medium">{(wa.buttons && wa.buttons.length > 1) ? `CTA ${bIdx + 1}:` : 'CTA Button:'}</span>
                                       <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60 break-all">
-                                        🔗 {btn.label || btn.text || 'Check Offer'} ({btn.url || 'https://u3.mnge.co/'})
+                                        🔗 {('label' in btn && btn.label) || btn.text || 'Check Offer'} ({btn.url || 'https://u3.mnge.co/'})
                                       </span>
                                     </div>
                                   ))}

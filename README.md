@@ -52,6 +52,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 3. **Phase 3 — Operational Work Management & Sync**:
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
    - Mixed Wealth briefs can submit WhatsApp to `tcl_promo` and RCS to `wealth` in one request. The confirmation shows both destinations; the backend authorizes each account and rejects a changed RCS bot before either channel is submitted.
+   - Jira Briefs CTA previews support WhatsApp API buttons with `text` and legacy fallback buttons with `label`/`text`. Both shapes are type-checked by the production frontend build.
    - Jira Briefs counts Push / App only when the parsed brief identifies a Push campaign (`channel_counts.push`). MoEngage staging metadata may exist for SMS or Email tickets and does not imply a Push campaign; Push title/body are empty when no Push campaign was identified.
    - Jira brief-status filters (including the chat prompt "Show pending Jira briefs") scan successive Jira search pages until the requested number of matching briefs is found or Jira has no more pages. Results remain newest-first; unfiltered listings use a single page.
    - MoEngage attribute resolver and automated template catalog sync.
