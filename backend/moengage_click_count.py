@@ -114,9 +114,10 @@ def query_result(row: dict, query_id: str, db_name: str) -> dict:
     if row.get("_id") != query_id or row.get("db_name") != db_name:
         raise HTTPException(status_code=404, detail="Query not found in the selected workspace.")
     result = {"query_id": query_id, "status": row.get("status"), "user_count": None, "reachable_users": None}
-    if result["status"] == "failed":
+    if result["status"] in ("failed", "failure"):
+        result["status"] = "failed"
         # Never echo provider failure_reason: it can include session data or raw queries.
-        result["error"] = "MoEngage could not complete this query. Refresh the session in Settings and submit a new query."
+        result["error"] = "MoEngage could not complete this query. No user count is available. You may submit a new query."
     elif result["status"] == "success":
         count = row.get("user_count")
         reachability = row.get("reachability_count")

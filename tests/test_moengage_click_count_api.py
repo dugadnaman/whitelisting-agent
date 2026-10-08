@@ -241,6 +241,23 @@ def test_http_completed_empty_cohort_is_zero_not_pending(client, portal, provisi
     assert result.json()["reachable_users"] == 0
 
 
+def test_http_native_provider_failure_is_terminal_without_a_false_zero_or_resubmission(client, portal, provision_user):
+    _, headers = provision_user(tenant="tata")
+    portal.states = ["running", "failure"]
+    accepted = client.post(PREFIX + "/queries", json=submission(portal), headers=headers).json()
+    path = PREFIX + "/queries/" + accepted["query_id"]
+    running = client.get(path, params={"workspace_id": WORKSPACE_ID}, headers=headers)
+    failed = client.get(path, params={"workspace_id": WORKSPACE_ID}, headers=headers)
+    assert running.status_code == 200
+    assert running.json()["status"] == "running"
+    assert failed.status_code == 200
+    assert failed.json()["status"] == "failed"
+    assert failed.json()["user_count"] is None
+    assert failed.json()["reachable_users"] is None
+    assert "error" in failed.json()
+    assert portal.posts == 1
+
+
 @pytest.mark.parametrize("updates,expected", [
     ({"workspace_id": FOREIGN_WORKSPACE_ID}, 403),
     ({"workspace_id": OTHER_WORKSPACE_ID}, 404),

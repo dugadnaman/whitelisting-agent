@@ -83,8 +83,9 @@ def test_query_for_other_workspace_is_not_disclosed():
     assert error.value.status_code == 404
 
 
-def test_failed_query_is_explicit_and_does_not_leak_upstream_reason():
-    result = query_result({"_id": QUERY_ID, "db_name": "TataCapital", "status": "failed",
+@pytest.mark.parametrize("provider_status", ["failed", "failure"])
+def test_failed_query_is_explicit_and_does_not_leak_upstream_reason(provider_status):
+    result = query_result({"_id": QUERY_ID, "db_name": "TataCapital", "status": provider_status,
                            "failure_reason": "Authorization: secret-token Cookie: secret-cookie"}, QUERY_ID, "TataCapital")
     assert result["status"] == "failed"
     assert result["user_count"] is None
