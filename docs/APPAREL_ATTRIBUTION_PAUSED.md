@@ -21,3 +21,15 @@ Paused at the user's request on 2026-10-07 while moving to a separate Tata Capit
 ## Separate Tata requirement
 
 Tata needs a distinct-user segment count for members of an imported base who clicked at least one selected channel between the base import creation date and a user-selected end date. This is not Apparel purchase/revenue attribution. Investigate official MoEngage segmentation/count and import metadata APIs before implementation.
+
+## Simplified native local setup
+
+- Added `scripts/apparel_local.py`: clone → `setup` → `start`, using installed Chrome, Python and Node rather than WSL/Docker or downloaded Chromium. Windows onboarding uses PowerShell and `py -3.12`; full commands are in README.
+- Setup installs root and worker requirements, preserves existing `.env` values, generates absent private secrets, and provisions the first Apparel admin through the existing hidden-password auth CLI. Fresh private backend/worker/browser state does not import Bajaj/Tata/cloud credentials or another person's Chrome profile.
+- Worker startup locking and credential/setup writes now have native Windows implementations: `msvcrt` exclusive locks, protected current-user/SYSTEM DACLs, fail-closed ACL filesystem checks, and private atomic replacements. Diagnostic screenshots use private platform-neutral paths.
+- Verification on macOS: **13 worker regressions and 7 launcher regressions passed**. Real isolated startup used portal 13000, API 18000, worker 18001 and CDP 19222. Hidden-password onboarding persisted a real Apparel admin without echo; restart retained the account/secrets. Ctrl+C released all four listeners.
+- The startup smoke found **Start login HTTP 503** because the native helper omitted the required login URL. Native login and dashboard now both use `https://dashboard-03.moengage.com/`, matching bundled reports. After the fix, the live API returned **200**, opened that actual regional MoEngage page and honestly remained `waiting_for_login`.
+- Real browser verification: a provisioned Operator signed in through the portal and saw attribution controls but no Admin setup, key upload or corporate-login controls. Anonymous access returned 401; Operator setup/login requests returned 403; the machine endpoint required its separate token.
+- Windows runtime remains unverified here, including DACLs, native locking, dependency installation and Windows child-job cleanup. The isolated fresh profile had no Google key or completed human MFA; this smoke did not write any attribution results or replace prior live-brand evidence. The Crocs and cloud verification gaps listed above remain unchanged.
+- The native setup is published separately on `apparel-local-setup`; main and unrelated pending work are unchanged. No local Docker builds, browser downloads or dependency installs were performed for this smoke.
+

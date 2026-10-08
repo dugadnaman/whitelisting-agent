@@ -120,6 +120,39 @@ karix/
 
 ## 🚀 Getting Started
 
+### Apparel on a local Windows laptop — no Docker
+
+Install [Git](https://git-scm.com/downloads/win), [Python 3.12](https://www.python.org/downloads/windows/), [Node.js 22+](https://nodejs.org/en/download), and [Google Chrome](https://www.google.com/chrome/) once. Open **PowerShell normally, not as administrator**, and run:
+
+```powershell
+git clone --branch apparel-local-setup https://github.com/dugadnaman/whitelisting-agent.git
+cd whitelisting-agent
+py -3.12 scripts/apparel_local.py setup
+py -3.12 scripts/apparel_local.py start
+```
+
+Setup installs both Python dependency sets and the frontend, creates private local secrets, and asks for the first Apparel administrator's name, email and password. Password entry is hidden. Do not copy someone else's `.env`, browser profile or Bajaj/Tata credentials.
+
+Start opens the portal in a **separate Apparel Chrome window** and runs the API, worker and frontend in one terminal. It uses installed Chrome; it does not download Chromium or require Docker/WSL. Keep the terminal open; **Ctrl+C** stops only this launcher's services and preserves its accounts, Google key and browser profile.
+
+One-time administrator steps in the portal:
+
+1. Sign in using the account created during setup, then open **Apparel Attribution** from the sidebar. The account is already scoped to Apparel.
+2. Upload the authorized Google service-account JSON key in **Admin setup**. Share the approved sheet with that service account as an editor, then click **Connect approved sheet**. Report mappings and `Mastersheet` are already bundled.
+3. Click **Start login**, complete corporate MoEngage sign-in/MFA in the dedicated window, then refresh status.
+4. Create marketing accounts in **Settings → Organization Team Directory → Add Colleague**, using **Operator**. Operators do not see Admin setup.
+
+For later use:
+
+```powershell
+cd ~/whitelisting-agent
+py -3.12 scripts/apparel_local.py start
+```
+
+Local state lives under `%LOCALAPPDATA%/Karix/Apparel/<checkout-id>`; secrets remain in the checkout's private `.env`. Use a local filesystem supporting Windows ACLs, such as NTFS, not FAT/exFAT. This is a per-device setup, not a public hosted service. Do not process the same shared-sheet rows from multiple laptops simultaneously. Browser sessions may require renewed human login.
+
+Verification: isolated native startup, hidden-password onboarding, SSO start and real operator UI exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
+
 ### 1. Environment Configuration
 
 Copy the example environment configuration:

@@ -25,6 +25,7 @@ from playwright.async_api import (
 
 from app.models.report import CampaignRow
 from app.config.settings import validate_private_cdp
+from app.core.local_storage import private_directory, private_file
 
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,14 @@ class MoEngageBrowserService:
         self.page: Page | None = None
         self.active_workspace: str | None = None
         self.lock = asyncio.Lock()
+
+    def _diagnostic_path(self, name: str) -> str:
+        directory = self.profile_dir.parent / "diagnostics"
+        private_directory(directory)
+        # Dropdown labels can contain separators or characters forbidden on Windows.
+        path = directory / re.sub(r"[^A-Za-z0-9._-]", "-", name)
+        private_file(path)
+        return str(path)
 
     async def start_login(self, login_hint: str | None = None) -> str:
         async with self.lock:
@@ -424,7 +433,7 @@ class MoEngageBrowserService:
         except Exception as exc:
             screenshot_note = "disabled for the Railway browser"
             if not self.remote_cdp_url:
-                screenshot_path = self.profile_dir.parent / "moengage-query-error.png"
+                screenshot_path = self._diagnostic_path("moengage-query-error.png")
                 try:
                     await page.screenshot(path=str(screenshot_path), full_page=False)
                     screenshot_note = str(screenshot_path)
@@ -510,7 +519,7 @@ class MoEngageBrowserService:
         except BrowserAutomationError:
             raise
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-agipl-brand.png"
+            screenshot_path = self._diagnostic_path("moengage-agipl-brand.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not set AGIPL Txn_Brand to {value!r} "
@@ -552,7 +561,7 @@ class MoEngageBrowserService:
             failure = (
                 f"operator_text={attribute_text!r}, input_values={input_values!r}"
             )
-        screenshot_path = "/tmp/moengage-cis-brand-readonly-check.png"
+        screenshot_path = self._diagnostic_path("moengage-cis-brand-readonly-check.png")
         await page.screenshot(path=screenshot_path, full_page=True)
         raise BrowserAutomationError(
             "CIS Brand_PM row must already be configured as "
@@ -841,8 +850,7 @@ class MoEngageBrowserService:
                 await nested_filter.locator(".mds-segmentation__arrow-wrapper").click(force=True)
         await page.get_by_text(re.compile(re.escape(marker), re.I)).first.wait_for(timeout=10000)
 
-    @staticmethod
-    async def _ensure_filter_editor_open(page: Page):
+    async def _ensure_filter_editor_open(self, page: Page):
         heading = page.get_by_text("Filter Users", exact=True).first
         header = heading.locator("xpath=ancestor::header[1]")
         section_icon = header.locator(".material-icons").last
@@ -871,7 +879,7 @@ class MoEngageBrowserService:
         try:
             await nested_filter.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-filter-nested-missing.png"
+            screenshot_path = self._diagnostic_path("moengage-filter-nested-missing.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not find the MoEngage delivered-event filter "
@@ -887,7 +895,7 @@ class MoEngageBrowserService:
         try:
             await event_control.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = Path("/tmp/moengage-filter-editor-error.png")
+            screenshot_path = self._diagnostic_path("moengage-filter-editor-error.png")
             await page.screenshot(path=str(screenshot_path), full_page=True)
             raise BrowserAutomationError(
                 "Could not open the MoEngage filter editor "
@@ -1014,7 +1022,7 @@ class MoEngageBrowserService:
         try:
             await event_control.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-delivery-event-control.png"
+            screenshot_path = self._diagnostic_path("moengage-delivery-event-control.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not open the MoEngage delivered-event control "
@@ -1039,15 +1047,14 @@ class MoEngageBrowserService:
         except Exception:
             current = ""
         if event_name.casefold() not in current.casefold():
-            screenshot_path = "/tmp/moengage-delivery-event-selection.png"
+            screenshot_path = self._diagnostic_path("moengage-delivery-event-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain delivered event {event_name!r}; current control is "
                 f"{current!r} (screenshot={screenshot_path!r})"
             )
 
-    @staticmethod
-    async def _set_delivery_lookback(page: Page, days: int):
+    async def _set_delivery_lookback(self, page: Page, days: int):
         delivery_pattern = re.compile(
             "|".join(re.escape(value) for value in DELIVERY_EVENTS.values()), re.I
         )
@@ -1080,7 +1087,7 @@ class MoEngageBrowserService:
         except BrowserAutomationError:
             raise
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-delivery-lookback.png"
+            screenshot_path = self._diagnostic_path("moengage-delivery-lookback.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not set the delivered-event lookback to {days} days "
@@ -1114,7 +1121,7 @@ class MoEngageBrowserService:
         try:
             await self._select_open_option(page, campaign_id)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-campaign-id-option.png"
+            screenshot_path = self._diagnostic_path("moengage-campaign-id-option.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not select campaign id {campaign_id!r} "
@@ -1123,7 +1130,7 @@ class MoEngageBrowserService:
         await page.wait_for_timeout(400)
         selected_text = (await value_control.inner_text()).strip()
         if campaign_id.casefold() not in selected_text.casefold():
-            screenshot_path = "/tmp/moengage-campaign-id-selection.png"
+            screenshot_path = self._diagnostic_path("moengage-campaign-id-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain campaign id {campaign_id!r}; current control is "
@@ -1146,7 +1153,7 @@ class MoEngageBrowserService:
             attribute = attributes.last
             delete_button = attribute.locator("[data-test='delete-button']").first
             if not await delete_button.count() or not await delete_button.is_visible():
-                screenshot_path = "/tmp/moengage-campaign-id-clear.png"
+                screenshot_path = self._diagnostic_path("moengage-campaign-id-clear.png")
                 await page.screenshot(path=screenshot_path, full_page=True)
                 raise BrowserAutomationError(
                     "Could not clear the existing Readable Campaign Id filter "
@@ -1158,7 +1165,7 @@ class MoEngageBrowserService:
             try:
                 await attribute.wait_for(state="detached", timeout=5000)
             except Exception as exc:
-                screenshot_path = "/tmp/moengage-campaign-id-clear.png"
+                screenshot_path = self._diagnostic_path("moengage-campaign-id-clear.png")
                 await page.screenshot(path=screenshot_path, full_page=True)
                 raise BrowserAutomationError(
                     "MoEngage did not clear the existing Readable Campaign Id filter "
@@ -1183,7 +1190,7 @@ class MoEngageBrowserService:
         try:
             await value_control.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-campaign-id-control.png"
+            screenshot_path = self._diagnostic_path("moengage-campaign-id-control.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 "Could not create a fresh Readable Campaign Id value control "
@@ -1228,7 +1235,7 @@ class MoEngageBrowserService:
             except Exception:
                 pass
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-readable-campaign-attribute.png"
+            screenshot_path = self._diagnostic_path("moengage-readable-campaign-attribute.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not add the Readable Campaign Id attribute "
@@ -1248,8 +1255,7 @@ class MoEngageBrowserService:
             await self._set_dropdown_control(page, attribute, plan.aggregation_attribute)
         await self._set_duration(page, row.start_date.isoformat(), row.end_date.isoformat())
 
-    @staticmethod
-    async def _set_daily_granularity(page: Page):
+    async def _set_daily_granularity(self, page: Page):
         candidates = page.get_by_text("Daily", exact=True)
         for index in range(await candidates.count()):
             candidate = candidates.nth(index)
@@ -1257,7 +1263,7 @@ class MoEngageBrowserService:
                 await candidate.click()
                 await page.wait_for_timeout(400)
                 return
-        screenshot_path = "/tmp/moengage-daily-granularity.png"
+        screenshot_path = self._diagnostic_path("moengage-daily-granularity.png")
         await page.screenshot(path=screenshot_path, full_page=True)
         raise BrowserAutomationError(
             "Could not select Daily granularity in the MoEngage behavior chart "
@@ -1272,7 +1278,7 @@ class MoEngageBrowserService:
         try:
             await selected.wait_for(state="visible", timeout=5000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-analysis-selection.png"
+            screenshot_path = self._diagnostic_path("moengage-analysis-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage analysis type did not change to {value!r} "
@@ -1284,7 +1290,7 @@ class MoEngageBrowserService:
         try:
             await dropdown.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = f"/tmp/moengage-dropdown-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-dropdown-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not find the MoEngage dropdown for {value!r} (screenshot={screenshot_path!r})"
@@ -1301,7 +1307,7 @@ class MoEngageBrowserService:
             await option.wait_for(state="visible", timeout=5000)
             await option.click()
         except Exception as exc:
-            screenshot_path = f"/tmp/moengage-option-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-option-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not select MoEngage option {value!r} (screenshot={screenshot_path!r})"
@@ -1312,7 +1318,7 @@ class MoEngageBrowserService:
         try:
             await dropdown.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = f"/tmp/moengage-dropdown-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-dropdown-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not find the MoEngage dropdown for {value!r} (screenshot={screenshot_path!r})"
@@ -1328,15 +1334,14 @@ class MoEngageBrowserService:
         current = page.locator(".attribute-wrapper .mds-dropdown:visible").first if value == "Order_Net_Val" else dropdown
         selected_text = (await current.inner_text()).strip()
         if value.casefold() not in selected_text.casefold():
-            screenshot_path = f"/tmp/moengage-selection-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-selection-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain selection {value!r}; current control is "
                 f"{selected_text!r} (screenshot={screenshot_path!r})"
             )
 
-    @staticmethod
-    async def _set_duration(page: Page, start_iso: str, end_iso: str):
+    async def _set_duration(self, page: Page, start_iso: str, end_iso: str):
         label = page.get_by_text("Duration", exact=True).last
         duration = label.locator("xpath=following::input[1]").first
         changed = await duration.evaluate(
@@ -1372,7 +1377,7 @@ class MoEngageBrowserService:
         expected_start = date.fromisoformat(start_iso).strftime("%d %b %Y")
         expected_end = date.fromisoformat(end_iso).strftime("%d %b %Y")
         if not changed or expected_start not in actual or expected_end not in actual:
-            screenshot_path = "/tmp/moengage-duration-selection.png"
+            screenshot_path = self._diagnostic_path("moengage-duration-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain duration {expected_start!r} - {expected_end!r}; "
