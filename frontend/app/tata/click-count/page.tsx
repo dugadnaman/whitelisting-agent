@@ -26,7 +26,6 @@ function ErrorNotice({ message }: { message: string }) {
   return (
     <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
       <p>{message}</p>
-      <p className="mt-1">If the MoEngage session has expired, ask an administrator to reconnect it in <Link href="/settings" className="font-semibold underline">Settings</Link>.</p>
     </div>
   );
 }

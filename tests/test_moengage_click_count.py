@@ -103,6 +103,47 @@ def test_only_active_imported_file_bases_are_offered(monkeypatch):
     assert client.bases() == [{"id": BASE_ID, "name": "imported"}]
 
 
+def test_imported_base_without_count_metadata_uses_creation_date(monkeypatch):
+    from moengage_click_count import ClickCountClient, TATA_PORTAL_ACCOUNT_ID
+    client = object.__new__(ClickCountClient)
+    client.account_id = TATA_PORTAL_ACCOUNT_ID
+    base = {"id": BASE_ID, "name": "HLBT_InternalMart_01_Oct", "type": "FILE_V2",
+            "source": "IMPORT_USERS", "deleted": False, "archived": False,
+            "created_time": "2026-10-07T09:39:23.186000"}
+    responses = {
+        "/v2/custom-segments/dashboard": {"custom_segments": [base]},
+        f"/v2/custom-segments/dashboard/{BASE_ID}/meta": {"cs_details": base},
+        "/getLoggedInUserData": {"data": {"dbName": "TataCapital", "account_id": TATA_PORTAL_ACCOUNT_ID}},
+    }
+    monkeypatch.setattr(client, "request", lambda method, path, **kwargs: responses[path])
+    details, database = client.base(BASE_ID)
+    assert base_metadata(details, WORKSPACE)["start_date"] == "2026-10-07"
+    assert database == "TataCapital"
+
+
+@pytest.mark.parametrize("profile", [
+    None,
+    {"dbName": "OtherTenant", "account_id": "other-account"},
+    {"dbName": None, "account_id": "6399ced48c5fa78ad1eb39ea"},
+    {"dbName": "", "account_id": "6399ced48c5fa78ad1eb39ea"},
+])
+def test_base_rejects_missing_or_foreign_workspace_database(monkeypatch, profile):
+    from moengage_click_count import ClickCountClient, TATA_PORTAL_ACCOUNT_ID
+    client = object.__new__(ClickCountClient)
+    client.account_id = TATA_PORTAL_ACCOUNT_ID
+    base = {"id": BASE_ID, "name": "imported", "type": "FILE_V2",
+            "source": "IMPORT_USERS", "deleted": False, "archived": False}
+    responses = {
+        "/v2/custom-segments/dashboard": {"custom_segments": [base]},
+        f"/v2/custom-segments/dashboard/{BASE_ID}/meta": {"cs_details": base},
+        "/getLoggedInUserData": {"data": profile},
+    }
+    monkeypatch.setattr(client, "request", lambda method, path, **kwargs: responses[path])
+    with pytest.raises(HTTPException) as error:
+        client.base(BASE_ID)
+    assert error.value.status_code == 502
+
+
 def test_signed_query_ticket_rejects_different_workspace_and_tampering(monkeypatch):
     import moengage_click_count as module
     monkeypatch.setattr(module, "configured_jwt_secret", lambda: "test-click-count-signing-key-at-least-32-bytes")

@@ -254,15 +254,19 @@ class ClickCountClient:
         if not any(row["id"] == base_id for row in self.bases()):
             raise HTTPException(status_code=404, detail="Imported base not found in the selected workspace.")
         metadata = self.request("GET", f"/v2/custom-segments/dashboard/{base_id}/meta")
-        base, meta = metadata.get("cs_details"), metadata.get("cs_meta")
-        if (not isinstance(base, dict) or not isinstance(meta, dict)
-                or base.get("id") != base_id or meta.get("cs_id") != base_id
+        base = metadata.get("cs_details")
+        if (not isinstance(base, dict) or base.get("id") != base_id
                 or base.get("source") != "IMPORT_USERS" or base.get("type") != "FILE_V2"
                 or base.get("deleted") is not False or base.get("archived") is not False
-                or not isinstance(base.get("name"), str) or not base["name"]
-                or not isinstance(meta.get("db_name"), str) or not meta["db_name"]):
+                or not isinstance(base.get("name"), str) or not base["name"]):
             raise HTTPException(status_code=502, detail="MoEngage returned invalid imported-base metadata.")
-        return base, meta["db_name"]
+        # cs_meta is optional; bind queries to the activated workspace, not cached base counts.
+        profile = self.request("GET", "/getLoggedInUserData", params={"api": 1}).get("data")
+        if (not isinstance(profile, dict) or profile.get("account_id") != self.account_id
+                or not isinstance(profile.get("dbName"), str)
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", profile["dbName"])):
+            raise HTTPException(status_code=502, detail="MoEngage returned invalid workspace database metadata.")
+        return base, profile["dbName"]
 
 
 def sign_query(query_id: str, workspace_id: str, db_name: str) -> str:
