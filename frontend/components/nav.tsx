@@ -100,6 +100,17 @@ const links = [
     ),
   },
   {
+    href: '/tata/click-count',
+    label: 'Tata Click Counts',
+    subtitle: 'Unique clicks across five channels',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 3v18h18" />
+        <path d="M7 17v-4M12 17V7M17 17v-7" />
+      </svg>
+    ),
+  },
+  {
     href: '/settings',
     label: 'Settings',
     icon: (
@@ -126,6 +137,10 @@ export default function Nav() {
     logout,
   } = useApp();
   const canViewAll = currentUser?.role === 'superadmin';
+  const canViewTataClickCounts = Boolean(currentUser && (
+    currentUser.tenant_id === 'tata' ||
+    (canViewAll && ['all', 'tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(account))
+  ));
   const accountOptions = canViewAll
     ? [{ id: 'all', name: 'All Accounts', is_builtin: true }, ...accounts]
     : accounts;
@@ -242,6 +257,7 @@ export default function Nav() {
       <nav className="flex-1 px-3 py-4 space-y-1">
         {links.map((link) => {
           if (link.href === '/apparel/attribution' && !canUseApparelAttribution(currentUser, account)) return null;
+          if (link.href === '/tata/click-count' && !canViewTataClickCounts) return null;
           const active =
             link.href === '/'
               ? pathname === '/'

@@ -1338,6 +1338,7 @@ export type MoEngageCredentials = {
   has_token: boolean;
   has_cookie: boolean;
   bearer_token: string;
+  refresh_token: string;
   cookie: string;
   expired?: boolean;
   expires_at?: number | null;
@@ -1356,7 +1357,8 @@ export async function saveMoEngageCredentials(
   bearerToken: string,
   cookie: string,
   baseUrl?: string,
-  senderId?: string
+  senderId?: string,
+  refreshToken?: string
 ): Promise<{ ok: boolean; account: string; updated_keys: string[]; expired?: boolean; remaining_min?: number | null }> {
   const res = await fetchWithRetry(getApiUrl("/api/moengage/credentials"), {
     method: "PUT",
@@ -1365,6 +1367,7 @@ export async function saveMoEngageCredentials(
       account,
       base_url: baseUrl || null,
       bearer_token: bearerToken,
+      refresh_token: refreshToken ?? null,
       cookie,
       sender_id: senderId || null,
     }),

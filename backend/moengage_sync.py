@@ -67,6 +67,11 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
         or (os.environ.get("TATA_MOENGAGE_COOKIE") if is_tata else "")
         or ""
     )
+    refresh_token = (
+        os.environ.get(f"{prefix}_MOENGAGE_REFRESH_TOKEN")
+        or (os.environ.get("MOENGAGE_REFRESH_TOKEN") if is_tata else "")
+        or ""
+    ).strip()
 
     from rcs_config import DEFAULT_RCS_BOT_IDS
 
@@ -82,6 +87,7 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
         "base_url": base_url,
         "bearer_token": token,
         "cookie": cookie,
+        "refresh_token": refresh_token,
         "sender_id": sender_id,
         "prefix": prefix,
     }
@@ -125,8 +131,10 @@ def get_moengage_credentials(account: str = "tata") -> dict[str, Any]:
         "sender_id": cfg["sender_id"],
         "bearer_token": token,
         "cookie": cfg["cookie"],
+        "refresh_token": cfg["refresh_token"],
         "has_token": bool(token),
         "has_cookie": bool(cfg["cookie"]),
+        "has_refresh_token": bool(cfg["refresh_token"]),
         **expiry,
     }
 

@@ -126,6 +126,7 @@ from sms_tracker import (
 from submission_client import _GOVERNOR, _STATUS_MAP, delete_templates_bulk
 from tracker import load_log, log_result, pending_entries
 from apparel_attribution import router as apparel_attribution_router
+from moengage_click_count import router as moengage_click_count_router
 
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
@@ -167,6 +168,7 @@ async def authenticate_api_requests(request: Request, call_next):
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
     return await call_next(request)
 app.include_router(apparel_attribution_router)
+app.include_router(moengage_click_count_router)
 
 LOG_PATH = "submission_log.jsonl"
 RCS_LOG_PATH = "rcs_submission_log.jsonl"
@@ -4344,6 +4346,7 @@ class MoEngageCredentialUpdate(BaseModel):
     account: str = "tata"
     base_url: str | None = None
     bearer_token: str | None = None
+    refresh_token: str | None = None
     cookie: str | None = None
     sender_id: str | None = None
 
@@ -4358,6 +4361,7 @@ def _moengage_credential_keys(account: str) -> dict[str, str]:
         return {
             "base_url": "MOENGAGE_BASE_URL",
             "bearer_token": "MOENGAGE_BEARER_TOKEN",  # nosec B105
+            "refresh_token": "MOENGAGE_REFRESH_TOKEN",
             "cookie": "MOENGAGE_COOKIE",
             "sender_id": "MOENGAGE_SENDER_ID",
         }
@@ -4365,6 +4369,7 @@ def _moengage_credential_keys(account: str) -> dict[str, str]:
     return {
         "base_url": f"{prefix}_MOENGAGE_BASE_URL",
         "bearer_token": f"{prefix}_MOENGAGE_BEARER_TOKEN",  # nosec B105
+        "refresh_token": f"{prefix}_MOENGAGE_REFRESH_TOKEN",
         "cookie": f"{prefix}_MOENGAGE_COOKIE",
         "sender_id": f"{prefix}_MOENGAGE_SENDER_ID",
     }
@@ -4388,8 +4393,10 @@ def get_moengage_credentials_endpoint(
             "base_url": creds.get("base_url"),
             "sender_id": creds.get("sender_id"),
             "has_token": creds.get("has_token", False),
+            "has_refresh_token": creds.get("has_refresh_token", False),
             "has_cookie": creds.get("has_cookie", False),
             "bearer_token": creds.get("bearer_token", ""),
+            "refresh_token": creds.get("refresh_token", ""),
             "cookie": creds.get("cookie", ""),
             "expired": creds.get("expired"),
             "expires_at": creds.get("expires_at"),
@@ -4410,6 +4417,7 @@ def update_moengage_credentials_endpoint(
     mapping: dict[str, str] = {}
     acc = req.account.lower().strip()
     raw_token = (req.bearer_token or "").strip()
+    raw_refresh_token = (req.refresh_token or "").strip()
     raw_cookie = (req.cookie or "").strip()
 
     # Auto-detect if user swapped or pasted cookie in token field
@@ -4429,6 +4437,11 @@ def update_moengage_credentials_endpoint(
         if acc in _TATA_MOENGAGE_ACCOUNTS:
             mapping["TATA_MOENGAGE_BEARER_TOKEN"] = raw_token
             mapping["MOENGAGE_BEARER_TOKEN"] = raw_token
+    if req.refresh_token is not None:
+        mapping[keys["refresh_token"]] = raw_refresh_token
+        if acc in _TATA_MOENGAGE_ACCOUNTS:
+            mapping["TATA_MOENGAGE_REFRESH_TOKEN"] = raw_refresh_token
+            mapping["MOENGAGE_REFRESH_TOKEN"] = raw_refresh_token
     if raw_cookie:
         mapping[keys["cookie"]] = raw_cookie
         if acc in _TATA_MOENGAGE_ACCOUNTS:

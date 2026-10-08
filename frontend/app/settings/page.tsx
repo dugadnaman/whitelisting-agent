@@ -70,6 +70,7 @@ export default function SettingsPage() {
   // MoEngage form state
   const [showMoEngage, setShowMoEngage] = useState(false);
   const [moeBearerToken, setMoeBearerToken] = useState('');
+  const [moeRefreshToken, setMoeRefreshToken] = useState('');
   const [moeCookie, setMoeCookie] = useState('');
   const [moeBaseUrl, setMoeBaseUrl] = useState('');
   const [moeSenderId, setMoeSenderId] = useState('');
@@ -83,6 +84,7 @@ export default function SettingsPage() {
         const creds = await fetchMoEngageCredentials(selectedAccount);
         if (ignore) return;
         setMoeBearerToken(creds.bearer_token || '');
+        setMoeRefreshToken(creds.refresh_token || '');
         setMoeCookie(creds.cookie || '');
         setMoeBaseUrl(creds.base_url || '');
         setMoeSenderId(creds.sender_id || '');
@@ -354,7 +356,8 @@ export default function SettingsPage() {
         moeBearerToken.trim(),
         moeCookie.trim(),
         moeBaseUrl.trim(),
-        moeSenderId.trim()
+        moeSenderId.trim(),
+        moeRefreshToken.trim()
       );
       setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
       setBanner({
@@ -875,6 +878,24 @@ export default function SettingsPage() {
             </div>
 
             <div>
+              <label htmlFor="moe_refresh_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                MoEngage Refresh Token
+              </label>
+              <input
+                id="moe_refresh_token"
+                type="password"
+                autoComplete="off"
+                value={moeRefreshToken}
+                onChange={(event) => setMoeRefreshToken(event.target.value)}
+                placeholder="Copy the refreshtoken request header from MoEngage DevTools"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+              />
+              <p className="text-[11px] text-gray-400 mt-1">
+                Required for Tata Click Counts workspace selection. Copy <code>refreshtoken</code> from the same request as the bearer token; it is separate from the session cookie.
+              </p>
+            </div>
+
+            <div>
               <label htmlFor="moe_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
                 MoEngage Session Cookie
               </label>
@@ -911,6 +932,7 @@ export default function SettingsPage() {
                 <li>Press F12 → Network tab → reload the page</li>
                 <li>Click any request to <code>dashboard-03.moengage.com</code></li>
                 <li>Headers → copy the full <code>authorization: Bearer …</code> value</li>
+                <li>For Tata Click Counts, also copy the <code>refreshtoken</code> header into Refresh Token</li>
                 <li>Paste it above and click Save</li>
               </ol>
             </div>
