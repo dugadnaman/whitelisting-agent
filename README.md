@@ -167,6 +167,17 @@ docker-compose up --build
 
 Run all unit and integration test suites:
 ```bash
+### Production authentication on Render
+
+Configure these service environment variables before deploying:
+
+- `DATABASE_URL`: a persistent PostgreSQL connection URL, such as a dedicated Neon database with TLS enabled. SQLite files on Render Free are ephemeral and do not preserve accounts across redeploys.
+- `JWT_SECRET`: a strong, private signing key generated once (for example, `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'`). Keep it stable across redeploys; changing it invalidates existing sessions.
+
+Database initialization creates the schema, not a default login. Provision accounts through the administrator flow, or restore existing user records from a trusted backup while preserving their IDs, password hashes, tenant assignments, roles, and active status. Do not enable public signup or bypass password verification to recover access.
+
+Verification must include a real login after redeployment and confirmation that its `last_login` update reaches PostgreSQL. Persistent application authentication does not refresh MoEngage portal sessions; expired Tata bearer/refresh tokens and cookies still require manual reconnection in **Settings → MoEngage**.
+
 pytest tests/ -v
 ```
 
