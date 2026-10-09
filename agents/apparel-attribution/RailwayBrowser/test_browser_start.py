@@ -1,14 +1,18 @@
 """Run with python -m unittest discover -s agents/apparel-attribution/RailwayBrowser.
 
-Configuration-only tests: no browser, credentials, network, deployment, or sheet writes.
+Configuration and readiness tests: no browser, credentials, network, or sheet writes.
 """
+import io
+import json
 import runpy
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 GUARD = runpy.run_path(str(Path(__file__).with_name("browser-start.py")))
 validate_config = GUARD["validate_config"]
 private_addresses = GUARD["private_addresses"]
+check_cdp = GUARD["check_cdp"]
 
 
 class BrowserDeploymentGuardTests(unittest.TestCase):
@@ -79,6 +83,46 @@ class BrowserDeploymentGuardTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             private_addresses([{"addr_info": [{"local": "127.0.0.1"}]}])
 
+
+class BrowserReadinessTests(unittest.TestCase):
+    def probe(self, payload):
+        interfaces = [{"addr_info": [{"local": "172.19.0.4"}]}]
+        response = MagicMock()
+        response.__enter__.return_value = io.StringIO(json.dumps(payload))
+        opener = MagicMock()
+        opener.open.return_value = response
+        with patch.object(GUARD["subprocess"], "check_output", return_value=json.dumps(interfaces)), \
+                patch.dict(check_cdp.__globals__, {
+                    "build_opener": MagicMock(return_value=opener),
+                    "os": MagicMock(environ={}),
+                }):
+            check_cdp()
+
+    def test_private_relay_must_return_chromium_browser_endpoint(self):
+        self.probe({
+            "Browser": "Chrome/146.0.0.0",
+            "webSocketDebuggerUrl": "ws://172.19.0.4:9222/devtools/browser/1234-abcd",
+        })
+        # The forwarder being alive, a desktop HTML page, or a page target is not readiness.
+        for payload in ({}, [], {"Browser": "Chrome/146.0.0.0"}, {
+            "Browser": "Chrome/146.0.0.0",
+            "webSocketDebuggerUrl": "ws://172.19.0.4:9222/devtools/page/1234-abcd",
+        }):
+            with self.subTest(payload=payload):
+                with self.assertRaises(RuntimeError):
+                    self.probe(payload)
+
+    def test_unavailable_chromium_fails_even_when_listener_exists(self):
+        interfaces = [{"addr_info": [{"local": "172.19.0.4"}]}]
+        opener = MagicMock()
+        opener.open.side_effect = ConnectionResetError("upstream not listening")
+        with patch.object(GUARD["subprocess"], "check_output", return_value=json.dumps(interfaces)), \
+                patch.dict(check_cdp.__globals__, {
+                    "build_opener": MagicMock(return_value=opener),
+                    "os": MagicMock(environ={}),
+                }):
+            with self.assertRaises(ConnectionResetError):
+                check_cdp()
 
 
 if __name__ == "__main__":

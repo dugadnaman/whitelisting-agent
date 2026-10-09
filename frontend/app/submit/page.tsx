@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTabState } from '@/lib/tab-state';
 import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates } from '@/lib/api';
 import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
 import { useApp, getRcsDetails } from '@/lib/context';
@@ -61,24 +62,24 @@ function isAcceptedFile(file: File): boolean {
 export default function SubmitPage() {
   const { account, channel, user, setAccount, getAccountLabel, accounts } = useApp();
   const activeRcs = getRcsDetails(account, accounts);
-  const [state, setState] = useState<State>({ step: 'idle' });
+  const [state, setState] = useTabState<State>('submit_state', { step: 'idle' });
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [autoFixGrammar, setAutoFixGrammar] = useState(true);
-  const [autoSkipDuplicates, setAutoSkipDuplicates] = useState(true);
+  const [autoFixGrammar, setAutoFixGrammar] = useTabState<boolean>('submit_auto_fix_grammar', true);
+  const [autoSkipDuplicates, setAutoSkipDuplicates] = useTabState<boolean>('submit_auto_skip_duplicates', true);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Phase 1 Identification Mode
-  const [activeTab, setActiveTab] = useState<'SUBMIT' | 'IDENTIFY'>('SUBMIT');
+  const [activeTab, setActiveTab] = useTabState<'SUBMIT' | 'IDENTIFY'>('submit_active_tab', 'SUBMIT');
   const [identifyFile, setIdentifyFile] = useState<File | null>(null);
   const [identifying, setIdentifying] = useState<boolean>(false);
-  const [identifyReport, setIdentifyReport] = useState<IdentificationReport | null>(null);
+  const [identifyReport, setIdentifyReport] = useTabState<IdentificationReport | null>('submit_identify_report', null);
   const [identifyError, setIdentifyError] = useState<string | null>(null);
-  const [identifyFilter, setIdentifyFilter] = useState<'ALL' | 'MISSING' | 'WHITELISTED' | 'DRIFT' | 'PENDING' | 'REJECTED'>('ALL');
-  const [identifySearch, setIdentifySearch] = useState<string>('');
+  const [identifyFilter, setIdentifyFilter] = useTabState<'ALL' | 'MISSING' | 'WHITELISTED' | 'DRIFT' | 'PENDING' | 'REJECTED'>('submit_identify_filter', 'ALL');
+  const [identifySearch, setIdentifySearch] = useTabState<string>('submit_identify_search', '');
   const identifyInputRef = useRef<HTMLInputElement>(null);
 
   const handleIdentifyFileSelect = async (selected: File) => {

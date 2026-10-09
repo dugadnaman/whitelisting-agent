@@ -233,10 +233,10 @@ export type ActivityStats = {
 };
 export function getApiUrl(path: string): string {
   if (typeof window !== "undefined") {
-    // In browser: relative URL (proxied by Next.js rewrites to backend)
+    // In browser: relative URL (proxied by the Next.js API route to backend)
     return path;
   }
-  const base = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const base = process.env.BACKEND_INTERNAL_URL || "http://127.0.0.1:8000";
   return `${base}${path}`;
 }
 

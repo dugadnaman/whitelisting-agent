@@ -3,11 +3,13 @@
 import ipaddress
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import time
 from urllib.parse import urlsplit
+from urllib.request import ProxyHandler, build_opener
 
 CHROME_CLI = "--remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 --disable-dev-shm-usage about:blank"
 PRIVATE_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
@@ -62,6 +64,26 @@ def private_addresses(interfaces, requested=""):
     return sorted(addresses)
 
 
+def check_cdp():
+    """Probe Chromium through each private relay, not merely socat's listening port."""
+    interfaces = json.loads(subprocess.check_output(["ip", "-j", "address", "show"], text=True))
+    addresses = private_addresses(interfaces, os.environ.get("CDP_BIND_ADDRESS", ""))
+    # Deployment HTTP proxy variables must never route the private debugger elsewhere.
+    opener = build_opener(ProxyHandler({}))
+    for address in addresses:
+        host = f"[{address}]" if ":" in address else address
+        with opener.open(f"http://{host}:9222/json/version", timeout=3) as response:
+            version = json.load(response)
+        if (not isinstance(version, dict)
+                or not isinstance(version.get("Browser"), str)
+                or not version["Browser"].startswith(("Chrome/", "Chromium/"))
+                or not isinstance(version.get("webSocketDebuggerUrl"), str)):
+            raise RuntimeError("Private CDP relay did not return Chromium's browser endpoint")
+        websocket = urlsplit(version["webSocketDebuggerUrl"])
+        if websocket.scheme != "ws" or not re.fullmatch(r"/devtools/browser/[A-Za-z0-9-]+", websocket.path):
+            raise RuntimeError("Private CDP relay did not return Chromium's browser endpoint")
+
+
 def forward_cdp():
     interfaces = json.loads(subprocess.check_output(["ip", "-j", "address", "show"], text=True))
     addresses = private_addresses(interfaces, os.environ.get("CDP_BIND_ADDRESS", ""))
@@ -100,6 +122,8 @@ def main():
         validate_config(os.environ)
         if sys.argv[1:] == ["--cdp-forward"]:
             forward_cdp()
+        elif sys.argv[1:] == ["--healthcheck"]:
+            check_cdp()
         else:
             # Keep command overrides from bypassing validation or starting a second service.
             if sys.argv[1:]:

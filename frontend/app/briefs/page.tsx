@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTabState } from '@/lib/tab-state';
 import { useApp, getRcsDetails } from '@/lib/context';
 import {
   fetchJiraProjects,
@@ -74,29 +75,33 @@ export default function JiraBriefsPage() {
     { key: 'MON', name: 'Moneyfy Mobile' },
     { key: 'COL', name: 'Collections & Operations' },
   ]);
-  const [project, setProject] = useState<string>('ALL');
-  const [selectedKey, setSelectedKey] = useState<string>('');
-  const [brief, setBrief] = useState<JiraBriefData | null>(null);
+  const [project, setProject] = useTabState<string>('briefs_project', 'ALL');
+  const [selectedKey, setSelectedKey] = useTabState<string>('briefs_selected_key', '');
+  const [brief, setBrief] = useTabState<JiraBriefData | null>('briefs_data', null);
   const [loadingBrief, setLoadingBrief] = useState(false);
-  const [campaignTypeFilter, setCampaignTypeFilter] = useState<'all' | 'messaging' | 'email'>('all');
-  const [briefStatusFilter, setBriefStatusFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed' | 'failed' | 'not_generated'>('all');
-  const [activeTab, setActiveTab] = useState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('whatsapp');
+  const [campaignTypeFilter, setCampaignTypeFilter] = useTabState<'all' | 'messaging' | 'email'>('briefs_campaign_type', 'all');
+  const [briefStatusFilter, setBriefStatusFilter] = useTabState<'all' | 'pending' | 'in_progress' | 'completed' | 'failed' | 'not_generated'>('briefs_status_filter', 'all');
+  const [activeTab, setActiveTab] = useTabState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('briefs_active_tab', 'whatsapp');
   const [submitting, setSubmitting] = useState(false);
   const [confirmationMode, setConfirmationMode] = useState<'all' | 'whatsapp' | 'rcs' | null>(null);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useTabState('briefs_search', '');
 
   // Editable template drafts and selection sets
-  const [waTemplates, setWaTemplates] = useState<JiraWhatsAppDraft[]>([]);
-  const [rcsTemplates, setRcsTemplates] = useState<JiraRcsDraft[]>([]);
-  const [smsTemplates, setSmsTemplates] = useState<JiraSmsDraft[]>([]);
-  const [selectedWa, setSelectedWa] = useState<Set<number>>(new Set());
-  const [selectedRcs, setSelectedRcs] = useState<Set<number>>(new Set());
+  const [waTemplates, setWaTemplates] = useTabState<JiraWhatsAppDraft[]>('briefs_wa_templates', []);
+  const [rcsTemplates, setRcsTemplates] = useTabState<JiraRcsDraft[]>('briefs_rcs_templates', []);
+  const [smsTemplates, setSmsTemplates] = useTabState<JiraSmsDraft[]>('briefs_sms_templates', []);
+  const [selectedWa, setSelectedWa] = useTabState<Set<number>>('briefs_selected_wa', new Set());
+  const [selectedRcs, setSelectedRcs] = useTabState<Set<number>>('briefs_selected_rcs', new Set());
+  const [editingCard, setEditingCard] = useTabState<Record<string, boolean>>('briefs_editing_card', {});
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
-  const [editingCard, setEditingCard] = useState<Record<string, boolean>>({});
   const [previewCreativeModal, setPreviewCreativeModal] = useState<{ url: string; filename: string; channel?: string } | null>(null);
-  const [targetAccount, setTargetAccount] = useState<string>('tcl_promo');
+  const [targetAccount, setTargetAccount] = useTabState<string>('briefs_target_account', 'tcl_promo');
+  const briefRef = useRef(brief);
+  briefRef.current = brief;
+  const waTemplatesRef = useRef(waTemplates);
+  waTemplatesRef.current = waTemplates;
   const currentRcs = getRcsDetails(targetAccount, accounts);
   const whatsappAccount = targetAccount === 'wealth' ? 'tcl_promo' : targetAccount;
   const whatsappAccountName = accounts.find((acc) => acc.id === whatsappAccount)?.name || whatsappAccount;
@@ -336,9 +341,13 @@ export default function JiraBriefsPage() {
     }
   };
 
-  const loadBrief = useCallback(async (key: string) => {
+  const loadBrief = useCallback(async (key: string, force = false) => {
     if (!key) return;
     const cleanKey = key.trim().toUpperCase();
+    if (!force && briefRef.current && briefRef.current.issue_key === cleanKey && waTemplatesRef.current.length > 0) {
+      // Retain active working drafts when returning to this tab
+      return;
+    }
     activeRequestKey.current = cleanKey;
     try {
       setLoadingBrief(true);
@@ -508,6 +517,70 @@ export default function JiraBriefsPage() {
   // Editing helpers
   const toggleEditCard = (cardId: string) => {
     setEditingCard((prev) => ({ ...prev, [cardId]: !prev[cardId] }));
+  };
+
+  const addTemplate = (channel: 'whatsapp' | 'rcs' | 'sms') => {
+    if (!brief) return;
+    const suffix = channel === 'whatsapp' ? 'wa' : channel;
+    const prefix = `${brief.issue_key.toLowerCase().replace(/[^a-z0-9_]/g, '_')}_${suffix}_manual`;
+    const names = new Set([...waTemplates, ...rcsTemplates, ...smsTemplates].map((template) => template.template_name));
+    let sequence = 1;
+    while (names.has(`${prefix}_${sequence}`)) sequence += 1;
+    const templateName = `${prefix}_${sequence}`;
+    let cardId: string;
+
+    if (channel === 'whatsapp') {
+      cardId = `wa-${waTemplates.length}`;
+      setWaTemplates((prev) => [...prev, {
+        template_name: templateName,
+        category: waTemplates[0]?.category || 'MARKETING',
+        language: waTemplates[0]?.language || 'en',
+        header_type: 'TEXT',
+        body: '',
+        button_type: 'NONE',
+        variables: [],
+        sample_values: [],
+        raw_source: '',
+      }]);
+    } else if (channel === 'rcs') {
+      cardId = `rcs-${rcsTemplates.length}`;
+      setRcsTemplates((prev) => [...prev, {
+        template_name: templateName,
+        card_title: '',
+        body: '',
+        action_type: 'URL',
+        action_label: '',
+        action_url: '',
+        variables: [],
+        raw_source: '',
+        template_type: 'text',
+      }]);
+    } else {
+      cardId = `sms-${smsTemplates.length}`;
+      setSmsTemplates((prev) => [...prev, {
+        template_name: templateName,
+        text: '',
+        char_count: 0,
+        variant: 'Manual',
+        variables: [],
+        raw_source: '',
+      }]);
+    }
+
+    setEditingCard((prev) => ({ ...prev, [cardId]: true }));
+    setBrief((prev) => {
+      if (!prev) return prev;
+      const whatsapp = waTemplates.length + (channel === 'whatsapp' ? 1 : 0);
+      const rcs = rcsTemplates.length + (channel === 'rcs' ? 1 : 0);
+      const sms = smsTemplates.length + (channel === 'sms' ? 1 : 0);
+      const email = prev.channel_counts?.email ?? 0;
+      const push = prev.channel_counts?.push ?? 0;
+      return { ...prev, channel_counts: { whatsapp, rcs, sms, email, push, total: whatsapp + rcs + sms + email + push } };
+    });
+    setFeedback({
+      message: `Added '${templateName}'. Enter one message in the new editor and remove it from the original template. New templates are not selected for whitelisting automatically.`,
+      type: 'success',
+    });
   };
 
   const updateWaField = <K extends keyof JiraWhatsAppDraft>(idx: number, field: K, val: JiraWhatsAppDraft[K]) => {
@@ -1229,7 +1302,7 @@ export default function JiraBriefsPage() {
                             📊 Total Campaigns in Ticket:
                           </span>
                           <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-blue-600 text-white shadow-2xs">
-                            {brief.channel_counts?.total ?? (waTemplates.length + rcsTemplates.length + (brief.sms_templates?.length || 0) + (brief.email_templates?.length || 0) + (brief.channel_counts?.push ?? 0))}
+                            {brief.channel_counts?.total ?? (waTemplates.length + rcsTemplates.length + smsTemplates.length + (brief.email_templates?.length || 0) + (brief.channel_counts?.push ?? 0))}
                           </span>
                         </div>
                         <span className="text-[11px] text-gray-500 font-medium">Channel-wise Breakdown</span>
@@ -1251,10 +1324,10 @@ export default function JiraBriefsPage() {
                         </div>
 
                         {/* SMS */}
-                        <div className={`p-2 rounded-lg border text-center transition ${(brief.sms_templates?.length || 0) > 0 ? 'bg-purple-50/90 border-purple-200 text-purple-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
+                        <div className={`p-2 rounded-lg border text-center transition ${smsTemplates.length > 0 ? 'bg-purple-50/90 border-purple-200 text-purple-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
                           <div className="text-[10px] font-bold uppercase tracking-wider">🟣 SMS (DLT)</div>
-                          <div className="text-base font-extrabold">{brief.sms_templates?.length || 0}</div>
-                          <div className="text-[9px] text-gray-500">{(brief.sms_templates?.length || 0) === 1 ? 'template' : 'templates'}</div>
+                          <div className="text-base font-extrabold">{smsTemplates.length}</div>
+                          <div className="text-[9px] text-gray-500">{smsTemplates.length === 1 ? 'template' : 'templates'}</div>
                         </div>
 
                         {/* Email */}
@@ -1689,7 +1762,7 @@ export default function JiraBriefsPage() {
                       >
                         <span>🟣 SMS (DLT)</span>
                         <span className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                          {brief.sms_templates.length}
+                          {smsTemplates.length}
                         </span>
                       </button>
 
@@ -1726,6 +1799,21 @@ export default function JiraBriefsPage() {
 
                 {/* Tab Content Panels */}
                 <div className="p-5 space-y-4">
+                  {(activeTab === 'whatsapp' || activeTab === 'rcs' || activeTab === 'sms') && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                      <p className="text-xs text-gray-500">
+                        Two messages in one template? Add a separate template, then edit the original.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => addTemplate(activeTab)}
+                        disabled={submitting}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        Add template content
+                      </button>
+                    </div>
+                  )}
                   {/* WhatsApp Panel */}
                   {activeTab === 'whatsapp' && (
                     <div className="space-y-4">
@@ -1759,7 +1847,7 @@ export default function JiraBriefsPage() {
                             <div
                               key={`wa-card-${idx}`}
                               className={`p-4 rounded-xl border transition space-y-3 ${
-                                isSelected ? 'bg-white border-emerald-300 shadow-xs' : 'bg-gray-50/70 border-gray-200 opacity-60'
+                                isSelected ? 'bg-white border-emerald-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
                               }`}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2086,7 +2174,7 @@ export default function JiraBriefsPage() {
                             <div
                               key={`rcs-card-${idx}`}
                               className={`p-4 rounded-xl border transition space-y-3 ${
-                                isSelected ? 'bg-white border-blue-300 shadow-xs' : 'bg-gray-50/70 border-gray-200 opacity-60'
+                                isSelected ? 'bg-white border-blue-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
                               }`}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">

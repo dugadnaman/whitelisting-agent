@@ -5,10 +5,13 @@ import ipaddress
 import json
 import os
 import re
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from app.core.local_storage import private_directory, private_file
 
 
 def strong_token(value: str) -> bool:
@@ -93,12 +96,12 @@ def validate_private_cdp(value: str) -> None:
         raise ValueError("MOENGAGE_REMOTE_CDP_URL must be a private HTTP CDP origin; never publish the debugger")
 
 def atomic_private_write(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    private_directory(path.parent)
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(name)
     try:
         with os.fdopen(descriptor, "wb") as destination:
-            os.fchmod(destination.fileno(), 0o600)
+            private_file(temporary)
             destination.write(content)
             destination.flush()
             os.fsync(destination.fileno())
@@ -120,7 +123,7 @@ DEFAULT_UI_CONFIG = {
         "Crocs": "https://dashboard-03.moengage.com/v4/analytics/v2/behavior?did=68ff2de28fa420e1be3622a2&chartId=68ff2de2ca8d4977c1a254b3",
         "R&B": "https://dashboard-03.moengage.com/v4/analytics/v2/behavior?did=68d2581b5f59d7fc44c4d372&chartId=68d2581ba583bed6d5db11be",
         "CK": "https://dashboard-03.moengage.com/v4/analytics/v2/behavior?did=68c92049d1045fd703a1b568&chartId=68c920494053703a90da7678",
-        "AGIPL": "https://dashboard-03.moengage.com/v4/analytics/v2/behavior?did=68d26980ac6269ea10b52cf5&chartId=68d26980cd4fd4ae6272de44",
+        "AGIPL": "https://dashboard-03.moengage.com/v4/analytics/v2/behavior?did=6901ead8da0afc9260fdb19f&chartId=6901ebd529fb3c6e959e3d65",
     },
     "workspace_map": {
         "Aldo": "AL_IN",
@@ -191,7 +194,7 @@ class Settings:
         )
         if result.setup_path.exists():
             try:
-                persisted = json.loads(result.setup_path.read_text())
+                persisted = json.loads(result.setup_path.read_text(encoding="utf-8"))
                 result.google_spreadsheet_url = persisted.get("spreadsheet_url") or result.google_spreadsheet_url
                 result.google_worksheet_name = persisted.get("worksheet_name") or result.google_worksheet_name
                 result.moengage_ui_config = persisted.get("ui_config") or result.moengage_ui_config

@@ -6,8 +6,7 @@ services:
     container_name: karix-template-platform
     restart: unless-stopped
     ports:
-      - "3000:3000"
-      - "8000:8000"
+      - "127.0.0.1:3000:3000"
     env_file:
       - path: .env
         required: false
@@ -15,19 +14,20 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app/backend:/app
       - BACKEND_INTERNAL_URL=http://127.0.0.1:8000
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - JWT_SECRET=${JWT_SECRET:?Set a strong persistent JWT_SECRET in .env}
       - KARIX_DB_PATH=/app/data/karix_store.db
-      - APPAREL_ATTRIBUTION_WORKER_URL=http://apparel-worker:8000
-      - APPAREL_ATTRIBUTION_TOKEN=${APPAREL_ATTRIBUTION_TOKEN:-g9T2kP7xV4mQ8zA1wR6nH3cJ5sL0uE_bD}
+      - APPAREL_ATTRIBUTION_WORKER_URL=http://apparel-worker.internal:8000
+      - APPAREL_ATTRIBUTION_TOKEN=${APPAREL_ATTRIBUTION_TOKEN:?Set a strong shared worker token in .env}
     volumes:
       # Mount a directory, not a possibly-absent SQLite file. Docker creates
       # missing file bind sources as directories, which breaks sqlite3.connect.
       - ./data:/app/data
       - ./media_cache:/app/media_cache
     depends_on:
-      - apparel-worker
+      apparel-worker:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -42,16 +42,21 @@ services:
     environment:
       - PORT=8000
       - STORAGE_DIR=/data
-      - APPAREL_ATTRIBUTION_TOKEN=${APPAREL_ATTRIBUTION_TOKEN:-g9T2kP7xV4mQ8zA1wR6nH3cJ5sL0uE_bD}
+      - APPAREL_ATTRIBUTION_TOKEN=${APPAREL_ATTRIBUTION_TOKEN:?Set a strong shared worker token in .env}
       - MOENGAGE_MODE=browser
       - MOENGAGE_DASHBOARD_URL=https://dashboard-03.moengage.com/
-      - MOENGAGE_REMOTE_CDP_URL=http://apparel-browser:9222
-      - MOENGAGE_BROWSER_LOGIN_URL=${MOENGAGE_BROWSER_LOGIN_URL:-https://dashboard-03.moengage.com/}
+      - MOENGAGE_REMOTE_CDP_URL=http://apparel-browser.internal:9222
+      - MOENGAGE_BROWSER_LOGIN_URL=${MOENGAGE_BROWSER_LOGIN_URL:-https://localhost:3001}
       - GOOGLE_WORKSHEET_NAME=Mastersheet
     volumes:
       - ./agents/apparel-attribution/data:/data
     depends_on:
-      - apparel-browser
+      apparel-browser:
+        condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - apparel-worker.internal
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).close()"]
       interval: 30s
@@ -66,16 +71,22 @@ services:
     container_name: apparel-attribution-browser
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3001"
     environment:
-      - CUSTOM_USER=operator-admin
-      - PASSWORD=KarixApparelSecureAuth2026!7xV4mQ8zA1
+      - PUID=1000
+      - PGID=1000
+      - CUSTOM_USER=${APPAREL_BROWSER_USER:?Set a non-default browser admin username in .env}
+      - PASSWORD=${APPAREL_BROWSER_PASSWORD:?Set a strong browser admin password in .env}
       - APPAREL_BROWSER_STREAM_ACCESS=trusted-network
       - CHROME_CLI=--remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 --disable-dev-shm-usage about:blank
       - RESTART_APP=true
       - HARDEN_DESKTOP=true
-      - SELKIES_ENABLE_SHARING=false
-      - SELKIES_ENABLE_COLLAB=false
+      - SELKIES_ENABLE_SHARING=false|locked
+      - SELKIES_ENABLE_COLLAB=false|locked
     volumes:
       - ./agents/apparel-attribution/browser-profile:/config
     shm_size: "1gb"
+    networks:
+      default:
+        aliases:
+          - apparel-browser.internal

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTabState } from '@/lib/tab-state';
 import {
   fetchWorkManagementDashboard,
   fetchTurnaroundAnalytics,
@@ -171,17 +172,17 @@ export default function WorkManagementPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedProject, setSelectedProject] = useState<string>('SWCM');
+  const [selectedProject, setSelectedProject] = useTabState<string>('wm_selected_project', 'SWCM');
   // Tab Switcher
-  const [activeTab, setActiveTab] = useState<'OPERATIONS' | 'ANALYTICS'>('OPERATIONS');
+  const [activeTab, setActiveTab] = useTabState<'OPERATIONS' | 'ANALYTICS'>('wm_active_tab', 'OPERATIONS');
   const [analyticsData, setAnalyticsData] = useState<TurnaroundAnalyticsData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState<boolean>(false);
 
   // Filters
-  const [selectedTimeline, setSelectedTimeline] = useState<string>('ALL');
-  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
-  const [selectedAssignee, setSelectedAssignee] = useState<string>('ALL');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedTimeline, setSelectedTimeline] = useTabState<string>('wm_timeline', 'ALL');
+  const [selectedStatus, setSelectedStatus] = useTabState<string>('wm_status', 'ALL');
+  const [selectedAssignee, setSelectedAssignee] = useTabState<string>('wm_assignee', 'ALL');
+  const [searchQuery, setSearchQuery] = useTabState<string>('wm_search', '');
 
   // Transfer Modal
   const [transferItem, setTransferItem] = useState<WorkItem | null>(null);
@@ -222,8 +223,8 @@ export default function WorkManagementPage() {
   const [showAiDrawer, setShowAiDrawer] = useState<boolean>(false);
 
   // View Mode & Channel Filters
-  const [viewMode, setViewMode] = useState<'KANBAN' | 'TABLE'>('KANBAN');
-  const [selectedChannel, setSelectedChannel] = useState<string>('ALL');
+  const [viewMode, setViewMode] = useTabState<'KANBAN' | 'TABLE'>('wm_view_mode', 'KANBAN');
+  const [selectedChannel, setSelectedChannel] = useTabState<string>('wm_channel', 'ALL');
 
   // Bulk Selection & Reassign
   const [selectedTicketKeys, setSelectedTicketKeys] = useState<string[]>([]);

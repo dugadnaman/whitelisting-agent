@@ -12,4 +12,8 @@ restartPolicyMaxRetries = 10
 # Keep the Docker ENTRYPOINT; no start command override.
 # Attach /config volume. Do NOT configure a browser public domain or TCP proxy.
 # A separate HTTPS authenticated reverse proxy reaches private port 3000 for streaming.
+# Direct trusted-network desktop access uses HTTPS 3001 (self-signed), never HTTP 3000.
+# Keep WebSocket upgrades and long proxy timeouts; set SUBFOLDER for subpath URLs.
 # Worker alone reaches private 9222. Browser DevTools itself stays on loopback 9223.
+# Docker's image healthcheck probes real /json/version through the private relay.
+# On Railway, verify CDP from the worker; do not add a public CDP healthcheck route.

@@ -1,5 +1,6 @@
 # Secrets
 .env
+.jwt_secret
 credentials.json
 credentials*.json
 !credentials.example.json

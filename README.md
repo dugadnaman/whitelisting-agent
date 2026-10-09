@@ -53,10 +53,10 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
    - Mixed Wealth briefs can submit WhatsApp to `tcl_promo` and RCS to `wealth` in one request. The confirmation shows both destinations; the backend authorizes each account and rejects a changed RCS bot before either channel is submitted.
    - Jira Briefs CTA previews support WhatsApp API buttons with `text` and legacy fallback buttons with `label`/`text`. Both shapes are type-checked by the production frontend build.
+   - Jira Briefs has **Add template content** in WhatsApp, RCS, and SMS panels, including empty channels. Use it to separate two messages incorrectly parsed into one template, then edit the original. New drafts have unique names, open in edit mode, and remain unchecked for whitelisting. Changes are local to the loaded brief until WhatsApp/RCS submission; reloading reparses Jira and discards unsent edits. SMS remains review/edit-only.
    - Jira Briefs counts Push / App only when the parsed brief identifies a Push campaign (`channel_counts.push`). MoEngage staging metadata may exist for SMS or Email tickets and does not imply a Push campaign; Push title/body are empty when no Push campaign was identified.
    - Jira brief-status filters (including the chat prompt "Show pending Jira briefs") scan successive Jira search pages until the requested number of matching briefs is found or Jira has no more pages. Results remain newest-first; unfiltered listings use a single page.
    - MoEngage attribute resolver and automated template catalog sync.
-   - SLA kickoff/checkpoint/escalation alerts omit due-today tickets in **Base Pending** or **Content Pending**: these are client-side dependencies, not operator-owned pending work. They are excluded from Google Chat mentions/counts and operator emails until the status changes; if no operator-owned work remains, no Chat webhook is sent. The alert dispatcher does not change Jira assignees.
    - **Tata Click Counts** (`/tata/click-count`): choose an authorized MoEngage workspace, then an imported base. The server derives the read-only start date from the base's creation timestamp in the workspace timezone; choose an inclusive end date between that date and today in the workspace to count unique users matching **WhatsApp OR Email OR SMS OR Android push OR iOS push clicks, AND base membership**. Users are deduplicated across channels; reachable users are a separate metric. Workspace/base/date changes clear stale results. The date limit refreshes at workspace midnight, and double-clicking cannot submit another query when the first finishes quickly.
    - Click counts use Tata's portal session, not the public MoEngage API workspace IDs. In Tata **Settings → MoEngage**, supply the Bearer token, `refreshtoken` request header, and session cookies from the logged-in dashboard, or configure the `TATA_MOENGAGE_*` variables in `.env.example`. Workspace switching uses request-local credentials and never saves a different workspace's tokens. Expired sessions require manual credential replacement. Counting adds a MoEngage query-history entry; it does not save a segment, export users, or send a campaign. Bajaj and Apparel users cannot access these endpoints.
    - Imported-base creation dates come from `cs_details`; MoEngage may omit `cs_meta` when no cached base-count metadata exists. Naive creation timestamps are UTC before conversion to the workspace calendar date. Query bounds preserve the portal's literal `00:00:00.000Z`–`23:59:59.999Z` calendar-date convention rather than converting them to UTC instants. Signed query tickets expire after 24 hours and bind the workspace and its `/getLoggedInUserData` database identity, with Tata account validation on status checks. Metadata errors are distinct from session-expiry errors.
@@ -69,7 +69,9 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - Dedicated `/apparel/attribution` portal under the Apparel account scope.
    - Multi-channel support (WhatsApp, SMS, RCS) with campaign date-range filtering, preview validation, and warnings.
    - Integrates with an isolated worker service deployed on Railway with dedicated persistent MoEngage Chromium browser.
+   - Browser attribution waits for the current MoEngage page's `load` event before opening a saved Behavior report. Navigating at `DOMContentLoaded` can interrupt dashboard startup and leave the report stuck in its navigation shell, even when the workspace label is visible.
    - Strict tenant isolation: Karix users from Tata or Bajaj cannot access Apparel attribution; authentication is fail-closed.
+   - Login offers Bajaj Finserv, Tata Capital, and Apparel, with automatic organization selection retained as the default. An explicit choice must match the authenticated user's organization (or platform-superadmin access); mismatches clear the returned token and stay on login. Apparel sign-ins open `/apparel/attribution` directly. Accounts still require administrator provisioning; the selector does not grant permissions.
    - Overwrite protection (off by default) ensures existing completed attribution figures are never overwritten unintentionally.
 ---
 
@@ -123,6 +125,39 @@ karix/
 
 ## 🚀 Getting Started
 
+### Apparel on a local Windows laptop — no Docker
+
+Install [Git](https://git-scm.com/downloads/win), [Python 3.12](https://www.python.org/downloads/windows/), [Node.js 22+](https://nodejs.org/en/download), and [Google Chrome](https://www.google.com/chrome/) once. Open **PowerShell normally, not as administrator**, and run:
+
+```powershell
+git clone https://github.com/dugadnaman/whitelisting-agent.git
+cd whitelisting-agent
+py -3.12 scripts/apparel_local.py setup
+py -3.12 scripts/apparel_local.py start
+```
+
+Setup installs both Python dependency sets and the frontend, creates private local secrets, and asks for the first Apparel administrator's name, email and password. Password entry is hidden. Do not copy someone else's `.env`, browser profile or Bajaj/Tata credentials. The launcher must be committed and pushed before another laptop can clone it.
+
+Start opens the portal in a **separate Apparel Chrome window** and runs the API, worker and frontend in one terminal. It uses installed Chrome; it does not download Chromium or require Docker/WSL. Keep the terminal open; **Ctrl+C** stops only this launcher's services and preserves its accounts, Google key and browser profile.
+
+One-time administrator steps in the portal:
+
+1. Sign in using the account created during setup; select **Apparel**.
+2. Upload the authorized Google service-account JSON key in **Admin setup**. Share the approved sheet with that service account as an editor, then click **Connect approved sheet**. Report mappings and `Mastersheet` are already bundled.
+3. Click **Start login**, complete corporate MoEngage sign-in/MFA in the dedicated window, then refresh status.
+4. Create marketing accounts in **Settings → Organization Team Directory → Add Colleague**, using **Operator**. Operators do not see Admin setup.
+
+For later use:
+
+```powershell
+cd ~/whitelisting-agent
+py -3.12 scripts/apparel_local.py start
+```
+
+Local state lives under `%LOCALAPPDATA%/Karix/Apparel/<checkout-id>`; secrets remain in the checkout's private `.env`. Use a local filesystem supporting Windows ACLs, such as NTFS, not FAT/exFAT. This is a per-device setup, not a public hosted service. Do not process the same shared-sheet rows from multiple laptops simultaneously. Browser sessions may require renewed human login.
+
+Verification: isolated native startup, hidden-password onboarding, SSO start and real operator UI exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
+
 ### 1. Environment Configuration
 
 Copy the example environment configuration:
@@ -133,6 +168,17 @@ Fill in the credentials for your tenant (`BAJAJ_*` or `TATA_*`). Non-secret defa
 When a workflow uses file-backed credentials, load `.env` before creating queue
 records so all queue writes and result updates use the same active database
 backend. The application handles this for autonomous remediation flows.
+
+### Production authentication on Render
+
+Configure these service environment variables before deploying:
+
+- `DATABASE_URL`: a persistent PostgreSQL connection URL, such as a dedicated Neon database with TLS enabled. SQLite files on Render Free are ephemeral and do not preserve accounts across redeploys.
+- `JWT_SECRET`: a strong, private signing key generated once (for example, `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'`). Keep it stable across redeploys; changing it invalidates existing sessions.
+
+Database initialization creates the schema, not a default login. Provision accounts through the administrator flow, or restore existing user records from a trusted backup while preserving their IDs, password hashes, tenant assignments, roles, and active status. Do not enable public signup or bypass password verification to recover access.
+
+Verification must include a real login after redeployment and confirmation that its `last_login` update reaches PostgreSQL. Persistent application authentication does not refresh MoEngage portal sessions; expired Tata bearer/refresh tokens and cookies still require manual reconnection in **Settings → MoEngage**.
 
 ### 2. Local Development
 
@@ -170,17 +216,6 @@ docker-compose up --build
 
 Run all unit and integration test suites:
 ```bash
-### Production authentication on Render
-
-Configure these service environment variables before deploying:
-
-- `DATABASE_URL`: a persistent PostgreSQL connection URL, such as a dedicated Neon database with TLS enabled. SQLite files on Render Free are ephemeral and do not preserve accounts across redeploys.
-- `JWT_SECRET`: a strong, private signing key generated once (for example, `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'`). Keep it stable across redeploys; changing it invalidates existing sessions.
-
-Database initialization creates the schema, not a default login. Provision accounts through the administrator flow, or restore existing user records from a trusted backup while preserving their IDs, password hashes, tenant assignments, roles, and active status. Do not enable public signup or bypass password verification to recover access.
-
-Verification must include a real login after redeployment and confirmation that its `last_login` update reaches PostgreSQL. Persistent application authentication does not refresh MoEngage portal sessions; expired Tata bearer/refresh tokens and cookies still require manual reconnection in **Settings → MoEngage**.
-
 pytest tests/ -v
 ```
 

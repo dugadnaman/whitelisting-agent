@@ -26,3 +26,13 @@ activity_log.jsonl
 agents/apparel-attribution/backend/storage/
 agents/apparel-attribution/backend/credentials/
 agents/apparel-attribution/data/
+**/credentials.json
+**/.jwt_secret
+**/moengage_ops_config.json
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/*.jsonl

@@ -7,12 +7,14 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from datetime import date
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -29,24 +31,120 @@ with tempfile.TemporaryDirectory() as import_directory, patch.dict(os.environ, {
     "MOENGAGE_DASHBOARD_URL": "https://dashboard.moengage.com/", "MOENGAGE_MODE": "browser",
     "ALLOW_MOCK_WRITES": "false", "APPAREL_ATTRIBUTION_TOKEN": "",
 }):
+    from app import main as worker_main
     from app.api import routes
-    from app.config.settings import Settings, spreadsheet_identity, strong_token, validate_private_cdp, validate_ui_config
+    from app.config.settings import (
+        Settings,
+        spreadsheet_identity,
+        strong_token,
+        validate_private_cdp,
+        validate_ui_config,
+    )
     from app.core import dependencies
+    from app.core.local_storage import private_directory, private_file, worker_storage_lock
     from app.main import app
     from app.models.report import CampaignMetrics, JobState, ReportJob, RowResult, SheetConnection
     from app.schemas.report_schema import MoEngageSessionRequest, SetupRequest, StartJobRequest
+    from app.services.excel_service import ExcelService
     from app.services.google_sheet_service import GoogleSheetService, finish_thread_call
     from app.services.moengage_browser_service import BrowserAutomationError, MoEngageBrowserService
     from app.services.moengage_service import MoEngageService
     from app.services.report_service import ReportService
     from app.utils.excel_utils import parse_tracking_range
-    from app.services.excel_service import ExcelService
 
 
 TOKEN = "7aP9!xD3#uF6@qR1$sT8%vW2&yZ5*bC0"
 SHEET_ID = "approved_apparel_sheet_identity_1234567890"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
 UI = {"workflow": "recorded_behavior", "query_url_map": {"Aldo": "https://dashboard.moengage.com/behavior?did=report&chartId=chart"}}
+
+
+def assert_private_path(test, path: Path, *, directory: bool = False):
+    if os.name != "nt":
+        test.assertEqual(path.stat().st_mode & 0o777, 0o700 if directory else 0o600)
+        return
+    # Query the actual Windows DACL, not chmod's read-only flag. PowerShell is
+    # included in Windows 10/11; no profile or operator configuration is loaded.
+    script = """
+    $acl = Get-Acl -LiteralPath $env:APPAREL_TEST_ACL_PATH
+    $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+        @{sid=$_.IdentityReference.Value; allow=($_.AccessControlType -eq 'Allow'); inherited=$_.IsInherited; full=($_.FileSystemRights -eq 'FullControl')}
+    })
+    @{protected=$acl.AreAccessRulesProtected; owner=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value; rules=$rules} | ConvertTo-Json -Depth 3 -Compress
+    """
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+        env={**os.environ, "APPAREL_TEST_ACL_PATH": str(path)},
+        check=True, capture_output=True, text=True, timeout=15,
+    )
+    acl = json.loads(result.stdout)
+    test.assertTrue(acl["protected"])
+    test.assertEqual({rule["sid"] for rule in acl["rules"]}, {acl["owner"], "S-1-5-18"})
+    test.assertTrue(all(rule["allow"] and rule["full"] and not rule["inherited"] for rule in acl["rules"]))
+
+
+class LocalStorageRegressionTests(unittest.TestCase):
+    def test_private_helpers_create_without_truncating_and_restrict_existing_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder) / "private"
+            private_directory(directory)
+            path = directory / "secret.bin"
+            private_file(path)
+            path.write_bytes(b"synthetic private bytes")
+            if os.name != "nt":
+                directory.chmod(0o755)
+                path.chmod(0o644)
+            private_directory(directory)
+            private_file(path)
+            self.assertEqual(path.read_bytes(), b"synthetic private bytes")
+            assert_private_path(self, directory, directory=True)
+            assert_private_path(self, path)
+
+    def test_second_process_refused_and_lock_released_after_success_and_error(self):
+        child = (
+            "import sys; from pathlib import Path; "
+            "from app.core.local_storage import worker_storage_lock\n"
+            "try:\n"
+            " with worker_storage_lock(Path(sys.argv[1])): pass\n"
+            "except RuntimeError:\n"
+            " sys.exit(23)\n"
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            def attempt():
+                return subprocess.run(
+                    [sys.executable, "-c", child, folder],
+                    check=False, capture_output=True, timeout=15,
+                ).returncode
+            with worker_storage_lock(directory):
+                self.assertEqual(attempt(), 23)
+            self.assertEqual(attempt(), 0)
+            with self.assertRaisesRegex(ValueError, "synthetic failure"):
+                with worker_storage_lock(directory):
+                    raise ValueError("synthetic failure")
+            self.assertEqual(attempt(), 0)
+
+    def test_lifespan_rejected_worker_never_shuts_down_owner_and_shutdown_errors_release_lock(self):
+        async def scenario(directory):
+            shutdown = AsyncMock()
+            configured = Settings(storage_dir=directory, machine_token=TOKEN)
+            with patch.object(worker_main, "settings", configured), patch.object(
+                worker_main, "get_report_service", return_value=SimpleNamespace(shutdown=shutdown),
+            ):
+                async with worker_main.lifespan(app):
+                    with self.assertRaisesRegex(RuntimeError, "Only one worker"):
+                        async with worker_main.lifespan(app):
+                            self.fail("second worker admitted")
+                    shutdown.assert_not_awaited()
+                self.assertEqual(shutdown.await_count, 1)
+                shutdown.side_effect = RuntimeError("synthetic shutdown failure")
+                with self.assertRaisesRegex(RuntimeError, "synthetic shutdown failure"):
+                    async with worker_main.lifespan(app):
+                        pass
+                with worker_storage_lock(directory):
+                    pass
+        with tempfile.TemporaryDirectory() as folder:
+            asyncio.run(scenario(Path(folder)))
 
 
 class WorksheetFixture:
@@ -150,11 +248,11 @@ class WorkerRegressionTests(unittest.TestCase):
     def test_setup_persists_restart_and_upload_does_not_override_sealed_key(self):
         changed_url = SHEET_URL.replace(SHEET_ID, "updated_approved_identity_123456789012345")
         response = self.client.put("/api/setup", headers=self.headers, json={
-            "spreadsheet_url": changed_url, "worksheet_name": "Approved Apparel", "ui_config": UI,
+            "spreadsheet_url": changed_url, "worksheet_name": "Approved Apparel – परीक्षण", "ui_config": UI,
         })
         self.assertEqual(response.status_code, 200)
         self.assertNotIn("private_key", response.text)
-        self.assertEqual(self.settings.setup_path.stat().st_mode & 0o777, 0o600)
+        assert_private_path(self, self.settings.setup_path)
         with patch.dict(os.environ, {
             "STORAGE_DIR": str(self.directory), "GOOGLE_SERVICE_ACCOUNT_JSON": "",
             "GOOGLE_SERVICE_ACCOUNT_FILE": "", "GOOGLE_SPREADSHEET_URL": SHEET_URL,
@@ -164,17 +262,53 @@ class WorkerRegressionTests(unittest.TestCase):
         }):
             restored = Settings.from_env()
         self.assertEqual(restored.google_spreadsheet_url, changed_url)
-        self.assertEqual(restored.google_worksheet_name, "Approved Apparel")
+        self.assertEqual(restored.google_worksheet_name, "Approved Apparel – परीक्षण")
         self.assertEqual(restored.moengage_ui_config, UI)
         restored_service = ReportService(restored)
         self.assertTrue(restored_service.google.configured)
         self.assertEqual(restored_service.google.service_account_email(), "test@synthetic-test-project.iam.gserviceaccount.com")
-        self.assertEqual(restored.google_service_account_file.stat().st_mode & 0o777, 0o600)
+        assert_private_path(self, restored.google_service_account_file)
         self.settings.sealed_google_credentials = True
         before = self.settings.google_service_account_file.read_bytes()
         rejected = self.client.post("/api/google/credentials", headers=self.headers, files={"credential": ("credential.json", self.key, "application/json")})
         self.assertEqual(rejected.status_code, 409)
         self.assertEqual(self.settings.google_service_account_file.read_bytes(), before)
+
+    def test_setup_save_and_google_upload_keep_old_state_when_protection_or_write_fails(self):
+        self.settings.persist_setup(SHEET_URL, "Mastersheet", UI)
+        setup_before = self.settings.setup_path.read_bytes()
+        credential_before = self.settings.google_service_account_file.read_bytes()
+        memory_before = dict(self.service.google.credential_info)
+        replacement = json.loads(self.key)
+        replacement["client_email"] = "replacement@synthetic-test-project.iam.gserviceaccount.com"
+        replacement = json.dumps(replacement).encode()
+        for target in [
+            "app.config.settings.private_directory",
+            "app.config.settings.private_file",
+            "app.config.settings.os.fsync",
+            "pathlib.Path.replace",
+        ]:
+            with self.subTest(target=target), patch(target, side_effect=PermissionError("synthetic storage failure")):
+                saved = self.client.put("/api/setup", headers=self.headers, json={
+                    "spreadsheet_url": SHEET_URL, "worksheet_name": "Changed", "ui_config": UI,
+                })
+                self.assertEqual(saved.status_code, 503)
+                uploaded = self.client.post("/api/google/credentials", headers=self.headers, files={
+                    "credential": ("credential.json", replacement, "application/json"),
+                })
+                self.assertEqual(uploaded.status_code, 503)
+                self.assertNotIn("private_key", uploaded.text)
+            self.assertEqual(self.settings.setup_path.read_bytes(), setup_before)
+            self.assertEqual(self.settings.google_worksheet_name, "Mastersheet")
+            self.assertEqual(self.settings.google_service_account_file.read_bytes(), credential_before)
+            self.assertEqual(self.service.google.credential_info, memory_before)
+            self.assertEqual(list(self.directory.glob("*.tmp")), [])
+        accepted = self.client.post("/api/google/credentials", headers=self.headers, files={
+            "credential": ("credential.json", replacement, "application/json"),
+        })
+        self.assertEqual(accepted.status_code, 200)
+        self.assertEqual(self.settings.google_service_account_file.read_bytes(), replacement)
+        assert_private_path(self, self.settings.google_service_account_file)
 
     def test_invalid_config_and_key_fail_closed_and_approved_sheet_cannot_switch(self):
         for config in [{"mode": "mock"}, {"workflow": "recorded_behavior", "query_url_map": {"Aldo": "http://localhost/private"}}, {"workflow": "api"}]:

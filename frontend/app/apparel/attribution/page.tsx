@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTabState } from '@/lib/tab-state';
 import Link from 'next/link';
 import { useApp } from '@/lib/context';
 import {
@@ -57,13 +58,13 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const [notice, setNotice] = useState('');
   const [requiresRefresh, setRequiresRefresh] = useState(false);
   const [connection, setConnection] = useState<SheetConnection | null>(null);
-  const [brands, setBrands] = useState<string[]>([]);
-  const [channels, setChannels] = useState<AttributionChannel[]>([]);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [rowLimit, setRowLimit] = useState('');
-  const [agiplTarget, setAgiplTarget] = useState('');
-  const [overwrite, setOverwrite] = useState(false);
+  const [brands, setBrands] = useTabState<string[]>('attr_brands', []);
+  const [channels, setChannels] = useTabState<AttributionChannel[]>('attr_channels', []);
+  const [dateFrom, setDateFrom] = useTabState<string>('attr_date_from', '');
+  const [dateTo, setDateTo] = useTabState<string>('attr_date_to', '');
+  const [rowLimit, setRowLimit] = useTabState<string>('attr_row_limit', '');
+  const [agiplTarget, setAgiplTarget] = useTabState<string>('attr_agipl_target', '');
+  const [overwrite, setOverwrite] = useTabState<boolean>('attr_overwrite', false);
   const [preview, setPreview] = useState<{ key: string; data: CampaignPreview } | null>(null);
   const [jobs, setJobs] = useState<AttributionJob[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);

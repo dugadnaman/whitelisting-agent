@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTabState } from '@/lib/tab-state';
 import { useApp } from '@/lib/context';
 import {
   automateMoEngageWhatsAppBatch,
@@ -300,31 +301,30 @@ export default function MoEngageCampaignsPage() {
   const account = superadmin ? selectedAccount : currentUser?.tenant_id || '';
   const allowed = !!currentUser && (account === 'tata' || account === 'bajaj') && (superadmin || currentUser.tenant_id === account);
 
-  const [activeTab, setActiveTab] = useState<'batch' | 'single' | 'templates'>('single');
+  const [activeTab, setActiveTab] = useTabState<'batch' | 'single' | 'templates'>('moe_active_tab', 'single');
   const [catalog, setCatalog] = useState<MoEngageCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
   const [automatingWa, setAutomatingWa] = useState(false);
   // Single form builder state
-  const [singleChannel, setSingleChannel] = useState<'WHATSAPP' | 'EMAIL' | 'PUSH'>('WHATSAPP');
-  const [singleName, setSingleName] = useState('');
-  const [singleSegment, setSingleSegment] = useState('');
-  const [singleDate, setSingleDate] = useState('2026-10-15T10:30');
-  const [singleTimezone, setSingleTimezone] = useState('Asia/Kolkata');
+  const [singleChannel, setSingleChannel] = useTabState<'WHATSAPP' | 'EMAIL' | 'PUSH'>('moe_single_channel', 'WHATSAPP');
+  const [singleName, setSingleName] = useTabState<string>('moe_single_name', '');
+  const [singleSegment, setSingleSegment] = useTabState<string>('moe_single_segment', '');
+  const [singleDate, setSingleDate] = useTabState<string>('moe_single_date', '2026-10-15T10:30');
+  const [singleTimezone, setSingleTimezone] = useTabState<string>('moe_single_timezone', 'Asia/Kolkata');
   // Email fields
-  const [singleEmailSender, setSingleEmailSender] = useState('');
-  const [singleSubject, setSingleSubject] = useState('');
-  const [singleHtml, setSingleHtml] = useState('<p>Special festive offer for valued customers. Do not publish.</p>');
-  const [singleContentType, setSingleContentType] = useState('PROMOTIONAL');
+  const [singleEmailSender, setSingleEmailSender] = useTabState<string>('moe_single_email_sender', '');
+  const [singleSubject, setSingleSubject] = useTabState<string>('moe_single_subject', '');
+  const [singleHtml, setSingleHtml] = useTabState<string>('moe_single_html', '<p>Special festive offer for valued customers. Do not publish.</p>');
+  const [singleContentType, setSingleContentType] = useTabState<string>('moe_single_content_type', 'PROMOTIONAL');
   // Push fields
-  const [singlePushPlatform, setSinglePushPlatform] = useState('ANDROID');
-  const [singlePushTitle, setSinglePushTitle] = useState('');
-  const [singlePushMessage, setSinglePushMessage] = useState('');
-  const [singleClickUrl, setSingleClickUrl] = useState('https://tatacapital.com');
+  const [singlePushPlatform, setSinglePushPlatform] = useTabState<string>('moe_single_push_platform', 'ANDROID');
+  const [singlePushTitle, setSinglePushTitle] = useTabState<string>('moe_single_push_title', '');
+  const [singlePushMessage, setSinglePushMessage] = useTabState<string>('moe_single_push_message', '');
+  const [singleClickUrl, setSingleClickUrl] = useTabState<string>('moe_single_click_url', 'https://tatacapital.com');
   // WhatsApp fields
-  const [singleWaSender, setSingleWaSender] = useState('');
-  const [singleWaTemplate, setSingleWaTemplate] = useState('');
-
+  const [singleWaSender, setSingleWaSender] = useTabState<string>('moe_single_wa_sender', '');
+  const [singleWaTemplate, setSingleWaTemplate] = useTabState<string>('moe_single_wa_template', '');
   // Batch & Spreadsheet state
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<MoEngageDraftPreview | null>(null);

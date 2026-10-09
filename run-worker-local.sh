@@ -7,11 +7,11 @@ export STORAGE_DIR="$(pwd)/agents/apparel-attribution/data"
 export APPAREL_ATTRIBUTION_TOKEN="g9T2kP7xV4mQ8zA1wR6nH3cJ5sL0uE_bD"
 export MOENGAGE_MODE="browser"
 export MOENGAGE_DASHBOARD_URL="https://dashboard-03.moengage.com/"
-export MOENGAGE_REMOTE_CDP_URL="http://localhost:9222"
+export MOENGAGE_REMOTE_CDP_URL="http://127.0.0.1:9222"
 export MOENGAGE_BROWSER_LOGIN_URL="https://dashboard-03.moengage.com/"
 export PYTHONPATH="$(pwd)/agents/apparel-attribution/Backend"
 
-PYTHON_BIN="/Users/naman/.pyenv/shims/python3"
+PYTHON_BIN="$(pwd)/.venv/bin/python"
 if [ ! -x "$PYTHON_BIN" ]; then
     PYTHON_BIN="python3"
 fi

@@ -7,25 +7,29 @@ import re
 import socket
 import time
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 import httpx
-
 from playwright.async_api import (
-    BrowserContext,
     Browser,
-    Error as PlaywrightError,
+    BrowserContext,
     Page,
     Playwright,
     async_playwright,
 )
+from playwright.async_api import (
+    Error as PlaywrightError,
+)
+from playwright.async_api import (
+    TimeoutError as PlaywrightTimeoutError,
+)
 
-from app.models.report import CampaignRow
 from app.config.settings import validate_private_cdp
-
+from app.core.local_storage import private_directory, private_file
+from app.models.report import CampaignRow
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +114,15 @@ class MoEngageBrowserService:
         self.page: Page | None = None
         self.active_workspace: str | None = None
         self.lock = asyncio.Lock()
+        self.connection_lock = asyncio.Lock()
+
+    def _diagnostic_path(self, name: str) -> str:
+        directory = self.profile_dir.parent / "diagnostics"
+        private_directory(directory)
+        # Dropdown labels can contain separators or characters forbidden on Windows.
+        path = directory / re.sub(r"[^A-Za-z0-9._-]", "-", name)
+        private_file(path)
+        return str(path)
 
     async def start_login(self, login_hint: str | None = None) -> str:
         async with self.lock:
@@ -149,10 +162,6 @@ class MoEngageBrowserService:
                 await self._ensure_browser()
             except BrowserAutomationError as exc:
                 return "disconnected", str(exc)
-        if (not self.page or self.page.is_closed()) and self.context:
-            open_pages = [page for page in self.context.pages if not page.is_closed()]
-            if open_pages:
-                self.page = open_pages[-1]
         if not self.page or self.page.is_closed():
             return "disconnected", "Open the MoEngage login window to connect."
         login_url = self.ui.get("login_url_contains", "login")
@@ -171,22 +180,29 @@ class MoEngageBrowserService:
         return "connected", "MoEngage session is connected and stored in the local browser profile."
 
     async def _ensure_browser(self, headless: bool = True):
-        if self.page and not self.page.is_closed():
+        async with self.connection_lock:
+            await self._connect_browser()
+
+    async def _connect_browser(self):
+        expected_host = urlparse(self.dashboard_url).hostname
+        if (self.page and not self.page.is_closed()
+                and (self.page.url == "about:blank"
+                     or urlparse(self.page.url).hostname == expected_host)):
             try:
                 await asyncio.wait_for(self.page.evaluate("1"), timeout=3.0)
                 return
-            except (PlaywrightError, asyncio.TimeoutError):
-                self.page = None
+            except (PlaywrightError, RuntimeError, asyncio.TimeoutError):
+                await self._clear_remote_connection()
         if self.context:
             try:
                 for candidate in reversed(self.context.pages):
-                    if candidate.is_closed():
+                    if candidate.is_closed() or urlparse(candidate.url).hostname != expected_host:
                         continue
                     try:
                         await asyncio.wait_for(candidate.evaluate("1"), timeout=3.0)
                         self.page = candidate
                         return
-                    except (PlaywrightError, asyncio.TimeoutError):
+                    except (PlaywrightError, RuntimeError, asyncio.TimeoutError):
                         try:
                             await asyncio.wait_for(
                                 candidate.close(run_before_unload=False), timeout=2
@@ -197,8 +213,7 @@ class MoEngageBrowserService:
                 self.page = await self.context.new_page()
                 return
             except Exception:
-                self.context = None
-                self.page = None
+                await self._clear_remote_connection()
         if self.playwright is None:
             self.playwright = await async_playwright().start()
         if self.remote_cdp_url:
@@ -208,7 +223,7 @@ class MoEngageBrowserService:
                     websocket_url,
                     timeout=30000,
                 )
-            except (PlaywrightError, httpx.HTTPError, OSError, ValueError) as exc:
+            except (PlaywrightError, RuntimeError, httpx.HTTPError, OSError, ValueError) as exc:
                 logger.exception("Could not attach to the Railway Chromium CDP endpoint")
                 await self._clear_remote_connection()
                 raise BrowserUnavailableError(
@@ -220,7 +235,15 @@ class MoEngageBrowserService:
                 if self.remote_browser.contexts
                 else await self.remote_browser.new_context(viewport={"width": 1440, "height": 960})
             )
-            self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            self.page = next(
+                (
+                    page for page in self.context.pages
+                    if not page.is_closed() and urlparse(page.url).hostname == expected_host
+                ),
+                None,
+            )
+            if self.page is None:
+                self.page = await self.context.new_page()
             return
         raise BrowserUnavailableError("The private Chromium service is not configured")
 
@@ -363,7 +386,7 @@ class MoEngageBrowserService:
                                     )
                             if isinstance(exc, PlaywrightError):
                                 raise BrowserAutomationError(
-                                    "The MoEngage browser tab crashed while running the query"
+                                    f"MoEngage browser query failed: {exc}"
                                 ) from exc
                             raise
                         if self.remote_cdp_url:
@@ -424,7 +447,7 @@ class MoEngageBrowserService:
         except Exception as exc:
             screenshot_note = "disabled for the Railway browser"
             if not self.remote_cdp_url:
-                screenshot_path = self.profile_dir.parent / "moengage-query-error.png"
+                screenshot_path = self._diagnostic_path("moengage-query-error.png")
                 try:
                     await page.screenshot(path=str(screenshot_path), full_page=False)
                     screenshot_note = str(screenshot_path)
@@ -442,7 +465,7 @@ class MoEngageBrowserService:
             ) from exc
 
         await self._ensure_section_open(page, "Events & filters", "Sale_Array")
-        await self._choose_visible_value(page, ["exists", "does not exist"], plan.transaction_operator)
+        await self._set_transaction_channel(page, plan.transaction_operator)
         if self._uses_event_transaction_brand(row.brand):
             await self._set_agipl_transaction_brand(page, row.attribution_brand)
         elif row.brand.casefold() == "cis":
@@ -502,15 +525,17 @@ class MoEngageBrowserService:
             ).first
             brand_value = attribute.locator(".mds-dropdown:visible").last
             await self._set_agipl_brand_value(page, brand_value, value)
-            retained = (await brand_value.inner_text()).strip()
-            if value.casefold() not in retained.casefold():
+            selected_value = brand_value.locator(".mds-dropdown__trigger__inner").first
+            retained = (await selected_value.inner_text()).strip()
+            if retained.casefold() != value.casefold():
                 raise BrowserAutomationError(
                     f"MoEngage retained Txn_Brand {retained!r} instead of {value!r}"
                 )
+            await brand_value.press("Escape")
         except BrowserAutomationError:
             raise
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-agipl-brand.png"
+            screenshot_path = self._diagnostic_path("moengage-agipl-brand.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not set AGIPL Txn_Brand to {value!r} "
@@ -552,7 +577,7 @@ class MoEngageBrowserService:
             failure = (
                 f"operator_text={attribute_text!r}, input_values={input_values!r}"
             )
-        screenshot_path = "/tmp/moengage-cis-brand-readonly-check.png"
+        screenshot_path = self._diagnostic_path("moengage-cis-brand-readonly-check.png")
         await page.screenshot(path=screenshot_path, full_page=True)
         raise BrowserAutomationError(
             "CIS Brand_PM row must already be configured as "
@@ -564,8 +589,6 @@ class MoEngageBrowserService:
     @staticmethod
     async def _set_agipl_brand_value(page: Page, control, value: str):
         await control.wait_for(state="visible", timeout=10000)
-        if value.casefold() in (await control.inner_text()).casefold():
-            return
         await control.focus()
         await control.press("Enter")
         await page.wait_for_timeout(300)
@@ -581,6 +604,16 @@ class MoEngageBrowserService:
         await MoEngageBrowserService._select_open_option(page, value)
 
     @staticmethod
+    async def _sale_event(page: Page):
+        name = page.locator(
+            ".mds-event__event-name .mds-dropdown__trigger__inner__single--value"
+        ).filter(has_text=re.compile(r"^\s*Sale_Array\s*$", re.I)).first
+        await name.wait_for(state="visible", timeout=10000)
+        return name.locator(
+            "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' mds-event ')][1]"
+        )
+
+    @staticmethod
     async def _reset_transaction_attribute(page: Page, target_attribute: str):
         """Delete and recreate a Sale_Array transaction attribute.
 
@@ -588,15 +621,8 @@ class MoEngageBrowserService:
         Recreating the attribute guarantees that a run cannot accidentally use
         the value retained by the preceding campaign.
         """
-        txn_channel = page.locator(".mds-attr:visible").filter(
-            has_text=re.compile(r"Txn_Channel", re.I)
-        ).first
         try:
-            await txn_channel.wait_for(state="visible", timeout=10000)
-            event = txn_channel.locator(
-                "xpath=ancestor::*[.//*[@data-test='attribute-add-btn']][1]"
-            )
-            await event.wait_for(state="visible", timeout=10000)
+            event = await MoEngageBrowserService._sale_event(page)
 
             target_pattern = re.compile(re.escape(target_attribute), re.I)
             attributes = event.locator(".mds-attr:visible").filter(
@@ -652,13 +678,14 @@ class MoEngageBrowserService:
                 ".mds-attr__name .mds-dropdown:visible"
             ).last
             await attribute_control.wait_for(state="visible", timeout=10000)
-            if not await page.locator(".mds-dropdown__popup:visible").count():
+            popup_id = (await attribute_control.get_attribute("id")).replace("trigger_", "popup_", 1)
+            if not await page.locator(f'[id="{popup_id}"]:visible').count():
                 trigger = attribute_control.locator(".mds-dropdown__trigger").first
                 await trigger.dispatch_event("mousedown")
                 await trigger.dispatch_event("mouseup")
                 await trigger.dispatch_event("click")
             await MoEngageBrowserService._select_open_option(
-                page, target_attribute
+                page, target_attribute, allow_create=False
             )
 
             fresh_attribute = event.locator(".mds-attr:visible").filter(
@@ -691,6 +718,10 @@ class MoEngageBrowserService:
     @staticmethod
     async def _goto_behavior_report(page: Page, query_url: str):
         """Open a report after workspace redirects have fully settled."""
+        # The dashboard's async startup scripts can still be loading after
+        # DOMContentLoaded, even with its workspace label visible. Navigating
+        # away then can leave the report permanently stuck in the SPA shell.
+        await page.wait_for_load_state("load")
         last_error = None
         for attempt in range(3):
             try:
@@ -841,8 +872,7 @@ class MoEngageBrowserService:
                 await nested_filter.locator(".mds-segmentation__arrow-wrapper").click(force=True)
         await page.get_by_text(re.compile(re.escape(marker), re.I)).first.wait_for(timeout=10000)
 
-    @staticmethod
-    async def _ensure_filter_editor_open(page: Page):
+    async def _ensure_filter_editor_open(self, page: Page):
         heading = page.get_by_text("Filter Users", exact=True).first
         header = heading.locator("xpath=ancestor::header[1]")
         section_icon = header.locator(".material-icons").last
@@ -854,9 +884,9 @@ class MoEngageBrowserService:
         ).first
         event_control = nested_filter.locator(".mds-event__event-name .mds-dropdown").first
 
-        # Visibility of the actual editor is more reliable than the animated
-        # arrow glyph, whose text can lag behind the section state.
-        if not await event_control.count() or not await event_control.is_visible():
+        # A collapsed condition can hide the editor while Filter Users is open.
+        # Only toggle the outer section when the condition itself is hidden.
+        if not await nested_filter.is_visible():
             toggle = header.locator("[role='button']").last
             if await toggle.count():
                 await toggle.click(force=True)
@@ -871,23 +901,22 @@ class MoEngageBrowserService:
         try:
             await nested_filter.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-filter-nested-missing.png"
+            screenshot_path = self._diagnostic_path("moengage-filter-nested-missing.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not find the MoEngage delivered-event filter "
                 f"(screenshot={screenshot_path!r})"
             ) from exc
         if not await event_control.is_visible():
-            arrow_wrapper = nested_filter.locator(".mds-segmentation__arrow-wrapper").first
-            await arrow_wrapper.dispatch_event("mousedown")
-            await arrow_wrapper.dispatch_event("mouseup")
-            await arrow_wrapper.dispatch_event("click")
-            await page.wait_for_timeout(400)
+            toggle = nested_filter.locator(
+                "[data-testid^='segmentation-toggle-filter-']"
+            ).first
+            await toggle.dispatch_event("click")
 
         try:
             await event_control.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = Path("/tmp/moengage-filter-editor-error.png")
+            screenshot_path = self._diagnostic_path("moengage-filter-editor-error.png")
             await page.screenshot(path=str(screenshot_path), full_page=True)
             raise BrowserAutomationError(
                 "Could not open the MoEngage filter editor "
@@ -895,64 +924,31 @@ class MoEngageBrowserService:
                 f"screenshot={str(screenshot_path)!r})"
             ) from exc
 
-    async def _choose_visible_value(self, page: Page, possible_values: list[str], target: str):
-        visible_current = None
-        # Saved reports hydrate their event attributes asynchronously. BBW in
-        # particular renders Sale_Array first and adds Txn_Channel a few seconds
-        # later, so retry before treating the control as absent.
-        for attempt in range(30):
-            for value in possible_values:
-                candidates = page.get_by_text(value, exact=True)
-                for index in range(await candidates.count()):
-                    candidate = candidates.nth(index)
-                    dropdown = candidate.locator(
-                        "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' mds-dropdown ')][1]"
-                    )
-                    if await candidate.is_visible() and await dropdown.count():
-                        visible_current = candidate
-                        if value == target:
-                            return
-                        break
-                if visible_current is not None:
-                    break
-            if visible_current is not None:
-                break
-            if attempt < 29:
-                await page.wait_for_timeout(400)
-        if visible_current is None:
-            await page.screenshot(path=f"/tmp/moengage-control-{target.replace(' ', '-')}.png", full_page=True)
-            raise BrowserAutomationError(f"Could not find the control for {target!r}")
-        dropdown = visible_current.locator(
-            "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' mds-dropdown ')][1]"
-        )
-        if await dropdown.count():
-            trigger = dropdown.locator(".mds-dropdown__trigger").first
-            await trigger.scroll_into_view_if_needed()
-            await trigger.click(force=True)
-        else:
-            await visible_current.click(force=True)
-        await self._select_open_option(page, target)
-        await page.wait_for_timeout(400)
-        selected = False
-        target_candidates = page.get_by_text(target, exact=True)
-        for index in range(await target_candidates.count()):
-            candidate = target_candidates.nth(index)
-            candidate_dropdown = candidate.locator(
-                "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' mds-dropdown ')][1]"
-            )
-            if await candidate.is_visible() and await candidate_dropdown.count():
-                selected = True
-                break
-        if not selected:
-            screenshot_path = f"/tmp/moengage-selection-{target.replace(' ', '-')}.png"
-            await page.screenshot(path=screenshot_path, full_page=True)
+    async def _set_transaction_channel(self, page: Page, operator: str):
+        """Set the Sale_Array channel condition, creating it when absent."""
+        event = await self._sale_event(page)
+        attribute_name = page.locator(
+            ".mds-attr__name .mds-dropdown__trigger__inner__single--value"
+        ).filter(has_text=re.compile(r"^\s*Txn_Channel\s*$", re.I))
+        attribute = event.locator(".mds-attr:visible").filter(has=attribute_name).first
+        try:
+            # Saved report attributes hydrate after the Sale_Array event.
+            await attribute.wait_for(state="visible", timeout=12000)
+        except PlaywrightTimeoutError:
+            attribute = await self._reset_transaction_attribute(page, "Txn_Channel")
+        control = attribute.locator(".mds-dropdown:visible").nth(1)
+        await self._set_titled_dropdown_control(page, control, operator)
+        retained = (
+            await attribute.locator(".mds-dropdown__trigger__inner__single--value").nth(1).inner_text()
+        ).strip()
+        if retained != operator:
             raise BrowserAutomationError(
-                f"MoEngage did not retain selection {target!r} "
-                f"(screenshot={screenshot_path!r})"
+                f"MoEngage retained Txn_Channel {retained!r} instead of {operator!r}"
             )
 
+
     @staticmethod
-    async def _select_open_option(page: Page, value: str):
+    async def _select_open_option(page: Page, value: str, *, allow_create: bool = True):
         async def click_option() -> bool:
             titled_option = page.locator(
                 f'.mds-dropdown__popup__list__item[title="{value}"]:visible'
@@ -991,8 +987,9 @@ class MoEngageBrowserService:
             await page.wait_for_timeout(1200)
             if await click_option():
                 return
-            await search.press("Enter")
-            return
+            if allow_create:
+                await search.press("Enter")
+                return
         popup_count = await page.locator(".mds-dropdown__popup:visible").count()
         visible_inputs = page.locator("input:visible")
         placeholders = []
@@ -1014,7 +1011,7 @@ class MoEngageBrowserService:
         try:
             await event_control.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-delivery-event-control.png"
+            screenshot_path = self._diagnostic_path("moengage-delivery-event-control.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not open the MoEngage delivered-event control "
@@ -1039,15 +1036,14 @@ class MoEngageBrowserService:
         except Exception:
             current = ""
         if event_name.casefold() not in current.casefold():
-            screenshot_path = "/tmp/moengage-delivery-event-selection.png"
+            screenshot_path = self._diagnostic_path("moengage-delivery-event-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain delivered event {event_name!r}; current control is "
                 f"{current!r} (screenshot={screenshot_path!r})"
             )
 
-    @staticmethod
-    async def _set_delivery_lookback(page: Page, days: int):
+    async def _set_delivery_lookback(self, page: Page, days: int):
         delivery_pattern = re.compile(
             "|".join(re.escape(value) for value in DELIVERY_EVENTS.values()), re.I
         )
@@ -1080,7 +1076,7 @@ class MoEngageBrowserService:
         except BrowserAutomationError:
             raise
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-delivery-lookback.png"
+            screenshot_path = self._diagnostic_path("moengage-delivery-lookback.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not set the delivered-event lookback to {days} days "
@@ -1114,7 +1110,7 @@ class MoEngageBrowserService:
         try:
             await self._select_open_option(page, campaign_id)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-campaign-id-option.png"
+            screenshot_path = self._diagnostic_path("moengage-campaign-id-option.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not select campaign id {campaign_id!r} "
@@ -1123,7 +1119,7 @@ class MoEngageBrowserService:
         await page.wait_for_timeout(400)
         selected_text = (await value_control.inner_text()).strip()
         if campaign_id.casefold() not in selected_text.casefold():
-            screenshot_path = "/tmp/moengage-campaign-id-selection.png"
+            screenshot_path = self._diagnostic_path("moengage-campaign-id-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain campaign id {campaign_id!r}; current control is "
@@ -1131,22 +1127,23 @@ class MoEngageBrowserService:
             )
 
     async def _reset_campaign_attribute(self, page: Page):
-        """Remove every existing campaign-id filter and add one empty filter.
-
-        MoEngage renders Readable Campaign Id as a single-select dropdown with
-        no clear button. Selecting another option can leave the previous value
-        in React state, so deleting and recreating the attribute is the only
-        deterministic reset before each campaign query.
-        """
-        attributes = page.locator(".mds-attr:visible").filter(
-            has_text="Readable Campaign Id"
+        """Replace stale campaign-name/id constraints with one empty ID filter."""
+        delivery_pattern = re.compile(
+            "|".join(re.escape(value) for value in DELIVERY_EVENTS.values()), re.I
         )
+        nested_filter = page.locator(".mds-segmentation__nested-filter").filter(
+            has_text=delivery_pattern
+        ).first
+        campaign_attribute = page.locator(
+            ".mds-attr__name .mds-dropdown__trigger__inner__single--value"
+        ).filter(has_text=re.compile(r"^\s*(?:Readable Campaign Id|Campaign Name)\s*$", re.I))
+        attributes = nested_filter.locator(".mds-attr:visible").filter(has=campaign_attribute)
         removed = 0
         while await attributes.count():
             attribute = attributes.last
             delete_button = attribute.locator("[data-test='delete-button']").first
             if not await delete_button.count() or not await delete_button.is_visible():
-                screenshot_path = "/tmp/moengage-campaign-id-clear.png"
+                screenshot_path = self._diagnostic_path("moengage-campaign-id-clear.png")
                 await page.screenshot(path=screenshot_path, full_page=True)
                 raise BrowserAutomationError(
                     "Could not clear the existing Readable Campaign Id filter "
@@ -1158,7 +1155,7 @@ class MoEngageBrowserService:
             try:
                 await attribute.wait_for(state="detached", timeout=5000)
             except Exception as exc:
-                screenshot_path = "/tmp/moengage-campaign-id-clear.png"
+                screenshot_path = self._diagnostic_path("moengage-campaign-id-clear.png")
                 await page.screenshot(path=screenshot_path, full_page=True)
                 raise BrowserAutomationError(
                     "MoEngage did not clear the existing Readable Campaign Id filter "
@@ -1169,12 +1166,10 @@ class MoEngageBrowserService:
                 raise BrowserAutomationError(
                     "MoEngage returned too many Readable Campaign Id filters while clearing"
                 )
-            attributes = page.locator(".mds-attr:visible").filter(
-                has_text="Readable Campaign Id"
-            )
+            attributes = nested_filter.locator(".mds-attr:visible").filter(has=campaign_attribute)
 
         await self._ensure_campaign_attribute(page)
-        fresh_attribute = page.locator(".mds-attr:visible").filter(
+        fresh_attribute = nested_filter.locator(".mds-attr:visible").filter(
             has_text="Readable Campaign Id"
         ).last
         value_control = fresh_attribute.locator(
@@ -1183,7 +1178,7 @@ class MoEngageBrowserService:
         try:
             await value_control.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-campaign-id-control.png"
+            screenshot_path = self._diagnostic_path("moengage-campaign-id-control.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 "Could not create a fresh Readable Campaign Id value control "
@@ -1192,18 +1187,18 @@ class MoEngageBrowserService:
         return value_control
 
     async def _ensure_campaign_attribute(self, page: Page):
-        visible_attribute = page.locator(".mds-attr:visible").filter(
-            has_text="Readable Campaign Id"
-        ).first
-        if await visible_attribute.count():
-            return
-
         delivery_pattern = re.compile(
             "|".join(re.escape(value) for value in DELIVERY_EVENTS.values()), re.I
         )
         nested_filter = page.locator(".mds-segmentation__nested-filter").filter(
             has_text=delivery_pattern
         ).first
+        campaign_name = page.locator(
+            ".mds-attr__name .mds-dropdown__trigger__inner__single--value"
+        ).filter(has_text=re.compile(r"^\s*Readable Campaign Id\s*$", re.I))
+        visible_attribute = nested_filter.locator(".mds-attr:visible").filter(has=campaign_name).first
+        if await visible_attribute.count():
+            return
         add_attribute = nested_filter.locator("[data-test='attribute-add-btn']").first
         try:
             await add_attribute.wait_for(state="visible", timeout=10000)
@@ -1212,14 +1207,15 @@ class MoEngageBrowserService:
             await add_attribute.dispatch_event("click")
             await page.wait_for_timeout(400)
             await self._ensure_filter_editor_open(page)
-            attribute_name = page.locator(".mds-attr__name .mds-dropdown:visible").last
+            attribute_name = nested_filter.locator(".mds-attr__name .mds-dropdown:visible").last
             await attribute_name.wait_for(state="visible", timeout=10000)
-            if not await page.locator(".mds-dropdown__popup:visible").count():
+            popup_id = (await attribute_name.get_attribute("id")).replace("trigger_", "popup_", 1)
+            if not await page.locator(f'[id="{popup_id}"]:visible').count():
                 attribute_trigger = attribute_name.locator(".mds-dropdown__trigger").first
                 await attribute_trigger.dispatch_event("mousedown")
                 await attribute_trigger.dispatch_event("mouseup")
                 await attribute_trigger.dispatch_event("click")
-            await self._select_open_option(page, "Readable Campaign Id")
+            await self._select_open_option(page, "Readable Campaign Id", allow_create=False)
             await visible_attribute.wait_for(state="visible", timeout=10000)
             try:
                 await page.locator(".mds-dropdown__popup:visible").wait_for(
@@ -1228,7 +1224,7 @@ class MoEngageBrowserService:
             except Exception:
                 pass
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-readable-campaign-attribute.png"
+            screenshot_path = self._diagnostic_path("moengage-readable-campaign-attribute.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not add the Readable Campaign Id attribute "
@@ -1248,8 +1244,7 @@ class MoEngageBrowserService:
             await self._set_dropdown_control(page, attribute, plan.aggregation_attribute)
         await self._set_duration(page, row.start_date.isoformat(), row.end_date.isoformat())
 
-    @staticmethod
-    async def _set_daily_granularity(page: Page):
+    async def _set_daily_granularity(self, page: Page):
         candidates = page.get_by_text("Daily", exact=True)
         for index in range(await candidates.count()):
             candidate = candidates.nth(index)
@@ -1257,7 +1252,7 @@ class MoEngageBrowserService:
                 await candidate.click()
                 await page.wait_for_timeout(400)
                 return
-        screenshot_path = "/tmp/moengage-daily-granularity.png"
+        screenshot_path = self._diagnostic_path("moengage-daily-granularity.png")
         await page.screenshot(path=screenshot_path, full_page=True)
         raise BrowserAutomationError(
             "Could not select Daily granularity in the MoEngage behavior chart "
@@ -1272,7 +1267,7 @@ class MoEngageBrowserService:
         try:
             await selected.wait_for(state="visible", timeout=5000)
         except Exception as exc:
-            screenshot_path = "/tmp/moengage-analysis-selection.png"
+            screenshot_path = self._diagnostic_path("moengage-analysis-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage analysis type did not change to {value!r} "
@@ -1284,12 +1279,14 @@ class MoEngageBrowserService:
         try:
             await dropdown.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = f"/tmp/moengage-dropdown-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-dropdown-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not find the MoEngage dropdown for {value!r} (screenshot={screenshot_path!r})"
             ) from exc
-        if value.casefold() in (await dropdown.inner_text()).casefold():
+        selected_value = dropdown.locator(".mds-dropdown__trigger__inner__single--value").first
+        if (await selected_value.count()
+                and value.casefold() == (await selected_value.inner_text()).strip().casefold()):
             return
         trigger = dropdown.locator(".mds-dropdown__trigger").first
         await trigger.scroll_into_view_if_needed()
@@ -1301,7 +1298,7 @@ class MoEngageBrowserService:
             await option.wait_for(state="visible", timeout=5000)
             await option.click()
         except Exception as exc:
-            screenshot_path = f"/tmp/moengage-option-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-option-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not select MoEngage option {value!r} (screenshot={screenshot_path!r})"
@@ -1312,7 +1309,7 @@ class MoEngageBrowserService:
         try:
             await dropdown.wait_for(state="visible", timeout=10000)
         except Exception as exc:
-            screenshot_path = f"/tmp/moengage-dropdown-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-dropdown-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"Could not find the MoEngage dropdown for {value!r} (screenshot={screenshot_path!r})"
@@ -1328,51 +1325,67 @@ class MoEngageBrowserService:
         current = page.locator(".attribute-wrapper .mds-dropdown:visible").first if value == "Order_Net_Val" else dropdown
         selected_text = (await current.inner_text()).strip()
         if value.casefold() not in selected_text.casefold():
-            screenshot_path = f"/tmp/moengage-selection-{value.replace(' ', '-')}.png"
+            screenshot_path = self._diagnostic_path(f"moengage-selection-{value.replace(' ', '-')}.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain selection {value!r}; current control is "
                 f"{selected_text!r} (screenshot={screenshot_path!r})"
             )
 
-    @staticmethod
-    async def _set_duration(page: Page, start_iso: str, end_iso: str):
+    async def _set_duration(self, page: Page, start_iso: str, end_iso: str):
+        start = date.fromisoformat(start_iso)
+        end = date.fromisoformat(end_iso)
+        expected_start = start.strftime("%d %b %Y")
+        expected_end = end.strftime("%d %b %Y")
         label = page.get_by_text("Duration", exact=True).last
         duration = label.locator("xpath=following::input[1]").first
-        changed = await duration.evaluate(
-            """(el, dates) => {
-                const key = Object.keys(el).find(k => k.startsWith('__reactInternalInstance'));
-                let fiber = key && el[key];
-                while (fiber) {
-                    const instance = fiber.stateNode;
-                    if (instance?.props?.onChange && Array.isArray(instance.props.value)) {
-                        const make = (iso, source) => {
-                            const [year, month, day] = iso.split('-').map(Number);
-                            return source.clone().year(year).month(month - 1).date(day)
-                                .hour(0).minute(0).second(0).millisecond(0);
-                        };
-                        instance.props.onChange(
-                            [make(dates.start, instance.props.value[0]),
-                             make(dates.end, instance.props.value[1])],
-                            {
-                                selectedOption: 'CUSTOM_RANGE',
-                                lastNSelectedValues: instance.props.lastNConfig?.lastNSelectedValues
-                            }
-                        );
-                        return true;
-                    }
-                    fiber = fiber.return;
-                }
-                return false;
-            }""",
-            {"start": start_iso, "end": end_iso},
-        )
-        await page.wait_for_timeout(600)
         actual = await duration.input_value()
-        expected_start = date.fromisoformat(start_iso).strftime("%d %b %Y")
-        expected_end = date.fromisoformat(end_iso).strftime("%d %b %Y")
-        if not changed or expected_start not in actual or expected_end not in actual:
-            screenshot_path = "/tmp/moengage-duration-selection.png"
+        if actual == f"{expected_start} - {expected_end}":
+            return
+
+        # Close attribute menus before opening the calendar's real UI.
+        await label.dispatch_event("click")
+        await duration.evaluate("el => el.scrollIntoView({block: 'center'})")
+        await duration.click()
+        calendar = page.locator(".mds-calender__container:visible").last
+        await calendar.wait_for(state="visible", timeout=10000)
+        await calendar.get_by_text(re.compile(r"^Custom range$", re.I)).click()
+
+        for target in (start, end):
+            target_month = target.strftime("%b %Y")
+            months = calendar.locator(".mds-calender__month")
+            month = months.filter(
+                has=page.locator(".mds-calender__month__header > span").filter(
+                    has_text=re.compile(rf"^\s*{re.escape(target_month)}\s*$")
+                )
+            ).first
+            for _ in range(24):
+                if await month.count():
+                    break
+                first_heading = calendar.locator(".mds-calender__month__header > span").first
+                current = datetime.strptime((await first_heading.inner_text()).strip(), "%b %Y")
+                delta = -1 if (target.year, target.month) < (current.year, current.month) else 1
+                direction = "previous" if delta < 0 else "next"
+                navigation = calendar.locator(f".{direction} .month-arrow:not(.disabled)").first
+                await navigation.dispatch_event("click")
+                year, zero_month = divmod(current.year * 12 + current.month - 1 + delta, 12)
+                next_month = date(year, zero_month + 1, 1).strftime("%b %Y")
+                await first_heading.filter(
+                    has_text=re.compile(rf"^\s*{re.escape(next_month)}\s*$")
+                ).wait_for(timeout=5000)
+            else:
+                raise BrowserAutomationError(f"Could not navigate the calendar to {target_month}")
+            day = month.locator(
+                ".mds-calender__month__dates__date"
+                ":not(.mds-calender__month__dates__date--not-same-month)"
+            ).filter(has_text=re.compile(rf"^\s*{target.day}\s*$")).first
+            await day.dispatch_event("click")
+
+        await calendar.get_by_role("button", name="Done", exact=True).click()
+        await calendar.wait_for(state="hidden", timeout=5000)
+        actual = await duration.input_value()
+        if expected_start not in actual or expected_end not in actual:
+            screenshot_path = self._diagnostic_path("moengage-duration-selection.png")
             await page.screenshot(path=screenshot_path, full_page=True)
             raise BrowserAutomationError(
                 f"MoEngage did not retain duration {expected_start!r} - {expected_end!r}; "
@@ -1410,18 +1423,20 @@ class MoEngageBrowserService:
                 break
         if numeric_cells is None:
             raise BrowserAutomationError(f"Could not read daily results for {row_label!r}")
-        # Cell zero is the selectable summary (Average by default), not a day.
-        # AG Grid virtualizes date columns, so scan horizontally and deduplicate
-        # by column ID rather than summing only the currently rendered cells.
-        summary_id = await numeric_cells.first.get_attribute("col-id")
-        if not summary_id:
-            raise BrowserAutomationError("The behavior-table summary has no column ID")
+        # Event labels may be pinned or inline. Only date-headed columns are
+        # daily results; neither the label nor the selectable summary is a day.
+        daily_header = re.compile(r"^\s*\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\s*$")
         daily_values = {}
         while True:
+            headers = grid.locator(".ag-header-cell").filter(has_text=daily_header)
+            date_columns = {
+                await headers.nth(index).get_attribute("col-id")
+                for index in range(await headers.count())
+            }
             for index in range(await numeric_cells.count()):
                 cell = numeric_cells.nth(index)
                 column_id = await cell.get_attribute("col-id")
-                if column_id == summary_id:
+                if column_id not in date_columns:
                     continue
                 if not column_id:
                     raise BrowserAutomationError("A behavior-table date has no column ID")

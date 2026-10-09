@@ -2,14 +2,23 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { loginUser, authorizedAccount } from '@/lib/api';
+import { loginUser, authorizedAccount, clearAuthToken } from '@/lib/api';
 
+const TATA_ACCOUNTS: Record<string, true> = {
+  tata: true,
+  tcl_promo: true,
+  tcl_trans: true,
+  tchfl: true,
+  wealth: true,
+  moneyfy: true,
+};
 
 export default function LoginPage() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [organization, setOrganization] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,13 +38,22 @@ export default function LoginPage() {
     try {
       const res = await loginUser(finalEmail, finalPass);
 
-      // Pre-select the appropriate account in localStorage
-      const targetAccount = authorizedAccount(res.user, localStorage.getItem('karix_account'));
+      const matchesOrganization = !organization || res.user.role === 'superadmin' ||
+        (organization === 'tata' ? TATA_ACCOUNTS[res.user.tenant_id] === true : res.user.tenant_id === organization);
+      if (!matchesOrganization) {
+        clearAuthToken();
+        throw new Error('This account does not have access to the selected organization. Choose your own organization or contact its administrator.');
+      }
+
+      const preferredAccount = organization
+        ? (organization === 'tata' ? 'tcl_promo' : organization)
+        : localStorage.getItem('karix_account');
+      const targetAccount = authorizedAccount(res.user, preferredAccount);
       try {
         localStorage.setItem('karix_account', targetAccount);
       } catch {}
 
-      window.location.href = '/';
+      window.location.href = targetAccount === 'apparel' ? '/apparel/attribution' : '/';
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setLoading(false);
@@ -68,6 +86,23 @@ export default function LoginPage() {
 
         {/* Sign In Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="login-organization" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+              Organization
+            </label>
+            <select
+              id="login-organization"
+              value={organization}
+              onChange={(e) => setOrganization(e.target.value)}
+              disabled={loading}
+              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-white disabled:bg-gray-100"
+            >
+              <option value="">Use my account&apos;s organization</option>
+              <option value="bajaj">Bajaj Finserv</option>
+              <option value="tata">Tata Capital</option>
+              <option value="apparel">Apparel</option>
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
               <span>Work Email</span>
