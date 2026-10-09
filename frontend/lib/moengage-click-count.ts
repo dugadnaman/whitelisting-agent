@@ -11,6 +11,8 @@ export interface ClickCountWorkspace {
 export interface ClickCountBase {
   id: string;
   name: string;
+  created_at?: string;
+  start_date?: string;
 }
 
 export interface ClickCountBaseMetadata extends ClickCountBase {

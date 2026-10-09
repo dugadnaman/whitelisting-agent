@@ -117,6 +117,17 @@ def test_only_active_imported_file_bases_are_offered(monkeypatch):
     assert client.bases() == [{"id": BASE_ID, "name": "imported"}]
 
 
+def test_bases_with_workspace_enriches_start_date_when_created_time_present():
+    from moengage_click_count import ClickCountClient
+    client = object.__new__(ClickCountClient)
+    base = {"id": BASE_ID, "name": "base", "source": "IMPORT_USERS", "type": "FILE_V2",
+            "deleted": False, "archived": False, "created_time": "2026-10-07T09:39:23.186000"}
+    client.request = lambda *args, **kwargs: {"custom_segments": [base]}
+    bases = client.bases(WORKSPACE)
+    assert bases == [{"id": BASE_ID, "name": "base", "start_date": "2026-10-07",
+                      "created_at": "2026-10-07T09:39:23.186000+00:00"}]
+
+
 def test_imported_base_without_count_metadata_uses_creation_date(monkeypatch):
     from moengage_click_count import ClickCountClient, TATA_PORTAL_ACCOUNT_ID
     client = object.__new__(ClickCountClient)

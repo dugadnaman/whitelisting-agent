@@ -232,26 +232,42 @@ class ClickCountClient:
             raise HTTPException(status_code=503, detail="The configured portal session has no active workspaces in the authorized Tata account. Ask an administrator to check the session and account ID.")
         return apps
 
-    def bases(self) -> list[dict]:
-        result = self.request("POST", "/v2/custom-segments/dashboard",
-                              params={"archived": "false"}, body={})
-        rows = result.get("custom_segments")
-        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
-            raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported-base list.")
-        bases = []
-        for row in rows:
-            if (row.get("source") != "IMPORT_USERS" or row.get("type") != "FILE_V2"
-                    or row.get("deleted") is True or row.get("archived") is True):
-                continue
-            if any(flag in row and type(row[flag]) is not bool for flag in ("deleted", "archived")):
-                raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported-base lifecycle state.")
-            if (not isinstance(row.get("id"), str) or not re.fullmatch(r"[a-fA-F0-9]{24}", row["id"])
-                    or not isinstance(row.get("name"), str) or not row["name"].strip()):
-                raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported base.")
-            bases.append({"id": row["id"], "name": row["name"]})
-        if len({row["id"] for row in bases}) != len(bases):
-            raise HTTPException(status_code=502, detail="MoEngage returned duplicate imported-base identities.")
-        return bases
+    def bases(self, workspace: dict | None = None) -> list[dict]:
+        if not hasattr(self, "_bases_cache") or self._bases_cache is None:
+            result = self.request("POST", "/v2/custom-segments/dashboard",
+                                  params={"archived": "false"}, body={})
+            rows = result.get("custom_segments")
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported-base list.")
+            bases = []
+            for row in rows:
+                if (row.get("source") != "IMPORT_USERS" or row.get("type") != "FILE_V2"
+                        or row.get("deleted") is True or row.get("archived") is True):
+                    continue
+                if any(flag in row and type(row[flag]) is not bool for flag in ("deleted", "archived")):
+                    raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported-base lifecycle state.")
+                if (not isinstance(row.get("id"), str) or not re.fullmatch(r"[a-fA-F0-9]{24}", row["id"])
+                        or not isinstance(row.get("name"), str) or not row["name"].strip()):
+                    raise HTTPException(status_code=502, detail="MoEngage returned an invalid imported base.")
+                item = {"id": row["id"], "name": row["name"]}
+                if isinstance(row.get("created_time"), str):
+                    item["_created_time"] = row["created_time"]
+                bases.append(item)
+            if len({row["id"] for row in bases}) != len(bases):
+                raise HTTPException(status_code=502, detail="MoEngage returned duplicate imported-base identities.")
+            self._bases_cache = bases
+        result_bases = []
+        for item in self._bases_cache:
+            entry = {"id": item["id"], "name": item["name"]}
+            if workspace and "_created_time" in item:
+                try:
+                    meta = base_metadata({"id": item["id"], "name": item["name"], "created_time": item["_created_time"]}, workspace)
+                    entry["start_date"] = meta["start_date"]
+                    entry["created_at"] = meta["created_at"]
+                except Exception:
+                    pass
+            result_bases.append(entry)
+        return result_bases
 
     def activate(self, app: dict) -> dict:
         self.headers = self.source_headers.copy()
@@ -287,7 +303,7 @@ class ClickCountClient:
     def workspaces(self) -> list[dict]:
         return [self.activate(app) for app in self.authorized_apps()]
 
-    def base(self, base_id: str) -> tuple[dict, str]:
+    def base(self, base_id: str, *, include_db: bool = True) -> tuple[dict, str]:
         validate_identifier(base_id, "base ID", object_id=True)
         if not any(row["id"] == base_id for row in self.bases()):
             raise HTTPException(status_code=404, detail="Imported base not found in the selected workspace.")
@@ -299,7 +315,8 @@ class ClickCountClient:
                 or not isinstance(base.get("name"), str) or not base["name"].strip()):
             raise HTTPException(status_code=502, detail="MoEngage returned invalid imported-base metadata.")
         # cs_meta is optional; bind queries to the activated workspace, not cached base counts.
-        return base, self.workspace_database()
+        db_name = self.workspace_database() if include_db else ""
+        return base, db_name
 
     def workspace_database(self) -> str:
         profile = self.request("GET", "/getLoggedInUserData", params={"api": 1}).get("data")
@@ -365,8 +382,8 @@ def get_workspaces():
 def get_bases(workspace_id: str = Query(...)):
     validate_identifier(workspace_id, "workspace ID", object_id=True)
     client = ClickCountClient()
-    client.select_workspace(workspace_id)
-    return {"bases": client.bases()}
+    workspace = client.select_workspace(workspace_id)
+    return {"bases": client.bases(workspace)}
 
 
 @router.get("/bases/{base_id}")
@@ -375,7 +392,7 @@ def get_base(base_id: str, workspace_id: str = Query(...)):
     validate_identifier(base_id, "base ID", object_id=True)
     client = ClickCountClient()
     workspace = client.select_workspace(workspace_id)
-    base, _ = client.base(base_id)
+    base, _ = client.base(base_id, include_db=False)
     return base_metadata(base, workspace)
 
 
@@ -387,7 +404,7 @@ def create_query(body: ClickCountQueryRequest):
     client = ClickCountClient()
     workspace = client.select_workspace(body.workspace_id)
     validate_end_date(body.end_date, workspace["timezone"])
-    raw_base, db_name = client.base(body.base_id)
+    raw_base, db_name = client.base(body.base_id, include_db=True)
     base = base_metadata(raw_base, workspace)
     result = client.request("POST", "/segmentation/recent_query/count",
                             params={"api": 1}, body=click_count_payload(base, body.end_date))

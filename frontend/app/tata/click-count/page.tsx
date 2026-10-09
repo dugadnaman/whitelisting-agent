@@ -230,29 +230,47 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
   };
 
   useEffect(() => {
+    for (const base of bases) {
+      if (base.start_date && base.created_at && !metadataCache.current.has(base.id)) {
+        metadataCache.current.set(base.id, {
+          id: base.id,
+          name: base.name,
+          start_date: base.start_date,
+          created_at: base.created_at,
+          timezone: workspace.timezone,
+        });
+      }
+    }
     const selected = new Set(bases.map((base) => base.id));
     setMetadata(Object.fromEntries([...metadataCache.current].filter(([id]) => selected.has(id))));
     setMetadataErrors((current) => Object.fromEntries(Object.entries(current).filter(([id]) => selected.has(id))));
     const missing = bases.filter((base) => !metadataCache.current.has(base.id));
+    if (missing.length === 0) {
+      setLoadingIds([]);
+      return;
+    }
     setLoadingIds(missing.map((base) => base.id));
     const controller = new AbortController();
-    void Promise.all(missing.map(async (base) => {
-      try {
-        const value = await fetchClickCountBase(workspace.id, base.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
-        if (controller.signal.aborted) return;
-        metadataCache.current.set(base.id, value);
-        setMetadata((current) => ({ ...current, [base.id]: value }));
-        setMetadataErrors((current) => {
-          const next = { ...current };
-          delete next[base.id];
-          return next;
-        });
-      } catch (err) {
-        if (!controller.signal.aborted) setMetadataErrors((current) => ({ ...current, [base.id]: errorMessage(err) }));
-      } finally {
-        if (!controller.signal.aborted) setLoadingIds((current) => current.filter((id) => id !== base.id));
+    void (async () => {
+      for (const base of missing) {
+        if (controller.signal.aborted) break;
+        try {
+          const value = await fetchClickCountBase(workspace.id, base.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
+          if (controller.signal.aborted) return;
+          metadataCache.current.set(base.id, value);
+          setMetadata((current) => ({ ...current, [base.id]: value }));
+          setMetadataErrors((current) => {
+            const next = { ...current };
+            delete next[base.id];
+            return next;
+          });
+        } catch (err) {
+          if (!controller.signal.aborted) setMetadataErrors((current) => ({ ...current, [base.id]: errorMessage(err) }));
+        } finally {
+          if (!controller.signal.aborted) setLoadingIds((current) => current.filter((id) => id !== base.id));
+        }
       }
-    }));
+    })();
     return () => controller.abort();
   }, [workspace.id, selectedKey, metadataReload]);
 
