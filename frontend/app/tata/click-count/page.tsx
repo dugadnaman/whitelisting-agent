@@ -19,6 +19,7 @@ const panel = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm';
 const input = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-500';
 const primary = 'rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50';
 const secondary = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50';
+const MAX_SELECTED_BASES = 10;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -82,11 +83,11 @@ function ClickCountWorkspacePicker() {
     <div className="mx-auto max-w-4xl space-y-5 p-8">
       <header>
         <h1 className="text-2xl font-bold text-gray-900">Tata Click Counts</h1>
-        <p className="mt-1 text-sm text-gray-500">Count unique users from an imported MoEngage base across an inclusive date range.</p>
+        <p className="mt-1 text-sm text-gray-500">Count multiple imported MoEngage bases simultaneously across an inclusive date range.</p>
       </header>
       <div className={panel}>
         <h2 className="text-sm font-semibold text-gray-900">Fixed click criteria</h2>
-        <p className="mt-2 text-sm text-gray-600">WhatsApp OR Email OR SMS OR Android push OR iOS push clicks, AND membership in the selected imported base. A user is counted once, even if they click multiple times or across channels.</p>
+        <p className="mt-2 text-sm text-gray-600">For each selected base: WhatsApp OR Email OR SMS OR Android push OR iOS push clicks, AND base membership. Users are deduplicated within each base; counts are not summed because the same user may belong to multiple bases.</p>
       </div>
       <section className={`${panel} space-y-4`} aria-label="Click count selection" aria-busy={loading || busy}>
         <div>
@@ -112,7 +113,7 @@ function ClickCountWorkspacePicker() {
 
 function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: ClickCountWorkspace; busy: boolean; onBusyChange: (value: boolean) => void }) {
   const [bases, setBases] = useState<ClickCountBase[]>([]);
-  const [baseId, setBaseId] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -136,7 +137,28 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
     return () => controller.abort();
   }, [workspace.id, reload]);
 
-  const filteredBases = bases.filter((base) => base.id === baseId || base.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const selected = new Set(selectedIds);
+  const searchTerm = search.trim().toLowerCase();
+  const filteredBases = bases.filter((base) => selected.has(base.id) || base.name.toLowerCase().includes(searchTerm));
+  const selectedBases = selectedIds.map((id) => bases.find((base) => base.id === id)).filter((base): base is ClickCountBase => Boolean(base));
+
+  function toggleBase(baseId: string) {
+    setSelectedIds((current) => current.includes(baseId)
+      ? current.filter((id) => id !== baseId)
+      : current.length < MAX_SELECTED_BASES ? [...current, baseId] : current);
+  }
+
+  function selectVisible() {
+    setSelectedIds((current) => {
+      const next = [...current];
+      for (const base of filteredBases) {
+        if (next.length === MAX_SELECTED_BASES) break;
+        if (!next.includes(base.id)) next.push(base.id);
+      }
+      return next;
+    });
+  }
+
   return (
     <>
       {bases.length > 20 && (
@@ -145,13 +167,6 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
           <input id="click-base-search" type="search" className={input} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="Search by base name" />
         </div>
       )}
-      <div>
-        <label htmlFor="click-base" className="mb-1 block text-sm font-medium text-gray-700">Imported base</label>
-        <select id="click-base" className={input} value={baseId} disabled={loading || busy || Boolean(error) || !bases.length} onChange={(event) => setBaseId(event.target.value)}>
-          <option value="">Select an imported base</option>
-          {filteredBases.map((base) => <option key={base.id} value={base.id}>{base.name}</option>)}
-        </select>
-      </div>
       {loading && <p role="status" className="text-sm text-gray-500">Loading imported bases…</p>}
       {error && <ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} />}
       {!loading && !error && bases.length === 0 && (
@@ -160,60 +175,93 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
           <button type="button" className={secondary} onClick={() => setReload((value) => value + 1)}>Reload imported bases</button>
         </div>
       )}
-      {!loading && bases.length > 0 && filteredBases.length === 0 && <p role="status" className="text-sm text-gray-500">No bases match your search.</p>}
-      {baseId && <BaseCountForm key={baseId} workspace={workspace} baseId={baseId} onBusyChange={onBusyChange} />}
+      {!loading && !error && bases.length > 0 && (
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium text-gray-700">Imported bases · {selectedIds.length}/{MAX_SELECTED_BASES} selected</legend>
+          <div className="mb-2 flex justify-end gap-2">
+            <button type="button" className={secondary} disabled={busy || filteredBases.every((base) => selected.has(base.id)) || selectedIds.length === MAX_SELECTED_BASES} onClick={selectVisible}>Select visible</button>
+            <button type="button" className={secondary} disabled={busy || selectedIds.length === 0} onClick={() => setSelectedIds([])}>Clear</button>
+          </div>
+          <div id="click-bases" className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2">
+            {filteredBases.map((base) => {
+              const checked = selected.has(base.id);
+              return (
+                <label key={base.id} className="flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm hover:bg-gray-50">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4" checked={checked} disabled={busy || !checked && selectedIds.length === MAX_SELECTED_BASES} onChange={() => toggleBase(base.id)} />
+                  <span className="break-all text-gray-700">{base.name}</span>
+                </label>
+              );
+            })}
+          </div>
+          {filteredBases.length === 0 && <p role="status" className="mt-2 text-sm text-gray-500">No bases match your search.</p>}
+          <p className="mt-2 text-xs text-gray-500">Up to {MAX_SELECTED_BASES} bases run simultaneously. Each result remains separate.</p>
+        </fieldset>
+      )}
+      {selectedBases.length > 0 && <MultiBaseCountForm workspace={workspace} bases={selectedBases} onBusyChange={onBusyChange} />}
     </>
   );
 }
 
-function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCountWorkspace; baseId: string; onBusyChange: (value: boolean) => void }) {
-  const [metadata, setMetadata] = useState<ClickCountBaseMetadata | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [metadataError, setMetadataError] = useState('');
+type BaseJob = {
+  query: ClickCountQuery | null;
+  status: ClickCountQueryStatus | null;
+  submitting: boolean;
+  pollingPaused: boolean;
+  unknownSubmission: boolean;
+  error: string;
+};
+
+function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: ClickCountWorkspace; bases: ClickCountBase[]; onBusyChange: (value: boolean) => void }) {
+  const [metadata, setMetadata] = useState<Record<string, ClickCountBaseMetadata>>({});
+  const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({});
+  const [loadingIds, setLoadingIds] = useState<string[]>([]);
   const [metadataReload, setMetadataReload] = useState(0);
   const [today, setToday] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [query, setQuery] = useState<ClickCountQuery | null>(null);
-  const [status, setStatus] = useState<ClickCountQueryStatus | null>(null);
-  const [queryError, setQueryError] = useState('');
-  const [pollingPaused, setPollingPaused] = useState(false);
-  const [unknownSubmission, setUnknownSubmission] = useState(false);
+  const [jobs, setJobs] = useState<Record<string, BaseJob>>({});
+  const metadataCache = useRef(new Map<string, ClickCountBaseMetadata>());
   const submitLock = useRef(false);
-  const requestController = useRef<AbortController | null>(null);
-  const pollController = useRef<AbortController | null>(null);
-  const pendingQuery = status?.status === 'queued' || status?.status === 'running';
-  const busy = submitting || unknownSubmission || pendingQuery && !pollingPaused;
+  const requestControllers = useRef(new Map<string, AbortController>());
+  const pollers = useRef(new Map<string, { controller: AbortController; timer?: number }>());
+  const selectedKey = bases.map((base) => base.id).join(',');
+
+  const stopPoller = (baseId: string) => {
+    const poller = pollers.current.get(baseId);
+    if (!poller) return;
+    poller.controller.abort();
+    clearTimeout(poller.timer);
+    pollers.current.delete(baseId);
+  };
 
   useEffect(() => {
-    onBusyChange(busy);
-    return () => onBusyChange(false);
-  }, [busy, onBusyChange]);
-
-  useEffect(() => () => requestController.current?.abort(), []);
-
-  useEffect(() => {
-    setLoading(true);
-    setMetadataError('');
+    const selected = new Set(bases.map((base) => base.id));
+    setMetadata(Object.fromEntries([...metadataCache.current].filter(([id]) => selected.has(id))));
+    setMetadataErrors((current) => Object.fromEntries(Object.entries(current).filter(([id]) => selected.has(id))));
+    const missing = bases.filter((base) => !metadataCache.current.has(base.id));
+    setLoadingIds(missing.map((base) => base.id));
     const controller = new AbortController();
-    async function load() {
+    void Promise.all(missing.map(async (base) => {
       try {
-        const data = await fetchClickCountBase(workspace.id, baseId, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
-        if (!controller.signal.aborted) setMetadata(data);
+        const value = await fetchClickCountBase(workspace.id, base.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
+        if (controller.signal.aborted) return;
+        metadataCache.current.set(base.id, value);
+        setMetadata((current) => ({ ...current, [base.id]: value }));
+        setMetadataErrors((current) => {
+          const next = { ...current };
+          delete next[base.id];
+          return next;
+        });
       } catch (err) {
-        if (!controller.signal.aborted) setMetadataError(errorMessage(err));
+        if (!controller.signal.aborted) setMetadataErrors((current) => ({ ...current, [base.id]: errorMessage(err) }));
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) setLoadingIds((current) => current.filter((id) => id !== base.id));
       }
-    }
-    void load();
+    }));
     return () => controller.abort();
-  }, [workspace.id, baseId, metadataReload]);
+  }, [workspace.id, selectedKey, metadataReload]);
 
   useEffect(() => {
-    if (!metadata) return;
-    const timezone = metadata.timezone;
-    const updateToday = () => setToday(todayInTimezone(timezone));
+    const updateToday = () => setToday(todayInTimezone(workspace.timezone));
     let timer: number;
     function tick() {
       updateToday();
@@ -227,140 +275,213 @@ function BaseCountForm({ workspace, baseId, onBusyChange }: { workspace: ClickCo
       window.removeEventListener('focus', updateToday);
       document.removeEventListener('visibilitychange', updateToday);
     };
-  }, [metadata]);
+  }, [workspace.timezone]);
 
   useEffect(() => {
-    if (!query || pollingPaused) return;
-    const activeQuery = query;
-    const controller = new AbortController();
-    pollController.current = controller;
-    let timer: number | undefined;
+    requestControllers.current.forEach((controller) => controller.abort());
+    pollers.current.forEach(({ controller, timer }) => {
+      controller.abort();
+      clearTimeout(timer);
+    });
+    requestControllers.current.clear();
+    pollers.current.clear();
+    setJobs({});
+    submitLock.current = false;
+  }, [selectedKey]);
+
+  useEffect(() => () => {
+    requestControllers.current.forEach((controller) => controller.abort());
+    pollers.current.forEach(({ controller, timer }) => {
+      controller.abort();
+      clearTimeout(timer);
+    });
+  }, []);
+
+  const busy = Object.values(jobs).some((job) => job.submitting || job.unknownSubmission
+    || (job.status?.status === 'queued' || job.status?.status === 'running') && !job.pollingPaused);
+
+  useEffect(() => onBusyChange(busy), [busy, onBusyChange]);
+  useEffect(() => () => onBusyChange(false), [onBusyChange]);
+
+  const updateJob = (baseId: string, patch: Partial<BaseJob>) => setJobs((current) => ({
+    ...current,
+    [baseId]: { ...current[baseId], ...patch },
+  }));
+
+  function pollQuery(baseId: string, query: ClickCountQuery) {
+    stopPoller(baseId);
+    const poller = { controller: new AbortController(), timer: undefined as number | undefined };
+    pollers.current.set(baseId, poller);
     async function poll() {
       try {
-        const next = await fetchClickCountQuery(activeQuery.workspace_id, activeQuery.query_id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
-        if (controller.signal.aborted) return;
-        setStatus(next);
-        setQueryError('');
+        const next = await fetchClickCountQuery(query.workspace_id, query.query_id, AbortSignal.any([poller.controller.signal, AbortSignal.timeout(60000)]));
+        if (poller.controller.signal.aborted) return;
+        updateJob(baseId, { status: next, error: '' });
         if (next.status === 'success' || next.status === 'failed') {
-          submitLock.current = false;
+          pollers.current.delete(baseId);
           return;
         }
       } catch (err) {
-        if (controller.signal.aborted) return;
+        if (poller.controller.signal.aborted) return;
         if (isTerminalClickCountError(err)) {
-          submitLock.current = false;
-          setPollingPaused(true);
-          setQueryError(`Status checking stopped: ${errorMessage(err)}. Selections are unlocked; the query may still be running on MoEngage.`);
+          pollers.current.delete(baseId);
+          updateJob(baseId, {
+            pollingPaused: true,
+            error: `Status checking stopped: ${errorMessage(err)}. This query may still be running on MoEngage.`,
+          });
           return;
         }
-        setQueryError(`Could not refresh the query status: ${errorMessage(err)}. Status polling will continue. You can stop checking to unlock selection; this does not cancel the query.`);
+        updateJob(baseId, { error: `Could not refresh status: ${errorMessage(err)}. Polling will continue.` });
       }
-      if (!controller.signal.aborted) timer = window.setTimeout(poll, 2500);
+      if (!poller.controller.signal.aborted) poller.timer = window.setTimeout(poll, 2500);
     }
     void poll();
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [query, pollingPaused]);
-
-  const validDates = Boolean(metadata && today && isValidClickCountRange(metadata.start_date, endDate, metadata.timezone));
-
-  function pausePolling() {
-    pollController.current?.abort();
-    submitLock.current = false;
-    setPollingPaused(true);
-    setQueryError('Status checking stopped. The query may still be running on MoEngage; stopping checks does not cancel it.');
   }
 
-  function resumePolling() {
-    if (submitLock.current || !query || !pendingQuery) return;
-    submitLock.current = true;
-    onBusyChange(true);
-    setQueryError('');
-    setPollingPaused(false);
+  function pausePolling(baseId: string) {
+    stopPoller(baseId);
+    updateJob(baseId, {
+      pollingPaused: true,
+      error: 'Status checking stopped. The query may still be running on MoEngage; stopping checks does not cancel it.',
+    });
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (submitLock.current || busy || !metadata || !isValidClickCountRange(metadata.start_date, endDate, metadata.timezone)) return;
-    submitLock.current = true;
-    onBusyChange(true);
+  function resumePolling(baseId: string) {
+    const job = jobs[baseId];
+    if (!job?.query || job.status?.status !== 'queued' && job.status?.status !== 'running') return;
+    updateJob(baseId, { pollingPaused: false, error: '' });
+    pollQuery(baseId, job.query);
+  }
+
+  async function startOne(base: ClickCountBaseMetadata) {
     const controller = new AbortController();
-    requestController.current = controller;
-    setSubmitting(true);
-    setPollingPaused(false);
-    setUnknownSubmission(false);
-    setQuery(null);
-    setStatus(null);
-    setQueryError('');
+    requestControllers.current.set(base.id, controller);
     try {
-      const accepted = await startClickCountQuery({ workspace_id: workspace.id, base_id: metadata.id, end_date: endDate }, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
+      const query = await startClickCountQuery(
+        { workspace_id: workspace.id, base_id: base.id, end_date: endDate },
+        AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]),
+      );
       if (controller.signal.aborted) return;
-      setQuery(accepted);
-      setStatus({ query_id: accepted.query_id, status: accepted.status, user_count: null, reachable_users: null });
+      updateJob(base.id, {
+        query,
+        status: { query_id: query.query_id, status: query.status, user_count: null, reachable_users: null },
+        submitting: false,
+      });
+      pollQuery(base.id, query);
     } catch (err) {
       if (controller.signal.aborted) return;
       const uncertain = !(err instanceof ClickCountApiError) || err.status === 0 || err.status === 408 || err.status >= 500;
-      submitLock.current = uncertain;
-      setUnknownSubmission(uncertain);
-      setQueryError(`${errorMessage(err)}. The query-start request was not automatically retried.${uncertain ? ' Its outcome is unknown: MoEngage may already have queued it. Confirm before allowing another query.' : ''}`);
+      updateJob(base.id, {
+        submitting: false,
+        unknownSubmission: uncertain,
+        error: `${errorMessage(err)}. This query-start request was not retried.${uncertain ? ' Its outcome is unknown; acknowledge it before running another batch.' : ''}`,
+      });
     } finally {
-      if (!controller.signal.aborted) setSubmitting(false);
+      requestControllers.current.delete(base.id);
     }
   }
 
+  const selectedMetadata = bases.map((base) => metadata[base.id]).filter((base): base is ClickCountBaseMetadata => Boolean(base));
+  const maxStartDate = selectedMetadata.reduce((latest, base) => base.start_date > latest ? base.start_date : latest, '');
+  const metadataReady = selectedMetadata.length === bases.length && loadingIds.length === 0 && Object.keys(metadataErrors).length === 0;
+  const validDates = metadataReady && Boolean(today && isValidClickCountRange(maxStartDate, endDate, workspace.timezone));
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitLock.current || busy || !validDates) return;
+    submitLock.current = true;
+    setJobs(Object.fromEntries(selectedMetadata.map((base) => [base.id, {
+      query: null,
+      status: null,
+      submitting: true,
+      pollingPaused: false,
+      unknownSubmission: false,
+      error: '',
+    }])));
+    await Promise.all(selectedMetadata.map(startOne));
+  }
+
+  function changeEndDate(value: string) {
+    pollers.current.forEach((_poller, baseId) => stopPoller(baseId));
+    setEndDate(value);
+    setJobs({});
+  }
+
   return (
-    <>
-      {loading && <p role="status" className="text-sm text-gray-500">Loading base creation date…</p>}
-      {metadataError && <ErrorNotice message={metadataError} onRetry={() => setMetadataReload((value) => value + 1)} />}
-      {metadata && (
-        <form onSubmit={submit} className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label htmlFor="click-start" className="mb-1 block text-sm font-medium text-gray-700">Start date · automatic</label>
-              <input id="click-start" type="date" className={input} value={metadata.start_date} disabled readOnly aria-describedby="click-timezone" />
-            </div>
-            <div>
-              <label htmlFor="click-end" className="mb-1 block text-sm font-medium text-gray-700">End date · inclusive</label>
-              <input id="click-end" type="date" className={input} value={endDate} min={metadata.start_date} max={today} required disabled={busy || !today || metadata.start_date > today} onChange={(event) => { pollController.current?.abort(); setEndDate(event.target.value); setQuery(null); setStatus(null); setQueryError(''); setPollingPaused(false); }} aria-describedby="click-timezone" />
-            </div>
-          </div>
-          <p id="click-timezone" className="text-xs text-gray-500">Dates use {metadata.timezone}. The start date is derived by the server from this base’s creation timestamp ({metadata.created_at}); the end date includes the whole selected day.</p>
-          {today && metadata.start_date > today && <p role="alert" className="text-sm text-red-700">This base’s creation date is after today in its workspace timezone; no valid date range is available yet.</p>}
-          {endDate && !validDates && <p role="alert" className="text-sm text-red-700">Choose an end date from {metadata.start_date} through {today}.</p>}
-          <button type="submit" className={primary} disabled={!validDates || busy} onClick={(event) => { if (event.detail > 1) event.preventDefault(); }}>{unknownSubmission ? 'Query outcome unknown' : submitting ? 'Starting query…' : busy ? 'Counting unique users…' : 'Count unique users'}</button>
-        </form>
+    <form onSubmit={submit} className="space-y-4">
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
+          <thead className="bg-gray-50 text-xs uppercase text-gray-500">
+            <tr><th className="px-3 py-2">Imported base</th><th className="px-3 py-2">Automatic start date</th></tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {bases.map((base) => (
+              <tr key={base.id}>
+                <td className="px-3 py-2 text-gray-700">{base.name}</td>
+                <td className="px-3 py-2 text-gray-600">
+                  {loadingIds.includes(base.id) ? 'Loading…' : metadata[base.id]?.start_date || 'Unavailable'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {Object.entries(metadataErrors).map(([baseId, message]) => (
+        <ErrorNotice key={baseId} message={`${bases.find((base) => base.id === baseId)?.name || baseId}: ${message}`} />
+      ))}
+      {Object.keys(metadataErrors).length > 0 && (
+        <button type="button" className={secondary} onClick={() => setMetadataReload((value) => value + 1)}>Retry base dates</button>
       )}
-      {queryError && <ErrorNotice message={queryError} />}
-      {unknownSubmission && (
-        <button type="button" className={secondary} onClick={() => { submitLock.current = false; setUnknownSubmission(false); }}>
-          I understand a query may already exist · unlock selection
-        </button>
-      )}
-      {query && status && (
-        <section className="rounded-lg border border-blue-200 bg-blue-50 p-4" aria-label="Query result" aria-live="polite" aria-atomic="true">
-          <h2 className="text-sm font-semibold text-gray-900">{status.status === 'success' ? 'Unique users who clicked' : 'Click count query'}</h2>
-          <dl className="mt-2 space-y-1 text-sm text-gray-600">
-            <div><dt className="inline font-medium">Workspace: </dt><dd className="inline">{query.workspace_name} ({query.workspace_id})</dd></div>
-            <div><dt className="inline font-medium">Imported base: </dt><dd className="inline">{query.base_name} ({query.base_id})</dd></div>
-            <div><dt className="inline font-medium">Inclusive range: </dt><dd className="inline">{query.start_date} – {query.end_date} · {query.timezone}</dd></div>
-          </dl>
-          {status.status === 'success' ? (
-            <>
-              <p className="mt-4 text-4xl font-bold text-blue-800">{status.user_count === null ? 'Count unavailable' : status.user_count.toLocaleString()}</p>
-              <p className="mt-1 text-sm text-gray-600">Deduplicated users matching the five click events and imported-base membership.</p>
-              {status.reachable_users !== null && <p className="mt-2 text-xs text-gray-500">Reachable users: {status.reachable_users.toLocaleString()} (a separate metric, not the unique-click count).</p>}
-            </>
-          ) : status.status === 'failed' ? <ErrorNotice message={status.error || 'The click count query failed.'} /> : (
-            <div className="mt-3 space-y-2">
-              <p role="status" className="text-sm font-medium text-blue-700">
-                {pollingPaused ? 'Status checking paused; the final outcome is unknown.' : `${status.status === 'queued' ? 'Query queued…' : 'Query running…'} Selection is locked until this query finishes or you stop checking.`}
-              </p>
-              <button type="button" className={secondary} onClick={pollingPaused ? resumePolling : pausePolling}>
-                {pollingPaused ? 'Check status again' : 'Stop checking and unlock selection'}
-              </button>
-            </div>
-          )}
+      <div>
+        <label htmlFor="click-end" className="mb-1 block text-sm font-medium text-gray-700">End date · inclusive for all selected bases</label>
+        <input id="click-end" type="date" className={input} value={endDate} min={maxStartDate} max={today} required disabled={busy || !metadataReady || !today || maxStartDate > today} onChange={(event) => changeEndDate(event.target.value)} />
+        <p className="mt-1 text-xs text-gray-500">Each base keeps its own automatic start date. The common end date uses {workspace.timezone} and includes the whole selected day.</p>
+      </div>
+      {today && maxStartDate > today && <p role="alert" className="text-sm text-red-700">At least one selected base was created after today in this workspace; no common date range is available yet.</p>}
+      {endDate && !validDates && metadataReady && <p role="alert" className="text-sm text-red-700">Choose an end date from {maxStartDate} through {today}.</p>}
+      <button type="submit" className={primary} disabled={!validDates || busy} onClick={(event) => { if (event.detail > 1) event.preventDefault(); }}>
+        {busy ? `Counting ${bases.length} bases…` : Object.keys(jobs).length ? `Count ${bases.length} bases again` : `Count ${bases.length} selected ${bases.length === 1 ? 'base' : 'bases'}`}
+      </button>
+      {Object.keys(jobs).length > 0 && (
+        <section className="space-y-3" aria-label="Query results" aria-live="polite">
+          {bases.map((base) => {
+            const job = jobs[base.id];
+            if (!job) return null;
+            const status = job.status;
+            return (
+              <article key={base.id} className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <h2 className="text-sm font-semibold text-gray-900">{base.name}</h2>
+                {job.query && <p className="mt-1 text-xs text-gray-500">{job.query.start_date} – {job.query.end_date} · {job.query.timezone}</p>}
+                {job.submitting && <p role="status" className="mt-3 text-sm font-medium text-blue-700">Starting query…</p>}
+                {job.error && <div className="mt-3"><ErrorNotice message={job.error} /></div>}
+                {job.unknownSubmission && (
+                  <button type="button" className={`${secondary} mt-3`} onClick={() => updateJob(base.id, { unknownSubmission: false })}>
+                    I understand this query may already exist
+                  </button>
+                )}
+                {status?.status === 'success' && (
+                  <>
+                    <p className="mt-3 text-4xl font-bold text-blue-800">{status.user_count === null ? 'Count unavailable' : status.user_count.toLocaleString()}</p>
+                    <p className="mt-1 text-sm text-gray-600">Unique users who clicked in this imported base.</p>
+                    {status.reachable_users !== null && <p className="mt-2 text-xs text-gray-500">Reachable users: {status.reachable_users.toLocaleString()}</p>}
+                  </>
+                )}
+                {status?.status === 'failed' && !job.error && <div className="mt-3"><ErrorNotice message={status.error || 'The click count query failed.'} /></div>}
+                {status && (status.status === 'queued' || status.status === 'running') && (
+                  <div className="mt-3 space-y-2">
+                    <p role="status" className="text-sm font-medium text-blue-700">
+                      {job.pollingPaused ? 'Status checking paused; the final outcome is unknown.' : status.status === 'queued' ? 'Query queued…' : 'Query running…'}
+                    </p>
+                    <button type="button" className={secondary} onClick={() => job.pollingPaused ? resumePolling(base.id) : pausePolling(base.id)}>
+                      {job.pollingPaused ? 'Check status again' : 'Stop checking'}
+                    </button>
+                  </div>
+                )}
+              </article>
+            );
+          })}
         </section>
       )}
-    </>
+    </form>
   );
 }
