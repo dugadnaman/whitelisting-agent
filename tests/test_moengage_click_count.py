@@ -423,12 +423,12 @@ def test_leap_day_range_and_action_time_ranges_are_independent(frozen_clock):
     assert all(action["primary_time_range"]["value1"] != "changed" for action in actions[1:])
 
 
-@pytest.mark.parametrize("status", ["queued", "running"])
-def test_pending_query_does_not_publish_stale_counts(status):
+@pytest.mark.parametrize("status,expected", [("queued", "queued"), ("running", "running"), ("received", "queued")])
+def test_pending_query_does_not_publish_stale_counts(status, expected):
     result = query_result({"_id": QUERY_ID, "db_name": "TataCapital", "status": status,
                            "user_count": 99, "reachability_count": {"total_reachable_count": 98}},
                           QUERY_ID, "TataCapital")
-    assert result == {"query_id": QUERY_ID, "status": status, "user_count": None, "reachable_users": None}
+    assert result == {"query_id": QUERY_ID, "status": expected, "user_count": None, "reachable_users": None}
 
 
 @pytest.mark.parametrize("status", [None, "", "pending", "cancelled", "SUCCESS", True, [], {}])

@@ -126,6 +126,8 @@ def query_result(row: dict, query_id: str, db_name: str) -> dict:
                 or type(reachable) is not int or not 0 <= reachable <= count):
             raise HTTPException(status_code=502, detail="MoEngage completed the query without valid unique and reachable user counts.")
         result.update(user_count=count, reachable_users=reachable)
+    elif result["status"] == "received":
+        result["status"] = "queued"
     elif result["status"] not in ("queued", "running"):
         raise HTTPException(status_code=502, detail="MoEngage returned an unrecognized query status.")
     return result

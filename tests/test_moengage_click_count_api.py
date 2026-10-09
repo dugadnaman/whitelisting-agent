@@ -243,11 +243,16 @@ def test_http_completed_empty_cohort_is_zero_not_pending(client, portal, provisi
 
 def test_http_native_provider_failure_is_terminal_without_a_false_zero_or_resubmission(client, portal, provision_user):
     _, headers = provision_user(tenant="tata")
-    portal.states = ["running", "failure"]
+    portal.states = ["received", "running", "failure"]
     accepted = client.post(PREFIX + "/queries", json=submission(portal), headers=headers).json()
     path = PREFIX + "/queries/" + accepted["query_id"]
+    queued = client.get(path, params={"workspace_id": WORKSPACE_ID}, headers=headers)
     running = client.get(path, params={"workspace_id": WORKSPACE_ID}, headers=headers)
     failed = client.get(path, params={"workspace_id": WORKSPACE_ID}, headers=headers)
+    assert queued.status_code == 200
+    assert queued.json()["status"] == "queued"
+    assert queued.json()["user_count"] is None
+    assert queued.json()["reachable_users"] is None
     assert running.status_code == 200
     assert running.json()["status"] == "running"
     assert failed.status_code == 200
