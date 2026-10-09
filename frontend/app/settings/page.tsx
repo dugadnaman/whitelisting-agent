@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection, canAccessAccount, authorizedAccount } from '@/lib/api';
-import type { Account, Channel, AccountItem, AuthUser } from '@/lib/api';
+import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection, canAccessAccount, authorizedAccount, accountOrganization, fetchAccessRequests, approveAccessRequest } from '@/lib/api';
+import type { Account, Channel, AccountItem, AuthUser, RequestedTenant } from '@/lib/api';
 import { useApp } from '@/lib/context';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
@@ -26,6 +26,7 @@ export default function SettingsPage() {
   );
   const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
   const teamTenant = currentUser?.role === 'superadmin' ? selectedAccount : currentUser?.tenant_id;
+  const canManage = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'));
   useEffect(() => {
     if (currentUser && !canAccessAccount(currentUser, selectedAccount)) {
       setSelectedAccount(authorizedAccount(currentUser, activeAccount));
@@ -78,6 +79,7 @@ export default function SettingsPage() {
   const [moeLoaded, setMoeLoaded] = useState(false);
   // Load MoEngage credentials for the selected account
   useEffect(() => {
+    if (!canManage) return;
     let ignore = false;
     async function loadMoEngage() {
       try {
@@ -96,7 +98,7 @@ export default function SettingsPage() {
     }
     loadMoEngage();
     return () => { ignore = true; };
-  }, [selectedAccount]);
+  }, [selectedAccount, canManage]);
 
   // Team Directory state
   const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
@@ -107,7 +109,54 @@ export default function SettingsPage() {
   const [invitePassword, setInvitePassword] = useState('');
   const [inviteRole, setInviteRole] = useState('operator');
   const [inviting, setInviting] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState<AuthUser[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
+  const [requestFilter, setRequestFilter] = useState<RequestedTenant | ''>(() => {
+    const organization = accountOrganization(activeAccount);
+    return organization === 'bajaj' || organization === 'tata' || organization === 'apparel' ? organization : '';
+  });
+  const canApprove = canManage && Boolean(currentUser?.role === 'superadmin' || (
+    currentUser && ['bajaj', 'tata', 'apparel'].includes(currentUser.tenant_id)
+  ));
+  const requestTenant = currentUser?.role === 'superadmin' ? requestFilter || undefined : currentUser?.tenant_id as RequestedTenant | undefined;
+
   useEffect(() => {
+    if (!canApprove) {
+      setPendingRequests([]);
+      return;
+    }
+    let ignore = false;
+    setLoadingRequests(true);
+    setPendingRequests([]);
+    setRequestError(null);
+    fetchAccessRequests(requestTenant)
+      .then((requests) => { if (!ignore) setPendingRequests(requests); })
+      .catch((err) => { if (!ignore) setRequestError(err instanceof Error ? err.message : String(err)); })
+      .finally(() => { if (!ignore) setLoadingRequests(false); });
+    return () => { ignore = true; };
+  }, [canApprove, requestTenant]);
+
+  async function handleApprove(applicant: AuthUser) {
+    setApprovingUserId(applicant.id);
+    setRequestError(null);
+    try {
+      const approved = await approveAccessRequest(applicant.id);
+      setPendingRequests((requests) => requests.filter((request) => request.id !== applicant.id));
+      if (approved.tenant_id === teamTenant) {
+        setTeamMembers((members) => [...members.filter((member) => member.id !== approved.id), approved]);
+      }
+      setBanner({ type: 'success', message: `Approved ${approved.name || approved.email} for ${getAccountLabel(approved.tenant_id)} as an operator.` });
+    } catch (err) {
+      setRequestError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApprovingUserId(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!canManage) return;
     let ignore = false;
     async function loadServerCreds() {
       try {
@@ -150,11 +199,11 @@ export default function SettingsPage() {
       setLoadingTeam(true);
       try {
         const team = await fetchTeam(teamTenant);
-        setTeamMembers(team || []);
+        if (!ignore) setTeamMembers(team || []);
       } catch {
-        setTeamMembers([]);
+        if (!ignore) setTeamMembers([]);
       } finally {
-        setLoadingTeam(false);
+        if (!ignore) setLoadingTeam(false);
       }
     }
 
@@ -163,7 +212,7 @@ export default function SettingsPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedAccount, selectedChannel, teamTenant]);
+  }, [selectedAccount, selectedChannel, teamTenant, canManage]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
@@ -407,6 +456,20 @@ export default function SettingsPage() {
     }
   }
 
+  if (!canManage) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-gray-900">Account settings</h1>
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 space-y-2">
+          <p className="text-sm font-semibold text-gray-900">{currentUser?.name}</p>
+          <p className="text-sm text-gray-600">{currentUser?.email}</p>
+          <p className="text-sm text-gray-600">Organization: {getAccountLabel(currentUser?.tenant_id)}</p>
+          <p className="text-xs text-gray-500">Your organization administrator manages team access and workspace credentials.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -512,6 +575,49 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
+        )}
+
+        {canApprove && (
+          <section className="border-t border-gray-100 pt-4 space-y-3" aria-labelledby="access-requests-heading">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 id="access-requests-heading" className="text-sm font-bold text-gray-900">Pending access requests</h4>
+                <p className="text-xs text-gray-500">Approval grants operator access only to the requested organization.</p>
+              </div>
+              {currentUser?.role === 'superadmin' && (
+                <div>
+                  <label htmlFor="access-request-filter" className="block text-xs font-semibold text-gray-600 mb-1">Requested organization</label>
+                  <select id="access-request-filter" value={requestFilter} disabled={Boolean(approvingUserId)} onChange={(e) => setRequestFilter(e.target.value as RequestedTenant | '')} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs">
+                    <option value="">All organizations</option>
+                    <option value="bajaj">Bajaj Finserv</option>
+                    <option value="tata">Tata Capital</option>
+                    <option value="apparel">Apparel</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            {requestError && <p role="alert" className="text-xs text-red-700">{requestError}</p>}
+            {loadingRequests ? (
+              <p role="status" className="py-3 text-xs text-gray-500">Loading access requests...</p>
+            ) : pendingRequests.length === 0 ? (
+              <p className="py-3 text-xs text-gray-500">No pending requests for {requestTenant ? getAccountLabel(requestTenant) : 'any organization'}.</p>
+            ) : (
+              <div className="space-y-2">
+                {pendingRequests.map((applicant) => (
+                  <div key={applicant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-900">{applicant.name}</p>
+                      <p className="text-xs text-gray-600 break-all">{applicant.email}</p>
+                      <p className="text-xs text-blue-700 mt-1">Requested: {getAccountLabel(applicant.requested_tenant_id || '')}</p>
+                    </div>
+                    <button type="button" disabled={Boolean(approvingUserId)} onClick={() => handleApprove(applicant)} aria-label={`Approve ${applicant.name || applicant.email} for ${getAccountLabel(applicant.requested_tenant_id || '')}`} className="rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 px-3.5 py-2 text-xs font-semibold text-white">
+                      {approvingUserId === applicant.id ? 'Approving...' : 'Approve'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         )}
       </div>
 

@@ -15,22 +15,21 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
+from config import _load_env_file
+
 logger = logging.getLogger(__name__)
 
 
 def _resolve_default_db_path() -> Path:
     env_p = os.environ.get("KARIX_DB_PATH")
     if env_p:
-        return Path(env_p)
-    if (Path("data") / "karix_store.db").exists():
-        return Path("data") / "karix_store.db"
-    if Path("karix_store.db").exists():
-        return Path("karix_store.db")
-    if Path("data").is_dir():
-        return Path("data") / "karix_store.db"
-    return Path("karix_store.db")
+        return Path(env_p).expanduser().resolve()
+    root = Path(__file__).resolve().parent.parent
+    candidates = (root / "data" / "karix_store.db", root / "karix_store.db", root / "backend" / "karix_store.db")
+    return next((path for path in candidates if path.is_file() and path.stat().st_size), candidates[0])
 
 
+_load_env_file()
 DEFAULT_SQLITE_PATH = _resolve_default_db_path()
 DB_PATH = DEFAULT_SQLITE_PATH
 
@@ -239,8 +238,9 @@ SQLITE_SCHEMA_DDL = [
         email TEXT UNIQUE,
         password_hash TEXT,
         name TEXT NOT NULL,
-        tenant_id TEXT NOT NULL DEFAULT 'all',
+        tenant_id TEXT NOT NULL DEFAULT 'unassigned',
         role TEXT DEFAULT 'operator',
+        requested_tenant_id TEXT,
         created_at TEXT NOT NULL,
         last_login TEXT,
         is_active INTEGER DEFAULT 1
@@ -455,8 +455,9 @@ POSTGRES_SCHEMA_DDL = [
         email VARCHAR(255) UNIQUE,
         password_hash TEXT,
         name VARCHAR(255) NOT NULL,
-        tenant_id VARCHAR(100) NOT NULL DEFAULT 'all',
+        tenant_id VARCHAR(100) NOT NULL DEFAULT 'unassigned',
         role VARCHAR(50) DEFAULT 'operator',
+        requested_tenant_id VARCHAR(100),
         created_at VARCHAR(100) NOT NULL,
         last_login VARCHAR(100),
         is_active INTEGER DEFAULT 1
@@ -675,6 +676,10 @@ def init_database(conn: DBConnection | None = None) -> None:
         clean_stmt = stmt.strip()
         if clean_stmt:
             conn.execute(clean_stmt)
+    if conn.is_postgres:
+        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_tenant_id VARCHAR(100)")
+    elif "requested_tenant_id" not in {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}:
+        conn.execute("ALTER TABLE users ADD COLUMN requested_tenant_id TEXT")
     conn.commit()
 
 

@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useApp } from '@/lib/context';
+import { isPendingUser } from '@/lib/api';
 import { useTabState, clearTabState } from '@/lib/tab-state';
 import Nav from '@/components/nav';
 import ChatWidget from '@/components/chat-widget';
@@ -23,20 +24,27 @@ const TAB_META: Record<string, { label: string; icon: string }> = {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { account } = useApp();
+  const { account, currentUser, authLoading } = useApp();
   const isAuthPage = pathname === '/login' || pathname === '/signup';
+  const hasWorkspace = !authLoading && Boolean(currentUser) && !isPendingUser(currentUser);
 
   const [openTabs, setOpenTabs] = useTabState<string[]>('workspace_open_tabs', ['/']);
   const prevAccountRef = useRef(account);
+  useEffect(() => {
+    if (authLoading || isAuthPage) return;
+    if (!currentUser) router.replace('/login');
+    else if (isPendingUser(currentUser)) router.replace('/signup');
+  }, [authLoading, currentUser, isAuthPage, router]);
+
 
   // Keep open tabs updated as user navigates
   useEffect(() => {
-    if (isAuthPage) return;
+    if (isAuthPage || !hasWorkspace) return;
     setOpenTabs((prev) => {
       if (prev.includes(pathname)) return prev;
       return [...prev, pathname];
     });
-  }, [pathname, isAuthPage, setOpenTabs]);
+  }, [pathname, isAuthPage, hasWorkspace, setOpenTabs]);
 
   // When account changes, clear cached drafts so they don't leak across tenants
   useEffect(() => {
@@ -61,6 +69,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       router.push(target);
     }
   };
+  if (!isAuthPage && !hasWorkspace) {
+    return <div className="min-h-screen flex items-center justify-center text-sm text-gray-500" role="status">{authLoading ? 'Checking your session...' : 'Redirecting to your account...'}</div>;
+  }
+
   return (
     <>
       {!isAuthPage && <Nav />}

@@ -23,6 +23,7 @@ export type AuthUser = {
   name: string;
   tenant_id: string;
   role: string;
+  requested_tenant_id?: string | null;
   created_at?: string;
   last_login?: string;
 };
@@ -32,17 +33,33 @@ export type AuthResponse = {
   token: string;
 };
 
+export type RequestedTenant = "bajaj" | "tata" | "apparel";
+
+const TATA_ACCOUNTS = ["tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"];
+
+export function accountOrganization(account: string): string {
+  return TATA_ACCOUNTS.includes(account) ? "tata" : account;
+}
+
+export function isPendingUser(user: AuthUser | null): boolean {
+  return Boolean(user && user.role !== "superadmin" && (
+    user.tenant_id === "unassigned" || user.tenant_id === "all"
+  ));
+}
+
 export function canAccessAccount(user: AuthUser | null, account: string): boolean {
-  if (!user) return false;
+  if (!user || isPendingUser(user)) return false;
   const target = account.toLowerCase().trim();
-  if (user.role === "superadmin") return Boolean(target);
-  if (!target || target === "all" || user.tenant_id === "all") return false;
+  if (!target || target === "unassigned") return false;
+  if (user.role === "superadmin") return true;
+  if (target === "all") return false;
   return target === user.tenant_id || (
-    user.tenant_id === "tata" && ["tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"].includes(target)
+    user.tenant_id === "tata" && accountOrganization(target) === "tata"
   );
 }
 
 export function authorizedAccount(user: AuthUser, savedAccount: string | null): string {
+  if (isPendingUser(user)) return "";
   const saved = savedAccount?.toLowerCase().trim();
   if (saved && canAccessAccount(user, saved)) return saved;
   return user.role === "superadmin" ? "all" : user.tenant_id === "tata" ? "tcl_promo" : user.tenant_id;
@@ -793,10 +810,56 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
   }
   return data;
 }
+export async function signupUser(
+  email: string,
+  password: string,
+  name: string,
+  tenantId: RequestedTenant
+): Promise<AuthResponse> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/signup"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, name, tenant_id: tenantId }),
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data: AuthResponse = await res.json();
+  if (data.token) setAuthToken(data.token);
+  return data;
+}
+
+export async function requestCompanyAccess(tenantId: RequestedTenant): Promise<AuthUser> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/access-requests"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tenant_id: tenantId }),
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data: { user: AuthUser } = await res.json();
+  return data.user;
+}
+
+export async function fetchAccessRequests(tenantId?: RequestedTenant): Promise<AuthUser[]> {
+  const query = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : "";
+  const res = await fetchWithRetry(getApiUrl(`/api/auth/access-requests${query}`));
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function approveAccessRequest(userId: string): Promise<AuthUser> {
+  const res = await fetchWithRetry(getApiUrl(`/api/auth/access-requests/${encodeURIComponent(userId)}/approve`), {
+    method: "POST",
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data: { user: AuthUser } = await res.json();
+  return data.user;
+}
+
 
 
 export async function fetchMe(): Promise<AuthUser> {
+  const token = getAuthToken();
   const res = await fetchWithRetry(getApiUrl("/api/auth/me"));
+  if ((res.status === 401 || res.status === 403) && getAuthToken() === token) clearAuthToken();
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

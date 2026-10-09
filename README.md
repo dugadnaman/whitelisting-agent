@@ -71,7 +71,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - Integrates with an isolated worker service deployed on Railway with dedicated persistent MoEngage Chromium browser.
    - Browser attribution waits for the current MoEngage page's `load` event before opening a saved Behavior report. Navigating at `DOMContentLoaded` can interrupt dashboard startup and leave the report stuck in its navigation shell, even when the workspace label is visible.
    - Strict tenant isolation: Karix users from Tata or Bajaj cannot access Apparel attribution; authentication is fail-closed.
-   - Login offers Bajaj Finserv, Tata Capital, and Apparel, with automatic organization selection retained as the default. An explicit choice must match the authenticated user's organization (or platform-superadmin access); mismatches clear the returned token and stay on login. Apparel sign-ins open `/apparel/attribution` directly. Accounts still require administrator provisioning; the selector does not grant permissions.
+   - Login offers Bajaj Finserv, Tata Capital, and Apparel, with automatic organization selection retained as the default. An explicit choice must match an assigned user's organization (or platform-superadmin access); mismatches clear the returned token and stay on login. Apparel sign-ins open `/apparel/attribution` directly. Pending users sign in to `/signup` to request company access; the selector itself never grants permissions.
    - Overwrite protection (off by default) ensures existing completed attribution figures are never overwritten unintentionally.
 ---
 
@@ -176,9 +176,19 @@ Configure these service environment variables before deploying:
 - `DATABASE_URL`: a persistent PostgreSQL connection URL, such as a dedicated Neon database with TLS enabled. SQLite files on Render Free are ephemeral and do not preserve accounts across redeploys.
 - `JWT_SECRET`: a strong, private signing key generated once (for example, `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'`). Keep it stable across redeploys; changing it invalidates existing sessions.
 
-Database initialization creates the schema, not a default login. Provision accounts through the administrator flow, or restore existing user records from a trusted backup while preserving their IDs, password hashes, tenant assignments, roles, and active status. Do not enable public signup or bypass password verification to recover access.
+Database initialization creates the schema, not a default login. Bootstrap the first company administrator explicitly. Public signup creates only a password-protected, unassigned Operator account requesting a company; an authorized administrator must approve it before any company data is available. Do not bypass password verification or promote legacy global accounts to recover access.
 
 Verification must include a real login after redeployment and confirmation that its `last_login` update reaches PostgreSQL. Persistent application authentication does not refresh MoEngage portal sessions; expired Tata bearer/refresh tokens and cookies still require manual reconnection in **Settings → MoEngage**.
+
+#### Login, signup and existing-account recovery
+
+- `/signup` accepts a name, work email, password and requested company. Passwords require at least 12 characters and at most 72 UTF-8 bytes; spaces are preserved. Duplicate registration never overwrites an existing account or password.
+- A company administrator approves applicants in **Settings → Organization Team Directory → Pending company access requests**. Approval grants only that requested company's Operator access. Operators cannot approve requests; company admins cannot approve another company's applicants.
+- Older `all` / `Operator` identities are normalized on backend startup without resetting passwords, replacing IDs or reactivating disabled accounts. They can sign in, but must request and receive a concrete company assignment before accessing data. Existing valid company assignments and platform-superadmin accounts remain intact.
+- Pending users can refresh approval status or sign out from `/signup`; successful approval opens their assigned workspace. Requests and approvals do not replace the administrator's session.
+- Default local SQLite selection is repository-anchored rather than dependent on the terminal's folder. Existing nonempty stores are preferred in `data/karix_store.db`, then repository-root `karix_store.db`, then `backend/karix_store.db`; fresh installs use `data/karix_store.db`. `KARIX_DB_PATH` explicitly selects a different store. Stores are not merged, and local accounts are not automatically copied to another laptop or a cloud database.
+- Missing or weak `JWT_SECRET` produces an authentication-configuration error, not a replacement signing key. The native local setup generates its key once; deployed services must keep their configured key persistent.
+
 
 ### 2. Local Development
 

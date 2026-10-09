@@ -1,5 +1,6 @@
 """Strict, offline authentication and provisioning regressions using real DB users/JWTs."""
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -142,10 +143,268 @@ def test_revocation_and_current_database_permissions(client, provision_user):
 
 @pytest.mark.parametrize("role", ["operator", "admin", "superadmin"])
 def test_public_signup_cannot_assign_privileges(client, role):
-    response = client.post("/api/auth/signup", json={"email": "attacker@example.com", "password": "Attacker-password-123", "name": "Attacker", "tenant_id": "all", "role": role})
-    assert response.status_code == 403
+    response = client.post("/api/auth/signup", json={"email": "attacker@example.com", "password": "Attacker-password-123", "name": "Attacker", "tenant_id": "apparel", "role": role})
+    assert response.status_code == 422
     with db.get_db() as conn:
         assert conn.execute("SELECT id FROM users WHERE email = 'attacker@example.com'").fetchone() is None
+
+
+def test_legacy_password_login_stays_pending_until_company_approval(client, provision_user):
+    legacy, _ = provision_user(email="legacy@example.com")
+    with db.get_db() as conn:
+        conn.execute("UPDATE users SET tenant_id = ' ALL ', role = 'Operator', email = ? WHERE id = ?", (" \tLegacy@Example.com\n ", legacy["id"]))
+        before = dict(conn.execute("SELECT * FROM users WHERE id = ?", (legacy["id"],)).fetchone())
+    auth.init_auth_db()
+    auth.init_auth_db()
+    with db.get_db() as conn:
+        migrated = dict(conn.execute("SELECT * FROM users WHERE id = ?", (legacy["id"],)).fetchone())
+    assert migrated["tenant_id"] == "unassigned" and migrated["role"] == "operator"
+    assert {key: value for key, value in migrated.items() if key not in ("tenant_id", "role")} == {
+        key: value for key, value in before.items() if key not in ("tenant_id", "role")
+    }
+    credentials = {"email": " LEGACY@example.com ", "password": "Test-only-password-456!"}
+    assert client.post("/api/auth/login", json={**credentials, "password": "Wrong-password-123!"}).status_code == 401
+    login = client.post("/api/auth/login", json=credentials)
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['token']}"}
+    assert client.get("/api/auth/me", headers=headers).json()["requested_tenant_id"] is None
+    for path in (
+        "/api/users", "/api/activity/stats", "/api/accounts", "/api/auth/team",
+        "/api/stats?account=apparel", "/api/stats?account=unassigned", "/api/stats?account=all",
+        "/api/work-management/projects", "/api/auth/access-requests", "/api/nonexistent",
+    ):
+        assert client.get(path, headers=headers).status_code == 403, path
+    assert client.post("/api/accounts", headers=headers, json={"name": "Unapproved"}).status_code == 403
+    with pytest.raises(ValueError, match="already exists"):
+        auth.register_user("legacy@example.com", "Replacement-password-123!", "Replacement", "apparel")
+    requested = client.post("/api/auth/access-requests", headers=headers, json={"tenant_id": "tata"})
+    assert requested.status_code == 200 and set(requested.json()) == {"user"}
+    assert requested.json()["user"]["tenant_id"] == "unassigned"
+    administrator, admin_headers = provision_user("tata", "admin", email="tata-admin@example.com")
+    applications = client.get("/api/auth/access-requests", headers=admin_headers)
+    assert applications.status_code == 200
+    assert [user["id"] for user in applications.json()] == [legacy["id"]]
+    approved = client.post(f"/api/auth/access-requests/{legacy['id']}/approve", headers=admin_headers)
+    assert approved.status_code == 200 and set(approved.json()) == {"user"}
+    assert approved.json()["user"]["tenant_id"] == "tata"
+    assert approved.json()["user"]["role"] == "operator"
+    assert approved.json()["user"]["requested_tenant_id"] is None
+    assert "password_hash" not in approved.json()["user"]
+    assert client.get("/api/auth/me", headers=admin_headers).json()["id"] == administrator["id"]
+    assert client.get("/api/auth/me", headers=headers).json()["tenant_id"] == "tata"
+    assert client.post("/api/auth/login", json=credentials).json()["user"]["tenant_id"] == "tata"
+    assert client.post("/api/auth/access-requests", headers=headers, json={"tenant_id": "bajaj"}).status_code == 403
+    with patch("api.load_accounts", return_value=[{"id": "tata", "name": "Tata"}, {"id": "apparel", "name": "Apparel"}]), patch("api.get_rcs_bot_id", return_value=""):
+        assert [account["id"] for account in client.get("/api/accounts", headers=headers).json()] == ["tata"]
+    with db.get_db() as conn:
+        final = dict(conn.execute("SELECT * FROM users WHERE id = ?", (legacy["id"],)).fetchone())
+    for key in ("id", "password_hash", "email", "name", "created_at", "is_active"):
+        assert final[key] == before[key]
+
+
+def test_signup_duplicate_preservation_and_company_approval_boundary(client, provision_user):
+    body = {"email": " Applicant@Example.com ", "password": "Applicant-password-123!", "name": "Applicant", "tenant_id": "apparel"}
+    signup = client.post("/api/auth/signup", json=body)
+    assert signup.status_code == 201
+    applicant = signup.json()["user"]
+    headers = {"Authorization": f"Bearer {signup.json()['token']}"}
+    assert applicant["email"] == "applicant@example.com"
+    assert applicant["tenant_id"] == "unassigned" and applicant["role"] == "operator"
+    assert applicant["requested_tenant_id"] == "apparel"
+    with db.get_db() as conn:
+        before = dict(conn.execute("SELECT * FROM users WHERE id = ?", (applicant["id"],)).fetchone())
+    assert before["is_active"] == 1 and auth.verify_password(body["password"], before["password_hash"])
+    duplicate = client.post("/api/auth/signup", json={**body, "email": "APPLICANT@example.com", "password": "Replacement-password-123!", "name": "Replacement", "tenant_id": "bajaj"})
+    assert duplicate.status_code == 400 and "already exists" in duplicate.json()["detail"]
+    with db.get_db() as conn:
+        assert dict(conn.execute("SELECT * FROM users WHERE id = ?", (applicant["id"],)).fetchone()) == before
+        assert conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"] == 1
+    assert client.post("/api/auth/login", json={"email": applicant["email"], "password": "Replacement-password-123!"}).status_code == 401
+    assert client.post("/api/auth/login", json={"email": applicant["email"], "password": body["password"]}).status_code == 200
+    assert client.get("/api/users", headers=headers).status_code == 403
+    _, other_headers = provision_user("bajaj", "admin", email="other-admin@example.com")
+    _, own_headers = provision_user("apparel", "admin", email="own-admin@example.com")
+    _, operator_headers = provision_user("apparel", "operator", email="operator@example.com")
+    assert client.get("/api/auth/access-requests", headers=other_headers).json() == []
+    assert client.get("/api/auth/access-requests?tenant_id=apparel", headers=other_headers).status_code == 403
+    assert client.post(f"/api/auth/access-requests/{applicant['id']}/approve", headers=other_headers).status_code == 403
+    assert client.post(f"/api/auth/access-requests/{applicant['id']}/approve", headers=operator_headers).status_code == 403
+    assert client.get("/api/auth/me", headers=headers).json()["tenant_id"] == "unassigned"
+    approved = client.post(f"/api/auth/access-requests/{applicant['id']}/approve", headers=own_headers)
+    assert approved.status_code == 200 and set(approved.json()) == {"user"}
+    assert approved.json()["user"]["tenant_id"] == "apparel"
+    assert client.get("/api/auth/me", headers=headers).json()["tenant_id"] == "apparel"
+    assert client.post("/api/auth/login", json={"email": applicant["email"], "password": body["password"]}).json()["user"]["tenant_id"] == "apparel"
+    assert client.post(f"/api/auth/access-requests/{applicant['id']}/approve", headers=own_headers).status_code == 409
+
+
+@pytest.mark.parametrize("tenant_id", ["all", "unassigned", "tchfl", "unknown", ""])
+def test_signup_rejects_unsupported_requested_company(client, tenant_id):
+    response = client.post("/api/auth/signup", json={
+        "email": "invalid-request@example.com", "password": "Applicant-password-123!", "name": "Applicant", "tenant_id": tenant_id,
+    })
+    assert response.status_code == 422
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"] == 0
+
+
+def test_access_request_competing_updates_do_not_approve_stale_company(client, provision_user):
+    pending = auth.register_user("race@example.com", "Race-password-123!", "Race", "unassigned", requested_tenant_id="apparel")
+    _, admin_headers = provision_user("apparel", "admin")
+    original_profile = auth._user_profile
+
+    def changed_request(conn, user_id):
+        profile = original_profile(conn, user_id)
+        if user_id == pending["id"]:
+            with db.get_db() as competing:
+                competing.execute("UPDATE users SET requested_tenant_id = 'bajaj' WHERE id = ?", (user_id,))
+        return profile
+
+    with patch("auth._user_profile", side_effect=changed_request):
+        approval = client.post(f"/api/auth/access-requests/{pending['id']}/approve", headers=admin_headers)
+    assert approval.status_code == 409
+    current = auth.get_user_profile(pending["id"])
+    assert current["tenant_id"] == "unassigned" and current["requested_tenant_id"] == "bajaj"
+    with pytest.raises(HTTPException) as conflict:
+        auth.request_organization_access({**current, "requested_tenant_id": "apparel"}, "tata")
+    assert conflict.value.status_code == 409
+    assert auth.get_user_profile(pending["id"]) == current
+
+
+def test_superadmin_can_list_and_filter_active_pending_requests(client, provision_user):
+    _, headers = provision_user("all", "superadmin")
+    applicants = [
+        auth.register_user(f"pending-{tenant}@example.com", "Applicant-password-123!", tenant, "unassigned", requested_tenant_id=tenant)
+        for tenant in ("bajaj", "tata", "apparel")
+    ]
+    with db.get_db() as conn:
+        conn.execute("UPDATE users SET is_active = 0 WHERE id = ?", (applicants[0]["id"],))
+    listing = client.get("/api/auth/access-requests", headers=headers)
+    assert listing.status_code == 200
+    assert {user["requested_tenant_id"] for user in listing.json()} == {"tata", "apparel"}
+    filtered = client.get("/api/auth/access-requests?tenant_id=tata", headers=headers)
+    assert [user["id"] for user in filtered.json()] == [applicants[1]["id"]]
+    assert client.get("/api/auth/access-requests?tenant_id=all", headers=headers).status_code == 400
+    assert client.post(f"/api/auth/access-requests/{applicants[0]['id']}/approve", headers=headers).status_code == 404
+    assert client.post(f"/api/auth/access-requests/{applicants[1]['id']}/approve", headers=headers).json()["user"]["tenant_id"] == "tata"
+
+
+@pytest.mark.parametrize("tenant,role,active,expected_tenant,expected_role", [
+    (" ALL ", "Admin", 0, "unassigned", "operator"),
+    (" TATA ", "Admin", 1, "tata", "admin"),
+    (" ALL ", "SuperAdmin", 1, "all", "superadmin"),
+    ("Custom_Company", "Operator", 1, "custom_company", "operator"),
+])
+def test_legacy_scope_normalization_preserves_password_and_active_state(provision_user, tenant, role, active, expected_tenant, expected_role):
+    user, _ = provision_user()
+    with db.get_db() as conn:
+        conn.execute("UPDATE users SET tenant_id = ?, role = ?, is_active = ? WHERE id = ?", (tenant, role, active, user["id"]))
+        before = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+    auth.init_auth_db()
+    auth.init_auth_db()
+    with db.get_db() as conn:
+        after = dict(conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone())
+    assert after == {**before, "tenant_id": expected_tenant, "role": expected_role}
+    login = auth.authenticate_user(user["email"], "Test-only-password-456!")
+    assert bool(login) == bool(active)
+    with pytest.raises(ValueError, match="already exists"):
+        auth.register_user(user["email"].upper(), "Replacement-password-123!", "Replacement", "apparel")
+
+
+def test_old_sqlite_user_schema_adds_nullable_request_without_reset(provision_user, tmp_path, monkeypatch):
+    path = tmp_path / "old-schema.db"
+    password_hash = auth.hash_password("Legacy-password-123!")
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT UNIQUE, password_hash TEXT, name TEXT NOT NULL, "
+            "tenant_id TEXT NOT NULL, role TEXT, created_at TEXT NOT NULL, last_login TEXT, is_active INTEGER)"
+        )
+        conn.execute("INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (
+            "legacy-id", "legacy-schema@example.com", password_hash, "Legacy", "all", "Operator", "2020-01-01", "2020-02-01", 1,
+        ))
+    monkeypatch.setattr(db, "DEFAULT_SQLITE_PATH", path)
+    auth.init_auth_db()
+    auth.init_auth_db()
+    with db.get_db() as conn:
+        row = dict(conn.execute("SELECT * FROM users WHERE id = 'legacy-id'").fetchone())
+    assert row["requested_tenant_id"] is None
+    assert row["tenant_id"] == "unassigned" and row["role"] == "operator"
+    assert row["password_hash"] == password_hash and row["is_active"] == 1
+    assert row["created_at"] == "2020-01-01" and row["last_login"] == "2020-02-01"
+    assert auth.authenticate_user(row["email"], "Legacy-password-123!")["user"]["id"] == "legacy-id"
+
+
+
+
+def test_retained_account_authentication_is_cwd_independent(provision_user, tmp_path, monkeypatch):
+    root = tmp_path / "repository"
+    (root / "backend").mkdir(parents=True)
+    (root / "data").mkdir()
+    retained = root / "data" / "karix_store.db"
+    conflicting = root / "backend" / "karix_store.db"
+    conflicting.write_bytes(b"untouched-conflicting-store")
+    monkeypatch.delenv("KARIX_DB_PATH", raising=False)
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(db, "__file__", str(root / "backend" / "db.py"))
+    monkeypatch.setattr(db, "DEFAULT_SQLITE_PATH", retained)
+    auth.init_auth_db()
+    user, _ = provision_user(email="retained@example.com")
+    for directory in (root, root / "backend", tmp_path):
+        monkeypatch.chdir(directory)
+        assert db._resolve_default_db_path() == retained
+        monkeypatch.setattr(db, "DEFAULT_SQLITE_PATH", db._resolve_default_db_path())
+        login = auth.authenticate_user(user["email"], "Test-only-password-456!")
+        assert login["user"]["id"] == user["id"] and login["user"]["tenant_id"] == "apparel"
+    assert conflicting.read_bytes() == b"untouched-conflicting-store"
+
+
+def test_empty_placeholders_do_not_hide_existing_backend_accounts(provision_user, tmp_path, monkeypatch):
+    root = tmp_path / "repository"
+    (root / "backend").mkdir(parents=True)
+    (root / "data").mkdir()
+    retained = root / "backend" / "karix_store.db"
+    monkeypatch.setattr(db, "__file__", str(root / "backend" / "db.py"))
+    monkeypatch.setattr(db, "DEFAULT_SQLITE_PATH", retained)
+    auth.init_auth_db()
+    user, _ = provision_user(email="retained-backend@example.com")
+    (root / "data" / "karix_store.db").touch()
+    (root / "karix_store.db").touch()
+    monkeypatch.delenv("KARIX_DB_PATH", raising=False)
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(db, "DEFAULT_SQLITE_PATH", db._resolve_default_db_path())
+    auth.init_auth_db()
+    login = auth.authenticate_user(user["email"], "Test-only-password-456!")
+    assert login is not None
+    assert login["user"]["id"] == user["id"]
+
+
+@pytest.mark.parametrize("process_url", [None, "postgresql://process.invalid/accounts"])
+def test_auth_schema_initialization_loads_file_config_before_strict_connection(provision_user, tmp_path, monkeypatch, process_url):
+    (tmp_path / ".env").write_text("DATABASE_URL=postgresql://file.invalid/accounts\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    if process_url is not None:
+        monkeypatch.setenv("DATABASE_URL", process_url)
+
+    def unavailable(*, strict_backend):
+        assert strict_backend is True
+        assert auth.os.environ["DATABASE_URL"] == (process_url or "postgresql://file.invalid/accounts")
+        raise RuntimeError("Configured PostgreSQL database is unavailable.")
+
+    with patch("auth._get_db", side_effect=unavailable):
+        with pytest.raises(HTTPException) as failure:
+            auth.init_auth_db()
+    assert failure.value.status_code == 503
+
+
+@pytest.mark.parametrize("account", ["apparel", "tata", "bajaj", "unassigned", "all"])
+def test_pending_identity_never_has_company_or_admin_permissions(account):
+    pending = {"tenant_id": "unassigned", "role": "operator"}
+    with pytest.raises(HTTPException) as failure:
+        auth.require_tenant_access(account, pending)
+    assert failure.value.status_code == 403
+    with pytest.raises(HTTPException):
+        auth.require_admin(pending)
 
 
 def test_authorized_staff_provisioning_does_not_replace_admin_session(client, provision_user):
@@ -269,6 +528,13 @@ def test_unconfigured_or_weak_secret_fails_closed(client, provision_user, monkey
     monkeypatch.setenv("JWT_SECRET", secret)
     assert client.get("/api/auth/me", headers=headers).status_code == 503
     assert client.post("/api/auth/login", json={"email": user["email"], "password": "Test-only-password-456!"}).status_code == 503
+    signup = client.post("/api/auth/signup", json={
+        "email": "unavailable-signup@example.com", "password": "Signup-password-456!",
+        "name": "New Colleague", "tenant_id": "apparel",
+    })
+    assert signup.status_code == 503
+    with db.get_db() as conn:
+        assert conn.execute("SELECT id FROM users WHERE email = ?", ("unavailable-signup@example.com",)).fetchone() is None
     assert client.get("/healthz").status_code == 200
 
 

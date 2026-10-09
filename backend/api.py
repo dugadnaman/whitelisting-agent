@@ -16,13 +16,13 @@ import tempfile
 import uuid
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from db_queue import (
     create_job_with_tasks,
@@ -41,10 +41,14 @@ from activity_tracker import (
 )
 from auth import (
     TATA_SUB_ACCOUNTS,
+    approve_access_request,
     authenticate_user,
+    create_access_token,
     get_current_user,
+    list_access_requests,
     list_tenant_team,
     register_user,
+    request_organization_access,
     require_tenant_access,
     security,
     require_admin,
@@ -162,6 +166,12 @@ async def authenticate_api_requests(request: Request, call_next):
         try:
             identity = await get_current_user(request, await security(request))
             request.state.current_user = identity
+            pending_identity_route = (
+                method == "GET" and path == "/api/auth/me"
+                or method == "POST" and path == "/api/auth/access-requests"
+            )
+            if identity["tenant_id"] == "unassigned" and not pending_identity_route:
+                raise HTTPException(status_code=403, detail="Organization access has not been approved.")
             if path == "/api/work-management" or path.startswith("/api/work-management/"):
                 require_tenant_access("tata", identity)
         except HTTPException as exc:
@@ -544,7 +554,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AccessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tenant_id: Literal["bajaj", "tata", "apparel"]
 
+
+class SignupRequest(AccessRequest):
+    email: str
+    password: str
+    name: str
 
 class TeamInviteRequest(BaseModel):
     email: str
@@ -554,10 +572,18 @@ class TeamInviteRequest(BaseModel):
     tenant_id: str | None = None
 
 
-@app.post("/api/auth/signup")
-def signup_endpoint():
-    """Public registration is closed; admins provision colleagues through team invite."""
-    raise HTTPException(status_code=403, detail="Public signup is disabled. Ask your organization administrator to provision your account.")
+@app.post("/api/auth/signup", status_code=201)
+def signup_endpoint(body: SignupRequest):
+    """Create a password-protected pending identity, never company access or an admin."""
+    try:
+        user = register_user(
+            body.email, body.password, body.name, "unassigned", "operator",
+            requested_tenant_id=body.tenant_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    token = create_access_token(user["id"], user["email"], user["tenant_id"], user["role"], user["name"])
+    return _json_safe({"user": user, "token": token})
 
 
 @app.post("/api/auth/login")
@@ -585,6 +611,29 @@ def get_me_endpoint(current_user: dict = Depends(get_current_user)):
     return _json_safe(current_user)
 
 
+@app.post("/api/auth/access-requests")
+def request_access_endpoint(body: AccessRequest, current_user: dict = Depends(get_current_user)):
+    try:
+        return _json_safe({"user": request_organization_access(current_user, body.tenant_id)})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/auth/access-requests")
+def list_access_requests_endpoint(
+    tenant_id: str | None = Query(None), current_user: dict = Depends(get_current_user),
+):
+    try:
+        return _json_safe(list_access_requests(current_user, tenant_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/auth/access-requests/{user_id}/approve")
+def approve_access_request_endpoint(user_id: str, current_user: dict = Depends(get_current_user)):
+    return _json_safe({"user": approve_access_request(user_id, current_user)})
+
+
 @app.get("/api/auth/team")
 def get_team_endpoint(
     tenant_id: str | None = Query(None),
@@ -605,7 +654,7 @@ def invite_team_member(body: TeamInviteRequest, current_user: dict = Depends(get
     tenant = (body.tenant_id or current_user["tenant_id"]).lower().strip()
     if current_user["role"] != "superadmin" and tenant != current_user["tenant_id"]:
         raise HTTPException(status_code=403, detail="Admins may provision only their own organization.")
-    if tenant == "all" or body.role.lower().strip() not in ("operator", "admin"):
+    if tenant in ("all", "unassigned") or body.role.lower().strip() not in ("operator", "admin"):
         raise HTTPException(status_code=400, detail="Choose a concrete organization and an operator or admin role.")
 
     try:

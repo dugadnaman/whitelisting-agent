@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   fetchAccounts,
@@ -10,6 +10,7 @@ import {
   clearAuthToken,
   canAccessAccount,
   authorizedAccount,
+  isPendingUser,
 } from './api';
 import type { Account, Channel, AccountItem, AuthUser, UserItem } from './api';
 
@@ -64,6 +65,7 @@ type AppContextType = {
   currentUser: AuthUser | null;
   setCurrentUser: (user: AuthUser | null) => void;
   authLoading: boolean;
+  refreshSession: () => Promise<AuthUser>;
   logout: () => void;
   accounts: AccountItem[];
   refreshAccounts: () => Promise<void>;
@@ -79,51 +81,91 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
-  const [account, setAccountState] = useState<Account>('tcl_promo');
+  const [account, setAccountState] = useState<Account>('');
   const [channel, setChannelState] = useState<Channel>('whatsapp');
   const [user, setUserState] = useState<string>('');
-  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [currentUser, setCurrentUserState] = useState<AuthUser | null>(null);
+  const currentUserRef = useRef<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [accounts, setAccounts] = useState<AccountItem[]>(DEFAULT_ACCOUNTS);
+  const [accounts, setAccounts] = useState<AccountItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [mounted, setMounted] = useState(false);
   const isTenantLocked = Boolean(
     currentUser && currentUser.role !== 'superadmin'
   );
 
+  const setCurrentUser = useCallback((profile: AuthUser | null) => {
+    const previous = currentUserRef.current;
+    currentUserRef.current = profile;
+    setCurrentUserState(profile);
+    setUserState(profile?.name || profile?.email || '');
+    const selectedAccount = profile ? authorizedAccount(profile, localStorage.getItem('karix_account')) : '';
+    setAccountState(selectedAccount);
+    if (!profile || isPendingUser(profile) || previous?.tenant_id !== profile.tenant_id || previous?.id !== profile.id) {
+      setAccounts([]);
+      setUsers([]);
+    }
+    if (!selectedAccount) return;
+    localStorage.setItem('karix_account', selectedAccount);
+    const savedChannel = localStorage.getItem('karix_channel');
+    if (selectedAccount === 'apparel') {
+      setChannelState('rcs');
+    } else if (savedChannel === 'whatsapp' || savedChannel === 'rcs' || savedChannel === 'sms') {
+      setChannelState(savedChannel);
+    }
+  }, []);
+
+  const refreshSession = useCallback(async () => {
+    const token = getAuthToken();
+    try {
+      if (!token) throw new Error('Please sign in again.');
+      const profile = await fetchMe();
+      if (getAuthToken() !== token) throw new Error('Your session changed. Please sign in again.');
+      setCurrentUser(profile);
+      return profile;
+    } catch (err) {
+      if (!getAuthToken()) {
+        setCurrentUser(null);
+        router.replace('/login');
+      }
+      throw err;
+    }
+  }, [router, setCurrentUser]);
+
   const refreshAccounts = useCallback(async () => {
+    const profile = currentUserRef.current;
+    if (!profile || isPendingUser(profile)) {
+      setAccounts([]);
+      return;
+    }
     try {
       const data = await fetchAccounts();
-      if (Array.isArray(data)) {
-        setAccounts(data);
-      }
+      if (currentUserRef.current === profile && Array.isArray(data)) setAccounts(data);
     } catch {
-      // Fallback
+      if (currentUserRef.current === profile) setAccounts([]);
     }
   }, []);
 
   const refreshUsers = useCallback(async () => {
     try {
-      if (!currentUser || account === 'all') {
+      if (!currentUser || isPendingUser(currentUser) || account === 'all' || !canAccessAccount(currentUser, account)) {
         setUsers([]);
         return;
       }
       const data = await fetchTeam(currentUser.role === 'superadmin' ? account : undefined);
-      if (Array.isArray(data)) {
+      if (currentUserRef.current === currentUser && Array.isArray(data)) {
         setUsers(data);
       }
     } catch {
-      // Fallback
+      setUsers([]);
     }
   }, [currentUser, account]);
   const logout = useCallback(() => {
     clearAuthToken();
     setCurrentUser(null);
-    setUserState('');
-    setAccounts([]);
-    setUsers([]);
+    setAccountState('');
     router.push('/login');
-  }, [router]);
+  }, [router, setCurrentUser]);
 
   // Authenticate user on initial mount
   useEffect(() => {
@@ -143,38 +185,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const userProfile = await fetchMe();
+        const userProfile = await refreshSession();
         if (ignore) return;
-
-        setCurrentUser(userProfile);
-        setUserState(userProfile.name || userProfile.email);
-
-        // Clamp saved preferences to the current, server-verified organization.
-        const selectedAccount = authorizedAccount(userProfile, localStorage.getItem('karix_account'));
-        setAccountState(selectedAccount);
-        localStorage.setItem('karix_account', selectedAccount);
-
-        const savedChannel = localStorage.getItem('karix_channel') as Channel;
-        if (selectedAccount === 'apparel') {
-          setChannelState('rcs');
-        } else if (savedChannel === 'whatsapp' || savedChannel === 'rcs' || savedChannel === 'sms') {
-          setChannelState(savedChannel);
+        if (isPendingUser(userProfile)) {
+          if (window.location.pathname !== '/signup') router.replace('/signup');
+        } else if (isAuthPage) {
+          const selectedAccount = authorizedAccount(userProfile, localStorage.getItem('karix_account'));
+          router.replace(selectedAccount === 'apparel' ? '/apparel/attribution' : '/');
         }
-
-        await refreshAccounts();
-        if (window.location.pathname === '/login') router.push('/');
       } catch (err) {
-        console.warn('Session expired or invalid token:', err);
-        clearAuthToken();
-        setCurrentUser(null);
-        setAccounts([]);
-        setUsers([]);
-        if (!isAuthPage) {
-          router.push('/login');
-        }
+        if (!ignore) console.warn('Unable to verify session:', err);
       } finally {
-        setAuthLoading(false);
-        setMounted(true);
+        if (!ignore) {
+          setAuthLoading(false);
+          setMounted(true);
+        }
       }
     }
 
@@ -183,7 +208,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return () => {
       ignore = true;
     };
-  }, [router, refreshAccounts]);
+  }, [router, refreshSession]);
+
+  useEffect(() => {
+    refreshAccounts();
+  }, [currentUser, refreshAccounts]);
 
   const setAccount = (newAccount: Account) => {
     const cleanAccount = newAccount.toLowerCase();
@@ -249,6 +278,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         currentUser,
         setCurrentUser,
         authLoading,
+        refreshSession,
         logout,
         accounts,
         refreshAccounts,

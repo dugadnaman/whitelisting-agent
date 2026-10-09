@@ -2,16 +2,8 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { loginUser, authorizedAccount, clearAuthToken } from '@/lib/api';
+import { loginUser, authorizedAccount, clearAuthToken, accountOrganization, isPendingUser } from '@/lib/api';
 
-const TATA_ACCOUNTS: Record<string, true> = {
-  tata: true,
-  tcl_promo: true,
-  tcl_trans: true,
-  tchfl: true,
-  wealth: true,
-  moneyfy: true,
-};
 
 export default function LoginPage() {
 
@@ -37,9 +29,13 @@ export default function LoginPage() {
 
     try {
       const res = await loginUser(finalEmail, finalPass);
+      if (isPendingUser(res.user)) {
+        window.location.href = '/signup';
+        return;
+      }
 
       const matchesOrganization = !organization || res.user.role === 'superadmin' ||
-        (organization === 'tata' ? TATA_ACCOUNTS[res.user.tenant_id] === true : res.user.tenant_id === organization);
+        accountOrganization(res.user.tenant_id) === organization;
       if (!matchesOrganization) {
         clearAuthToken();
         throw new Error('This account does not have access to the selected organization. Choose your own organization or contact its administrator.');
@@ -75,7 +71,7 @@ export default function LoginPage() {
 
         {/* Error Alert */}
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium flex items-start gap-2.5">
+          <div role="alert" className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium flex items-start gap-2.5">
             <span className="text-sm shrink-0 mt-0.5">⚠️</span>
             <div className="flex-1 leading-relaxed">
               <span className="font-semibold">Sign in failed: </span>
@@ -104,11 +100,13 @@ export default function LoginPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+            <label htmlFor="login-email" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
               <span>Work Email</span>
               <span className="text-[10px] text-blue-600 font-normal">e.g. @attributics.com</span>
             </label>
             <input
+              id="login-email"
+              disabled={loading}
               type="email"
               autoComplete="email"
               required
@@ -120,11 +118,14 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="login-password" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
               Password
             </label>
             <div className="relative">
               <input
+                id="login-password"
+                required
+                disabled={loading}
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 value={password}
@@ -134,6 +135,7 @@ export default function LoginPage() {
               />
               <button
                 type="button"
+                disabled={loading}
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-medium p-1"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}

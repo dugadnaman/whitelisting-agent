@@ -1,4 +1,4 @@
-"""JWT authentication, explicit user provisioning and strict tenant isolation."""
+"""JWT authentication, pending access requests and strict tenant isolation."""
 
 import argparse
 import getpass
@@ -6,8 +6,7 @@ import logging
 import os
 import re
 import uuid
-from pathlib import Path
-import secrets
+import string
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -16,13 +15,15 @@ import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from db import get_db as _get_db
+from db import DBConnection, get_db as _get_db
 
 logger = logging.getLogger(__name__)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 security = HTTPBearer(auto_error=False)
 TATA_SUB_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
+REQUESTABLE_TENANTS = {"bajaj", "tata", "apparel"}
+_PROFILE_COLUMNS = "id, email, name, tenant_id, role, requested_tenant_id, created_at, last_login"
 
 
 def _auth_db():
@@ -32,28 +33,16 @@ def _auth_db():
         raise HTTPException(status_code=503, detail="Authentication database is unavailable.") from exc
 
 def configured_jwt_secret() -> str:
-    """Retrieve cryptographically strong JWT secret, loading from .env or auto-generating for local dev."""
-    try:
-        from config import _load_env_file
-        _load_env_file()
-    except Exception:
-        pass
+    """Use one configured signing key; never replace it during authentication."""
+    from config import _load_env_file
+
+    _load_env_file()
     secret = os.environ.get("JWT_SECRET", "").strip()
     if not secret or len(secret.encode("utf-8")) < 32 or len(set(secret)) < 16 or secret == "karix_whitelisting_secure_jwt_secret_key_2026_prod":
-        dev_secret_path = Path(".jwt_secret")
-        if dev_secret_path.exists():
-            try:
-                secret = dev_secret_path.read_text(encoding="utf-8").strip()
-            except OSError:
-                secret = ""
-        if not secret or len(secret) < 32:
-            secret = secrets.token_urlsafe(48)
-            try:
-                dev_secret_path.write_text(secret, encoding="utf-8")
-                dev_secret_path.chmod(0o600)
-            except OSError:
-                pass
-        os.environ["JWT_SECRET"] = secret
+        raise HTTPException(
+            status_code=503,
+            detail="Authentication signing key is unavailable. Configure a strong, persistent JWT_SECRET.",
+        )
     return secret
 
 
@@ -69,11 +58,28 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def init_auth_db() -> None:
-    """Initialize schema only; never seed, reset or delete stored users."""
+    """Initialize and safely normalize legacy identity scopes; never seed or reset users."""
     from db import init_database
+    from config import _load_env_file
+
+    _load_env_file()
 
     with _auth_db() as conn:
         init_database(conn)
+        rows = conn.execute("SELECT id, tenant_id, role FROM users").fetchall()
+        for row in rows:
+            tenant = str(row["tenant_id"] or "").strip().lower()
+            role = str(row["role"] or "").strip().lower()
+            if (tenant == "all" and role != "superadmin") or tenant == "unassigned":
+                tenant, role = "unassigned", "operator"
+            elif role not in ("operator", "admin", "superadmin") or not re.fullmatch(r"[a-z0-9][a-z0-9_]{0,99}", tenant):
+                continue
+            if (tenant, role) != (row["tenant_id"], row["role"]):
+                conn.execute(
+                    "UPDATE users SET tenant_id = ?, role = ? WHERE id = ? AND tenant_id = ? "
+                    "AND (role = ? OR (role IS NULL AND ? IS NULL))",
+                    (tenant, role, row["id"], row["tenant_id"], row["role"], row["role"]),
+                )
 
 
 try:
@@ -118,10 +124,33 @@ def validate_identity_scope(tenant_id: str, role: str) -> None:
         raise ValueError("A valid organization ID is required.")
     if (tenant_id == "all") != (role == "superadmin"):
         raise ValueError("Only platform superadmins may have all-organization scope; company users require a concrete organization.")
+    if tenant_id == "unassigned" and role != "operator":
+        raise ValueError("Unassigned accounts must be operators.")
 
 
-def register_user(email: str, password: str, name: str, tenant_id: str, role: str = "operator") -> dict[str, Any]:
+def _email_matches(conn: DBConnection, email: str) -> list[Any]:
+    # Preserve stored legacy emails while comparing their normalized identity.
+    trim = "BTRIM" if conn.is_postgres else "TRIM"
+    return conn.execute(
+        f"SELECT * FROM users WHERE LOWER({trim}(email, ?)) = ? LIMIT 2",
+        (string.whitespace, email.lower().strip()),
+    ).fetchall()
+
+
+def _user_profile(conn: DBConnection, user_id: str) -> dict[str, Any] | None:
+    row = conn.execute(
+        f"SELECT {_PROFILE_COLUMNS} FROM users WHERE id = ? AND is_active = 1 AND password_hash IS NOT NULL",
+        (user_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def register_user(
+    email: str, password: str, name: str, tenant_id: str, role: str = "operator",
+    *, requested_tenant_id: str | None = None,
+) -> dict[str, Any]:
     """Create a user. Callers must authorize provisioning; existing users are never overwritten."""
+    configured_jwt_secret()
     clean_email, clean_name = email.lower().strip(), name.strip()
     clean_tenant, clean_role = tenant_id.lower().strip(), role.lower().strip()
     if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", clean_email):
@@ -130,29 +159,42 @@ def register_user(email: str, password: str, name: str, tenant_id: str, role: st
     if not clean_name:
         raise ValueError("Name is required.")
     validate_identity_scope(clean_tenant, clean_role)
+    if requested_tenant_id is not None and (requested_tenant_id not in REQUESTABLE_TENANTS or clean_tenant != "unassigned"):
+        raise ValueError("Request a supported organization only from an unassigned account.")
     now = datetime.now(UTC).isoformat()
     user_id = f"usr_{uuid.uuid4().hex}"
-    password_hash = hash_password(password)
     with _auth_db() as conn:
-        if conn.execute("SELECT id FROM users WHERE email = ?", (clean_email,)).fetchone():
+        if _email_matches(conn, clean_email):
             raise ValueError("An account with this email already exists; provisioning cannot reset it.")
-        conn.execute(
-            "INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
-            (user_id, clean_email, password_hash, clean_name, clean_tenant, clean_role, now),
+        inserted = conn.execute(
+            "INSERT INTO users (id, email, password_hash, name, tenant_id, role, requested_tenant_id, created_at, is_active) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1) ON CONFLICT(email) DO NOTHING",
+            (user_id, clean_email, hash_password(password), clean_name, clean_tenant, clean_role, requested_tenant_id, now),
         )
-    return {"id": user_id, "email": clean_email, "name": clean_name, "tenant_id": clean_tenant, "role": clean_role, "created_at": now}
+        if inserted.rowcount != 1:
+            raise ValueError("An account with this email already exists; provisioning cannot reset it.")
+    return {
+        "id": user_id, "email": clean_email, "name": clean_name, "tenant_id": clean_tenant,
+        "role": clean_role, "requested_tenant_id": requested_tenant_id, "created_at": now,
+    }
 
 
 def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
     configured_jwt_secret()
     with _auth_db() as conn:
-        row = conn.execute("SELECT * FROM users WHERE email = ? AND is_active = 1", (email.lower().strip(),)).fetchone()
-        if not row or not verify_password(password, row["password_hash"]):
+        matches = _email_matches(conn, email)
+        if len(matches) != 1:
+            return None
+        row = matches[0]
+        if row["is_active"] != 1 or not verify_password(password, row["password_hash"]):
             return None
         try:
             validate_identity_scope(row["tenant_id"], row["role"])
-        except (ValueError, TypeError):
-            return None
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                status_code=403,
+                detail="Your account permissions need administrator configuration.",
+            ) from exc
         user_data = dict(row)
         user_data.pop("password_hash", None)
         conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (datetime.now(UTC).isoformat(), row["id"]))
@@ -161,11 +203,7 @@ def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
 
 def get_user_profile(user_id: str) -> dict[str, Any] | None:
     with _auth_db() as conn:
-        row = conn.execute(
-            "SELECT id, email, name, tenant_id, role, created_at, last_login FROM users WHERE id = ? AND is_active = 1 AND password_hash IS NOT NULL",
-            (user_id,),
-        ).fetchone()
-        return dict(row) if row else None
+        return _user_profile(conn, user_id)
 
 
 def list_tenant_team(tenant_id: str) -> list[dict[str, Any]]:
@@ -200,19 +238,80 @@ async def get_current_user(request: Request, auth: HTTPAuthorizationCredentials 
 
 
 def require_admin(user: dict[str, Any]) -> None:
-    if user.get("role") not in ("admin", "superadmin"):
+    if user.get("tenant_id") == "unassigned" or user.get("role") not in ("admin", "superadmin"):
         raise HTTPException(status_code=403, detail="Organization administrator access required.")
 
 
 def require_tenant_access(account: str, user: dict[str, Any]) -> None:
     target = account.lower().strip()
     tenant = str(user.get("tenant_id", "")).lower().strip()
+    if tenant == "unassigned" or target == "unassigned":
+        raise HTTPException(status_code=403, detail="Organization access has not been approved.")
     if user.get("role") == "superadmin":
         return
     if target and target != "all" and tenant != "all" and (target == tenant or tenant == "tata" and target in TATA_SUB_ACCOUNTS):
         return
     raise HTTPException(status_code=403, detail=f"Access denied to organization '{target}'.")
 
+
+
+def request_organization_access(user: dict[str, Any], tenant_id: str) -> dict[str, Any]:
+    if user.get("tenant_id") != "unassigned" or user.get("role") != "operator":
+        raise HTTPException(status_code=403, detail="Only unassigned accounts may request organization access.")
+    if tenant_id not in REQUESTABLE_TENANTS:
+        raise ValueError("Choose bajaj, tata or apparel.")
+    previous = user.get("requested_tenant_id")
+    with _auth_db() as conn:
+        updated = conn.execute(
+            "UPDATE users SET requested_tenant_id = ? WHERE id = ? AND tenant_id = 'unassigned' "
+            "AND role = 'operator' AND is_active = 1 "
+            "AND (requested_tenant_id = ? OR (requested_tenant_id IS NULL AND ? IS NULL))",
+            (tenant_id, user["id"], previous, previous),
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Account or access request changed; refresh your status.")
+        return _user_profile(conn, user["id"])
+
+
+def list_access_requests(user: dict[str, Any], tenant_id: str | None = None) -> list[dict[str, Any]]:
+    require_admin(user)
+    tenant = tenant_id.strip().lower() if tenant_id is not None else None
+    if user["role"] != "superadmin":
+        tenant = tenant or user["tenant_id"]
+        require_tenant_access(tenant, user)
+    if tenant is not None and tenant not in REQUESTABLE_TENANTS:
+        raise ValueError("Choose bajaj, tata or apparel.")
+    query = (
+        f"SELECT {_PROFILE_COLUMNS} FROM users WHERE tenant_id = 'unassigned' AND role = 'operator' "
+        "AND is_active = 1 AND password_hash IS NOT NULL AND requested_tenant_id IN ('bajaj', 'tata', 'apparel')"
+    )
+    params = ()
+    if tenant is not None:
+        query += " AND requested_tenant_id = ?"
+        params = (tenant,)
+    with _auth_db() as conn:
+        return [dict(row) for row in conn.execute(query + " ORDER BY created_at, id", params).fetchall()]
+
+
+def approve_access_request(user_id: str, administrator: dict[str, Any]) -> dict[str, Any]:
+    require_admin(administrator)
+    with _auth_db() as conn:
+        applicant = _user_profile(conn, user_id)
+        if not applicant:
+            raise HTTPException(status_code=404, detail="Active applicant not found.")
+        tenant = applicant["requested_tenant_id"]
+        if applicant["tenant_id"] != "unassigned" or applicant["role"] != "operator" or tenant not in REQUESTABLE_TENANTS:
+            raise HTTPException(status_code=409, detail="No pending organization access request.")
+        require_tenant_access(tenant, administrator)
+        updated = conn.execute(
+            "UPDATE users SET tenant_id = ?, role = 'operator', requested_tenant_id = NULL "
+            "WHERE id = ? AND tenant_id = 'unassigned' AND role = 'operator' "
+            "AND is_active = 1 AND requested_tenant_id = ?",
+            (tenant, user_id, tenant),
+        )
+        if updated.rowcount != 1:
+            raise HTTPException(status_code=409, detail="Account or access request changed; refresh the applicant list.")
+        return _user_profile(conn, user_id)
 
 def reset_password(email: str, password: str) -> dict[str, Any]:
     """Explicit local administrative rotation, preserving identity, role and active state."""
