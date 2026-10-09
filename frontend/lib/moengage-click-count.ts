@@ -85,24 +85,56 @@ function isCalendarDate(value: unknown): value is string {
   return Number.isFinite(instant.getTime()) && instant.toISOString().slice(0, 10) === value;
 }
 
-export function todayInTimezone(timezone: string, now = new Date()): string {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+function calendarDateFormatter(timezone: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat('en-US', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit', era: 'short' });
+}
+
+function calendarDateInTimezone(formatter: Intl.DateTimeFormat, instant: Date): string {
+  const parts = formatter.formatToParts(instant);
+  // An offset near year 0001 can cross into BC, outside the service's calendar.
+  if (parts.find((part) => part.type === 'era')?.value !== 'AD') return '';
   return ['year', 'month', 'day'].map((type) => parts.find((part) => part.type === type)?.value.padStart(type === 'year' ? 4 : 2, '0')).join('-');
 }
 
+export function todayInTimezone(timezone: string, now = new Date()): string {
+  return calendarDateInTimezone(calendarDateFormatter(timezone), now);
+}
+
 export function isValidClickCountRange(startDate: string, endDate: string, timezone: string, now = new Date()): boolean {
-  return isCalendarDate(startDate) && isCalendarDate(endDate) && endDate >= startDate && endDate <= todayInTimezone(timezone, now);
+  if (!isCalendarDate(startDate) || !isCalendarDate(endDate) || endDate < startDate || !isText(timezone)) return false;
+  try {
+    const today = todayInTimezone(timezone, now);
+    return isCalendarDate(today) && endDate <= today;
+  } catch {
+    return false;
+  }
+}
+
+function hasValidBaseDates(value: { created_at?: unknown; start_date?: unknown }, formatter: Intl.DateTimeFormat): value is { created_at: string; start_date: string } {
+  if (typeof value.created_at !== 'string' || !isCalendarDate(value.created_at.slice(0, 10)) || !isCalendarDate(value.start_date)
+    || !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|\+00:00)$/.test(value.created_at)) return false;
+  const instant = new Date(value.created_at);
+  return Number.isFinite(instant.getTime()) && value.start_date === calendarDateInTimezone(formatter, instant);
 }
 
 function assertResponse(condition: unknown): asserts condition {
   if (!condition) throw new ClickCountApiError('The click-count service returned an invalid response. Reload the data before continuing.', 0);
 }
 
-async function readResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) throw new ClickCountApiError(await getErrorMessage(res), res.status);
+async function readResponse<T>(res: Response, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
+  if (!res.ok) {
+    const message = await getErrorMessage(res);
+    // The shared error-body reader suppresses read errors; cancellation must still win.
+    signal?.throwIfAborted();
+    throw new ClickCountApiError(message, res.status);
+  }
   try {
-    return await res.json() as T;
+    const data = await res.json() as T;
+    signal?.throwIfAborted();
+    return data;
   } catch (error) {
+    signal?.throwIfAborted();
     if (typeof error === 'object' && error !== null && 'name' in error && error.name === 'SyntaxError') {
       throw new ClickCountApiError('The click-count service returned unreadable data. Reload the data before continuing.', 0);
     }
@@ -112,7 +144,7 @@ async function readResponse<T>(res: Response): Promise<T> {
 
 export async function fetchClickCountWorkspaces(signal?: AbortSignal): Promise<{ workspaces: ClickCountWorkspace[] }> {
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/workspaces`), { signal, cache: 'no-store' });
-  const data = await readResponse<{ workspaces: ClickCountWorkspace[] }>(res);
+  const data = await readResponse<{ workspaces: ClickCountWorkspace[] }>(res, signal);
   assertResponse(typeof data === 'object' && data !== null && Array.isArray(data.workspaces) && data.workspaces.every(
     (item) => isBase(item) && 'timezone' in item && isTimezone(item.timezone),
   ));
@@ -120,23 +152,25 @@ export async function fetchClickCountWorkspaces(signal?: AbortSignal): Promise<{
   return data;
 }
 
-export async function fetchClickCountBases(workspaceId: string, signal?: AbortSignal): Promise<{ bases: ClickCountBase[] }> {
+export async function fetchClickCountBases(workspaceId: string, signal?: AbortSignal, timezone?: string): Promise<{ bases: ClickCountBase[] }> {
   const qs = new URLSearchParams({ workspace_id: workspaceId });
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/bases?${qs}`), { signal, cache: 'no-store' });
-  const data = await readResponse<{ bases: ClickCountBase[] }>(res);
+  const data = await readResponse<{ bases: ClickCountBase[] }>(res, signal);
   assertResponse(typeof data === 'object' && data !== null && Array.isArray(data.bases) && data.bases.every(isBase));
   assertResponse(new Set(data.bases.map((item) => item.id)).size === data.bases.length);
-  return data;
+  const formatter = isTimezone(timezone) ? calendarDateFormatter(timezone) : null;
+  // Optional list metadata is only an optimization. Invalid pairs require the metadata endpoint.
+  return { bases: data.bases.map((base) => formatter && hasValidBaseDates(base, formatter)
+    ? { id: base.id, name: base.name, created_at: base.created_at, start_date: base.start_date }
+    : { id: base.id, name: base.name }) };
 }
 
 export async function fetchClickCountBase(workspaceId: string, baseId: string, signal?: AbortSignal): Promise<ClickCountBaseMetadata> {
   const qs = new URLSearchParams({ workspace_id: workspaceId });
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/bases/${encodeURIComponent(baseId)}?${qs}`), { signal, cache: 'no-store' });
-  const data = await readResponse<ClickCountBaseMetadata>(res);
-  assertResponse(isBase(data) && data.id === baseId && isCalendarDate(data.start_date) && isTimezone(data.timezone)
-    && typeof data.created_at === 'string' && isCalendarDate(data.created_at.slice(0, 10))
-    && /^\d{4}-\d{2}-\d{2}T.+(?:Z|\+00:00)$/.test(data.created_at) && Number.isFinite(Date.parse(data.created_at)));
-  assertResponse(data.start_date === todayInTimezone(data.timezone, new Date(data.created_at)));
+  const data = await readResponse<ClickCountBaseMetadata>(res, signal);
+  assertResponse(isBase(data) && data.id === baseId && isTimezone(data.timezone));
+  assertResponse(hasValidBaseDates(data, calendarDateFormatter(data.timezone)));
   return data;
 }
 
@@ -144,7 +178,7 @@ export async function startClickCountQuery(payload: StartClickCountRequest, sign
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/queries`), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal,
   }, 0);
-  const data = await readResponse<ClickCountQuery>(res);
+  const data = await readResponse<ClickCountQuery>(res, signal);
   assertResponse(typeof data === 'object' && data !== null && isText(data.query_id) && data.query_id.length <= 4096 && data.status === 'queued'
     && data.workspace_id === payload.workspace_id && data.base_id === payload.base_id && data.end_date === payload.end_date
     && isText(data.workspace_name) && isText(data.base_name) && isTimezone(data.timezone)
@@ -156,7 +190,7 @@ export async function fetchClickCountQuery(workspaceId: string, queryId: string,
   const qs = new URLSearchParams({ workspace_id: workspaceId });
   // The serialized polling loop handles transient failures; do not multiply each poll with retries.
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/queries/${encodeURIComponent(queryId)}?${qs}`), { signal, cache: 'no-store' }, 0);
-  const data = await readResponse<ClickCountQueryStatus>(res);
+  const data = await readResponse<ClickCountQueryStatus>(res, signal);
   assertResponse(typeof data === 'object' && data !== null && data.query_id === queryId
     && typeof data.status === 'string' && ['queued', 'running', 'success', 'failed'].includes(data.status)
     && (data.error === undefined || typeof data.error === 'string'));

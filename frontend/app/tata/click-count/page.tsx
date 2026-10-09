@@ -124,7 +124,7 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
     const controller = new AbortController();
     async function load() {
       try {
-        const data = await fetchClickCountBases(workspace.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
+        const data = await fetchClickCountBases(workspace.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]), workspace.timezone);
         if (!controller.signal.aborted) setBases(data.bases);
       } catch (err) {
         if (!controller.signal.aborted) setError(errorMessage(err));
@@ -139,7 +139,7 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
   const selected = new Set(selectedIds);
   const searchTerm = search.trim().toLowerCase();
   const filteredBases = bases.filter((base) => selected.has(base.id) || base.name.toLowerCase().includes(searchTerm));
-  const selectedBases = selectedIds.map((id) => bases.find((base) => base.id === id)).filter((base): base is ClickCountBase => Boolean(base));
+  const selectedBases = bases.filter((base) => selected.has(base.id));
 
   function toggleBase(baseId: string) {
     setSelectedIds((current) => current.includes(baseId)
@@ -398,6 +398,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
   const selectedMetadata = bases.map((base) => metadata[base.id]).filter((base): base is ClickCountBaseMetadata => Boolean(base));
   const maxStartDate = selectedMetadata.reduce((latest, base) => base.start_date > latest ? base.start_date : latest, '');
   const metadataReady = selectedMetadata.length === bases.length && loadingIds.length === 0 && Object.keys(metadataErrors).length === 0;
+  const loading = new Set(loadingIds);
   const validDates = metadataReady && Boolean(today && isValidClickCountRange(maxStartDate, endDate, workspace.timezone));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -412,7 +413,11 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
       unknownSubmission: false,
       error: '',
     }])));
-    await Promise.all(selectedMetadata.map(startOne));
+    try {
+      await Promise.all(selectedMetadata.map(startOne));
+    } finally {
+      submitLock.current = false;
+    }
   }
 
   function changeEndDate(value: string) {
@@ -433,7 +438,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
               <tr key={base.id}>
                 <td className="px-3 py-2 text-gray-700">{base.name}</td>
                 <td className="px-3 py-2 text-gray-600">
-                  {loadingIds.includes(base.id) ? 'Loading…' : metadata[base.id]?.start_date || 'Unavailable'}
+                  {loading.has(base.id) ? 'Loading…' : metadata[base.id]?.start_date || 'Unavailable'}
                 </td>
               </tr>
             ))}

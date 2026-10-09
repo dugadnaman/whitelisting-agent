@@ -856,3 +856,132 @@ def test_extra_query_input_fields_are_rejected():
     with pytest.raises(ValidationError):
         ClickCountQueryRequest(workspace_id=WORKSPACE["id"], base_id=BASE_ID, end_date="2026-10-09",
                                db_name="OtherTenant")
+
+
+@pytest.mark.parametrize("switch", ["activate", "select_workspace", "workspaces"])
+def test_base_cache_is_discarded_when_same_client_switches_workspace(monkeypatch, switch):
+    import moengage_click_count as module
+    client = object.__new__(module.ClickCountClient)
+    client.source_headers = {"authorization": "Bearer original"}
+    client.headers = client.source_headers.copy()
+    client.account_id = module.TATA_PORTAL_ACCOUNT_ID
+    other_id = "62aad9735e6ff766f85bb0b8"
+    base = {"id": BASE_ID, "name": "original workspace base", "source": "IMPORT_USERS",
+            "type": "FILE_V2", "deleted": False, "archived": False}
+    apps = [{"id": workspace_id, "name": workspace_id, "account_id": client.account_id,
+             "activated": True, "is_test": False} for workspace_id in (WORKSPACE["id"], other_id)]
+    listed_workspaces = []
+    def request(method, path, **kwargs):
+        if path == "/dash/auth/listApps":
+            return {"data": apps}
+        if path == "/dash/auth/changeApp":
+            return {"code": 200, "status": "success", "data": {
+                "bearer": "selected-" + kwargs["params"]["app_id"], "app_access_details": "ALLOWED"}}
+        if path == "/appsettings":
+            return {"data": {"time_zone": "UTC"}}
+        if path == "/v2/custom-segments/dashboard":
+            selected = client.headers["authorization"].removeprefix("Bearer selected-")
+            listed_workspaces.append(selected)
+            return {"custom_segments": [base] if selected == WORKSPACE["id"] else []}
+        pytest.fail("A base outside the active workspace must not reach its metadata endpoint.")
+    monkeypatch.setattr(client, "request", request)
+    client.activate(apps[0])
+    assert client.bases() == [{"id": BASE_ID, "name": base["name"]}]
+    if switch == "activate":
+        client.activate(apps[1])
+    elif switch == "select_workspace":
+        client.select_workspace(other_id)
+    else:
+        client.workspaces()
+    assert client.bases() == []
+    with pytest.raises(HTTPException) as error:
+        client.base(BASE_ID, include_db=False)
+    assert error.value.status_code == 404
+    assert listed_workspaces == [WORKSPACE["id"], other_id]
+
+
+def test_unexpected_metadata_conversion_errors_are_not_silently_omitted(monkeypatch):
+    import moengage_click_count as module
+    client = object.__new__(module.ClickCountClient)
+    row = {"id": BASE_ID, "name": "base", "source": "IMPORT_USERS", "type": "FILE_V2",
+           "deleted": False, "archived": False, "created_time": "2026-10-07T09:39:23Z"}
+    monkeypatch.setattr(client, "request", lambda *args, **kwargs: {"custom_segments": [row]})
+    def broken_conversion(*args):
+        raise RuntimeError("metadata conversion failed")
+    monkeypatch.setattr(module, "base_metadata", broken_conversion)
+    with pytest.raises(RuntimeError, match="metadata conversion failed"):
+        client.bases(WORKSPACE)
+
+
+@pytest.mark.parametrize("created", [None, "", False, 1, "invalid", "2026-02-30T00:00:00Z"])
+def test_invalid_optional_list_timestamp_never_supplies_a_creation_date(monkeypatch, created):
+    from moengage_click_count import ClickCountClient
+    client = object.__new__(ClickCountClient)
+    row = {"id": BASE_ID, "name": "base", "source": "IMPORT_USERS", "type": "FILE_V2",
+           "deleted": False, "archived": False, "created_time": created}
+    monkeypatch.setattr(client, "request", lambda *args, **kwargs: {"custom_segments": [row]})
+    assert client.bases(WORKSPACE) == [{"id": BASE_ID, "name": "base"}]
+
+
+def test_base_cache_avoids_duplicate_lists_and_does_not_expose_mutable_entries(monkeypatch):
+    from moengage_click_count import ClickCountClient
+    client = object.__new__(ClickCountClient)
+    row = {"id": BASE_ID, "name": "base", "source": "IMPORT_USERS", "type": "FILE_V2",
+           "deleted": False, "archived": False, "created_time": "2026-09-25T00:30:00Z"}
+    calls = []
+    def request(method, path, **kwargs):
+        calls.append(path)
+        return {"custom_segments": [row]}
+    monkeypatch.setattr(client, "request", request)
+    india = client.bases(WORKSPACE)
+    india[0]["id"] = QUERY_ID
+    west = client.bases({**WORKSPACE, "timezone": "America/Los_Angeles"})
+    assert west == [{"id": BASE_ID, "name": "base", "start_date": "2026-09-24",
+                     "created_at": "2026-09-25T00:30:00+00:00"}]
+    assert calls == ["/v2/custom-segments/dashboard"]
+
+
+@pytest.mark.parametrize("created", [None, "2026-10-07T09:39:23Z"])
+@pytest.mark.parametrize("timezone", [None, 1, "", "../UTC", "not/a/zone"])
+def test_invalid_workspace_timezone_is_not_swallowed_as_optional_timestamp_fallback(monkeypatch, created, timezone):
+    from moengage_click_count import ClickCountClient
+    client = object.__new__(ClickCountClient)
+    row = {"id": BASE_ID, "name": "base", "source": "IMPORT_USERS", "type": "FILE_V2",
+           "deleted": False, "archived": False, "created_time": created}
+    monkeypatch.setattr(client, "request", lambda *args, **kwargs: {"custom_segments": [row]})
+    with pytest.raises(HTTPException) as error:
+        client.bases({**WORKSPACE, "timezone": timezone})
+    assert error.value.status_code == 502
+
+
+@pytest.mark.parametrize("switch", ["activate", "select_workspace"])
+def test_failed_workspace_switch_cannot_retain_old_base_cache(monkeypatch, switch):
+    from moengage_click_count import ClickCountClient
+    client = object.__new__(ClickCountClient)
+    client.source_headers = {"authorization": "Bearer original"}
+    client.headers = {"authorization": "Bearer selected"}
+    client._bases_cache = [{"id": BASE_ID, "name": "old workspace base"}]
+    def reject_switch(*args, **kwargs):
+        raise HTTPException(status_code=503, detail="Session expired.")
+    monkeypatch.setattr(client, "request", reject_switch)
+    with pytest.raises(HTTPException) as error:
+        if switch == "activate":
+            client.activate(WORKSPACE)
+        else:
+            client.select_workspace(WORKSPACE["id"])
+    assert error.value.status_code == 503
+    assert client._bases_cache is None
+
+
+def test_non_validation_metadata_http_errors_are_not_swallowed(monkeypatch):
+    import moengage_click_count as module
+    client = object.__new__(module.ClickCountClient)
+    row = {"id": BASE_ID, "name": "base", "source": "IMPORT_USERS", "type": "FILE_V2",
+           "deleted": False, "archived": False, "created_time": "2026-10-07T09:39:23Z"}
+    monkeypatch.setattr(client, "request", lambda *args, **kwargs: {"custom_segments": [row]})
+    def denied_conversion(*args):
+        raise HTTPException(status_code=403, detail="Metadata access denied.")
+    monkeypatch.setattr(module, "base_metadata", denied_conversion)
+    with pytest.raises(HTTPException) as error:
+        client.bases(WORKSPACE)
+    assert error.value.status_code == 403

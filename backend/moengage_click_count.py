@@ -233,6 +233,11 @@ class ClickCountClient:
         return apps
 
     def bases(self, workspace: dict | None = None) -> list[dict]:
+        if workspace is not None:
+            try:
+                ZoneInfo(workspace["timezone"])
+            except (KeyError, ValueError, TypeError, ZoneInfoNotFoundError):
+                raise HTTPException(status_code=502, detail="MoEngage returned an invalid workspace timezone.") from None
         if not hasattr(self, "_bases_cache") or self._bases_cache is None:
             result = self.request("POST", "/v2/custom-segments/dashboard",
                                   params={"archived": "false"}, body={})
@@ -264,12 +269,18 @@ class ClickCountClient:
                     meta = base_metadata({"id": item["id"], "name": item["name"], "created_time": item["_created_time"]}, workspace)
                     entry["start_date"] = meta["start_date"]
                     entry["created_at"] = meta["created_at"]
-                except Exception:
-                    pass
+                except HTTPException as error:
+                    if error.status_code != 502:
+                        raise
+                    # Optional list timestamps can be absent or invalid; /meta
+                    # remains the authoritative fallback and query validation.
             result_bases.append(entry)
         return result_bases
 
     def activate(self, app: dict) -> dict:
+        # Imported-base membership is scoped to the currently activated app.
+        # Clear before switching so failed switches cannot retain old membership.
+        self._bases_cache = None
         self.headers = self.source_headers.copy()
         switched = self.request("GET", "/dash/auth/changeApp",
                                 params={"sls_enabled": "true", "app_id": app["id"]})
@@ -293,6 +304,7 @@ class ClickCountClient:
 
     def select_workspace(self, workspace_id: str) -> dict:
         validate_identifier(workspace_id, "workspace ID", object_id=True)
+        self._bases_cache = None
         self.headers = self.source_headers.copy()
         apps = self.authorized_apps()
         app = next((row for row in apps if row.get("id") == workspace_id), None)
@@ -301,6 +313,8 @@ class ClickCountClient:
         return self.activate(app)
 
     def workspaces(self) -> list[dict]:
+        self._bases_cache = None
+        self.headers = self.source_headers.copy()
         return [self.activate(app) for app in self.authorized_apps()]
 
     def base(self, base_id: str, *, include_db: bool = True) -> tuple[dict, str]:
@@ -404,10 +418,13 @@ def create_query(body: ClickCountQueryRequest):
     client = ClickCountClient()
     workspace = client.select_workspace(body.workspace_id)
     validate_end_date(body.end_date, workspace["timezone"])
-    raw_base, db_name = client.base(body.base_id, include_db=True)
+    raw_base, _ = client.base(body.base_id, include_db=False)
     base = base_metadata(raw_base, workspace)
+    payload = click_count_payload(base, body.end_date)
+    # Invalid provider timestamps and user ranges need no database lookup.
+    db_name = client.workspace_database()
     result = client.request("POST", "/segmentation/recent_query/count",
-                            params={"api": 1}, body=click_count_payload(base, body.end_date))
+                            params={"api": 1}, body=payload)
     query_id = result.get("rq_id")
     if result.get("success") is not True or not isinstance(query_id, str) or not re.fullmatch(r"[a-fA-F0-9]{24}", query_id):
         raise HTTPException(status_code=502, detail="MoEngage did not confirm a queued query. No automatic resubmission was attempted.")
