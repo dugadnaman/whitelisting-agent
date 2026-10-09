@@ -19,7 +19,6 @@ const panel = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm';
 const input = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-500';
 const primary = 'rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50';
 const secondary = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50';
-const MAX_SELECTED_BASES = 10;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -145,17 +144,14 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
   function toggleBase(baseId: string) {
     setSelectedIds((current) => current.includes(baseId)
       ? current.filter((id) => id !== baseId)
-      : current.length < MAX_SELECTED_BASES ? [...current, baseId] : current);
+      : [...current, baseId]);
   }
 
   function selectVisible() {
     setSelectedIds((current) => {
-      const next = [...current];
-      for (const base of filteredBases) {
-        if (next.length === MAX_SELECTED_BASES) break;
-        if (!next.includes(base.id)) next.push(base.id);
-      }
-      return next;
+      const next = new Set(current);
+      for (const base of filteredBases) next.add(base.id);
+      return [...next];
     });
   }
 
@@ -177,9 +173,9 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
       )}
       {!loading && !error && bases.length > 0 && (
         <fieldset>
-          <legend className="mb-2 text-sm font-medium text-gray-700">Imported bases · {selectedIds.length}/{MAX_SELECTED_BASES} selected</legend>
+          <legend className="mb-2 text-sm font-medium text-gray-700">Imported bases · {selectedIds.length} selected</legend>
           <div className="mb-2 flex justify-end gap-2">
-            <button type="button" className={secondary} disabled={busy || filteredBases.every((base) => selected.has(base.id)) || selectedIds.length === MAX_SELECTED_BASES} onClick={selectVisible}>Select visible</button>
+            <button type="button" className={secondary} disabled={busy || filteredBases.every((base) => selected.has(base.id))} onClick={selectVisible}>Select visible</button>
             <button type="button" className={secondary} disabled={busy || selectedIds.length === 0} onClick={() => setSelectedIds([])}>Clear</button>
           </div>
           <div id="click-bases" className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2">
@@ -187,14 +183,14 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
               const checked = selected.has(base.id);
               return (
                 <label key={base.id} className="flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm hover:bg-gray-50">
-                  <input type="checkbox" className="mt-0.5 h-4 w-4" checked={checked} disabled={busy || !checked && selectedIds.length === MAX_SELECTED_BASES} onChange={() => toggleBase(base.id)} />
+                  <input type="checkbox" className="mt-0.5 h-4 w-4" checked={checked} disabled={busy} onChange={() => toggleBase(base.id)} />
                   <span className="break-all text-gray-700">{base.name}</span>
                 </label>
               );
             })}
           </div>
           {filteredBases.length === 0 && <p role="status" className="mt-2 text-sm text-gray-500">No bases match your search.</p>}
-          <p className="mt-2 text-xs text-gray-500">Up to {MAX_SELECTED_BASES} bases run simultaneously. Each result remains separate.</p>
+          <p className="mt-2 text-xs text-gray-500">All selected bases start together. Each result remains separate.</p>
         </fieldset>
       )}
       {selectedBases.length > 0 && <MultiBaseCountForm workspace={workspace} bases={selectedBases} onBusyChange={onBusyChange} />}
