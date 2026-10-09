@@ -99,14 +99,14 @@ def test_tata_can_still_access_own_moengage_credentials(client, provision_user):
     assert response.json()["has_token"] is True
     credentials.assert_called_once_with("tata")
 
-def test_tata_operator_cannot_read_own_moengage_credentials(client, provision_user):
+def test_tata_operator_can_read_own_moengage_credentials(client, provision_user):
     _, headers = provision_user(tenant="tata", role="operator")
     client.headers.update(headers)
-    with patch("moengage_sync.get_moengage_credentials") as credentials:
+    with patch("moengage_sync.get_moengage_credentials", return_value={"has_token": True}) as credentials:
         response = client.get("/api/moengage/credentials?account=tata")
-    assert response.status_code == 403
-    credentials.assert_not_called()
-
+    assert response.status_code == 200
+    assert response.json()["has_token"] is True
+    credentials.assert_called_once_with("tata")
 
 def test_apparel_can_sync_rcs_to_apparel_moengage(client, provision_user):
     _, headers = provision_user(tenant="apparel", role="operator")

@@ -459,21 +459,23 @@ def test_cross_tenant_accounts_stats_and_copilot_rejected(client, provision_user
         assert [account["id"] for account in client.get("/api/accounts", headers=headers).json()] == ["bajaj"]
 
 
-def test_operators_cannot_read_change_or_test_credentials(client, provision_user):
-    _, headers = provision_user()
-    with patch("api._load_env_file") as env_loader, patch("api._commit_credentials_to_github") as persist, patch("moengage_sync.get_moengage_credentials") as credentials:
-        assert client.get("/api/credentials?account=apparel", headers=headers).status_code == 403
-        assert client.put("/api/credentials", headers=headers, json={"account": "apparel", "channel": "rcs", "rcs_auth_token": "do-not-write"}).status_code == 403
-        assert client.post("/api/test-credentials?account=apparel", headers=headers).status_code == 403
-        assert client.get("/api/moengage/credentials?account=apparel", headers=headers).status_code == 403
-        assert client.put("/api/moengage/credentials", headers=headers, json={"account": "apparel", "bearer_token": "do-not-write"}).status_code == 403
-        env_loader.assert_not_called()
-        persist.assert_not_called()
-        credentials.assert_not_called()
+def test_operators_can_read_and_update_own_credentials_but_cannot_cross_tenants_or_manage_platform(client, provision_user):
+    _, headers = provision_user("apparel")
+    with patch("api._load_env_file"), patch("api._commit_credentials_to_github"), patch("moengage_sync.get_moengage_credentials", return_value={"has_token": True}):
+        assert client.get("/api/credentials?account=apparel", headers=headers).status_code == 200
+        assert client.put("/api/credentials", headers=headers, json={"account": "apparel", "channel": "rcs", "rcs_bot_id": "apparel-bot"}).status_code == 200
+        assert client.get("/api/moengage/credentials?account=apparel", headers=headers).status_code == 200
+        assert client.put("/api/moengage/credentials", headers=headers, json={"account": "apparel", "bearer_token": "valid-token"}).status_code == 200
+        # Cross-tenant access remains forbidden
+        assert client.get("/api/credentials?account=tata", headers=headers).status_code == 403
+        assert client.put("/api/credentials", headers=headers, json={"account": "tata", "channel": "rcs", "rcs_bot_id": "tata-bot"}).status_code == 403
+        assert client.get("/api/moengage/credentials?account=tata", headers=headers).status_code == 403
+        assert client.put("/api/moengage/credentials", headers=headers, json={"account": "tata", "bearer_token": "valid-token"}).status_code == 403
+    # Platform administrative endpoints remain restricted
     assert client.post("/api/accounts", headers=headers, json={"name": "Escalated company"}).status_code == 403
     assert client.delete("/api/accounts/bajaj", headers=headers).status_code == 403
     assert client.post("/api/gemini/test", headers=headers, json={"api_key": "do-not-write"}).status_code == 403
-
+    assert client.put("/api/credentials", headers=headers, json={"account": "apparel", "channel": "whatsapp", "gemini_api_key": "secret"}).status_code == 403
 
 @pytest.mark.parametrize("email,bypass", [("dugadnaman@gmail.com", "namandugad13"), ("namandugad46@gmail.com", "Naman@123"), ("neel.shah@attributics.com", "Neel@123"), ("aadya.trivedi@attributics.com", "Password@123")])
 def test_known_password_bypasses_and_duplicate_resets_removed(client, provision_user, email, bypass):

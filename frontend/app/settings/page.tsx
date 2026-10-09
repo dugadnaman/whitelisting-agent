@@ -26,7 +26,8 @@ export default function SettingsPage() {
   );
   const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
   const teamTenant = currentUser?.role === 'superadmin' ? selectedAccount : currentUser?.tenant_id;
-  const canManage = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'));
+  const isAssigned = Boolean(currentUser && currentUser.tenant_id && currentUser.tenant_id !== 'unassigned');
+  const canManageTeam = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'));
   useEffect(() => {
     if (currentUser && !canAccessAccount(currentUser, selectedAccount)) {
       setSelectedAccount(authorizedAccount(currentUser, activeAccount));
@@ -79,7 +80,7 @@ export default function SettingsPage() {
   const [moeLoaded, setMoeLoaded] = useState(false);
   // Load MoEngage credentials for the selected account
   useEffect(() => {
-    if (!canManage) return;
+    if (!isAssigned) return;
     let ignore = false;
     async function loadMoEngage() {
       try {
@@ -98,7 +99,7 @@ export default function SettingsPage() {
     }
     loadMoEngage();
     return () => { ignore = true; };
-  }, [selectedAccount, canManage]);
+  }, [selectedAccount, isAssigned]);
 
   // Team Directory state
   const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
@@ -117,7 +118,7 @@ export default function SettingsPage() {
     const organization = accountOrganization(activeAccount);
     return organization === 'bajaj' || organization === 'tata' || organization === 'apparel' ? organization : '';
   });
-  const canApprove = canManage && Boolean(currentUser?.role === 'superadmin' || (
+  const canApprove = canManageTeam && Boolean(currentUser?.role === 'superadmin' || (
     currentUser && ['bajaj', 'tata', 'apparel'].includes(currentUser.tenant_id)
   ));
   const requestTenant = currentUser?.role === 'superadmin' ? requestFilter || undefined : currentUser?.tenant_id as RequestedTenant | undefined;
@@ -156,7 +157,7 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    if (!canManage) return;
+    if (!isAssigned) return;
     let ignore = false;
     async function loadServerCreds() {
       try {
@@ -212,7 +213,7 @@ export default function SettingsPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedAccount, selectedChannel, teamTenant, canManage]);
+  }, [selectedAccount, selectedChannel, teamTenant, isAssigned]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
@@ -456,7 +457,7 @@ export default function SettingsPage() {
     }
   }
 
-  if (!canManage) {
+  if (!isAssigned) {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-bold text-gray-900">Account settings</h1>
@@ -464,7 +465,7 @@ export default function SettingsPage() {
           <p className="text-sm font-semibold text-gray-900">{currentUser?.name}</p>
           <p className="text-sm text-gray-600">{currentUser?.email}</p>
           <p className="text-sm text-gray-600">Organization: {getAccountLabel(currentUser?.tenant_id)}</p>
-          <p className="text-xs text-gray-500">Your organization administrator manages team access and workspace credentials.</p>
+          <p className="text-xs text-gray-500">Your account is pending administrator approval before you can access organization workspaces and credentials.</p>
         </div>
       </div>
     );

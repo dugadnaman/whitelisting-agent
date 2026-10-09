@@ -74,7 +74,7 @@ from error_tracker import log_error
 from grammar_checker import lint_and_fix_body, validate_meta_technical_compliance
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus, SubmissionResult, SubmissionStatus
-from rcs_client import fetch_rcs_templates
+from rcs_client import fetch_rcs_templates, normalize_rcs_template_name
 
 # RCS pipeline imports
 from rcs_config import (
@@ -91,7 +91,7 @@ from rcs_config import (
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
 from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
 from rcs_runner import run_rcs
-from rcs_tracker import load_rcs_log, log_rcs_result
+from rcs_tracker import load_rcs_log, log_rcs_result, update_rcs_results
 from runner import get_pending_templates_sla_insights, poll_pending, run
 
 # SMS pipeline imports
@@ -708,32 +708,10 @@ def get_stats(
                 },
             }
         elif chan == "rcs":
-            local_entries = load_rcs_log(RCS_LOG_PATH)
-            local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-            live_templates = fetch_rcs_templates(client=acc)
-            seen_names = set()
-            merged = []
-
-            for lt in live_templates:
-                vi = lt.get("viTemplate", {})
-                name = vi.get("name") or str(lt.get("templateId", ""))
-                status_str = str(lt.get("status", "SUBMITTED")).upper()
-                merged.append(
-                    {
-                        "template_name": name,
-                        "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-                        "approval_status": status_str.lower(),
-                    }
-                )
-                seen_names.add(name.lower())
-
-            for le in local_entries:
-                if le.get("template_name", "").lower() not in seen_names:
-                    merged.append(le)
-
+            merged = _merge_rcs_templates(acc, None, None)
             total = len(merged)
             submitted = sum(1 for e in merged if e.get("status") == "submitted")
-            failed = sum(1 for e in merged if e.get("status") == "failed")
+            failed = sum(1 for e in merged if e.get("status") in ("failed", "blocked_aspect_ratio"))
             duplicate = sum(1 for e in merged if e.get("status") == "duplicate")
             return {
                 "total": total,
@@ -746,8 +724,8 @@ def get_stats(
                 "error": None,
                 "karix_health": _GOVERNOR.get_health_stats(),
                 "sla_insights": {
-                    "pending_count": 0,
-                    "due_for_poll_count": 0,
+                    "pending_count": sum(e.get("approval_status") == "pending" for e in merged),
+                    "due_for_poll_count": sum(e.get("approval_status") == "pending" for e in merged),
                     "categories": {},
                     "next_recommended_poll_sec": 120,
                 },
@@ -844,16 +822,28 @@ def _filter_and_sort_templates(entries: list[dict], status: str | None, search: 
     return res
 
 
+def _rcs_approval_status(status) -> str:
+    value = str(status or "").strip().lower()
+    if value in ("submitted", "pending", "pending_approval", "in_review"):
+        return "pending"
+    return value if value in ("approved", "rejected") else "unknown"
+
+
+
 def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
-    local_entries = [e for e in load_rcs_log(RCS_LOG_PATH) if (e.get("client", "bajaj") or "bajaj").lower() == acc]
+    local_entries = load_rcs_log(RCS_LOG_PATH, client=acc)
     live_templates = fetch_rcs_templates(client=acc)
-    seen_names = set()
+    bot_id = get_rcs_bot_id(acc)
     merged_entries = []
 
     for lt in live_templates:
-        vi = lt.get("viTemplate", {})
-        name = vi.get("name") or str(lt.get("templateId", ""))
-        status_str = str(lt.get("status", "SUBMITTED")).upper()
+        if not isinstance(lt, dict):
+            continue
+        vi = lt.get("viTemplate") if isinstance(lt.get("viTemplate"), dict) else {}
+        live_bot = str(lt.get("botId") or vi.get("botId") or "")
+        if live_bot and live_bot != bot_id:
+            continue
+        name = vi.get("name") or lt.get("template_name") or str(lt.get("templateId", ""))
         t_type = vi.get("type", "text")
 
         carousel_cards = vi.get("carouselCard", [])
@@ -890,13 +880,15 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
         entry = {
             "source_ref": name,
             "template_name": name,
-            "template_id": name,
+            "template_id": str(lt.get("templateId") or lt.get("id") or ""),
+            "provider_ref_id": str(lt.get("templateId") or lt.get("id") or ""),
+            "bot_id": bot_id,
             "template_type": t_type,
             "card_title": card_title,
             "template_message": msg,
             "sender_ids": [lt.get("botId", "")],
-            "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-            "approval_status": status_str.lower(),
+            "status": "submitted",
+            "approval_status": _rcs_approval_status(lt.get("status")),
             "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
             "provider_response": lt,
             "client": acc,
@@ -911,23 +903,21 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
             "suggestions": suggestions,
         }
         merged_entries.append(entry)
-        seen_names.add(name.lower())
 
-    for le in local_entries:
-        le_name = (le.get("template_name") or "").strip().lower()
-        le_clean = dict(le)
-        le_clean["error"] = _clean_error_message(le.get("error"))
-        if le_name in seen_names:
-            for me in merged_entries:
-                if me.get("template_name", "").strip().lower() == le_name:
-                    me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
-                    me["source_file"] = me.get("source_file") or le.get("source_file")
-                    me["exists_on_waba"] = True
-        else:
-            le_clean["live"] = False
-            le_clean["exists_on_waba"] = False
-            merged_entries.append(le_clean)
-            seen_names.add(le_name)
+    by_id = {entry["provider_ref_id"]: entry for entry in merged_entries if entry["provider_ref_id"]}
+    represented = set()
+    rows = []
+    for local in local_entries:
+        entry = {**local, "error": _clean_error_message(local.get("error")), "live": False, "exists_on_waba": False}
+        # Never attach history from another bot or a failed/blocked attempt by name.
+        live = by_id.get(str(local.get("provider_ref_id") or ""))
+        if live and local.get("bot_id") == bot_id:
+            represented.add(id(live))
+            approval = local.get("approval_status")
+            entry = {**live, **entry, "live": True, "exists_on_waba": True,
+                     "approval_status": approval if approval in ("approved", "rejected") else live["approval_status"]}
+        rows.append(entry)
+    merged_entries = rows + [entry for entry in merged_entries if id(entry) not in represented]
 
     return _filter_and_sort_templates(merged_entries, status, search)
 
@@ -1500,236 +1490,131 @@ async def _submit_rcs_batch(
     current_user: dict,
     fix_aspect_ratio: bool = True,
 ) -> dict:
+    # RCS credentials/media/bot identity must never be rerouted after parsing.
+    acc = acc.lower().strip()
+    require_tenant_access(acc, current_user)
+    bot_id = get_rcs_bot_id(acc)
     subs = (
-        load_rcs_from_excel(tmp_path, client=acc, fix_aspect_ratio=fix_aspect_ratio, upload_media=True)
+        await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=acc,
+                                fix_aspect_ratio=fix_aspect_ratio, upload_media=False)
         if suffix in (".xlsx", ".xls")
-        else load_rcs_from_csv(tmp_path, client=acc)
+        else await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=acc)
     )
     if not subs:
         raise HTTPException(status_code=400, detail=f"No valid RCS templates found in '{filename}' to submit.")
 
-    if auto_route:
-        from loader import detect_spreadsheet_account
-
-        detection = detect_spreadsheet_account(subs, current_account=acc)
-        if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
-            target_acc = detection["detected_account_id"]
-            try:
-                require_tenant_access(target_acc, current_user)
-                acc = target_acc
-            except HTTPException:
-                pass
-
-    to_submit = []
-    duplicate_entries = []
-    seen_in_batch: set[str] = set()
     results_by_index: list[dict | None] = [None] * len(subs)
-
+    preliminary: dict[int, RcsSubmissionResult] = {}
+    to_submit = []
     live_map = {}
     if skip_duplicates:
-        live_templates = fetch_rcs_templates(client=acc)
-        for lt in live_templates:
-            if not isinstance(lt, dict):
+        for template in await asyncio.to_thread(fetch_rcs_templates, client=acc):
+            if not isinstance(template, dict):
                 continue
-            vi = lt.get("viTemplate") if isinstance(lt.get("viTemplate"), dict) else {}
-            name = str(vi.get("name") or lt.get("template_name") or lt.get("templateId") or "").strip().lower()
-            if name:
-                live_map[name] = lt
-                safe_k = re.sub(r"[^a-zA-Z0-9_]", "_", name)[:25].strip("_").lower()
-                live_map[safe_k] = lt
-
-    for idx, s in enumerate(subs):
-        tname = str(s.template_name or "").strip()
-
-        # Strict Aspect Ratio Validation Gate
-        if getattr(s, "aspect_ratio_blocked", False):
-            blocked_err = (
-                getattr(s, "aspect_ratio_error", None)
-                or "Template not created: Image is not in recommended aspect ratio (16:9, 1:1, or 3:4). Auto-resizing has been removed."
-            )
-            block_res = RcsSubmissionResult(
-                source_ref=s.source_ref,
-                template_name=s.template_name,
-                template_id="",
-                status=RcsSubmissionStatus.BLOCKED_ASPECT_RATIO,
-                provider_ref_id="",
-                error=f"BLOCKED (Invalid Aspect Ratio): {blocked_err}",
-                provider_response=None,
-                approval_status="blocked_aspect_ratio",
-                client=acc,
-                channel="rcs",
-                submitted_by=user,
-                source_file=filename,
-            )
-            log_rcs_result(block_res, RCS_LOG_PATH)
-            entry_dict = asdict(block_res)
-            results_by_index[idx] = entry_dict
-            continue
-
-        if not tname:
-            to_submit.append((idx, s))
-            continue
-        name_key = tname.lower()
-        safe_key = re.sub(r"[^a-zA-Z0-9_]", "_", tname)[:25].strip("_").lower()
-
-        matched_live = (live_map.get(name_key) or live_map.get(safe_key)) if skip_duplicates else None
-
-        if skip_duplicates and matched_live:
-            live_obj = matched_live
-            status_str = str(live_obj.get("status", "APPROVED")).upper()
-            ref_id = str(live_obj.get("templateId", "") or live_obj.get("id", "") or "")
-            dupe_res = RcsSubmissionResult(
-                source_ref=s.source_ref,
-                template_name=s.template_name,
-                template_id=ref_id,
-                status=RcsSubmissionStatus.DUPLICATE,
-                provider_ref_id=ref_id,
-                error=f"RCS template already active on DLT Bot ({status_str}) — skipped duplicate submission.",
-                provider_response=live_obj,
-                approval_status=status_str.lower(),
-                client=acc,
-                channel="rcs",
-                submitted_by=user,
-                source_file=filename,
-            )
-            log_rcs_result(dupe_res, RCS_LOG_PATH)
-            entry_dict = asdict(dupe_res)
-            duplicate_entries.append(entry_dict)
-            results_by_index[idx] = entry_dict
-            seen_in_batch.add(name_key)
-            seen_in_batch.add(safe_key)
-        elif name_key in seen_in_batch or safe_key in seen_in_batch:
-            dupe_res = RcsSubmissionResult(
-                source_ref=s.source_ref,
-                template_name=s.template_name,
-                template_id="",
-                status=RcsSubmissionStatus.DUPLICATE,
-                provider_ref_id="",
-                error="Duplicate RCS template within uploaded file — skipped duplicate submission.",
-                provider_response=None,
-                approval_status="pending",
-                client=acc,
-                channel="rcs",
-                submitted_by=user,
-                source_file=filename,
-            )
-            log_rcs_result(dupe_res, RCS_LOG_PATH)
-            entry_dict = asdict(dupe_res)
-            duplicate_entries.append(entry_dict)
-            results_by_index[idx] = entry_dict
+            vi = template.get("viTemplate") if isinstance(template.get("viTemplate"), dict) else {}
+            live_bot = str(template.get("botId") or vi.get("botId") or "")
+            if live_bot and live_bot != bot_id:
+                continue
+            name = vi.get("name") or template.get("template_name") or ""
+            try:
+                key = normalize_rcs_template_name(str(name)).lower()
+            except ValueError:
+                continue
+            live_map[key] = template
+    seen: set[str] = set()
+    for index, submission in enumerate(subs):
+        submission.client = acc
+        error = None
+        status = RcsSubmissionStatus.FAILED
+        approval = "unknown"
+        provider = None
+        ref = None
+        if submission.bot_id and submission.bot_id != bot_id:
+            error = "RCS template bot does not belong to the selected account."
         else:
-            seen_in_batch.add(name_key)
-            seen_in_batch.add(safe_key)
-            to_submit.append((idx, s))
+            submission.bot_id = bot_id
+            try:
+                key = normalize_rcs_template_name(str(submission.template_name or "")).lower()
+            except ValueError as exc:
+                error = str(exc)
+            if not error and getattr(submission, "aspect_ratio_blocked", False):
+                status = RcsSubmissionStatus.BLOCKED_ASPECT_RATIO
+                approval = "blocked_aspect_ratio"
+                error = f"BLOCKED (Invalid Aspect Ratio): {submission.aspect_ratio_error or 'Unsupported image aspect ratio.'}"
+            if not error:
+                provider = live_map.get(key)
+                if provider is not None:
+                    status = RcsSubmissionStatus.DUPLICATE
+                    approval = _rcs_approval_status(provider.get("status"))
+                    ref = str(provider.get("templateId") or provider.get("id") or "") or None
+                    error = f"RCS template already exists on the selected bot ({approval.upper()}) — skipped duplicate submission."
+                elif key in seen:
+                    status = RcsSubmissionStatus.DUPLICATE
+                    error = "Duplicate RCS template within uploaded file — skipped duplicate submission."
+                else:
+                    to_submit.append((index, submission))
+                seen.add(key)
+        if error:
+            preliminary[index] = RcsSubmissionResult(
+                source_ref=submission.source_ref, template_name=submission.template_name,
+                status=status, approval_status=approval, error=error,
+                provider_ref_id=ref, provider_response=provider, client=acc,
+                bot_id=bot_id, submitted_by=user, source_file=filename,
+            )
 
-    new_entries = []
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    task_payloads = []
-    for idx, s in enumerate(subs):
-        existing_res = results_by_index[idx]
-        task_payloads.append(
-            {
-                "source_ref": s.source_ref,
-                "template_name": s.template_name,
-                "status": existing_res["status"].upper() if existing_res else "PENDING",
-                "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
-                "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
-                "error": existing_res.get("error") if existing_res else None,
-            }
-        )
-
+    job_id = f"job_{uuid.uuid4().hex}"
     create_job_with_tasks(
-        tenant_id=acc,
-        channel="rcs",
-        filename=filename,
-        submitted_by=user,
-        tasks_data=task_payloads,
-        job_id=job_id,
+        tenant_id=acc, channel="rcs", filename=filename, submitted_by=user, job_id=job_id,
+        tasks_data=[{"source_ref": s.source_ref, "template_name": s.template_name,
+                     "client": acc, "bot_id": bot_id, "submitted_by": user,
+                     "source_file": filename, "status": "PROCESSING"} for s in subs],
     )
-
-    new_entries = []
-    if to_submit:
-        before_count = len(load_rcs_log(RCS_LOG_PATH))
-        await asyncio.to_thread(
-            run_rcs,
-            [s for _, s in to_submit],
-            RCS_LOG_PATH,
-            client=acc,
-            user=user,
-            source_file=filename,
-        )
-        all_entries = load_rcs_log(RCS_LOG_PATH)
-        new_entries = all_entries[before_count:]
-
-        by_ref: dict[str, list[dict]] = collections.defaultdict(list)
-        for e in new_entries:
-            key = str(e.get("source_ref") or e.get("template_name") or "").strip().lower()
-            by_ref[key].append(e)
-
-        for idx, s in to_submit:
-            s_key = str(s.source_ref or s.template_name or "").strip().lower()
-            matched_pool = by_ref.get(s_key) or by_ref.get(str(s.template_name or "").strip().lower())
-            if matched_pool:
-                res_item = matched_pool.pop(0)
-                results_by_index[idx] = res_item
-                tid = f"task_{job_id}_{idx:04d}"
-                record_task_result(
-                    task_id=tid,
-                    status=res_item.get("status", "FAILED"),
-                    approval_status=res_item.get("approval_status") or "pending",
-                    provider_ref_id=res_item.get("provider_ref_id") or res_item.get("template_id"),
-                    error=_clean_error_message(res_item.get("error")),
-                )
-                QUEUE_MANAGER.broadcast_event(
-                    job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item}
-                )
-
+    try:
+        for index, result in preliminary.items():
+            results_by_index[index] = log_rcs_result(result, RCS_LOG_PATH, task_id=f"task_{job_id}_{index:04d}")
+        if to_submit:
+            submission_task = asyncio.create_task(asyncio.to_thread(
+                run_rcs, [s for _, s in to_submit], RCS_LOG_PATH,
+                client=acc, user=user, source_file=filename,
+                task_ids=[f"task_{job_id}_{index:04d}" for index, _ in to_submit],
+            ))
+            try:
+                entries = await asyncio.shield(submission_task)
+            except asyncio.CancelledError:
+                # A disconnected caller cannot cancel a provider POST already in flight.
+                await submission_task
+                raise
+            if len(entries) != len(to_submit):
+                raise RuntimeError("RCS runner did not return one result for each submitted row")
+            for (index, _), entry in zip(to_submit, entries, strict=True):
+                results_by_index[index] = entry
+        for entry in results_by_index:
+            if entry is None:
+                raise RuntimeError("RCS batch contains an unrecorded input row")
+            QUEUE_MANAGER.broadcast_event(job_id, "task_update", entry)
+    except (Exception, asyncio.CancelledError) as exc:
+        from db_queue import fail_unfinished_job
+        fail_unfinished_job(job_id, str(exc))
+        raise
     final_job = get_job(job_id)
     if final_job:
         QUEUE_MANAGER.broadcast_event(job_id, "job_status", final_job)
-    all_combined = [e for e in results_by_index if e is not None]
-    if len(all_combined) < (len(duplicate_entries) + len(new_entries)):
-        used_ids = {id(e) for e in all_combined}
-        for e in duplicate_entries + new_entries:
-            if id(e) not in used_ids:
-                all_combined.append(e)
-    cleaned_entries = []
-    for e in all_combined:
-        entry = dict(e)
-        if "error" in entry:
-            entry["error"] = _clean_error_message(entry["error"])
-        cleaned_entries.append(entry)
+    results = [{**entry, "error": _clean_error_message(entry.get("error"))} for entry in results_by_index]
+    duplicates = sum(entry["status"] == "duplicate" for entry in results)
+    submitted = sum(entry["status"] == "submitted" for entry in results)
+    failed = sum(entry["status"] in ("failed", "blocked_aspect_ratio") for entry in results)
     log_activity(
-        user=user,
-        action="TEMPLATE_SUBMISSION",
-        account=acc,
-        channel="rcs",
-        details={
-            "filename": filename,
-            "count": len(cleaned_entries),
-            "net_new_submitted": len(to_submit),
-            "duplicates_skipped": len(duplicate_entries),
-            "templates": [e.get("template_name") for e in cleaned_entries],
-            "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
-            "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
-        },
-        status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
-    )
-    blocked_count = len(
-        [
-            e
-            for e in cleaned_entries
-            if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"
-        ]
+        user=user, action="TEMPLATE_SUBMISSION", account=acc, channel="rcs",
+        details={"filename": filename, "count": len(results), "net_new_submitted": submitted,
+                 "duplicates_skipped": duplicates, "successful": submitted + duplicates,
+                 "failed": failed, "templates": [entry["template_name"] for entry in results]},
+        status="success" if submitted + duplicates else "failed",
     )
     return {
-        "job_id": job_id,
-        "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
-        "total": len(subs),
-        "submitted": len(to_submit),
-        "skipped_duplicates": len(duplicate_entries),
-        "blocked_aspect_ratio": blocked_count,
-        "results": [_json_safe(e) for e in cleaned_entries],
+        "job_id": job_id, "status": final_job["status"] if final_job else "COMPLETED",
+        "total": len(subs), "submitted": submitted, "skipped_duplicates": duplicates,
+        "blocked_aspect_ratio": sum(entry["status"] == "blocked_aspect_ratio" for entry in results),
+        "results": [_json_safe(entry) for entry in results],
     }
 
 
@@ -2125,11 +2010,12 @@ def get_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)
 
 
 @app.get("/api/jobs/{job_id}/stream")
-async def stream_job_endpoint(job_id: str):
+async def stream_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
     """Server-Sent Events (SSE) stream yielding real-time per-task progress and job completion events."""
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    require_tenant_access(job["tenant_id"], current_user)
 
     return StreamingResponse(
         QUEUE_MANAGER.sse_event_stream(job_id),
@@ -2249,8 +2135,42 @@ def poll(
     acc = account.lower()
     chan = channel.lower()
     try:
+        if chan == "rcs":
+            bot_id = get_rcs_bot_id(acc)
+            pending = [entry for entry in load_rcs_log(RCS_LOG_PATH, client=acc, pending_only=True)
+                       if entry.get("bot_id") == bot_id]
+            if not pending:
+                return {"checked": 0, "updated": 0}
+            inventory = {}
+            for template in fetch_rcs_templates(client=acc):
+                if not isinstance(template, dict):
+                    continue
+                vi = template.get("viTemplate") if isinstance(template.get("viTemplate"), dict) else {}
+                live_bot = str(template.get("botId") or vi.get("botId") or "")
+                if live_bot and live_bot != bot_id:
+                    continue
+                ref = str(template.get("templateId") or template.get("id") or "")
+                if ref:
+                    inventory[ref] = template
+            updates = {}
+            for entry in pending:
+                live = inventory.get(str(entry["provider_ref_id"]))
+                if live is None:
+                    continue
+                approval = _rcs_approval_status(live.get("status"))
+                if approval == "unknown" or approval == entry["approval_status"]:
+                    continue
+                updates[entry["task_id"]] = {
+                    "approval_status": approval,
+                    "approval_reason": live.get("reason") or live.get("rejectionReason"),
+                    "provider_response": live,
+                }
+            updated = update_rcs_results(updates, RCS_LOG_PATH, client=acc)
+            log_activity(user=user, action="STATUS_POLL", account=acc, channel="rcs",
+                         details={"checked_count": len(pending), "updated_count": updated}, status="success")
+            return {"checked": len(pending), "updated": updated}
         if chan != "whatsapp":
-            return {"checked": 0}
+            return {"checked": 0, "updated": 0}
         all_pending = pending_entries(LOG_PATH)
         matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
         poll_res = poll_pending(LOG_PATH, client=acc)
@@ -2639,7 +2559,6 @@ def get_credentials(
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
-    require_admin(current_user)
     """
     Return saved credentials from the server so any device/operator on the team
     instantly shares the single source of truth without re-entering keys.
@@ -2869,7 +2788,6 @@ def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str, acc: st
 @app.put("/api/credentials")
 def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get_current_user)):
     require_tenant_access(creds.account, current_user)
-    require_admin(current_user)
     if creds.gemini_api_key is not None and current_user["role"] != "superadmin":
         raise HTTPException(status_code=403, detail="Only platform administrators may change shared Gemini credentials.")
     env_path = Path(".env")
@@ -3129,7 +3047,6 @@ def test_credentials(
     body_fields = creds.model_fields_set if creds else set()
     acc = (creds.account if creds and "account" in body_fields else account).lower().strip()
     require_tenant_access(acc, current_user)
-    require_admin(current_user)
     chan = (creds.channel if creds and "channel" in body_fields else channel).lower().strip()
     acc_name = get_account_name(acc)
     prefix = _account_prefix(acc)
@@ -4431,7 +4348,6 @@ def get_moengage_credentials_endpoint(
 ):
     """Return MoEngage credential state (token, cookie, expiry) for an account."""
     _require_moengage_account_access(account, current_user)
-    require_admin(current_user)
     from moengage_sync import get_moengage_credentials
 
     creds = get_moengage_credentials(account)
@@ -4461,7 +4377,6 @@ def update_moengage_credentials_endpoint(
 ):
     """Persist an account's MoEngage workspace credentials to .env and credentials.json."""
     _require_moengage_account_access(req.account, current_user)
-    require_admin(current_user)
     keys = _moengage_credential_keys(req.account)
     mapping: dict[str, str] = {}
     acc = req.account.lower().strip()
@@ -5078,7 +4993,6 @@ def save_moengage_mcp_token_endpoint(
 ):
     """Save MoEngage MCP access/refresh token or server URL."""
     _require_moengage_account_access(body.account, current_user)
-    require_admin(current_user)
     from moengage_mcp import save_mcp_tokens
 
     status = save_mcp_tokens(
@@ -5098,7 +5012,6 @@ def start_moengage_mcp_oauth_endpoint(
 ):
     """Initiate OAuth 2.0 + PKCE flow against https://moeauth.moengage.com for https://mcp.moengage.com."""
     _require_moengage_account_access(body.account, current_user)
-    require_admin(current_user)
     from moengage_mcp import start_mcp_oauth
 
     redirect_uri = body.redirect_uri
