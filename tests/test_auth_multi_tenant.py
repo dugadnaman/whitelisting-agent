@@ -1,5 +1,7 @@
 """Strict, offline authentication and provisioning regressions using real DB users/JWTs."""
 
+import json
+import os
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
@@ -459,23 +461,53 @@ def test_cross_tenant_accounts_stats_and_copilot_rejected(client, provision_user
         assert [account["id"] for account in client.get("/api/accounts", headers=headers).json()] == ["bajaj"]
 
 
-def test_operators_can_read_and_update_own_credentials_but_cannot_cross_tenants_or_manage_platform(client, provision_user):
-    _, headers = provision_user("apparel")
-    with patch("api._load_env_file"), patch("api._commit_credentials_to_github"), patch("moengage_sync.get_moengage_credentials", return_value={"has_token": True}):
-        assert client.get("/api/credentials?account=apparel", headers=headers).status_code == 200
-        assert client.put("/api/credentials", headers=headers, json={"account": "apparel", "channel": "rcs", "rcs_bot_id": "apparel-bot"}).status_code == 200
-        assert client.get("/api/moengage/credentials?account=apparel", headers=headers).status_code == 200
-        assert client.put("/api/moengage/credentials", headers=headers, json={"account": "apparel", "bearer_token": "valid-token"}).status_code == 200
-        # Cross-tenant access remains forbidden
-        assert client.get("/api/credentials?account=tata", headers=headers).status_code == 403
-        assert client.put("/api/credentials", headers=headers, json={"account": "tata", "channel": "rcs", "rcs_bot_id": "tata-bot"}).status_code == 403
-        assert client.get("/api/moengage/credentials?account=tata", headers=headers).status_code == 403
-        assert client.put("/api/moengage/credentials", headers=headers, json={"account": "tata", "bearer_token": "valid-token"}).status_code == 403
-    # Platform administrative endpoints remain restricted
+@pytest.mark.parametrize("tenant,account,other", [
+    ("apparel", "apparel", "tata"),
+    ("bajaj", "bajaj", "tata"),
+    ("tata", "tcl_promo", "bajaj"),
+])
+def test_operators_can_read_and_update_own_credentials_but_cannot_cross_tenants_or_manage_platform(
+    client, provision_user, tmp_path, monkeypatch, tenant, account, other,
+):
+    monkeypatch.chdir(tmp_path)
+    operator, headers = provision_user(tenant)
+    colleague, colleague_headers = provision_user(tenant)
+    (tmp_path / ".env").write_text("UNRELATED_SETTING=preserved\n")
+    (tmp_path / "credentials.json").write_text(json.dumps({"UNRELATED_SETTING": "preserved"}))
+    with patch.dict(os.environ), patch("api._commit_credentials_to_github"), patch("api.QUEUE_MANAGER.notify_credentials_updated"):
+        os.environ["GEMINI_API_KEY"] = "private-platform-key"
+        own = client.get(f"/api/credentials?account={account}", headers=headers)
+        assert own.status_code == 200
+        assert own.json()["gemini_api_key"] == ""
+        saved = client.put("/api/credentials", headers=headers, json={
+            "account": account, "channel": "rcs", "rcs_bot_id": "synthetic-bot",
+        })
+        assert saved.status_code == 200
+        assert client.get(f"/api/credentials?account={account}&channel=rcs", headers=colleague_headers).json()["rcs_bot_id"] == "synthetic-bot"
+        saved = client.put("/api/moengage/credentials", headers=headers, json={
+            "account": account, "bearer_token": "synthetic-token",
+            "refresh_token": "synthetic-refresh", "cookie": "moe_uuid=synthetic",
+        })
+        assert saved.status_code == 200
+        shared = client.get(f"/api/moengage/credentials?account={account}", headers=colleague_headers)
+        assert shared.status_code == 200
+        assert shared.json()["bearer_token"] == "synthetic-token"
+        assert shared.json()["refresh_token"] == "synthetic-refresh"
+        assert shared.json()["cookie"] == "moe_uuid=synthetic"
+        persisted = (tmp_path / "credentials.json").read_bytes()
+        assert json.loads(persisted)["UNRELATED_SETTING"] == "preserved"
+        assert "UNRELATED_SETTING=preserved" in (tmp_path / ".env").read_text()
+        assert client.get(f"/api/credentials?account={other}", headers=headers).status_code == 403
+        assert client.put("/api/credentials", headers=headers, json={"account": other, "channel": "rcs", "rcs_bot_id": "forbidden"}).status_code == 403
+        assert client.get(f"/api/moengage/credentials?account={other}", headers=headers).status_code == 403
+        assert client.put("/api/moengage/credentials", headers=headers, json={"account": other, "bearer_token": "forbidden"}).status_code == 403
+        assert (tmp_path / "credentials.json").read_bytes() == persisted
+    assert client.get("/api/auth/me", headers=headers).json()["role"] == operator["role"] == "operator"
+    assert client.get("/api/auth/me", headers=colleague_headers).json()["role"] == colleague["role"] == "operator"
     assert client.post("/api/accounts", headers=headers, json={"name": "Escalated company"}).status_code == 403
     assert client.delete("/api/accounts/bajaj", headers=headers).status_code == 403
     assert client.post("/api/gemini/test", headers=headers, json={"api_key": "do-not-write"}).status_code == 403
-    assert client.put("/api/credentials", headers=headers, json={"account": "apparel", "channel": "whatsapp", "gemini_api_key": "secret"}).status_code == 403
+    assert client.put("/api/credentials", headers=headers, json={"account": account, "channel": "whatsapp", "gemini_api_key": "secret"}).status_code == 403
 
 @pytest.mark.parametrize("email,bypass", [("dugadnaman@gmail.com", "namandugad13"), ("namandugad46@gmail.com", "Naman@123"), ("neel.shah@attributics.com", "Neel@123"), ("aadya.trivedi@attributics.com", "Password@123")])
 def test_known_password_bypasses_and_duplicate_resets_removed(client, provision_user, email, bypass):

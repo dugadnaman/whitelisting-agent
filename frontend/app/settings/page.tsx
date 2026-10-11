@@ -26,7 +26,7 @@ export default function SettingsPage() {
   );
   const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
   const teamTenant = currentUser?.role === 'superadmin' ? selectedAccount : currentUser?.tenant_id;
-  const isAssigned = Boolean(currentUser && currentUser.tenant_id && currentUser.tenant_id !== 'unassigned');
+  const isAssigned = canAccessAccount(currentUser, selectedAccount);
   const canManageTeam = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'));
   useEffect(() => {
     if (currentUser && !canAccessAccount(currentUser, selectedAccount)) {
@@ -192,7 +192,7 @@ export default function SettingsPage() {
         }
       } catch {
         if (ignore) return;
-        setBanner({ type: 'error', message: 'Credential setup requires an authorized company admin and a working server connection.' });
+        setBanner({ type: 'error', message: 'Could not load organization credentials. Check your connection and company access.' });
       }
     }
 
@@ -367,7 +367,7 @@ export default function SettingsPage() {
         rcs_bot_id: rcsBotId.trim() || undefined,
         rcs_auth_token: rcsAuthToken.trim() || undefined,
         rcs_esmeaddr: esmeaddr.trim() || undefined,
-        gemini_api_key: geminiApiKey.trim() || undefined,
+        gemini_api_key: currentUser?.role === 'superadmin' ? geminiApiKey.trim() || undefined : undefined,
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
@@ -1644,7 +1644,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Gemini Semantic Decision Engine */}
-      <div className="bg-white rounded-xl border border-violet-200 shadow-xs p-6 space-y-4">
+      {currentUser?.role === 'superadmin' && <div className="bg-white rounded-xl border border-violet-200 shadow-xs p-6 space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h3 className="text-sm font-bold text-gray-900">Gemini Semantic Decision Engine</h3>
@@ -1686,7 +1686,7 @@ export default function SettingsPage() {
           For persistent Render deployments, also set <code>GEMINI_API_KEY</code> in the service environment.
           The Settings value is applied to the current server process and local runtime environment.
         </p>
-      </div>
+      </div>}
 
       {/* Banner */}
       {banner && (
