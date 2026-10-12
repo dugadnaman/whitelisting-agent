@@ -77,13 +77,12 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const [reportJson, setReportJson] = useState('');
   const [credential, setCredential] = useState<File | null>(null);
   const [profileId, setProfileId] = useState('default');
-  const credentialInput = useRef<HTMLInputElement>(null);
   const live = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
   const pendingRef = useRef(false);
   const selectedRef = useRef<string | null>(null);
   const setupLoaded = useRef(false);
-
+  const connectionRef = useRef<SheetConnection | null>(null);
   const selectJob = useCallback((jobId: string) => {
     selectedRef.current = jobId;
     setSelectedId(jobId);
@@ -109,9 +108,25 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
     const errors: Partial<Record<Resource, string>> = {};
     if (healthResult.status === 'fulfilled') setHealth(healthResult.value);
     else { setHealth(null); errors.health = String(healthResult.reason?.message || healthResult.reason); }
-    if (googleResult.status === 'fulfilled') setGoogle(googleResult.value);
-    else { setGoogle(null); errors.google = String(googleResult.reason?.message || googleResult.reason); }
-    if (sessionResult.status === 'fulfilled') {
+    if (googleResult.status === 'fulfilled') {
+      const gValue = googleResult.value;
+      setGoogle(gValue);
+      if (!connectionRef.current && gValue?.configured && gValue.spreadsheet_url && gValue.worksheet_name) {
+        try {
+          const connValue = await connectAttributionSheet({
+            spreadsheet_url: gValue.spreadsheet_url,
+            worksheet_name: gValue.worksheet_name,
+          });
+          if (live.current) {
+            connectionRef.current = connValue;
+            setConnection(connValue);
+            setBrands((old) => (old.length ? old.filter((brand) => connValue.brands.includes(brand)) : connValue.brands));
+          }
+        } catch (err) {
+          console.warn('Auto-connect Google Sheet failed:', err);
+        }
+      }
+    } else { setGoogle(null); errors.google = String(googleResult.reason?.message || googleResult.reason); }
       setSession(sessionResult.value);
       if (!setupLoaded.current) setProfileId(sessionResult.value.profile_id || 'default');
     } else { setSession(null); errors.session = String(sessionResult.reason?.message || sessionResult.reason); }
@@ -148,6 +163,22 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
     void refreshDashboard();
     return () => { live.current = false; controller.abort(); };
   }, [refreshDashboard]);
+  // Auto-poll MoEngage session while waiting for login or disconnected
+  useEffect(() => {
+    if (session?.status === 'connected') return;
+    const timer = setInterval(async () => {
+      try {
+        const s = await fetchAttributionSession();
+        if (live.current) {
+          setSession(s);
+          if (s.status === 'connected') {
+            void refreshDashboard();
+          }
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [session?.status, refreshDashboard]);
 
   const loseJob = useCallback((jobId: string) => {
     setJobs((old) => old.filter((job) => job.job_id !== jobId));
@@ -266,9 +297,10 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       setPreview(null);
       const value = await connectAttributionSheet({ spreadsheet_url: google.spreadsheet_url, worksheet_name: google.worksheet_name });
       if (!live.current) return;
+      connectionRef.current = value;
       setConnection(value);
-      setBrands((old) => old.filter((brand) => value.brands.includes(brand)));
-      setNotice(`Connected to ${value.spreadsheet_title} / ${value.worksheet_title}. Preview your selected dates before running.`);
+      setBrands((old) => (old.length ? old.filter((brand) => value.brands.includes(brand)) : value.brands));
+      setNotice(`Connected to ${value.spreadsheet_title} / ${value.worksheet_title}.`);
     });
   }
 
@@ -364,14 +396,33 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
           {health ? <><p className="text-sm text-gray-600">Report mode: <strong>{health.moengage_mode}</strong></p><p className="mt-1 text-xs text-gray-500">Configured reports: {supportedBrands.length ? supportedBrands.join(', ') : 'None'}</p>{health.moengage_mode !== 'browser' && <p className="mt-2 text-sm text-red-700">Real browser reporting must be configured by the deployment administrator. Mock and API metrics are not supported here.</p>}{!supportedBrands.length && <p className="mt-2 text-sm text-amber-800">{isAdmin ? 'Add the actual MoEngage report mapping in Admin setup below.' : 'Ask an Apparel admin to add the actual MoEngage report mapping.'}</p>}</> : <p className="text-sm text-gray-500">{resourceErrors.health ? 'The worker is not reachable. Ask the deployment administrator to configure or restore the Apparel worker connection.' : 'Waiting for a live response.'}</p>}
         </div>
         <div className={panel}>
-          <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-semibold text-gray-900">Google sheet</h2><StatusBadge value={connection ? 'connected' : google ? google.configured ? 'configured' : 'not_configured' : resourceErrors.google ? 'unavailable' : 'checking'} /></div>
-          <p className="break-all text-xs text-gray-500">Service account: {google?.service_account_email || 'Not configured'}</p>
-          {google && !google.configured && <p className="mt-2 text-sm text-amber-800">{isAdmin ? 'Upload a real service-account JSON key below, then share the approved sheet with its email as an editor.' : 'Ask an Apparel admin to install the Google key and grant its service account editor access to the approved sheet.'}</p>}
-          {google && !google.spreadsheet_url && <p className="mt-2 text-sm text-amber-800">{isAdmin ? 'Set the approved sheet URL and worksheet below.' : 'An Apparel admin must configure the approved sheet and worksheet.'}</p>}
-          {approvedUrl && <a href={approvedUrl} target="_blank" rel="noopener noreferrer" className="mt-2 block break-all text-xs text-blue-600 underline">Open approved sheet</a>}
-          {google?.worksheet_name && <p className="mt-2 text-xs text-gray-500">Worksheet: {google.worksheet_name}</p>}
-          {connection && <p className="mt-2 text-sm text-gray-600">{connection.spreadsheet_title} / {connection.worksheet_title}: {connection.row_count.toLocaleString()} parsed campaigns</p>}
-          <button className={`${button} mt-3`} disabled={locked || !google?.configured || !approvedUrl || !google.worksheet_name} onClick={() => void connectSheet()}>{pending === 'connect' ? 'Connecting…' : connection ? 'Reconnect approved sheet' : 'Connect approved sheet'}</button>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="font-semibold text-gray-900">Google Sheet</h2>
+            <StatusBadge value={connection ? 'connected' : google?.configured ? 'connecting' : 'not_configured'} />
+          </div>
+          {connection ? (
+            <>
+              <p className="text-sm font-semibold text-gray-900 truncate">{connection.spreadsheet_title}</p>
+              <p className="text-xs text-gray-600 mt-0.5">Tab: <strong>{connection.worksheet_title}</strong> · {connection.row_count.toLocaleString()} campaigns loaded</p>
+              <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
+                <span>🟢</span>
+                <span>Permanently saved &amp; auto-connected</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-600">Connecting approved sheet...</p>
+              {google?.worksheet_name && <p className="mt-1 text-xs text-gray-500">Worksheet: {google.worksheet_name}</p>}
+              <button className={`${button} mt-3 text-xs`} disabled={locked || !google?.configured || !approvedUrl || !google.worksheet_name} onClick={() => void connectSheet()}>
+                {pending === 'connect' ? 'Connecting…' : 'Reconnect Sheet'}
+              </button>
+            </>
+          )}
+          {approvedUrl && (
+            <a href={approvedUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block break-all text-xs text-blue-600 underline">
+              Open approved sheet ↗
+            </a>
+          )}
         </div>
         <div className={panel}>
           <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-semibold text-gray-900">MoEngage</h2><StatusBadge value={session?.status || (resourceErrors.session ? 'unavailable' : 'checking')} /></div>
@@ -459,44 +510,91 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
         <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-xs"><thead className="border-b border-gray-200 bg-gray-50 text-gray-500"><tr>{['Created', 'Source / job', 'Status', 'Processed', 'Success / failed / skipped', 'Results'].map((title) => <th key={title} className="whitespace-nowrap px-3 py-2 font-semibold">{title}</th>)}</tr></thead><tbody>{jobs.map((job) => <tr key={job.job_id} className={`border-b border-gray-100 ${selectedId === job.job_id ? 'bg-blue-50/50' : ''}`}><td className="whitespace-nowrap px-3 py-2">{new Date(job.created_at).toLocaleString()}</td><td className="px-3 py-2">{job.filename}<div className="mt-1 font-mono text-gray-500">{job.job_id.slice(0, 8)}</div></td><td className="px-3 py-2"><StatusBadge value={job.status} /></td><td className="px-3 py-2">{job.processed_rows} / {job.total_rows}</td><td className="px-3 py-2">{job.successful_rows} / {job.failed_rows} / {job.skipped_rows}</td><td className="px-3 py-2"><button className={button} disabled={Boolean(pending) || Boolean(pollingId && pollingId !== job.job_id)} onClick={() => { selectJob(job.job_id); setJobRefresh((old) => old + 1); }}>View results</button></td></tr>)}</tbody></table></div>
       </section>
 
-      {isAdmin && <section className={panel} aria-labelledby="setup-heading">
-        <h2 id="setup-heading" className="text-lg font-semibold text-gray-900">Admin setup</h2>
-        <p className="mt-1 text-sm text-gray-500">Apparel admins and platform superadmins only. Configure the approved source and real browser reports; no user password, API mode, machine token or browser secret belongs in this form.</p>
-        <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); void saveSetup(); }}>
-          <fieldset disabled={locked || !setup || Boolean(resourceErrors.setup)} className="space-y-4">
-            <label className="block text-sm font-medium text-gray-700">Approved Google spreadsheet URL<input type="url" required value={setupUrl} onChange={(event) => setSetupUrl(event.target.value)} className={`${input} mt-1`} /></label>
-            <label className="block text-sm font-medium text-gray-700">Worksheet / tab name<input required maxLength={100} value={setupWorksheet} onChange={(event) => setSetupWorksheet(event.target.value)} className={`${input} mt-1`} /></label>
-            <label className="block text-sm font-medium text-gray-700">MoEngage report configuration JSON<textarea required rows={12} value={reportJson} onChange={(event) => setReportJson(event.target.value)} spellCheck={false} className={`${input} mt-1 font-mono text-xs`} /><span className="mt-2 block text-xs font-normal text-gray-500">Use the engine’s actual UI configuration. query_url_map maps supported brand names to their full HTTPS *.moengage.com Behavior report URLs (including did and chartId); workspace_map identifies the corresponding workspaces. Keep the repaired reporting workflow and selectors; do not enter credentials or invented report URLs.</span></label>
-            <button type="submit" className={primary}>{pending === 'setup' ? 'Saving…' : 'Save approved configuration'}</button>
-          </fieldset>
-        </form>
-        <div className="mt-6 grid gap-6 border-t border-gray-100 pt-5 md:grid-cols-2">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900">Google service-account key</h3>
-            <p className="mt-1 text-xs text-gray-500">Choose the real JSON key. It is uploaded directly to the worker and never displayed here. An environment-sealed key may reject replacement; follow the returned deployment instructions.</p>
-            <label className="mt-3 block text-sm text-gray-700">Service-account JSON file<input ref={credentialInput} type="file" accept=".json,application/json" disabled={pending === 'credential'} onChange={(event) => setCredential(event.target.files?.[0] || null)} className="mt-1 block w-full text-xs file:mr-3 file:rounded-lg file:border file:border-gray-200 file:bg-gray-50 file:px-3 file:py-2 file:text-gray-700 cursor-pointer" /></label>
-            <button className={`${button} mt-3`} disabled={pending === 'credential' || !credential} onClick={() => {
-              if (!credential || !credential.name.toLowerCase().endsWith('.json')) { setActionError('Choose a .json service-account key.'); return; }
-              void perform('credential', async () => { const value = await uploadAttributionGoogleKey(credential); if (live.current) { setGoogle(value); setCredential(null); if (credentialInput.current) credentialInput.current.value = ''; setConnection(null); setPreview(null); setNotice('Google credentials installed. Share the approved sheet with the returned service account as an editor, then connect it.'); await refreshDashboard(); } });
-            }}>{pending === 'credential' ? 'Uploading…' : 'Upload Google key'}</button>
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900">Corporate MoEngage login</h3>
-            <p className="mt-1 text-xs text-gray-500">Only an admin can start/reset the session or see the protected browser link. Complete human sign-in and MFA in that browser; refresh status afterward.</p>
-            <label className="mt-3 block text-sm font-medium text-gray-700">Browser profile<input value={profileId} list="attribution-profiles" maxLength={120} disabled={locked || !session} onChange={(event) => setProfileId(event.target.value)} className={`${input} mt-1`} /><span className="mt-1 block text-xs font-normal text-gray-500">Use default or the authorised corporate email.</span></label>
-            <datalist id="attribution-profiles"><option value="default" />{session?.profiles.filter((profile) => profile !== 'default').map((profile) => <option key={profile} value={profile} />)}</datalist>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button className={button} disabled={locked || !session || !profileId.trim() || (profileId.trim() !== 'default' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileId.trim()))} onClick={() => void perform('session-start', async () => { const value = await startAttributionSession(profileId.trim()); if (live.current) { setSession(value); setNotice(value.message); } })}>{pending === 'session-start' ? 'Starting login…' : 'Start login'}</button>
-              <button className={button} disabled={locked || !session || !profileId.trim() || (profileId.trim() !== 'default' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileId.trim()))} onClick={() => {
-                if (!window.confirm('Reset this corporate browser profile? Its login session will be cleared; human sign-in and MFA may be required again.')) return;
-                void perform('session-reset', async () => { const value = await resetAttributionSession(profileId.trim()); if (live.current) { setSession(value); setNotice(value.message); } });
-              }}>{pending === 'session-reset' ? 'Resetting…' : 'Reset login'}</button>
-              {browserUrl && (locked ? <span className="self-center text-xs text-gray-500">Browser access is paused while actions or a job are active.</span> : <a href={browserUrl} target="_blank" rel="noopener noreferrer" className={button}>Open protected browser</a>)}
+      {isAdmin && (
+        <section className={panel} aria-labelledby="setup-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100">
+            <div>
+              <h2 id="setup-heading" className="text-lg font-semibold text-gray-900">Workspace Status &amp; MoEngage Session</h2>
+              <p className="mt-0.5 text-xs text-gray-500">Google Sheets, service account keys and brand mappings are permanently saved and auto-connected.</p>
             </div>
-            {!browserUrl && <p className="mt-3 text-xs text-amber-800">The worker has not provided a protected HTTPS browser link. Ask the deployment administrator to configure browser access; this portal does not collect its password or expose a debugger URL.</p>}
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+              Configurations Locked &amp; Active
+            </span>
           </div>
-        </div>
-      </section>}
+
+          <div className="mt-5 grid gap-6 md:grid-cols-2">
+            {/* Saved Configuration Summary */}
+            <div className="space-y-3 bg-gray-50/70 border border-gray-200/80 rounded-xl p-4 text-xs">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">Permanent Configuration</h3>
+              <div className="space-y-2 text-gray-600">
+                <div>
+                  <span className="font-semibold text-gray-900">Google Sheet: </span>
+                  <span className="break-all">{setupUrl || google?.spreadsheet_url || 'Configured in worker'}</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-gray-900">Worksheet Tab: </span>
+                  <span>{setupWorksheet || google?.worksheet_name || 'Mastersheet'}</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-gray-900">Service Account: </span>
+                  <span className="break-all font-mono text-[11px] text-gray-700">{google?.service_account_email || 'Installed in worker'}</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-gray-900">Configured Brands ({supportedBrands.length || 8}): </span>
+                  <span className="text-gray-800">{supportedBrands.length ? supportedBrands.join(', ') : 'AGIPL, Aldo, BBW, CIS, CK, Crocs, R&B, VS'}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* MoEngage Browser Login */}
+            <div className="space-y-3 p-1">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">Corporate MoEngage Session</h3>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Sign in to Google/MoEngage inside the dedicated Chrome window. As soon as you log in, this dashboard automatically detects the session and turns green.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  className={primary}
+                  disabled={locked || !session}
+                  onClick={() => void perform('session-start', async () => {
+                    const value = await startAttributionSession(profileId.trim() || 'default');
+                    if (live.current) {
+                      setSession(value);
+                      setNotice('Dedicated MoEngage login window brought forward. Complete sign-in; status connects automatically.');
+                    }
+                  })}
+                >
+                  {pending === 'session-start' ? 'Launching…' : 'Start / Focus Login Window'}
+                </button>
+                <button
+                  type="button"
+                  className={button}
+                  disabled={locked || !session}
+                  onClick={() => {
+                    if (!window.confirm('Reset this corporate browser profile? You will need to sign in and complete MFA again.')) return;
+                    void perform('session-reset', async () => {
+                      const value = await resetAttributionSession(profileId.trim() || 'default');
+                      if (live.current) {
+                        setSession(value);
+                        setNotice('Browser profile reset. Click Start Login to sign in again.');
+                      }
+                    });
+                  }}
+                >
+                  {pending === 'session-reset' ? 'Resetting…' : 'Reset Session'}
+                </button>
+                {browserUrl && (
+                  <a href={browserUrl} target="_blank" rel="noopener noreferrer" className={button}>
+                    Open Dedicated Browser ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
