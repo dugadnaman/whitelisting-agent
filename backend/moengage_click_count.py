@@ -55,13 +55,17 @@ def base_metadata(base: dict, workspace: dict) -> dict:
     }
 
 
-def validate_end_date(end_date: str, timezone: str | None = None) -> date:
+def validate_calendar_date(value: str, label: str) -> date:
     try:
-        if not isinstance(end_date, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", end_date):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
             raise ValueError
-        end = date.fromisoformat(end_date)
+        return date.fromisoformat(value)
     except ValueError:
-        raise HTTPException(status_code=400, detail="End date must be a valid YYYY-MM-DD date.") from None
+        raise HTTPException(status_code=400, detail=f"{label} must be a valid YYYY-MM-DD date.") from None
+
+
+def validate_end_date(end_date: str, timezone: str | None = None) -> date:
+    end = validate_calendar_date(end_date, "End date")
     if timezone is None:
         return end
     try:
@@ -73,15 +77,16 @@ def validate_end_date(end_date: str, timezone: str | None = None) -> date:
     return end
 
 
-def click_count_payload(base: dict, end_date: str) -> dict:
+def click_count_payload(base: dict, end_date: str, start_date: str | None = None) -> dict:
     end = validate_end_date(end_date, base["timezone"])
-    if end < date.fromisoformat(base["start_date"]):
-        raise HTTPException(status_code=400, detail="End date cannot be before the imported base's creation date.")
+    start = validate_calendar_date(base["start_date"] if start_date is None else start_date, "Start date")
+    if end < start:
+        raise HTTPException(status_code=400, detail="End date cannot be before the report start date.")
     # Portal absolute ranges encode workspace calendar dates with a literal Z.
     # Preserve that observed contract rather than converting these bounds to UTC.
     time_range = {
         "period_unit": "days", "type": "between", "value_type": "absolute",
-        "value": base["start_date"] + "T00:00:00.000Z",
+        "value": start.isoformat() + "T00:00:00.000Z",
         "value1": end.isoformat() + "T23:59:59.999Z",
     }
     actions = [{
@@ -382,6 +387,7 @@ class ClickCountQueryRequest(BaseModel):
     workspace_id: str
     base_id: str
     end_date: str
+    start_date: str | None = None
 
 
 router = APIRouter(prefix="/api/moengage/click-count", dependencies=[Depends(require_click_count_user)])
@@ -414,13 +420,15 @@ def get_base(base_id: str, workspace_id: str = Query(...)):
 def create_query(body: ClickCountQueryRequest):
     validate_identifier(body.workspace_id, "workspace ID", object_id=True)
     validate_identifier(body.base_id, "base ID", object_id=True)
-    validate_end_date(body.end_date)
+    end = validate_end_date(body.end_date)
+    if body.start_date is not None and validate_calendar_date(body.start_date, "Start date") > end:
+        raise HTTPException(status_code=400, detail="End date cannot be before the report start date.")
     client = ClickCountClient()
     workspace = client.select_workspace(body.workspace_id)
     validate_end_date(body.end_date, workspace["timezone"])
     raw_base, _ = client.base(body.base_id, include_db=False)
     base = base_metadata(raw_base, workspace)
-    payload = click_count_payload(base, body.end_date)
+    payload = click_count_payload(base, body.end_date, body.start_date)
     # Invalid provider timestamps and user ranges need no database lookup.
     db_name = client.workspace_database()
     result = client.request("POST", "/segmentation/recent_query/count",
@@ -432,7 +440,7 @@ def create_query(body: ClickCountQueryRequest):
         "query_id": sign_query(query_id, workspace["id"], db_name),
         "workspace_id": workspace["id"], "workspace_name": workspace["name"],
         "base_id": base["id"], "base_name": base["name"],
-        "start_date": base["start_date"], "end_date": body.end_date,
+        "start_date": base["start_date"] if body.start_date is None else body.start_date, "end_date": body.end_date,
         "timezone": workspace["timezone"], "status": "queued",
     }
 

@@ -10,8 +10,11 @@ Tests:
 7. Live Moneyfy API sync verification.
 """
 
+import os
 from datetime import date
 from pathlib import Path
+
+import pytest
 
 from moengage_ops_client import (
     MoEngageWorkspaceConfig,
@@ -174,14 +177,19 @@ def test_export_ops_dashboard_excel():
     p.unlink()
 
 
+@pytest.mark.live_moengage
 def test_live_moneyfy_workspace_sync():
     """Verify live API connection and data extraction from Moneyfy workspace."""
+    workspace_id = os.environ.get("MONEYFY_MOENGAGE_WORKSPACE_ID", "").strip()
+    api_key = os.environ.get("MONEYFY_MOENGAGE_API_KEY", "").strip()
+    if not workspace_id or not api_key:
+        pytest.skip("Live Moneyfy requires MONEYFY_MOENGAGE_WORKSPACE_ID and MONEYFY_MOENGAGE_API_KEY.")
     cfg = MoEngageWorkspaceConfig(
         workspace_name="Moneyfy",
         vertical="Moneyfy",
-        workspace_id="PLBRDCVUS0YE8ME3E8XSHV5D",
-        api_key="F9ED1AC8BB3449E8B6D94E5C",
-        data_center="03",
+        workspace_id=workspace_id,
+        api_key=api_key,
+        data_center=os.environ.get("MONEYFY_MOENGAGE_DATA_CENTER", "03"),
         is_active=True,
     )
 

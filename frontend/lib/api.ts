@@ -78,7 +78,8 @@ export type UserItem = {
 export type Template = {
   source_ref: string;
   template_name: string;
-  status: "submitted" | "failed" | "duplicate" | "blocked_aspect_ratio" | "blocked";
+  task_id?: string;
+  status: "pending" | "processing" | "submitted" | "failed" | "duplicate" | "blocked_aspect_ratio" | "blocked";
   provider_ref_id?: string | null;
   approval_status?: "pending" | "approved" | "rejected" | "unknown" | "blocked" | "blocked_aspect_ratio";
   approval_reason?: string | null;
@@ -158,12 +159,14 @@ export type GrammarWarning = {
   suggestion: string;
   original: string;
   replacement: string;
+  component?: string;
 };
 export type ComplianceWarning = {
   type: string;
   severity: 'error' | 'warning';
   issue: string;
   recommendation: string;
+  component?: string;
 };
 export type AccountDetection = {
   detected_account_id: string;
@@ -174,7 +177,19 @@ export type AccountDetection = {
   current_account: string;
 };
 
-export type TemplatePreview = {
+export type DraftWarnings = {
+  aspect_ratio_warnings?: AspectRatioWarning[];
+  aspect_ratio_blocked?: boolean;
+  aspect_ratio_block_reason?: string;
+  grammar_warnings?: GrammarWarning[];
+  compliance_warnings?: ComplianceWarning[];
+  duplicate_warning?: {
+    template_name: string;
+    message: string;
+  };
+};
+
+export type TemplatePreview = DraftWarnings & {
   template_name: string;
   category?: string;
   language?: string;
@@ -182,17 +197,8 @@ export type TemplatePreview = {
   channel?: string;
   waba_id?: string;
   source_ref?: string;
-  aspect_ratio_warnings?: AspectRatioWarning[];
-  aspect_ratio_blocked?: boolean;
-  aspect_ratio_block_reason?: string;
-  grammar_warnings?: GrammarWarning[];
-  compliance_warnings?: ComplianceWarning[];
   already_exists_on_waba?: boolean;
   exists_on_waba?: boolean;
-  duplicate_warning?: {
-    template_name: string;
-    message: string;
-  };
   account_detection?: AccountDetection;
   components?: Array<{
     type: string;
@@ -487,8 +493,8 @@ export type JobTask = {
   template_name: string;
   category?: string;
   language?: string;
-  status: "PENDING" | "SUBMITTED" | "DUPLICATE" | "FAILED";
-  approval_status: "pending" | "approved" | "rejected" | "unknown";
+  status: "PENDING" | "PROCESSING" | "SUBMITTED" | "DUPLICATE" | "FAILED" | "BLOCKED_ASPECT_RATIO";
+  approval_status: "pending" | "approved" | "rejected" | "unknown" | "blocked_aspect_ratio";
   provider_ref_id?: string;
   error?: string;
   approval_reason?: string;
@@ -498,6 +504,42 @@ export async function fetchJob(jobId: string): Promise<{ job: IngestionJob; task
   const res = await fetchWithRetry(getApiUrl(`/api/jobs/${encodeURIComponent(jobId)}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
+}
+
+export async function* streamJobEvents(
+  jobId: string, signal: AbortSignal
+): AsyncGenerator<{ event: string; data: string }> {
+  const response = await fetchWithRetry(
+    getApiUrl(`/api/jobs/${encodeURIComponent(jobId)}/stream`),
+    { headers: { Accept: "text/event-stream" }, signal }, 0
+  );
+  if (!response.ok) throw new Error(await getErrorMessage(response));
+  if (!response.body) throw new Error("Job stream has no response body.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+      let end: number;
+      while ((end = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+        let event = "message";
+        const data: string[] = [];
+        for (const line of block.split("\n")) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        }
+        if (data.length) yield { event, data: data.join("\n") };
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 export async function resumeJob(jobId: string): Promise<{ ok: boolean; resumed_jobs?: number }> {
@@ -967,7 +1009,7 @@ export type JiraIssueItem = {
   brief_status?: 'Pending' | 'In Progress' | 'Completed' | 'Failed' | 'Not Generated' | string;
 };
 
-export type JiraWhatsAppDraft = {
+export type JiraWhatsAppDraft = DraftWarnings & {
   template_name: string;
   category: string;
   body: string;
@@ -977,6 +1019,7 @@ export type JiraWhatsAppDraft = {
   footer_text?: string | null;
   media_file?: string | null;
   media_filename?: string | null;
+  media_attachment_id?: string | null;
   button_type: string;
   button_text?: string | null;
   button_url?: string | null;
@@ -990,12 +1033,13 @@ export type JiraWhatsAppDraft = {
   live_ref_id?: string | null;
 };
 
-export type JiraRcsDraft = {
+export type JiraRcsDraft = DraftWarnings & {
   template_name: string;
   card_title: string;
   body: string;
   media_file?: string | null;
   media_filename?: string | null;
+  media_attachment_id?: string | null;
   action_type: string;
   action_label: string;
   action_url: string;
@@ -1003,11 +1047,12 @@ export type JiraRcsDraft = {
   variables: string[];
   raw_source: string;
   template_type?: "text" | "richcard" | "carousel" | string;
-  carousel_cards?: Array<{
+  carousel_cards?: Array<DraftWarnings & {
     card_title: string;
     card_description: string;
     media_url?: string | null;
     media_filename?: string | null;
+    media_attachment_id?: string | null;
     button_text?: string;
     button_url?: string;
   }>;
@@ -1042,6 +1087,7 @@ export type JiraBriefData = {
     file_type?: string;
     body?: string;
     local_path?: string | null;
+    attachment_id?: string | null;
     html_content?: string;
     target_channel?: string;
   }>;
@@ -1132,6 +1178,63 @@ export async function fetchJiraBrief(issueKey: string, account?: string): Promis
   return data.brief;
 }
 
+export type JiraDraftPreviewRequest = {
+  account: string;
+  whatsapp_account: string;
+  whatsapp_templates: JiraWhatsAppDraft[];
+  rcs_templates: JiraRcsDraft[];
+};
+
+export type JiraDraftPreview = {
+  whatsapp_templates: JiraWhatsAppDraft[];
+  rcs_templates: JiraRcsDraft[];
+};
+
+export async function previewJiraDrafts(params: JiraDraftPreviewRequest, signal?: AbortSignal): Promise<JiraDraftPreview> {
+  const res = await fetchWithRetry(getApiUrl("/api/jira/preview"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+    signal,
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data = await res.json();
+  if (!Array.isArray(data.whatsapp_templates) || !Array.isArray(data.rcs_templates)
+      || data.whatsapp_templates.length !== params.whatsapp_templates.length
+      || data.rcs_templates.length !== params.rcs_templates.length
+      || [...data.whatsapp_templates, ...data.rcs_templates].some(
+        (draft) => !draft || typeof draft.aspect_ratio_blocked !== "boolean"
+      )) {
+    throw new Error("Creative validation is unavailable. Please retry before whitelisting.");
+  }
+  return data;
+}
+
+export type JiraValidationCommentResult = {
+  ok: boolean;
+  posted: boolean;
+  comment_text: string;
+  comment_id?: string | null;
+};
+
+export async function reportJiraValidation(
+  issueKey: string,
+  params: JiraDraftPreviewRequest & { confirmed: boolean; expected_comment?: string }
+): Promise<JiraValidationCommentResult> {
+  const cleanKey = encodeURIComponent(issueKey.trim().toUpperCase());
+  const res = await fetchWithRetry(getApiUrl(`/api/jira/validation-comment/${cleanKey}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data = await res.json();
+  if (!data.ok || typeof data.comment_text !== "string" || data.posted !== params.confirmed) {
+    throw new Error("The Jira validation comment was not confirmed by the server.");
+  }
+  return data;
+}
+
 export async function submitJiraBrief(
   issueKey: string,
   channels: string[] = ["whatsapp", "rcs"],
@@ -1165,20 +1268,23 @@ export async function submitJiraBrief(
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
-export function getJiraCreativeDownloadUrl(params: {
+export type JiraCreativeSource = {
   path?: string | null;
   attachmentId?: string | null;
   filename?: string | null;
-  inline?: boolean;
-}): string {
+};
+
+export async function fetchJiraCreativeBlob(params: JiraCreativeSource, signal?: AbortSignal): Promise<Blob> {
   const qs = new URLSearchParams();
   if (params.path) qs.set("path", params.path);
   if (params.attachmentId) qs.set("attachment_id", params.attachmentId);
   if (params.filename) qs.set("filename", params.filename);
-  if (params.inline) qs.set("inline", "true");
-  const token = getAuthToken();
-  if (token) qs.set("token", token);
-  return getApiUrl(`/api/jira/creative/download?${qs.toString()}`);
+  const res = await fetchWithRetry(getApiUrl(`/api/jira/creative/download?${qs.toString()}`), {
+    signal,
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.blob();
 }
 
 export async function uploadJiraCreative(file: File): Promise<{

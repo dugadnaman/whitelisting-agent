@@ -223,7 +223,9 @@ def route_jira_brief(
         )
         has_header = bool(re.search(r"\bheader\b", lower))
         has_footer = bool(re.search(r"\bfooter\b", lower))
-        has_cta = bool(re.search(r"\b(button|cta|link)\b", lower))
+        has_cta = bool(re.search(r"\b(button|cta|link)\b", lower)) or bool(
+            re.search(r"(?:^|\n)\s*action\s*[:\-–]\s*\S", raw_text, re.IGNORECASE)
+        )
         return JiraRoutingDecision(
             target_channel=chan,
             channel_confidence=0.8,

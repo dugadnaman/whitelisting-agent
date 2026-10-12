@@ -1,17 +1,13 @@
 """
-Unit and integration tests for Jira Work Management & Autonomous Workload Dispatcher Engine.
-Tests:
-1. Status categorization (PENDING, BLOCKED, DONE).
-2. Due date timeline bucketing (OVERDUE, TODAY, TOMORROW, DAY_AFTER, LATER, NO_DATE).
-3. Messaging channel inference from Jira summary.
-4. Assignee capacity calculation (Dnyanesh, Mrunalini, Neel, interns).
-5. Live dashboard generation.
-6. Autonomous AI workload rebalancing agent proposals.
-7. Ticket transfer & handover comment generation.
+Offline tests for Jira work management and workload dispatch.
+Provider data is mocked at the Jira issue boundary; dashboard classification,
+capacity, dry-run transfers, and turnaround calculations remain real.
 """
 
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from work_manager import (
     JiraUser,
@@ -66,138 +62,140 @@ def test_channel_inference_from_summary():
     assert infer_channel_from_summary("General Campaign Brief") == "General"
 
 
-def test_assignable_users_and_capacity_tracking():
-    """Verify team members and interns are parsed with appropriate roles."""
-    users = fetch_assignable_jira_users(project="TCN")
-    assert len(users) > 0
+@pytest.fixture
+def jira_work_items():
+    today = datetime.now(UTC).date()
+    issues = [
+        {
+            "key": "TCN-101", "id": "101", "summary": "WhatsApp offer",
+            "status": "To Do", "assignee": "Mrunalini Gawande", "duedate": today.isoformat(),
+        },
+        {
+            "key": "TCN-102", "id": "102", "summary": "RCS offer",
+            "status": "In Progress", "assignee": "Mrunalini Gawande",
+            "duedate": (today + timedelta(days=1)).isoformat(),
+        },
+        {
+            "key": "SWCM-201", "id": "201", "summary": "SMS audience upload",
+            "status": "Base Pending", "assignee": "Neel Shah", "duedate": today.isoformat(),
+            "created": (datetime.now(UTC) - timedelta(days=3)).isoformat(),
+        },
+        {
+            "key": "SWCM-202", "id": "202", "summary": "Email campaign",
+            "status": "Done", "assignee": "Dnyanesh Khawas",
+            "created": "2026-09-01T09:00:00Z", "updated": "2026-09-03T09:00:00Z",
+        },
+    ]
 
-    names = {u.name for u in users}
-    assert "Mrunalini Gawande" in names
-    assert "Dnyanesh Khawas" in names
-    assert "Neel Shah" in names
-    assert "Soham Das" in names
-    assert "Aadya" in names or "Aadya Trivedi" in names
-    assert "Apurva Mohite" not in names
-    mrunalini = next(u for u in users if u.name == "Mrunalini Gawande")
-    assert mrunalini.role == "Core Operator"
-    assert mrunalini.account_id.startswith("712020:")
+    def list_issues(project="TCN", limit=100):
+        selected = issues if project == "ALL" else [i for i in issues if i["key"].startswith(f"{project}-")]
+        return selected[:limit]
+
+    with patch("work_manager.list_jira_issues", side_effect=list_issues) as provider:
+        yield provider
 
 
-def test_work_management_dashboard_aggregation():
-    """Verify live work management dashboard ingests tickets and populates metrics."""
+def test_work_management_dashboard_aggregation(jira_work_items):
     dash = get_work_management_dashboard(project="TCN", limit=25)
-    assert dash["project"] == "TCN"
-    assert dash["total_tickets"] > 0
-    assert "PENDING" in dash["status_counts"]
-    assert "TODAY" in dash["timeline_counts"]
-    assert "TOMORROW" in dash["timeline_counts"]
-    assert len(dash["assignees"]) > 0
-    assert len(dash["work_items"]) > 0
+    jira_work_items.assert_called_once_with(project="TCN", limit=25)
+    assert dash["total_tickets"] == 2
+    assert dash["status_counts"] == {"PENDING": 2, "BLOCKED": 0, "DONE": 0}
+    assert dash["timeline_counts"]["TODAY"] == 1
+    assert dash["timeline_counts"]["TOMORROW"] == 1
+    assert dash["channel_counts"]["WhatsApp"] == 1
+    assert dash["channel_counts"]["RCS"] == 1
+    owner = next(a for a in dash["assignees"] if a["name"] == "Mrunalini Gawande")
+    assert owner["open_tickets_count"] == 2
+    assert owner["due_today_count"] == 1
+    assert owner["due_tomorrow_count"] == 1
+    assert {w["key"] for w in dash["work_items"]} == {"TCN-101", "TCN-102"}
 
 
-def test_ai_workload_rebalancing_proposals():
-    """Verify AI workload dispatcher evaluates context and proposes ticket reassignments."""
-    prompt = (
-        "Mrunalini is overloaded with tickets due this week, transfer some tickets to other team members or interns"
-    )
-    res = ai_rebalance_workload(prompt, project="TCN", auto_execute=False)
-
+def test_rule_based_workload_rebalancing_dry_run(jira_work_items, monkeypatch):
+    """Missing AI credentials uses disclosed rule-based proposals, never executes them."""
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with patch("work_manager.transfer_jira_ticket") as transfer:
+        res = ai_rebalance_workload("Mrunalini is overloaded; transfer tickets to peers", project="TCN", auto_execute=False)
+    transfer.assert_not_called()
     assert res["ok"] is True
-    assert res["proposals_count"] > 0
-    assert len(res["proposals"]) > 0
-
-    first_proposal = res["proposals"][0]
-    assert first_proposal["issue_key"].startswith("TCN-")
-    assert first_proposal["current_assignee"] == "Mrunalini Gawande"
-    assert first_proposal["target_assignee"] != "Mrunalini Gawande"
-    assert first_proposal["target_account_id"].startswith("712020:")
-    assert "Rebalancing" in first_proposal["reason"] or "transfer" in first_proposal["reason"]
+    assert res["auto_executed"] is False
+    assert res["proposals_count"] == len(res["proposals"]) == 2
+    assert {p["issue_key"] for p in res["proposals"]} == {"TCN-101", "TCN-102"}
+    active_recipients = {
+        u.account_id: u.name for u in fetch_assignable_jira_users("TCN")
+        if u.is_active_for_allocation and u.name != "Mrunalini Gawande"
+    }
+    for proposal in res["proposals"]:
+        assert proposal["current_assignee"] == "Mrunalini Gawande"
+        assert active_recipients[proposal["target_account_id"]] == proposal["target_assignee"]
+        assert proposal["executed"] is False
 
 
 def test_transfer_jira_ticket_mock():
-    """Verify transfer_jira_ticket calls Atlassian API for licensed Jira users."""
-    with patch("requests.put") as mock_put:
+    """Licensed-user transfer sends the requested account to the mocked Jira endpoint."""
+    target = "712020:fae946f9-8472-455a-9d27-6d773ecfb48d"
+    with patch("work_manager.requests.put") as mock_put:
         mock_put.return_value.status_code = 204
         res = transfer_jira_ticket(
-            issue_key="TCN-999",
-            to_account_id="712020:fae946f9-8472-455a-9d27-6d773ecfb48d",
-            handover_note="Passing WhatsApp creative review",
-            transferred_by="Naman Dugad",
+            issue_key="TCN-999", to_account_id=target,
+            handover_note="Passing WhatsApp creative review", transferred_by="Naman Dugad",
         )
-        assert res["ok"] is True
-        assert res["issue_key"] == "TCN-999"
-        assert res["to_account_id"] == "712020:fae946f9-8472-455a-9d27-6d773ecfb48d"
-        assert mock_put.called
+    assert res["ok"] is True
+    assert res["jira_updated"] is True
+    assert res["virtual_assignment"] is False
+    assert res["issue_key"] == "TCN-999"
+    assert res["to_account_id"] == target
+    mock_put.assert_called_once()
+    args, kwargs = mock_put.call_args
+    assert args == ("https://jira.example.invalid/rest/api/3/issue/TCN-999/assignee",)
+    assert kwargs["json"] == {"accountId": target}
+    assert kwargs["headers"]["Authorization"].startswith("Basic ")
 
 
-def test_swcm_project_dashboard_and_blocked_status():
-    """Verify TATA Service and wealth Campaign Manager (SWCM) project queries and blocks status."""
+def test_swcm_project_dashboard_and_blocked_status(jira_work_items):
     dash = get_work_management_dashboard(project="SWCM", limit=20)
+    jira_work_items.assert_called_once_with(project="SWCM", limit=20)
     assert dash["project"] == "SWCM"
-    assert dash["total_tickets"] > 0
-    assert "BLOCKED" in dash["status_counts"]
-    from work_manager import categorize_status
+    assert dash["total_tickets"] == 2
+    assert dash["status_counts"] == {"PENDING": 0, "BLOCKED": 1, "DONE": 1}
+    assert {w["key"] for w in dash["work_items"]} == {"SWCM-201", "SWCM-202"}
+    blocked = next(w for w in dash["work_items"] if w["key"] == "SWCM-201")
+    assert blocked["status_category"] == "BLOCKED"
+    assert blocked["assignee_name"] == "Neel Shah"
+    assert dash["timeline_counts"]["TODAY"] == 1
 
-    assert categorize_status("Base Pending") == "BLOCKED"
-    assert any(w["key"].startswith("SWCM-") for w in dash["work_items"])
-    assert any(p["key"] == "SWCM" for p in dash["projects_catalog"])
 
-
-def test_all_projects_combined_dashboard():
-    """Verify combined querying across all Tata projects (ALL)."""
+def test_all_projects_combined_dashboard(jira_work_items):
     dash = get_work_management_dashboard(project="ALL", limit=30)
+    jira_work_items.assert_called_once_with(project="ALL", limit=30)
     assert dash["project"] == "ALL"
-    assert dash["total_tickets"] > 0
-    keys = [w["key"] for w in dash["work_items"]]
-    # Should contain tickets from both TCN and SWCM
-    assert any(k.startswith("SWCM-") for k in keys) or any(k.startswith("TCN-") for k in keys)
+    assert dash["total_tickets"] == 4
+    assert {w["key"] for w in dash["work_items"]} == {"TCN-101", "TCN-102", "SWCM-201", "SWCM-202"}
+    assert dash["status_counts"] == {"PENDING": 2, "BLOCKED": 1, "DONE": 1}
 
 
-def test_turnaround_and_bottleneck_analytics():
-    """Verify cycle time calculations, operator turnaround velocity, and roadblock attribution."""
+def test_turnaround_and_bottleneck_analytics(jira_work_items):
     analytics = get_turnaround_and_bottleneck_analytics(project="SWCM", limit=50)
-
+    jira_work_items.assert_called_once_with(project="SWCM", limit=50)
     assert analytics["project"] == "SWCM"
-    assert analytics["total_tickets_analyzed"] > 0
-    assert analytics["completed_count"] > 0
-    assert analytics["team_avg_cycle_time_days"] > 0.0
-    assert analytics["team_avg_cycle_time_hours"] > 0.0
-
-    # Roadblock Attribution checks
-    attr = analytics["roadblock_attribution"]
-    assert "total_roadblocks" in attr
-    assert "tata_capital" in attr
-    assert "karix_meta" in attr
-    assert "attributics" in attr
-    assert attr["total_roadblocks"] == (
-        attr["tata_capital"]["count"] + attr["karix_meta"]["count"] + attr["attributics"]["count"]
-    )
-    if attr["total_roadblocks"] > 0:
-        total_pct = (
-            attr["tata_capital"]["percentage"] + attr["karix_meta"]["percentage"] + attr["attributics"]["percentage"]
-        )
-        assert round(total_pct) == 100
-
-    # Operator Velocities checks
-    ops = analytics["operator_velocities"]
-    assert len(ops) > 0
-    dnyanesh = next((o for o in ops if o["name"] == "Dnyanesh Khawas"), None)
-    assert dnyanesh is not None
-    assert dnyanesh["completed_count"] > 0
-    assert dnyanesh["avg_cycle_time_days"] > 0.0
-    assert dnyanesh["velocity_rating"] in ["EXCELLENT", "FAST", "STANDARD"]
-
-    # Blocked tickets diagnostic
-    blocked = analytics["blocked_tickets"]
-    assert len(blocked) == attr["total_roadblocks"]
-    for t in blocked:
-        assert t["roadblock_category"] in [
-            "Tata Capital (Client)",
-            "Karix / Meta (Gateway)",
-            "Attributics (Internal)",
-        ]
-        assert t["root_cause"] != ""
-        assert t["aging_days"] >= 0.0
+    assert analytics["total_tickets_analyzed"] == 2
+    assert analytics["completed_count"] == 1
+    assert analytics["team_avg_cycle_time_days"] == 2.0
+    assert analytics["team_avg_cycle_time_hours"] == 48.0
+    attribution = analytics["roadblock_attribution"]
+    assert attribution["total_roadblocks"] == 1
+    assert attribution["tata_capital"]["count"] == 1
+    assert attribution["tata_capital"]["percentage"] == 100.0
+    assert attribution["karix_meta"]["count"] == attribution["attributics"]["count"] == 0
+    operator = next(o for o in analytics["operator_velocities"] if o["name"] == "Dnyanesh Khawas")
+    assert operator["completed_count"] == 1
+    assert operator["avg_cycle_time_hours"] == 48.0
+    assert operator["avg_cycle_time_days"] == 2.0
+    assert len(analytics["blocked_tickets"]) == 1
+    blocked = analytics["blocked_tickets"][0]
+    assert blocked["key"] == "SWCM-201"
+    assert blocked["roadblock_category"] == "Tata Capital (Client)"
+    assert blocked["aging_days"] >= 3.0
 
 
 def test_api_turnaround_analytics_endpoint(provision_user):

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTabState } from '@/lib/tab-state';
 import { useApp, getRcsDetails } from '@/lib/context';
 import {
@@ -9,7 +9,8 @@ import {
   fetchJiraBrief,
   submitJiraBrief,
   syncRcsTemplateToMoEngage,
-  getJiraCreativeDownloadUrl,
+  previewJiraDrafts,
+  reportJiraValidation,
   uploadJiraCreative,
   fetchMoEngageCatalog,
   stageMoEngageDraftBatch,
@@ -23,8 +24,64 @@ import {
   type JiraWhatsAppDraft,
   type JiraRcsDraft,
   type JiraSmsDraft,
+  type DraftWarnings,
+  type JiraCreativeSource,
+  type JiraDraftPreviewRequest,
+  type JiraDraftPreview,
 } from '@/lib/api';
 import { formatError, formatDate } from '@/lib/format';
+import { JiraCreativeImage, JiraCreativeDownload } from '@/components/jira-creative';
+import { carouselCardWarnings, carouselSelectionError, selectedRcsDraft, type SelectableRcsDraft } from '@/lib/jira-carousel';
+
+function isAspectBlocked(draft: DraftWarnings) {
+  return Boolean(draft.aspect_ratio_blocked || draft.aspect_ratio_warnings?.some((warning) => warning.blocked));
+}
+
+function DraftWarningList({ draft }: { draft: DraftWarnings }) {
+  return (
+    <div className="space-y-2 text-xs">
+      {isAspectBlocked(draft) && (
+        <p role="alert" className="font-semibold text-rose-800">
+          Whitelisting blocked: {draft.aspect_ratio_block_reason || 'Replace the creative with a compliant image.'}
+        </p>
+      )}
+      {draft.aspect_ratio_warnings?.map((warning, index) => (
+        <div key={`aspect-${index}`} className="p-2 rounded border border-rose-200 bg-rose-50 text-rose-900">
+          <p className="font-semibold">{warning.component}: {warning.error || warning.action || 'Image aspect ratio warning'}</p>
+          <p>Original: {warning.original_size || 'Unknown'} · Current ratio: {warning.current_ratio || 'Unknown'} · Required: {warning.recommended_ratio || 'See recommendation'}</p>
+          {warning.error && warning.action && <p>{warning.action}</p>}
+        </div>
+      ))}
+      {draft.compliance_warnings?.map((warning, index) => (
+        <div key={`compliance-${index}`} className={`p-2 rounded border ${warning.severity === 'error' ? 'border-rose-200 bg-rose-50 text-rose-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+          <p className="font-semibold">{warning.component ? `${warning.component}: ` : ''}{warning.severity === 'error' ? 'Compliance error' : 'Compliance warning'}: {warning.issue}</p>
+          {warning.recommendation && <p>{warning.recommendation}</p>}
+        </div>
+      ))}
+      {draft.grammar_warnings?.map((warning, index) => (
+        <div key={`grammar-${index}`} className="p-2 rounded border border-blue-200 bg-blue-50 text-blue-900">
+          <p className="font-semibold">{warning.component ? `${warning.component}: ` : ''}Grammar: {warning.issue}</p>
+          {warning.suggestion && <p>{warning.suggestion}</p>}
+          {warning.original && <p>Original: {warning.original}</p>}
+          {warning.replacement && <p>Suggested: {warning.replacement}</p>}
+        </div>
+      ))}
+      {draft.duplicate_warning && (
+        <p className="p-2 rounded border border-amber-200 bg-amber-50 text-amber-900">
+          Duplicate: {draft.duplicate_warning.message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+
+type JiraPreviewSnapshot = {
+  selectedKey: string;
+  issueKey?: string;
+  payload: JiraDraftPreviewRequest;
+  attempt: number;
+};
 
 function BriefStatusBadge({ status }: { status?: string }) {
   const s = (status || 'Pending').toLowerCase().trim();
@@ -89,23 +146,66 @@ export default function JiraBriefsPage() {
 
   // Editable template drafts and selection sets
   const [waTemplates, setWaTemplates] = useTabState<JiraWhatsAppDraft[]>('briefs_wa_templates', []);
-  const [rcsTemplates, setRcsTemplates] = useTabState<JiraRcsDraft[]>('briefs_rcs_templates', []);
+  const [rcsTemplates, setRcsTemplates] = useTabState<SelectableRcsDraft[]>('briefs_rcs_templates', []);
   const [smsTemplates, setSmsTemplates] = useTabState<JiraSmsDraft[]>('briefs_sms_templates', []);
   const [selectedWa, setSelectedWa] = useTabState<Set<number>>('briefs_selected_wa', new Set());
   const [selectedRcs, setSelectedRcs] = useTabState<Set<number>>('briefs_selected_rcs', new Set());
   const [editingCard, setEditingCard] = useTabState<Record<string, boolean>>('briefs_editing_card', {});
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
-  const [previewCreativeModal, setPreviewCreativeModal] = useState<{ url: string; filename: string; channel?: string } | null>(null);
+  const [previewCreativeModal, setPreviewCreativeModal] = useState<(JiraCreativeSource & { filename: string; channel?: string }) | null>(null);
   const [targetAccount, setTargetAccount] = useTabState<string>('briefs_target_account', 'tcl_promo');
   const briefRef = useRef(brief);
   briefRef.current = brief;
   const waTemplatesRef = useRef(waTemplates);
   waTemplatesRef.current = waTemplates;
+  const rcsTemplatesRef = useRef(rcsTemplates);
+  rcsTemplatesRef.current = rcsTemplates;
   const currentRcs = getRcsDetails(targetAccount, accounts);
   const whatsappAccount = targetAccount === 'wealth' ? 'tcl_promo' : targetAccount;
   const whatsappAccountName = accounts.find((acc) => acc.id === whatsappAccount)?.name || whatsappAccount;
   const activeRequestKey = useRef<string>('');
+  const [uploadingCreative, setUploadingCreative] = useState<Record<string, boolean>>({});
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [validation, setValidation] = useState<{
+    signature: JiraPreviewSnapshot | null;
+    status: 'pending' | 'ready' | 'error';
+    data?: JiraDraftPreview;
+    error?: string;
+  }>({ signature: null, status: 'pending' });
+  const [commentReview, setCommentReview] = useState<{
+    signature: JiraPreviewSnapshot;
+    issueKey: string;
+    payload: JiraDraftPreviewRequest;
+    text: string;
+  } | null>(null);
+  const [commentBusy, setCommentBusy] = useState(false);
+  const commentBusyRef = useRef(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const effectiveRcsTemplates = useMemo(() => rcsTemplates.map(selectedRcsDraft), [rcsTemplates]);
+  const previewPayload = useMemo(() => ({
+    account: targetAccount,
+    whatsapp_account: whatsappAccount,
+    whatsapp_templates: waTemplates,
+    rcs_templates: effectiveRcsTemplates,
+  }), [targetAccount, whatsappAccount, waTemplates, effectiveRcsTemplates]);
+  const previewSignature = useMemo<JiraPreviewSnapshot>(
+    () => ({ selectedKey, issueKey: brief?.issue_key, payload: previewPayload, attempt: previewAttempt }),
+    [selectedKey, brief?.issue_key, previewPayload, previewAttempt]
+  );
+  const previewSignatureRef = useRef(previewSignature);
+  previewSignatureRef.current = previewSignature;
+  const validationReady = validation.signature === previewSignature && validation.status === 'ready'
+    && !loadingBrief && selectedKey === brief?.issue_key && !Object.values(uploadingCreative).some(Boolean);
+  const getWaWarnings = (index: number) => (validationReady ? validation.data?.whatsapp_templates[index] : undefined) ?? waTemplates[index];
+  const validationError = validation.signature === previewSignature && validation.status === 'error' ? validation.error : undefined;
+  const getRcsWarnings = (index: number) => (validationReady ? validation.data?.rcs_templates[index] : undefined) ?? rcsTemplates[index];
+  const isRcsEligible = (index: number) => !carouselSelectionError(effectiveRcsTemplates[index]) && !isAspectBlocked(getRcsWarnings(index));
+  const creativeSource = (path?: string | null, filename?: string | null, attachmentId?: string | null): JiraCreativeSource => ({
+    path,
+    filename,
+    attachmentId: attachmentId || brief?.attachments_mapped.find((attachment) => path ? attachment.local_path === path : filename && attachment.filename === filename)?.id,
+  });
   // MoEngage Campaign Staging State
   const [moeCatalog, setMoeCatalog] = useState<MoEngageCatalog | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState<boolean>(false);
@@ -344,11 +444,11 @@ export default function JiraBriefsPage() {
   const loadBrief = useCallback(async (key: string, force = false) => {
     if (!key) return;
     const cleanKey = key.trim().toUpperCase();
+    activeRequestKey.current = cleanKey;
     if (!force && briefRef.current && briefRef.current.issue_key === cleanKey && waTemplatesRef.current.length > 0) {
       // Retain active working drafts when returning to this tab
       return;
     }
-    activeRequestKey.current = cleanKey;
     try {
       setLoadingBrief(true);
       setFeedback(null);
@@ -433,9 +533,93 @@ export default function JiraBriefsPage() {
     }
   }, [selectedKey, loadBrief]);
 
+  useEffect(() => {
+    if (!brief || loadingBrief || selectedKey !== brief.issue_key) return;
+    const controller = new AbortController();
+    let disposed = false;
+    setValidation({ signature: previewSignature, status: 'pending' });
+    const timer = setTimeout(() => {
+      previewJiraDrafts(previewPayload, controller.signal)
+        .then((data) => {
+          if (!disposed && previewSignatureRef.current === previewSignature) {
+            setValidation({ signature: previewSignature, status: 'ready', data });
+          }
+        })
+        .catch((error) => {
+          if (!disposed && previewSignatureRef.current === previewSignature) {
+            setValidation({ signature: previewSignature, status: 'error', error: formatError(error) });
+          }
+        });
+    }, 350);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [brief?.issue_key, loadingBrief, selectedKey, previewPayload, previewSignature, previewAttempt]);
+
+  useEffect(() => {
+    setCommentReview((current) => current?.signature === previewSignature && validationReady ? current : null);
+    setCommentError(null);
+  }, [previewSignature, validationReady]);
+
+  const prepareValidationComment = async () => {
+    if (!brief || !validationReady || submitting || commentBusyRef.current || !hasValidationErrors) return;
+    const signature = previewSignature;
+    const issueKey = brief.issue_key;
+    const payload = previewPayload;
+    commentBusyRef.current = true;
+    setCommentBusy(true);
+    setCommentError(null);
+    try {
+      const result = await reportJiraValidation(issueKey, { ...payload, confirmed: false });
+      if (previewSignatureRef.current !== signature) return;
+      setCommentReview({ signature, issueKey, payload, text: result.comment_text });
+    } catch (error) {
+      if (previewSignatureRef.current === signature) {
+        setFeedback({ message: `Could not prepare Jira validation comment: ${formatError(error)}`, type: 'error' });
+      }
+    } finally {
+      commentBusyRef.current = false;
+      setCommentBusy(false);
+    }
+  };
+
+  const confirmValidationComment = async () => {
+    if (!commentReview || !validationReady || submitting || commentBusyRef.current) return;
+    if (commentReview.signature !== previewSignatureRef.current) {
+      setCommentReview(null);
+      return;
+    }
+    const review = commentReview;
+    commentBusyRef.current = true;
+    setCommentBusy(true);
+    setCommentError(null);
+    try {
+      await reportJiraValidation(review.issueKey, {
+        ...review.payload,
+        confirmed: true,
+        expected_comment: review.text,
+      });
+      setCommentReview(null);
+      setFeedback({ message: `Validation errors reported as a comment on ${review.issueKey}.`, type: 'success' });
+    } catch (error) {
+      const message = formatError(error);
+      setCommentError(message);
+      setFeedback({ message: `Could not confirm posting to ${review.issueKey}: ${message}`, type: 'error' });
+    } finally {
+      commentBusyRef.current = false;
+      setCommentBusy(false);
+    }
+  };
+
   // Submission handler with selective channel filtering
   const handleSubmitChannel = async (channelMode: 'all' | 'whatsapp' | 'rcs') => {
     if (!brief) return;
+    if (!validationReady) {
+      setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
+      return;
+    }
     try {
       setSubmitting(true);
       setFeedback(null);
@@ -445,12 +629,12 @@ export default function JiraBriefsPage() {
       let rcsToSubmit: JiraRcsDraft[] = [];
 
       if (channelMode === 'all' || channelMode === 'whatsapp') {
-        waToSubmit = waTemplates.filter((_, idx) => selectedWa.has(idx));
+        waToSubmit = waTemplates.filter((_, idx) => selectedWa.has(idx) && !isAspectBlocked(getWaWarnings(idx)));
         if (waToSubmit.length > 0) submitChannels.push('whatsapp');
       }
 
       if (channelMode === 'all' || channelMode === 'rcs') {
-        rcsToSubmit = rcsTemplates.filter((_, idx) => selectedRcs.has(idx));
+        rcsToSubmit = effectiveRcsTemplates.filter((_, idx) => selectedRcs.has(idx) && isRcsEligible(idx));
         if (rcsToSubmit.length > 0) submitChannels.push('rcs');
       }
 
@@ -476,11 +660,19 @@ export default function JiraBriefsPage() {
         rcsToSubmit.length > 0 ? currentRcs.botId : undefined
       );
 
-      const waCount = res.whatsapp_submitted?.length || 0;
-      const rcsCount = res.rcs_submitted?.length || 0;
+      const waResults = res.whatsapp_submitted || [];
+      const rcsResults = res.rcs_submitted || [];
+      const waCount = waResults.filter((result) => result.status === 'submitted').length;
+      const rcsCount = rcsResults.filter((result) => result.status === 'submitted').length;
+      const outcomes = [...waResults, ...rcsResults];
+      const errors = outcomes.filter((result) => result.status !== 'submitted' && result.status !== 'duplicate');
+      const duplicateCount = outcomes.filter((result) => result.status === 'duplicate').length;
       setFeedback({
-        message: `Successfully submitted ${waCount} WhatsApp and ${rcsCount} RCS templates for ${brief.issue_key}. Jira ticket comment posted.`,
-        type: 'success',
+        message: `Submitted ${waCount} WhatsApp and ${rcsCount} RCS templates for ${brief.issue_key}.`
+          + (duplicateCount ? ` ${duplicateCount} already registered.` : '')
+          + (errors.length ? ` ${errors.length} blocked or failed: ${errors.map((result) => `${result.template_name}: ${result.error || result.status}`).join('; ')}.` : '')
+          + ' No Jira comment was posted.',
+        type: errors.length ? 'error' : 'success',
       });
       loadBrief(brief.issue_key);
     } catch (err) {
@@ -491,16 +683,20 @@ export default function JiraBriefsPage() {
   };
 
   const requestWhitelist = (channelMode: 'all' | 'whatsapp' | 'rcs') => {
+    if (!validationReady) {
+      setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
+      return;
+    }
     const count = channelMode === 'whatsapp'
-      ? selectedWa.size
+      ? selectedWaCount
       : channelMode === 'rcs'
-      ? selectedRcs.size
-      : selectedWa.size + selectedRcs.size;
+      ? selectedRcsCount
+      : selectedWaCount + selectedRcsCount;
     if (count === 0) {
       setFeedback({ message: 'Please select at least one template to whitelist.', type: 'error' });
       return;
     }
-    if (channelMode !== 'whatsapp' && selectedRcs.size > 0 && !currentRcs.botId) {
+    if (channelMode !== 'whatsapp' && selectedRcsCount > 0 && !currentRcs.botId) {
       setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Refresh account settings before submitting.`, type: 'error' });
       return;
     }
@@ -587,6 +783,21 @@ export default function JiraBriefsPage() {
     setWaTemplates((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: val };
+      const draft = next[idx];
+      if (field === 'button_type' && val === 'NONE') {
+        draft.buttons = [];
+      } else if (draft.buttons?.length && ['button_type', 'button_text', 'button_url', 'button_phone'].includes(field)) {
+        const first = { ...draft.buttons[0] };
+        if (field === 'button_type') {
+          first.type = String(val);
+          first.url = val === 'URL' ? draft.button_url || undefined : undefined;
+          first.phone_number = val === 'PHONE_NUMBER' ? draft.button_phone || undefined : undefined;
+        }
+        if (field === 'button_text') first.text = String(val || '');
+        if (field === 'button_url') first.url = String(val || '');
+        if (field === 'button_phone') first.phone_number = String(val || '');
+        draft.buttons = [first, ...draft.buttons.slice(1)];
+      }
       return next;
     });
   };
@@ -595,6 +806,22 @@ export default function JiraBriefsPage() {
     setRcsTemplates((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: val };
+      const draft = next[idx];
+      if (draft.suggestions?.length && ['action_label', 'action_url', 'action_type'].includes(field)) {
+        const first = { ...draft.suggestions[0] };
+        if (field === 'action_label') first.label = first.text = String(val || '');
+        if (field === 'action_url') first.url = String(val || '');
+        if (field === 'action_type') first.type = String(val || '');
+        draft.suggestions = [first, ...draft.suggestions.slice(1)];
+      }
+      if (draft.carousel_cards?.length) {
+        const first = { ...draft.carousel_cards[0] };
+        if (field === 'card_title') first.card_title = String(val || '');
+        if (field === 'body') first.card_description = String(val || '');
+        if (field === 'action_label') first.button_text = String(val || '');
+        if (field === 'action_url') first.button_url = String(val || '');
+        draft.carousel_cards = [first, ...draft.carousel_cards.slice(1)];
+      }
       return next;
     });
   };
@@ -668,6 +895,7 @@ export default function JiraBriefsPage() {
           body: wa.body,
           media_file: wa.media_file,
           media_filename: wa.media_filename,
+          media_attachment_id: wa.media_attachment_id,
           action_type: wa.button_type || 'URL',
           action_label: wa.button_text || 'Check Offer',
           action_url: wa.button_url || 'https://u3.mnge.co/',
@@ -718,6 +946,7 @@ export default function JiraBriefsPage() {
           footer_text: null,
           media_file: rcs.media_file,
           media_filename: rcs.media_filename,
+          media_attachment_id: rcs.media_attachment_id,
           button_type: rcs.action_url ? 'URL' : 'NONE',
           button_text: rcs.action_label || 'Check Offer',
           button_url: rcs.action_url || 'https://u3.mnge.co/',
@@ -815,6 +1044,7 @@ export default function JiraBriefsPage() {
   };
 
   const toggleSelectWa = (idx: number) => {
+    if (!validationReady || isAspectBlocked(getWaWarnings(idx))) return;
     setSelectedWa((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
@@ -824,6 +1054,7 @@ export default function JiraBriefsPage() {
   };
 
   const toggleSelectRcs = (idx: number) => {
+    if (!validationReady || (!selectedRcs.has(idx) && !isRcsEligible(idx))) return;
     setSelectedRcs((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
@@ -832,28 +1063,45 @@ export default function JiraBriefsPage() {
     });
   };
 
+  const toggleCarouselCard = (rcsIdx: number, cardIdx: number) => {
+    if (submitting) return;
+    setRcsTemplates((prev) => prev.map((draft, index) => {
+      if (index !== rcsIdx) return draft;
+      const excluded = new Set(draft.excluded_card_indices || []);
+      if (excluded.has(cardIdx)) excluded.delete(cardIdx);
+      else excluded.add(cardIdx);
+      return { ...draft, excluded_card_indices: [...excluded] };
+    }));
+  };
+
   const selectAllWa = (select: boolean) => {
-    setSelectedWa(select ? new Set(waTemplates.map((_, idx) => idx)) : new Set());
+    if (!validationReady) return;
+    setSelectedWa(select ? new Set(waTemplates.flatMap((_, idx) => isAspectBlocked(getWaWarnings(idx)) ? [] : [idx])) : new Set());
   };
 
   const selectAllRcs = (select: boolean) => {
-    setSelectedRcs(select ? new Set(rcsTemplates.map((_, idx) => idx)) : new Set());
+    if (!validationReady) return;
+    setSelectedRcs(select ? new Set(rcsTemplates.flatMap((_, idx) => isRcsEligible(idx) ? [idx] : [])) : new Set());
   };
-  const [uploadingCreative, setUploadingCreative] = useState<Record<string, boolean>>({});
 
   const handleReplaceWaCreative = async (idx: number, file: File) => {
     const key = `wa_${idx}`;
+    const issueKey = brief?.issue_key;
+    const templateName = waTemplates[idx]?.template_name;
     try {
       setUploadingCreative((prev) => ({ ...prev, [key]: true }));
       const res = await uploadJiraCreative(file);
+      if (briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
+          || !waTemplatesRef.current.some((draft) => draft.template_name === templateName)) return;
       setWaTemplates((prev) =>
-        prev.map((w, i) =>
-          i === idx
+        prev.map((w) =>
+          w.template_name === templateName
             ? {
                 ...w,
                 header_type: 'IMAGE',
                 media_file: res.local_path,
                 media_filename: res.filename,
+                media_attachment_id: null,
               }
             : w
         )
@@ -874,16 +1122,27 @@ export default function JiraBriefsPage() {
 
   const handleReplaceRcsCreative = async (idx: number, file: File) => {
     const key = `rcs_${idx}`;
+    const issueKey = brief?.issue_key;
+    const templateName = rcsTemplates[idx]?.template_name;
     try {
       setUploadingCreative((prev) => ({ ...prev, [key]: true }));
       const res = await uploadJiraCreative(file);
+      if (briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
+          || !rcsTemplatesRef.current.some((draft) => draft.template_name === templateName)) return;
       setRcsTemplates((prev) =>
-        prev.map((r, i) =>
-          i === idx
+        prev.map((r) =>
+          r.template_name === templateName
             ? {
                 ...r,
                 media_file: res.local_path,
                 media_filename: res.filename,
+                media_attachment_id: null,
+                carousel_cards: r.carousel_cards?.map((card, cardIndex) => cardIndex === 0 ? {
+                  ...card,
+                  media_url: res.local_path,
+                  media_filename: res.filename,
+                  media_attachment_id: null,
+                } : card),
               }
             : r
         )
@@ -903,26 +1162,34 @@ export default function JiraBriefsPage() {
   };
   const handleReplaceCarouselCardCreative = async (rcsIdx: number, cardIdx: number, file: File) => {
     const key = `rcs_${rcsIdx}_card_${cardIdx}`;
+    const issueKey = brief?.issue_key;
+    const templateName = rcsTemplates[rcsIdx]?.template_name;
     try {
       setUploadingCreative((prev) => ({ ...prev, [key]: true }));
       const res = await uploadJiraCreative(file);
+      if (briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
+          || !rcsTemplatesRef.current.some((draft) => draft.template_name === templateName && draft.carousel_cards?.[cardIdx])) return;
       setRcsTemplates((prev) => {
         const next = [...prev];
-        const rcs = { ...next[rcsIdx] };
+        const currentIndex = next.findIndex((draft) => draft.template_name === templateName);
+        if (currentIndex < 0) return prev;
+        const rcs = { ...next[currentIndex] };
         if (rcs.carousel_cards) {
           const nextCards = [...rcs.carousel_cards];
           nextCards[cardIdx] = {
             ...nextCards[cardIdx],
             media_url: res.local_path,
             media_filename: res.filename,
+            media_attachment_id: null,
           };
           rcs.carousel_cards = nextCards;
           if (cardIdx === 0) {
             rcs.media_file = res.local_path;
             rcs.media_filename = res.filename;
+            rcs.media_attachment_id = null;
           }
         }
-        next[rcsIdx] = rcs;
+        next[currentIndex] = rcs;
         return next;
       });
       setFeedback({
@@ -990,7 +1257,13 @@ export default function JiraBriefsPage() {
       (i.assignee || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
   });
-  const totalSelectedCount = selectedWa.size + selectedRcs.size;
+  const selectedWaCount = waTemplates.filter((_, index) => selectedWa.has(index) && !isAspectBlocked(getWaWarnings(index))).length;
+  const selectedRcsCount = rcsTemplates.filter((_, index) => selectedRcs.has(index) && isRcsEligible(index)).length;
+  const eligibleWaCount = waTemplates.filter((_, index) => !isAspectBlocked(getWaWarnings(index))).length;
+  const eligibleRcsCount = rcsTemplates.filter((_, index) => isRcsEligible(index)).length;
+  const totalSelectedCount = selectedWaCount + selectedRcsCount;
+  const hasValidationErrors = [...waTemplates.map((_, index) => getWaWarnings(index)), ...rcsTemplates.map((_, index) => getRcsWarnings(index))]
+    .some((draft) => isAspectBlocked(draft) || draft.compliance_warnings?.some((warning) => warning.severity === 'error'));
 
   return (
     <>
@@ -1421,6 +1694,30 @@ export default function JiraBriefsPage() {
                       </div>
                     )}
 
+                  {(waTemplates.length > 0 || rcsTemplates.length > 0) && !validationReady && (
+                    <div role={validationError ? 'alert' : 'status'} className={`p-3 rounded-lg border text-xs ${validationError ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
+                      <p>{validationError ? `Creative and copy validation failed: ${validationError}` : 'Checking current creative and copy. Whitelisting is paused until validation completes; any displayed warnings are from the previous inspection.'}</p>
+                      {validationError && (
+                        <button type="button" className="mt-1 font-semibold underline" onClick={() => {
+                          setValidation({ signature: previewSignature, status: 'pending' });
+                          setPreviewAttempt((value) => value + 1);
+                        }}>
+                          Retry validation
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {hasValidationErrors && (
+                    <button
+                      type="button"
+                      onClick={prepareValidationComment}
+                      disabled={!validationReady || submitting || commentBusy}
+                      className="px-3 py-2 rounded-lg border border-rose-300 bg-rose-50 text-rose-800 text-xs font-semibold hover:bg-rose-100 disabled:opacity-50"
+                    >
+                      {commentBusy ? 'Preparing Jira report…' : 'Report validation errors to Jira…'}
+                    </button>
+                  )}
+
                   {/* Selective Submission Action Controls */}
                   <div className="flex flex-wrap items-center gap-2">
                     {brief.is_email_campaign ? (
@@ -1433,13 +1730,13 @@ export default function JiraBriefsPage() {
                         {waTemplates.length > 0 && (
                           <button
                             onClick={() => requestWhitelist('whatsapp')}
-                            disabled={submitting || selectedWa.size === 0}
+                            disabled={submitting || !validationReady || selectedWaCount === 0}
                             className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
                             title="Submit only the checked WhatsApp templates"
                           >
                             <span>🟢 Whitelist WhatsApp Only</span>
                             <span className="bg-emerald-500 px-1.5 py-0.2 rounded text-[10px]">
-                              {selectedWa.size}
+                              {selectedWaCount}
                             </span>
                           </button>
                         )}
@@ -1447,13 +1744,13 @@ export default function JiraBriefsPage() {
                         {rcsTemplates.length > 0 && (
                           <button
                             onClick={() => requestWhitelist('rcs')}
-                            disabled={submitting || selectedRcs.size === 0 || !currentRcs.botId}
+                            disabled={submitting || !validationReady || selectedRcsCount === 0 || !currentRcs.botId}
                             className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
-                            title={`Submit ${selectedRcs.size} RCS template(s) to Karix RCS Bot '${currentRcs.botName}' (ID: ${currentRcs.botId})`}
+                            title={`Submit ${selectedRcsCount} RCS template(s) to Karix RCS Bot '${currentRcs.botName}' (ID: ${currentRcs.botId})`}
                           >
                             <span>🔵 Whitelist RCS Only</span>
                             <span className="bg-blue-500 px-1.5 py-0.2 rounded text-[10px] font-bold">
-                              {selectedRcs.size}
+                              {selectedRcsCount}
                             </span>
                             <span className="text-[10px] bg-blue-700/90 px-1.5 py-0.2 rounded font-normal opacity-95">
                               ➔ {currentRcs.botName}
@@ -1463,7 +1760,7 @@ export default function JiraBriefsPage() {
 
                         <button
                           onClick={() => requestWhitelist('all')}
-                          disabled={submitting || totalSelectedCount === 0 || (selectedRcs.size > 0 && !currentRcs.botId)}
+                          disabled={submitting || !validationReady || totalSelectedCount === 0 || (selectedRcsCount > 0 && !currentRcs.botId)}
                           className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
                         >
                           {submitting ? (
@@ -1507,17 +1804,7 @@ export default function JiraBriefsPage() {
                           att.mime?.startsWith('image/') ||
                           /\.(png|jpe?g|webp|gif|svg)$/i.test(fn)
                         );
-                        const downloadUrl = getJiraCreativeDownloadUrl({
-                          path: att.local_path,
-                          attachmentId: att.id,
-                          filename: att.filename,
-                        });
-                        const previewUrl = getJiraCreativeDownloadUrl({
-                          path: att.local_path,
-                          attachmentId: att.id,
-                          filename: att.filename,
-                          inline: true,
-                        });
+                        const source = creativeSource(att.local_path, att.filename, att.id);
 
                         if (isImg) {
                           return (
@@ -1525,29 +1812,12 @@ export default function JiraBriefsPage() {
                               key={att.id || att.filename}
                               className="group relative flex flex-col w-36 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden shadow-2xs hover:shadow-md hover:border-blue-400 transition"
                             >
-                              <div
-                                onClick={() =>
-                                  setPreviewCreativeModal({
-                                    url: previewUrl,
-                                    filename: fn,
-                                    channel: att.target_channel,
-                                  })
-                                }
-                                className="relative h-24 w-full bg-gray-50 flex items-center justify-center cursor-pointer overflow-hidden"
-                                title="Click to view full-size image"
-                              >
-                                <img
-                                  src={previewUrl}
-                                  alt={fn}
-                                  className="h-full w-full object-cover group-hover:scale-105 transition duration-200"
-                                  onError={(e) => {
-                                    (e.currentTarget as HTMLImageElement).src =
-                                      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text y="50" font-size="12">Preview Unavailable</text></svg>';
-                                  }}
+                              <div className="relative min-h-24 w-full bg-gray-50 flex items-center justify-center">
+                                <JiraCreativeImage
+                                  source={source}
+                                  className="max-h-24 w-full object-contain transition duration-200"
+                                  onPreview={() => setPreviewCreativeModal({ ...source, filename: fn, channel: att.target_channel })}
                                 />
-                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1">
-                                  <span>🔍 Preview</span>
-                                </div>
                                 <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/90 text-gray-800 shadow-2xs">
                                   {att.target_channel === 'WHATSAPP'
                                     ? '🟢 WA'
@@ -1567,25 +1837,15 @@ export default function JiraBriefsPage() {
                                 <div className="flex items-center justify-between gap-1 pt-1 border-t border-gray-100">
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      setPreviewCreativeModal({
-                                        url: previewUrl,
-                                        filename: fn,
-                                        channel: att.target_channel,
-                                      })
-                                    }
+                                    onClick={() => setPreviewCreativeModal({ ...source, filename: fn, channel: att.target_channel })}
                                     className="text-blue-600 hover:text-blue-800 font-bold"
                                   >
                                     View
                                   </button>
-                                  <a
-                                    href={downloadUrl}
-                                    download={fn}
-                                    className="text-gray-500 hover:text-gray-900 font-semibold flex items-center gap-0.5"
-                                    title="Download file"
-                                  >
-                                    <span>⬇️</span> Download
-                                  </a>
+                                  <JiraCreativeDownload
+                                    source={source}
+                                    className="text-gray-500 hover:text-gray-900 font-semibold"
+                                  />
                                 </div>
                               </div>
                             </div>
@@ -1625,13 +1885,10 @@ export default function JiraBriefsPage() {
                               <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-white text-gray-600 border">
                                 {att.target_channel || 'BRIEF'}
                               </span>
-                              <a
-                                href={downloadUrl}
-                                download={fn}
+                              <JiraCreativeDownload
+                                source={source}
                                 className="px-2 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[10px] border border-blue-200"
-                              >
-                                ⬇️ Get
-                              </a>
+                              />
                             </div>
                           </div>
                         );
@@ -1734,7 +1991,7 @@ export default function JiraBriefsPage() {
                       >
                         <span>🟢 WhatsApp</span>
                         <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                          {selectedWa.size}/{waTemplates.length}
+                          {selectedWaCount}/{waTemplates.length}
                         </span>
                       </button>
 
@@ -1748,7 +2005,7 @@ export default function JiraBriefsPage() {
                       >
                         <span>🔵 RCS (DLT)</span>
                         <span className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                          {selectedRcs.size}/{rcsTemplates.length}
+                          {selectedRcsCount}/{rcsTemplates.length}
                         </span>
                       </button>
 
@@ -1821,13 +2078,14 @@ export default function JiraBriefsPage() {
                         <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
                           <div className="flex items-center gap-3">
                             <span className="font-semibold text-gray-700">
-                              Selected: {selectedWa.size} of {waTemplates.length}
+                              Selected: {selectedWaCount} of {waTemplates.length}
                             </span>
                             <button
-                              onClick={() => selectAllWa(selectedWa.size < waTemplates.length)}
+                              onClick={() => selectAllWa(selectedWaCount < eligibleWaCount)}
+                              disabled={!validationReady || eligibleWaCount === 0}
                               className="text-blue-600 hover:underline font-medium"
                             >
-                              {selectedWa.size < waTemplates.length ? 'Select All' : 'Deselect All'}
+                              {selectedWaCount < eligibleWaCount ? 'Select All Eligible' : 'Deselect All'}
                             </button>
                           </div>
                           <span className="text-gray-400 text-[11px]">
@@ -1840,7 +2098,10 @@ export default function JiraBriefsPage() {
                         <p className="py-8 text-center text-xs text-gray-400">No WhatsApp templates detected in this brief.</p>
                       ) : (
                         waTemplates.map((wa, idx) => {
-                          const isSelected = selectedWa.has(idx);
+                          const warnings = getWaWarnings(idx);
+                          const blocked = isAspectBlocked(warnings);
+                          const isSelected = selectedWa.has(idx) && !blocked;
+                          const source = creativeSource(wa.media_file, wa.media_filename, wa.media_attachment_id);
                           const isEditing = editingCard[`wa-${idx}`] || false;
 
                           return (
@@ -1856,6 +2117,8 @@ export default function JiraBriefsPage() {
                                     type="checkbox"
                                     checked={isSelected}
                                     onChange={() => toggleSelectWa(idx)}
+                                    disabled={!validationReady || blocked}
+                                    aria-label={`Select ${wa.template_name} for whitelisting`}
                                     className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
                                   />
                                   {isEditing ? (
@@ -1921,7 +2184,7 @@ export default function JiraBriefsPage() {
                                     </span>
                                   ) : (
                                     <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
-                                      ⚡ Ready to Whitelist
+                                      {blocked ? 'Blocked: invalid creative' : validationReady ? 'Ready to Whitelist' : 'Validation required'}
                                     </span>
                                   )}
 
@@ -1953,6 +2216,7 @@ export default function JiraBriefsPage() {
                                   </select>
                                 </div>
                               </div>
+                              <DraftWarningList draft={warnings} />
 
                               {/* Header Creative (Image / Media) — Download & Replace */}
                               <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
@@ -1966,18 +2230,11 @@ export default function JiraBriefsPage() {
                                     )}
                                   </span>
                                   <div className="flex items-center gap-1.5">
-                                    {wa.media_file && (
-                                      <a
-                                        href={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename })}
-                                        download={wa.media_filename || 'creative.png'}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
-                                        title="Download creative to inspect or edit"
-                                      >
-                                        <span>⬇️</span>
-                                        <span>Download</span>
-                                      </a>
+                                    {(wa.media_file || wa.media_attachment_id) && (
+                                      <JiraCreativeDownload
+                                        source={source}
+                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] shadow-2xs transition"
+                                      />
                                     )}
                                     <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
                                       <span>{uploadingCreative[`wa_${idx}`] ? '⏳ Uploading...' : wa.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
@@ -1995,20 +2252,12 @@ export default function JiraBriefsPage() {
                                     </label>
                                   </div>
                                 </div>
-                                {wa.media_file && (
+                                {(wa.media_file || wa.media_attachment_id) && (
                                   <div className="pt-1">
-                                    <img
-                                      src={getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename, inline: true })}
-                                      alt={wa.media_filename || 'Creative preview'}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white cursor-pointer hover:opacity-90 transition shadow-2xs"
-                                      title="Click to preview full-size"
-                                      onClick={() => {
-                                        const url = getJiraCreativeDownloadUrl({ path: wa.media_file, filename: wa.media_filename, inline: true });
-                                        setPreviewCreativeModal({ url, filename: wa.media_filename || 'whatsapp_creative.jpg', channel: 'WhatsApp (16:9 / 1.91:1)' });
-                                      }}
-                                      onError={(e) => {
-                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                      }}
+                                    <JiraCreativeImage
+                                      source={source}
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white hover:opacity-90 transition shadow-2xs"
+                                      onPreview={() => setPreviewCreativeModal({ ...source, filename: wa.media_filename || 'whatsapp_creative.jpg', channel: 'WhatsApp (16:9 / 1.91:1)' })}
                                     />
                                   </div>
                                 )}
@@ -2148,13 +2397,14 @@ export default function JiraBriefsPage() {
                         <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
                           <div className="flex items-center gap-3">
                             <span className="font-semibold text-gray-700">
-                              Selected: {selectedRcs.size} of {rcsTemplates.length}
+                              Selected: {selectedRcsCount} of {rcsTemplates.length}
                             </span>
                             <button
-                              onClick={() => selectAllRcs(selectedRcs.size < rcsTemplates.length)}
+                              onClick={() => selectAllRcs(selectedRcsCount < eligibleRcsCount)}
+                              disabled={!validationReady || eligibleRcsCount === 0}
                               className="text-blue-600 hover:underline font-medium"
                             >
-                              {selectedRcs.size < rcsTemplates.length ? 'Select All' : 'Deselect All'}
+                              {selectedRcsCount < eligibleRcsCount ? 'Select All Eligible' : 'Deselect All'}
                             </button>
                           </div>
                           <span className="text-gray-400 text-[11px]">
@@ -2167,7 +2417,11 @@ export default function JiraBriefsPage() {
                         <p className="py-8 text-center text-xs text-gray-400">No RCS templates detected in this brief.</p>
                       ) : (
                         rcsTemplates.map((rcs, idx) => {
-                          const isSelected = selectedRcs.has(idx);
+                          const warnings = getRcsWarnings(idx);
+                          const blocked = isAspectBlocked(warnings);
+                          const selectionError = carouselSelectionError(effectiveRcsTemplates[idx]);
+                          const isSelected = selectedRcs.has(idx) && !blocked && !selectionError;
+                          const source = creativeSource(rcs.media_file, rcs.media_filename, rcs.media_attachment_id);
                           const isEditing = editingCard[`rcs-${idx}`] || false;
 
                           return (
@@ -2183,6 +2437,8 @@ export default function JiraBriefsPage() {
                                     type="checkbox"
                                     checked={isSelected}
                                     onChange={() => toggleSelectRcs(idx)}
+                                    disabled={!validationReady || submitting || (!selectedRcs.has(idx) && (blocked || Boolean(selectionError)))}
+                                    aria-label={`Select ${rcs.template_name} for whitelisting`}
                                     className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
                                   />
                                   {isEditing ? (
@@ -2255,6 +2511,8 @@ export default function JiraBriefsPage() {
                                   </select>
                                 </div>
                               </div>
+                              <DraftWarningList draft={warnings} />
+                              {selectionError && <p role="alert" className="text-xs font-semibold text-rose-800">{selectionError}</p>}
 
                               <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2267,18 +2525,11 @@ export default function JiraBriefsPage() {
                                     )}
                                   </span>
                                   <div className="flex items-center gap-1.5">
-                                    {rcs.media_file && (
-                                      <a
-                                        href={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename })}
-                                        download={rcs.media_filename || 'creative.png'}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] flex items-center gap-1 shadow-2xs transition"
-                                        title="Download creative to inspect or edit"
-                                      >
-                                        <span>⬇️</span>
-                                        <span>Download</span>
-                                      </a>
+                                    {(rcs.media_file || rcs.media_attachment_id) && (
+                                      <JiraCreativeDownload
+                                        source={source}
+                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] shadow-2xs transition"
+                                      />
                                     )}
                                     <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
                                       <span>{uploadingCreative[`rcs_${idx}`] ? '⏳ Uploading...' : rcs.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
@@ -2296,20 +2547,12 @@ export default function JiraBriefsPage() {
                                     </label>
                                   </div>
                                 </div>
-                                {rcs.media_file && (
+                                {(rcs.media_file || rcs.media_attachment_id) && (
                                   <div className="pt-1">
-                                    <img
-                                      src={getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename, inline: true })}
-                                      alt={rcs.media_filename || 'Creative preview'}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white cursor-pointer hover:opacity-90 transition shadow-2xs"
-                                      title="Click to preview full-size"
-                                      onClick={() => {
-                                        const url = getJiraCreativeDownloadUrl({ path: rcs.media_file, filename: rcs.media_filename, inline: true });
-                                        setPreviewCreativeModal({ url, filename: rcs.media_filename || 'rcs_creative.jpg', channel: 'RCS (2:1 / 1440x720)' });
-                                      }}
-                                      onError={(e) => {
-                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                      }}
+                                    <JiraCreativeImage
+                                      source={source}
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white hover:opacity-90 transition shadow-2xs"
+                                      onPreview={() => setPreviewCreativeModal({ ...source, filename: rcs.media_filename || 'rcs_creative.jpg', channel: 'RCS (2:1 / 1440x720)' })}
                                     />
                                   </div>
                                 )}
@@ -2374,20 +2617,33 @@ export default function JiraBriefsPage() {
                                       </span>
                                     </div>
                                   ))}
+                                </div>
+                              )}
                                   {rcs.carousel_cards && rcs.carousel_cards.length > 0 && (
                                     <div className="pt-3 border-t border-gray-100 space-y-2">
                                       <div className="flex items-center justify-between text-[11px] font-bold text-gray-700">
-                                        <span>🎠 Carousel Cards ({rcs.carousel_cards.length}):</span>
+                                        <span>🎠 Carousel Cards ({effectiveRcsTemplates[idx].carousel_cards?.length || 0}/{rcs.carousel_cards.length} selected):</span>
                                       </div>
+                                      <p className="text-[11px] text-gray-500">Only checked cards are whitelisted, in their original order. Keep 2–10 cards selected.</p>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         {rcs.carousel_cards.map((card, cIdx) => {
                                           const isCardEditing = isEditing || editingCard[`rcs_${idx}_card_${cIdx}`] || false;
+                                          const cardSource = creativeSource(card.media_url, card.media_filename, card.media_attachment_id);
+                                          const cardIncluded = !rcs.excluded_card_indices?.includes(cIdx);
                                           return (
-                                            <div key={`card-${cIdx}`} className={`p-3 bg-white rounded-xl border text-xs space-y-2.5 shadow-2xs transition ${isCardEditing ? 'border-indigo-400 ring-2 ring-indigo-50' : 'border-gray-200'}`}>
+                                            <div key={`card-${cIdx}`} className={`p-3 rounded-xl border text-xs space-y-2.5 shadow-2xs transition ${cardIncluded ? 'bg-white' : 'bg-gray-50'} ${isCardEditing ? 'border-indigo-400 ring-2 ring-indigo-50' : cardIncluded ? 'border-indigo-200' : 'border-gray-200'}`}>
                                               <div className="flex items-center justify-between gap-2">
-                                                <span className="text-[10px] px-2 py-0.5 rounded font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                                <label className="flex items-center gap-2 text-[10px] font-bold text-indigo-700 cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={cardIncluded}
+                                                    onChange={() => toggleCarouselCard(idx, cIdx)}
+                                                    disabled={submitting}
+                                                    aria-label={`Include Card ${cIdx + 1} of ${rcs.template_name} for whitelisting`}
+                                                    className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                                                  />
                                                   Card {cIdx + 1}
-                                                </span>
+                                                </label>
                                                 <button
                                                   type="button"
                                                   onClick={() => toggleEditCard(`rcs_${idx}_card_${cIdx}`)}
@@ -2400,40 +2656,23 @@ export default function JiraBriefsPage() {
                                                   {isCardEditing ? '✓ Done' : '✏️ Edit Card'}
                                                 </button>
                                               </div>
+                                              {cardIncluded
+                                                ? <DraftWarningList draft={carouselCardWarnings(rcs, warnings, cIdx)} />
+                                                : <p className="text-[11px] font-semibold text-gray-500">Excluded from whitelisting</p>}
 
                                               {/* Card Creative Image Preview & Individual Upload */}
                                               <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col">
-                                                {card.media_url ? (
-                                                  <div className="relative h-28 w-full bg-white flex items-center justify-center group overflow-hidden">
-                                                    <img
-                                                      src={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true })}
-                                                      alt={card.media_filename || `Card ${cIdx + 1} creative`}
-                                                      className="w-full h-full object-cover group-hover:scale-105 transition cursor-pointer"
-                                                      onClick={() => {
-                                                        const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
-                                                        setPreviewCreativeModal({
-                                                          url,
-                                                          filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
-                                                          channel: `RCS Card ${cIdx + 1}`,
-                                                        });
-                                                      }}
-                                                      onError={(e) => {
-                                                        (e.currentTarget as HTMLImageElement).style.display = 'none';
-                                                      }}
+                                                {(card.media_url || card.media_attachment_id) ? (
+                                                  <div className="relative min-h-28 w-full bg-white flex items-center justify-center">
+                                                    <JiraCreativeImage
+                                                      source={cardSource}
+                                                      className="w-full max-h-28 object-contain transition"
+                                                      onPreview={() => setPreviewCreativeModal({
+                                                        ...cardSource,
+                                                        filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
+                                                        channel: `RCS Card ${cIdx + 1}`,
+                                                      })}
                                                     />
-                                                    <div
-                                                      onClick={() => {
-                                                        const url = getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename, inline: true });
-                                                        setPreviewCreativeModal({
-                                                          url,
-                                                          filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
-                                                          channel: `RCS Card ${cIdx + 1}`,
-                                                        });
-                                                      }}
-                                                      className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[11px] font-bold cursor-pointer"
-                                                    >
-                                                      <span>🔍 Preview Image</span>
-                                                    </div>
                                                   </div>
                                                 ) : (
                                                   <div className="h-16 flex items-center justify-center text-[10px] text-gray-400 italic bg-gray-50">
@@ -2446,17 +2685,11 @@ export default function JiraBriefsPage() {
                                                     {card.media_filename || 'None'}
                                                   </span>
                                                   <div className="flex items-center gap-1.5">
-                                                    {card.media_url && (
-                                                      <a
-                                                        href={getJiraCreativeDownloadUrl({ path: card.media_url, filename: card.media_filename })}
-                                                        download={card.media_filename || `card_${cIdx + 1}.png`}
-                                                        target="_blank"
-                                                        rel="noopener noreferrer"
+                                                    {(card.media_url || card.media_attachment_id) && (
+                                                      <JiraCreativeDownload
+                                                        source={cardSource}
                                                         className="px-1.5 py-0.5 rounded bg-white hover:bg-gray-50 text-blue-700 border border-blue-200 font-semibold text-[9px]"
-                                                        title="Download this card's creative"
-                                                      >
-                                                        ⬇️ Get
-                                                      </a>
+                                                      />
                                                     )}
                                                     <label className="px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[9px] cursor-pointer transition flex items-center gap-0.5">
                                                       <span>{uploadingCreative[`rcs_${idx}_card_${cIdx}`] ? '⏳...' : card.media_url ? '🔄 Replace' : '📤 Upload'}</span>
@@ -2537,8 +2770,6 @@ export default function JiraBriefsPage() {
                                       </div>
                                     </div>
                                   )}
-                                </div>
-                              )}
                             </div>
                           );
                         })
@@ -2664,6 +2895,14 @@ export default function JiraBriefsPage() {
                               <div className="bg-white p-3 rounded-lg border border-purple-100 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
                                 {em.body}
                               </div>
+                            )}
+                            {(em.local_path || em.attachment_id) && (
+                              <JiraCreativeDownload
+                                source={creativeSource(em.local_path, em.filename, em.attachment_id)}
+                                className="px-2 py-1 rounded bg-white hover:bg-purple-50 text-purple-700 border border-purple-200 font-semibold text-xs"
+                              >
+                                Download email asset
+                              </JiraCreativeDownload>
                             )}
                           </div>
                         ))
@@ -3048,6 +3287,20 @@ export default function JiraBriefsPage() {
         </div>
       </div>
     </div>
+    {commentReview && commentReview.signature === previewSignature && validationReady && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4" role="dialog" aria-modal="true" aria-labelledby="jira-report-confirmation-title">
+        <div className="w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-4">
+          <h2 id="jira-report-confirmation-title" className="text-base font-bold text-gray-900">Report validation errors on {commentReview.issueKey}?</h2>
+          <p className="text-xs text-gray-600">Review the exact comment below. Nothing is posted until you choose “Yes, post comment”.</p>
+          <pre className="max-h-[55vh] overflow-auto whitespace-pre-wrap break-words p-3 rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-800 font-sans">{commentReview.text}</pre>
+          {commentError && <p role="alert" className="text-xs text-rose-800">{commentError}</p>}
+          <div className="flex justify-end gap-3">
+            <button type="button" onClick={() => setCommentReview(null)} disabled={commentBusy} className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={confirmValidationComment} disabled={commentBusy || submitting || !validationReady} className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-semibold disabled:opacity-50">{commentBusy ? 'Posting comment…' : 'Yes, post comment'}</button>
+          </div>
+        </div>
+      </div>
+    )}
     {confirmationMode && brief && (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
@@ -3076,20 +3329,28 @@ export default function JiraBriefsPage() {
             </p>
             <ul className="list-disc list-inside space-y-1">
               {(confirmationMode === 'all' || confirmationMode === 'whatsapp') && (
-                <li>{selectedWa.size} WhatsApp template{selectedWa.size === 1 ? '' : 's'}</li>
+                <li>{selectedWaCount} WhatsApp template{selectedWaCount === 1 ? '' : 's'}</li>
               )}
               {(confirmationMode === 'all' || confirmationMode === 'rcs') && (
-                <li>{selectedRcs.size} RCS template{selectedRcs.size === 1 ? '' : 's'}</li>
+                <li>{selectedRcsCount} RCS template{selectedRcsCount === 1 ? '' : 's'}</li>
               )}
+              {(confirmationMode === 'all' || confirmationMode === 'rcs') && effectiveRcsTemplates.map((draft, index) => (
+                selectedRcs.has(index) && isRcsEligible(index) && draft.carousel_cards?.length ? (
+                  <li key={`carousel-confirm-${index}`}>
+                    {draft.template_name}: {draft.carousel_cards.length} of {rcsTemplates[index].carousel_cards?.length} cards
+                    {' '}(Cards {rcsTemplates[index].carousel_cards?.flatMap((_, cardIndex) => rcsTemplates[index].excluded_card_indices?.includes(cardIndex) ? [] : [cardIndex + 1]).join(', ')})
+                  </li>
+                ) : null
+              ))}
             </ul>
-            {(confirmationMode === 'all' || confirmationMode === 'whatsapp') && selectedWa.size > 0 && (
+            {(confirmationMode === 'all' || confirmationMode === 'whatsapp') && selectedWaCount > 0 && (
               <p className="font-semibold text-gray-800">
                 WhatsApp destination: <strong>{whatsappAccountName}</strong> ({whatsappAccount.toUpperCase()}) — WABA
               </p>
             )}
 
             {/* Dedicated RCS Whitelisting Destination breakdown inside modal */}
-            {(confirmationMode === 'all' || confirmationMode === 'rcs') && selectedRcs.size > 0 && (
+            {(confirmationMode === 'all' || confirmationMode === 'rcs') && selectedRcsCount > 0 && (
               <div className="rounded-xl border border-blue-200 bg-blue-50/90 p-3.5 space-y-2.5 text-blue-950">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-xs uppercase tracking-wide text-blue-900 flex items-center gap-1.5">
@@ -3157,7 +3418,7 @@ export default function JiraBriefsPage() {
             <button
               type="button"
               onClick={confirmWhitelist}
-              disabled={submitting || (confirmationMode !== 'whatsapp' && selectedRcs.size > 0 && !currentRcs.botId)}
+              disabled={submitting || !validationReady || totalSelectedCount === 0 || (confirmationMode !== 'whatsapp' && selectedRcsCount > 0 && !currentRcs.botId)}
               className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
             >
               {submitting ? 'Whitelisting...' : 'Confirm & Whitelist'}
@@ -3192,13 +3453,12 @@ export default function JiraBriefsPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <a
-                href={previewCreativeModal.url}
-                download={previewCreativeModal.filename}
+              <JiraCreativeDownload
+                source={previewCreativeModal}
                 className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-sans text-xs font-semibold shadow-2xs transition"
               >
-                ⬇️ Download Creative
-              </a>
+                Download Creative
+              </JiraCreativeDownload>
               <button
                 onClick={() => setPreviewCreativeModal(null)}
                 className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 text-base font-bold px-2.5 transition"
@@ -3209,9 +3469,8 @@ export default function JiraBriefsPage() {
             </div>
           </div>
           <div className="p-4 overflow-auto flex items-center justify-center bg-black/50 min-h-[300px]">
-            <img
-              src={previewCreativeModal.url}
-              alt={previewCreativeModal.filename}
+            <JiraCreativeImage
+              source={previewCreativeModal}
               className="max-h-[75vh] max-w-full object-contain rounded-lg shadow-md"
             />
           </div>

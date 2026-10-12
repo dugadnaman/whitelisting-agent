@@ -12,24 +12,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api
+import db
 from db_queue import (
     create_job_with_tasks,
     get_db,
     get_job,
     get_job_tasks,
-    init_queue_db,
     record_task_result,
     update_template_approval_monotonic,
 )
 from models import ApprovalStatus
-from queue_manager import QUEUE_MANAGER, WabaTokenBucket
+from queue_manager import QUEUE_MANAGER, QueueManager, WabaTokenBucket
 
 client = TestClient(api.app)
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
-    init_queue_db()
+def setup_db(monkeypatch):
+    # conftest supplies a private database; never import developer JSONL history.
+    db.init_database()
+    manager = QueueManager()
+    monkeypatch.setattr(api, "QUEUE_MANAGER", manager)
+    monkeypatch.setitem(globals(), "QUEUE_MANAGER", manager)
 
 
 def test_db_queue_atomic_job_and_tasks_creation():

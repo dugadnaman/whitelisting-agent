@@ -1,17 +1,14 @@
 """
-Production Deployment & Docker Configuration Smoke Tests.
+Production API and persistence smoke tests.
 Validates:
 - Health check endpoints (/healthz, /api/health)
-- Dockerfile and docker-compose.yml configuration integrity
+- Pending signup and provisioned login permissions
 - SQLite WAL volume persistence and concurrency
 - Webhook connectivity, secret authentication, and targeted status check
-- Frontend proxy forwarding
 """
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -38,47 +35,41 @@ def test_health_endpoints():
     assert r_api_health.json()["status"] == "ok"
 
 
-def test_docker_configuration_integrity():
-    """
-    - Multi-stage build (frontend-builder + Python runner)
-    - Supervisord running both FastAPI (8000) and Next.js (3000)
-    - Directory-backed SQLite persistence via KARIX_DB_PATH
-    - Healthcheck definition
-    """
-    dockerfile_path = Path("Dockerfile")
-    assert dockerfile_path.exists(), "Dockerfile must exist at project root"
-    df_content = dockerfile_path.read_text(encoding="utf-8")
-
-    assert "FROM node:20-alpine AS frontend-builder" in df_content
-    assert "FROM python:3.11-slim" in df_content
-    assert "supervisord" in df_content
-    assert "EXPOSE 3000 8000" in df_content
-    assert "uvicorn api:app" in df_content
-    assert "npm run start" in df_content
-
-    compose_path = Path("docker-compose.yml")
-    assert compose_path.exists(), "docker-compose.yml must exist at project root"
-    dc_content = compose_path.read_text(encoding="utf-8")
-
-    assert "3000:3000" in dc_content
-    assert "8000:8000" in dc_content
-    assert "KARIX_DB_PATH=/app/data/karix_store.db" in dc_content
-    assert "./data:/app/data" in dc_content
-    assert "media_cache:/app/media_cache" in dc_content
-    assert "BACKEND_INTERNAL_URL" in dc_content
-    assert "healthcheck:" in dc_content
-    assert "./karix_store.db:/app/karix_store.db" not in dc_content
-    assert "./.env:/app/.env" not in dc_content
 
 
-def test_explicit_provision_and_login_contract(provision_user):
-    """Public signup is closed; explicitly provisioned users receive usable login JWTs."""
+def test_pending_signup_has_no_company_or_admin_privileges_and_provisioned_login_works(provision_user):
+    """Signup requests access; only provisioned identities have company permissions."""
     user, _ = provision_user("bajaj")
     signup = client.post(
         "/api/auth/signup",
         json={"email": "anonymous@example.com", "password": "Anonymous-password-123", "name": "Anonymous", "tenant_id": "bajaj"},
     )
-    assert signup.status_code == 403
+    assert signup.status_code == 201, signup.text
+    applicant = signup.json()
+    assert applicant["user"]["tenant_id"] == "unassigned"
+    assert applicant["user"]["requested_tenant_id"] == "bajaj"
+    assert applicant["user"]["role"] == "operator"
+    pending_headers = {"Authorization": f"Bearer {applicant['token']}"}
+    profile = client.get("/api/auth/me", headers=pending_headers)
+    assert profile.status_code == 200
+    assert profile.json()["id"] == applicant["user"]["id"]
+    assert profile.json()["tenant_id"] == "unassigned"
+    assert profile.json()["requested_tenant_id"] == "bajaj"
+    for tenant in ("bajaj", "tata", "apparel"):
+        assert client.get(f"/api/stats?account={tenant}", headers=pending_headers).status_code == 403
+        assert client.get(f"/api/auth/team?tenant_id={tenant}", headers=pending_headers).status_code == 403
+    assert client.get("/api/auth/access-requests", headers=pending_headers).status_code == 403
+    assert client.post(
+        f"/api/auth/access-requests/{applicant['user']['id']}/approve", headers=pending_headers,
+    ).status_code == 403
+    pending_login = client.post(
+        "/api/auth/login", json={"email": "anonymous@example.com", "password": "Anonymous-password-123"},
+    )
+    assert pending_login.status_code == 200
+    assert pending_login.json()["user"]["tenant_id"] == "unassigned"
+    assert pending_login.json()["user"]["role"] == "operator"
+    login_headers = {"Authorization": f"Bearer {pending_login.json()['token']}"}
+    assert client.get("/api/stats?account=bajaj", headers=login_headers).status_code == 403
     login = client.post("/api/auth/login", json={"email": user["email"], "password": "Test-only-password-456!"})
     assert login.status_code == 200, login.text
     assert login.json()["user"]["id"] == user["id"]

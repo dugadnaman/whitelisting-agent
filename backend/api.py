@@ -13,7 +13,9 @@ import os
 import secrets
 import re
 import tempfile
+import threading
 import uuid
+from concurrent.futures import Future
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
@@ -22,7 +24,7 @@ import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool
 
 from db_queue import (
     create_job_with_tasks,
@@ -74,7 +76,7 @@ from error_tracker import log_error
 from grammar_checker import lint_and_fix_body, validate_meta_technical_compliance
 from loader import load_from_csv, load_from_excel
 from models import ApprovalStatus, SubmissionResult, SubmissionStatus
-from rcs_client import fetch_rcs_templates
+from rcs_client import RcsInventoryUnavailable, fetch_rcs_templates, normalize_rcs_template_name
 
 # RCS pipeline imports
 from rcs_config import (
@@ -90,8 +92,8 @@ from rcs_config import (
 )
 from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
 from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
-from rcs_runner import run_rcs
-from rcs_tracker import load_rcs_log, log_rcs_result
+from rcs_runner import rcs_submission_payload, run_rcs
+from rcs_tracker import load_rcs_log, log_rcs_result, update_rcs_results
 from runner import get_pending_templates_sla_insights, poll_pending, run
 
 # SMS pipeline imports
@@ -708,32 +710,10 @@ def get_stats(
                 },
             }
         elif chan == "rcs":
-            local_entries = load_rcs_log(RCS_LOG_PATH)
-            local_entries = [e for e in local_entries if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-            live_templates = fetch_rcs_templates(client=acc)
-            seen_names = set()
-            merged = []
-
-            for lt in live_templates:
-                vi = lt.get("viTemplate", {})
-                name = vi.get("name") or str(lt.get("templateId", ""))
-                status_str = str(lt.get("status", "SUBMITTED")).upper()
-                merged.append(
-                    {
-                        "template_name": name,
-                        "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-                        "approval_status": status_str.lower(),
-                    }
-                )
-                seen_names.add(name.lower())
-
-            for le in local_entries:
-                if le.get("template_name", "").lower() not in seen_names:
-                    merged.append(le)
-
+            merged = _merge_rcs_templates(acc, None, None)
             total = len(merged)
             submitted = sum(1 for e in merged if e.get("status") == "submitted")
-            failed = sum(1 for e in merged if e.get("status") == "failed")
+            failed = sum(1 for e in merged if e.get("status") in ("failed", "blocked_aspect_ratio"))
             duplicate = sum(1 for e in merged if e.get("status") == "duplicate")
             return {
                 "total": total,
@@ -746,8 +726,8 @@ def get_stats(
                 "error": None,
                 "karix_health": _GOVERNOR.get_health_stats(),
                 "sla_insights": {
-                    "pending_count": 0,
-                    "due_for_poll_count": 0,
+                    "pending_count": sum(e.get("approval_status") == "pending" for e in merged),
+                    "due_for_poll_count": sum(e.get("approval_status") == "pending" for e in merged),
                     "categories": {},
                     "next_recommended_poll_sec": 120,
                 },
@@ -844,16 +824,59 @@ def _filter_and_sort_templates(entries: list[dict], status: str | None, search: 
     return res
 
 
+def _rcs_approval_status(status) -> str:
+    value = str(status or "").strip().lower()
+    if value in ("submitted", "pending", "pending_approval", "in_review"):
+        return "pending"
+    return value if value in ("approved", "rejected") else "unknown"
+
+
+_rcs_inventory_inflight: dict[tuple[str, str], Future] = {}
+_rcs_inventory_lock = threading.Lock()
+
+
+def _fetch_rcs_inventory(client: str) -> list[dict]:
+    """Share concurrent account/bot fetches, never cache success or hide an outage."""
+    client = str(client or "").lower().strip()
+    key = (client, get_rcs_bot_id(client))
+    with _rcs_inventory_lock:
+        flight = _rcs_inventory_inflight.get(key)
+        leader = flight is None
+        if leader:
+            flight = Future()
+            _rcs_inventory_inflight[key] = flight
+    if not leader:
+        return flight.result()
+    try:
+        try:
+            templates = fetch_rcs_templates(client=client)
+        except RcsInventoryUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"RCS inventory unavailable for {client}: {exc}") from exc
+        flight.set_result(templates)
+        return templates
+    except BaseException as exc:
+        flight.set_exception(exc)
+        raise
+    finally:
+        with _rcs_inventory_lock:
+            _rcs_inventory_inflight.pop(key, None)
+
+
+
 def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
-    local_entries = [e for e in load_rcs_log(RCS_LOG_PATH) if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-    live_templates = fetch_rcs_templates(client=acc)
-    seen_names = set()
+    local_entries = load_rcs_log(RCS_LOG_PATH, client=acc)
+    live_templates = _fetch_rcs_inventory(acc)
+    bot_id = get_rcs_bot_id(acc)
     merged_entries = []
 
     for lt in live_templates:
-        vi = lt.get("viTemplate", {})
-        name = vi.get("name") or str(lt.get("templateId", ""))
-        status_str = str(lt.get("status", "SUBMITTED")).upper()
+        if not isinstance(lt, dict):
+            continue
+        vi = lt.get("viTemplate") if isinstance(lt.get("viTemplate"), dict) else {}
+        live_bot = str(lt.get("botId") or vi.get("botId") or "")
+        if live_bot and live_bot != bot_id:
+            continue
+        name = vi.get("name") or lt.get("template_name") or str(lt.get("templateId", ""))
         t_type = vi.get("type", "text")
 
         carousel_cards = vi.get("carouselCard", [])
@@ -890,13 +913,15 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
         entry = {
             "source_ref": name,
             "template_name": name,
-            "template_id": name,
+            "template_id": str(lt.get("templateId") or lt.get("id") or ""),
+            "provider_ref_id": str(lt.get("templateId") or lt.get("id") or ""),
+            "bot_id": bot_id,
             "template_type": t_type,
             "card_title": card_title,
             "template_message": msg,
             "sender_ids": [lt.get("botId", "")],
-            "status": "submitted" if status_str in ("PENDING", "APPROVED", "SUBMITTED") else "failed",
-            "approval_status": status_str.lower(),
+            "status": "submitted",
+            "approval_status": _rcs_approval_status(lt.get("status")),
             "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
             "provider_response": lt,
             "client": acc,
@@ -911,23 +936,21 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
             "suggestions": suggestions,
         }
         merged_entries.append(entry)
-        seen_names.add(name.lower())
 
-    for le in local_entries:
-        le_name = (le.get("template_name") or "").strip().lower()
-        le_clean = dict(le)
-        le_clean["error"] = _clean_error_message(le.get("error"))
-        if le_name in seen_names:
-            for me in merged_entries:
-                if me.get("template_name", "").strip().lower() == le_name:
-                    me["submitted_by"] = me.get("submitted_by") or le.get("submitted_by")
-                    me["source_file"] = me.get("source_file") or le.get("source_file")
-                    me["exists_on_waba"] = True
-        else:
-            le_clean["live"] = False
-            le_clean["exists_on_waba"] = False
-            merged_entries.append(le_clean)
-            seen_names.add(le_name)
+    by_id = {entry["provider_ref_id"]: entry for entry in merged_entries if entry["provider_ref_id"]}
+    represented = set()
+    rows = []
+    for local in local_entries:
+        entry = {**local, "error": _clean_error_message(local.get("error")), "live": False, "exists_on_waba": False}
+        # Never attach history from another bot or a failed/blocked attempt by name.
+        live = by_id.get(str(local.get("provider_ref_id") or ""))
+        if live and local.get("bot_id") == bot_id:
+            represented.add(id(live))
+            approval = local.get("approval_status")
+            entry = {**live, **entry, "live": True, "exists_on_waba": True,
+                     "approval_status": approval if approval in ("approved", "rejected") else live["approval_status"]}
+        rows.append(entry)
+    merged_entries = rows + [entry for entry in merged_entries if id(entry) not in represented]
 
     return _filter_and_sort_templates(merged_entries, status, search)
 
@@ -1091,47 +1114,121 @@ def search_template_by_content_endpoint(
     return _json_safe(result.to_dict())
 
 
-def _inspect_image_aspect_ratio(comp: dict, aspect_warnings: list[dict]) -> None:
-    img_bytes = comp.get("image_bytes")
-    if not img_bytes:
+def _inspect_image_aspect_ratio(
+    comp: dict,
+    aspect_warnings: list[dict],
+    channel: str = "whatsapp",
+    template_type: str = "richcard",
+    component: str = "HEADER (IMAGE)",
+) -> None:
+    img_bytes = comp.pop("image_bytes", None)
+    reason = comp.pop("media_error", None)
+    if not img_bytes and not reason:
         return
+    w, h, ratio = 0, 0, 0.0
     try:
         import base64
         import io
 
         from PIL import Image
 
-        img = Image.open(io.BytesIO(img_bytes))
-        w, h = img.size
-        ratio = w / h
+        if not reason:
+            # Decode fully: the WhatsApp ratio checker alone accepts unreadable data.
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                img.verify()
+            with Image.open(io.BytesIO(img_bytes)) as img:
+                img.load()
+            if channel == "rcs":
+                from rcs_loader import check_rcs_image_aspect_ratio
 
-        is_16_9 = abs(ratio - (16 / 9)) < 0.08
-        is_1_1 = abs(ratio - 1.0) < 0.08
-        is_2_1 = abs(ratio - 2.0) < 0.08
+                valid, reason, (w, h), ratio = check_rcs_image_aspect_ratio(img_bytes, template_type)
+                maximum = 1024 * 1024 if template_type == "carousel" else 2 * 1024 * 1024
+                if valid and len(img_bytes) > maximum:
+                    valid, reason = False, f"RCS media exceeds {maximum} bytes"
+            else:
+                from submission_client import check_whatsapp_image_aspect_ratio
 
-        if not is_16_9 and not is_1_1 and not is_2_1:
-            shape_name = (
-                "Square (1:1)"
-                if abs(ratio - 1.0) < 0.05
-                else ("Portrait / Vertical" if ratio < 1.0 else f"Non-standard ({ratio:.2f}:1)")
+                valid, reason, (w, h), ratio = check_whatsapp_image_aspect_ratio(img_bytes)
+            if valid:
+                reason = None
+            comp["thumbnail_url"] = (
+                f"data:{comp.get('file_type') or 'image/png'};base64,{base64.b64encode(img_bytes).decode()}"
             )
-            aspect_warnings.append(
-                {
-                    "component": "HEADER (IMAGE)",
-                    "original_size": f"{w}x{h}px",
-                    "current_ratio": shape_name,
-                    "recommended_ratio": "16:9 (1280x720) or 1:1 (Square)",
-                    "action": "BLOCKED: Template will NOT be created because image is not in recommended ratio. Auto-resizing has been removed.",
-                    "error": f"Header image dimension {w}x{h} ({ratio:.2f}:1) does not match required WhatsApp aspect ratio: 16:9 (1280x720) or 1:1 (Square). Auto-resizing is disabled; this template will not be created.",
-                    "blocked": True,
-                }
-            )
-        f_type = comp.get("file_type") or "image/png"
-        comp["thumbnail_url"] = f"data:{f_type};base64,{base64.b64encode(img_bytes).decode()}"
     except Exception as exc:
-        logger.debug("Aspect ratio inspection notice: %s", exc)
-    finally:
-        comp.pop("image_bytes", None)
+        reason = f"Invalid or unreadable image data ({exc})"
+    if reason:
+        aspect_warnings.append({
+            "component": component,
+            "original_size": f"{w}x{h}px" if w and h else "Unavailable",
+            "current_ratio": f"{ratio:.2f}:1" if ratio else "Unavailable",
+            "recommended_ratio": (
+                "16:9, 1:1, 3:4, 8:5, or 5:2" if channel == "rcs" and template_type == "carousel"
+                else "2:1, 16:9, 3:4, or 3:1" if channel == "rcs"
+                else "16:9, 1:1, or 2:1"
+            ),
+            "action": "BLOCKED: Replace the creative before submission. Auto-resizing is disabled.",
+            "error": f"{component}: {reason}",
+            "blocked": True,
+        })
+
+
+def _inspect_rcs_compliance(item: dict) -> list[dict]:
+    """Use Karix's pure payload checks, without applying Meta's variable rules."""
+    from rcs_client import _build_rcs_clean_suggestions, _checked_text, normalize_rcs_template_name
+
+    warnings = []
+
+    def check(component, operation):
+        try:
+            operation()
+        except (ValueError, TypeError) as exc:
+            warnings.append({
+                "type": "RCS_TECHNICAL_COMPLIANCE",
+                "severity": "error",
+                "component": component,
+                "issue": f"{component}: {exc}",
+                "recommendation": "Correct this field before submitting to Karix.",
+            })
+
+    check("Template name", lambda: normalize_rcs_template_name(item.get("template_name")))
+    cards = item.get("carousel_cards") or []
+    is_carousel = item.get("template_type") in ("carousel", "carousal") or bool(cards)
+    is_richcard = item.get("template_type") in ("richcard", "card", "standalone", "rich_card", "image")
+    if is_carousel and not 2 <= len(cards) <= 10:
+        warnings.append({
+            "type": "RCS_CARD_COUNT", "severity": "error", "component": "Carousel",
+            "issue": "RCS carousel must contain 2 to 10 cards.",
+            "recommendation": "Add or remove cards before submission.",
+        })
+    targets = cards if is_carousel else [item]
+    for index, target in enumerate(targets):
+        component = f"Card {index + 1}" if is_carousel else "Rich card" if is_richcard else "Text message"
+        if not isinstance(target, dict):
+            check(component, lambda: _checked_text(None, "card", 0, required=True))
+            continue
+        if is_carousel or is_richcard:
+            title = target.get("cardTitle") or target.get("card_title") or ""
+            description = target.get("cardDescription") or target.get("card_description") or target.get("body") or target.get("text_message") or ""
+            check(f"{component} title", lambda: _checked_text(title, "card title", 200))
+            check(f"{component} description", lambda: _checked_text(description, "card description", 2000))
+        else:
+            text = target.get("text_message") or target.get("template_message") or ""
+            check(component, lambda: _checked_text(text, "text message", 3072, required=True))
+        suggestions = target.get("suggestions") or []
+        maximum = 4 if is_carousel or is_richcard else 11
+        if not isinstance(suggestions, list) or len(suggestions) > maximum:
+            warnings.append({
+                "type": "RCS_SUGGESTION_COUNT", "severity": "error", "component": component,
+                "issue": f"{component} allows at most {maximum} suggestions in an array.",
+                "recommendation": "Correct the suggestions before submission.",
+            })
+        if isinstance(suggestions, list):
+            for button_index, suggestion in enumerate(suggestions):
+                check(
+                    f"{component} button {button_index + 1}",
+                    lambda: _build_rcs_clean_suggestions([suggestion], 1, []),
+                )
+    return warnings
 
 
 def _inspect_single_submission(
@@ -1142,7 +1239,9 @@ def _inspect_single_submission(
     channel: str,
     use_ai: bool = False,
 ) -> dict:
-    item = asdict(s) if not isinstance(s, dict) else dict(s)
+    from copy import deepcopy
+
+    item = asdict(s) if not isinstance(s, dict) else deepcopy(s)
     tname = (item.get("template_name") or "").strip()
     already_exists = tname.lower() in live_names if tname else False
     item["already_exists_on_waba"] = already_exists
@@ -1151,8 +1250,8 @@ def _inspect_single_submission(
         item["duplicate_warning"] = {
             "template_name": tname,
             "message": (
-                f"Template '{tname}' already exists on WABA for {account.title()}. "
-                "Meta will reject resubmission with duplicate content. "
+                f"Template '{tname}' already exists on {'RCS bot' if channel == 'rcs' else 'WABA'} for {account.title()}. "
+                "The provider may reject duplicate resubmissions. "
                 "Please use a new name (e.g. appending '_v2') or edit the existing template."
             ),
         }
@@ -1187,80 +1286,18 @@ def _inspect_single_submission(
                 _, g_warns = lint_and_fix_body(val)
                 grammar_warnings.extend(g_warns)
 
-        # Inspect carousel cards images for aspect ratio warnings & thumbnails
-        c_cards = item.get("carousel_cards") or []
-        for c_idx, card in enumerate(c_cards):
+        for c_idx, card in enumerate(item.get("carousel_cards") or []):
             if isinstance(card, dict):
-                c_img = card.get("image_bytes")
-                if c_img:
-                    try:
-                        import base64
-                        import io
-
-                        from PIL import Image
-
-                        img = Image.open(io.BytesIO(c_img))
-                        w, h = img.size
-                        ratio = w / h
-                        # Official Karix RCS carousel ratio is 3:4 (0.75:1) or 1:1 (1.0:1)
-                        # Official Karix RCS carousel ratio: 16:9 (~1.78), 1:1 (1.0), or 3:4 (0.75)
-                        is_16_9 = abs(ratio - (16 / 9)) < 0.08
-                        is_1_1 = abs(ratio - 1.0) < 0.08
-                        is_3_4 = abs(ratio - 0.75) < 0.08
-                        if not is_16_9 and not is_1_1 and not is_3_4:
-                            aspect_warnings.append(
-                                {
-                                    "component": f"Card {c_idx + 1} Image",
-                                    "original_size": f"{w}x{h}px",
-                                    "current_ratio": f"{ratio:.2f}:1",
-                                    "recommended_ratio": "16:9 (1280x720), 1:1 (770x720), or 3:4 (768x1024)",
-                                    "action": "BLOCKED: Template will NOT be created because card image is not in recommended ratio. Auto-resizing has been removed.",
-                                    "error": f"Card {c_idx + 1} image dimension {w}x{h} ({ratio:.2f}:1) does not match required Carousel aspect ratio: 16:9, 1:1, or 3:4. Auto-resizing is disabled; this template will not be created.",
-                                    "blocked": True,
-                                }
-                            )
-                            card["aspect_ratio_blocked"] = True
-                            card["aspect_ratio_error"] = (
-                                f"Card {c_idx + 1} image dimension {w}x{h} ({ratio:.2f}:1) does not match required ratio."
-                            )
-                    except Exception as exc:
-                        logger.debug("RCS card image inspection notice: %s", exc)
-                    finally:
-                        card.pop("image_bytes", None)
-
-        # Standalone rich card image
-        standalone_img = item.get("image_bytes")
-        if standalone_img:
-            try:
-                import base64
-                import io
-
-                from PIL import Image
-
-                img = Image.open(io.BytesIO(standalone_img))
-                w, h = img.size
-                ratio = w / h
-                is_2_1 = abs(ratio - 2.0) < 0.08
-                is_16_9 = abs(ratio - (16 / 9)) < 0.08
-                is_3_4 = abs(ratio - 0.75) < 0.08
-                is_3_1 = abs(ratio - 3.0) < 0.10
-                if not is_2_1 and not is_16_9 and not is_3_4 and not is_3_1:
-                    aspect_warnings.append(
-                        {
-                            "component": "Rich Card Image",
-                            "original_size": f"{w}x{h}px",
-                            "current_ratio": f"{ratio:.2f}:1",
-                            "recommended_ratio": "2:1 (1440x720 / 1200x600), 16:9 (1280x720), or 3:4",
-                            "action": "BLOCKED: Template will NOT be created because image is not in recommended ratio. Auto-resizing has been removed.",
-                            "error": f"Rich card image dimension {w}x{h} ({ratio:.2f}:1) does not match required Rich Card aspect ratio: 2:1, 16:9, or 3:4. Auto-resizing is disabled; this template will not be created.",
-                            "blocked": True,
-                        }
-                    )
-                item["thumbnail_url"] = f"data:image/png;base64,{base64.b64encode(standalone_img).decode()}"
-            except Exception as exc:
-                logger.debug("RCS standalone image inspection notice: %s", exc)
-            finally:
-                item.pop("image_bytes", None)
+                for field in ("card_title", "card_description", "cardTitle", "cardDescription", "body"):
+                    if card.get(field):
+                        _, g_warns = lint_and_fix_body(card[field])
+                        grammar_warnings.extend(
+                            {**warning, "component": f"Card {c_idx + 1}"} for warning in g_warns
+                        )
+                _inspect_image_aspect_ratio(
+                    card, aspect_warnings, "rcs", "carousel", f"Card {c_idx + 1} Image"
+                )
+        _inspect_image_aspect_ratio(item, aspect_warnings, "rcs", "richcard", "Rich Card Image")
 
     blocked_aspect = [w for w in aspect_warnings if w.get("blocked")]
     item["aspect_ratio_warnings"] = aspect_warnings
@@ -1272,6 +1309,7 @@ def _inspect_single_submission(
             else item.get("aspect_ratio_error")
             or "Image is not in recommended aspect ratio. Template will NOT be created."
         )
+    item["grammar_warnings"] = grammar_warnings
 
     body_text = next(
         (str(c.get("text", "")) for c in components if isinstance(c, dict) and c.get("type") == "BODY"), ""
@@ -1284,15 +1322,19 @@ def _inspect_single_submission(
         (c.get("buttons", []) for c in components if isinstance(c, dict) and c.get("type") == "BUTTONS"), []
     )
 
-    item["compliance_warnings"] = validate_meta_technical_compliance(
-        body_text=body_text,
-        header_text=header_comp.get("text") if header_comp else None,
-        footer_text=footer_text,
-        buttons=buttons_list,
-        header_format=header_comp.get("format") if header_comp else None,
-        declared_category=item.get("category", "MARKETING"),
-        use_ai=use_ai,
-        client=account,
+    item["compliance_warnings"] = (
+        _inspect_rcs_compliance(item)
+        if channel == "rcs"
+        else validate_meta_technical_compliance(
+            body_text=body_text,
+            header_text=header_comp.get("text") if header_comp else None,
+            footer_text=footer_text,
+            buttons=buttons_list,
+            header_format=header_comp.get("format") if header_comp else None,
+            declared_category=item.get("category", "MARKETING"),
+            use_ai=use_ai,
+            client=account,
+        )
     )
     return item
 
@@ -1309,7 +1351,7 @@ def _inspect_template_quality_and_warnings(
     acc = account.lower().strip()
     account_detection = detect_spreadsheet_account(submissions, current_account=acc)
 
-    live_templates = fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else fetch_rcs_templates(client=acc)
+    live_templates = fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else _fetch_rcs_inventory(acc)
     live_names = {
         (lt.get("template_name") or lt.get("viTemplate", {}).get("name") or "").strip().lower()
         for lt in live_templates
@@ -1498,238 +1540,144 @@ async def _submit_rcs_batch(
     auto_route: bool,
     filename: str,
     current_user: dict,
-    fix_aspect_ratio: bool = True,
 ) -> dict:
+    # RCS credentials/media/bot identity must never be rerouted after parsing.
+    acc = acc.lower().strip()
+    require_tenant_access(acc, current_user)
+    QUEUE_MANAGER.bind_event_loop()
+    bot_id = get_rcs_bot_id(acc)
     subs = (
-        load_rcs_from_excel(tmp_path, client=acc, fix_aspect_ratio=fix_aspect_ratio, upload_media=True)
+        await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=acc, upload_media=False)
         if suffix in (".xlsx", ".xls")
-        else load_rcs_from_csv(tmp_path, client=acc)
+        else await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=acc)
     )
     if not subs:
         raise HTTPException(status_code=400, detail=f"No valid RCS templates found in '{filename}' to submit.")
 
-    if auto_route:
-        from loader import detect_spreadsheet_account
-
-        detection = detect_spreadsheet_account(subs, current_account=acc)
-        if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
-            target_acc = detection["detected_account_id"]
-            try:
-                require_tenant_access(target_acc, current_user)
-                acc = target_acc
-            except HTTPException:
-                pass
-
-    to_submit = []
-    duplicate_entries = []
-    seen_in_batch: set[str] = set()
     results_by_index: list[dict | None] = [None] * len(subs)
-
+    preliminary: dict[int, RcsSubmissionResult] = {}
+    to_submit = []
     live_map = {}
     if skip_duplicates:
-        live_templates = fetch_rcs_templates(client=acc)
-        for lt in live_templates:
-            if not isinstance(lt, dict):
+        for template in await asyncio.to_thread(_fetch_rcs_inventory, acc):
+            if not isinstance(template, dict):
                 continue
-            vi = lt.get("viTemplate") if isinstance(lt.get("viTemplate"), dict) else {}
-            name = str(vi.get("name") or lt.get("template_name") or lt.get("templateId") or "").strip().lower()
-            if name:
-                live_map[name] = lt
-                safe_k = re.sub(r"[^a-zA-Z0-9_]", "_", name)[:25].strip("_").lower()
-                live_map[safe_k] = lt
-
-    for idx, s in enumerate(subs):
-        tname = str(s.template_name or "").strip()
-
-        # Strict Aspect Ratio Validation Gate
-        if getattr(s, "aspect_ratio_blocked", False):
-            blocked_err = (
-                getattr(s, "aspect_ratio_error", None)
-                or "Template not created: Image is not in recommended aspect ratio (16:9, 1:1, or 3:4). Auto-resizing has been removed."
-            )
-            block_res = RcsSubmissionResult(
-                source_ref=s.source_ref,
-                template_name=s.template_name,
-                template_id="",
-                status=RcsSubmissionStatus.BLOCKED_ASPECT_RATIO,
-                provider_ref_id="",
-                error=f"BLOCKED (Invalid Aspect Ratio): {blocked_err}",
-                provider_response=None,
-                approval_status="blocked_aspect_ratio",
-                client=acc,
-                channel="rcs",
-                submitted_by=user,
-                source_file=filename,
-            )
-            log_rcs_result(block_res, RCS_LOG_PATH)
-            entry_dict = asdict(block_res)
-            results_by_index[idx] = entry_dict
-            continue
-
-        if not tname:
-            to_submit.append((idx, s))
-            continue
-        name_key = tname.lower()
-        safe_key = re.sub(r"[^a-zA-Z0-9_]", "_", tname)[:25].strip("_").lower()
-
-        matched_live = (live_map.get(name_key) or live_map.get(safe_key)) if skip_duplicates else None
-
-        if skip_duplicates and matched_live:
-            live_obj = matched_live
-            status_str = str(live_obj.get("status", "APPROVED")).upper()
-            ref_id = str(live_obj.get("templateId", "") or live_obj.get("id", "") or "")
-            dupe_res = RcsSubmissionResult(
-                source_ref=s.source_ref,
-                template_name=s.template_name,
-                template_id=ref_id,
-                status=RcsSubmissionStatus.DUPLICATE,
-                provider_ref_id=ref_id,
-                error=f"RCS template already active on DLT Bot ({status_str}) — skipped duplicate submission.",
-                provider_response=live_obj,
-                approval_status=status_str.lower(),
-                client=acc,
-                channel="rcs",
-                submitted_by=user,
-                source_file=filename,
-            )
-            log_rcs_result(dupe_res, RCS_LOG_PATH)
-            entry_dict = asdict(dupe_res)
-            duplicate_entries.append(entry_dict)
-            results_by_index[idx] = entry_dict
-            seen_in_batch.add(name_key)
-            seen_in_batch.add(safe_key)
-        elif name_key in seen_in_batch or safe_key in seen_in_batch:
-            dupe_res = RcsSubmissionResult(
-                source_ref=s.source_ref,
-                template_name=s.template_name,
-                template_id="",
-                status=RcsSubmissionStatus.DUPLICATE,
-                provider_ref_id="",
-                error="Duplicate RCS template within uploaded file — skipped duplicate submission.",
-                provider_response=None,
-                approval_status="pending",
-                client=acc,
-                channel="rcs",
-                submitted_by=user,
-                source_file=filename,
-            )
-            log_rcs_result(dupe_res, RCS_LOG_PATH)
-            entry_dict = asdict(dupe_res)
-            duplicate_entries.append(entry_dict)
-            results_by_index[idx] = entry_dict
+            vi = template.get("viTemplate") if isinstance(template.get("viTemplate"), dict) else {}
+            live_bot = str(template.get("botId") or vi.get("botId") or "")
+            if live_bot and live_bot != bot_id:
+                continue
+            name = vi.get("name") or template.get("template_name") or ""
+            try:
+                key = normalize_rcs_template_name(str(name)).lower()
+            except ValueError:
+                continue
+            live_map[key] = template
+    seen: set[str] = set()
+    for index, submission in enumerate(subs):
+        error = None
+        status = RcsSubmissionStatus.FAILED
+        approval = "unknown"
+        provider = None
+        ref = None
+        if str(submission.client or "").lower().strip() != acc or submission.channel != "rcs":
+            error = "RCS template payload does not belong to the selected tenant/channel."
+        elif submission.bot_id and submission.bot_id != bot_id:
+            error = "RCS template bot does not belong to the selected account."
         else:
-            seen_in_batch.add(name_key)
-            seen_in_batch.add(safe_key)
-            to_submit.append((idx, s))
+            submission.bot_id = bot_id
+            try:
+                key = normalize_rcs_template_name(str(submission.template_name or "")).lower()
+            except ValueError as exc:
+                error = str(exc)
+            if not error and getattr(submission, "aspect_ratio_blocked", False):
+                status = RcsSubmissionStatus.BLOCKED_ASPECT_RATIO
+                approval = "blocked_aspect_ratio"
+                error = f"BLOCKED (Invalid Aspect Ratio): {submission.aspect_ratio_error or 'Unsupported image aspect ratio.'}"
+            if not error:
+                provider = live_map.get(key)
+                if provider is not None:
+                    status = RcsSubmissionStatus.DUPLICATE
+                    approval = _rcs_approval_status(provider.get("status"))
+                    ref = str(provider.get("templateId") or provider.get("id") or "") or None
+                    error = f"RCS template already exists on the selected bot ({approval.upper()}) — skipped duplicate submission."
+                elif key in seen:
+                    status = RcsSubmissionStatus.DUPLICATE
+                    error = "Duplicate RCS template within uploaded file — skipped duplicate submission."
+                else:
+                    to_submit.append((index, submission))
+                seen.add(key)
+        if error:
+            preliminary[index] = RcsSubmissionResult(
+                source_ref=submission.source_ref, template_name=submission.template_name,
+                status=status, approval_status=approval, error=error,
+                provider_ref_id=ref, provider_response=provider, client=acc,
+                bot_id=bot_id, submitted_by=user, source_file=filename,
+            )
 
-    new_entries = []
-    job_id = f"job_{uuid.uuid4().hex[:12]}"
-    task_payloads = []
-    for idx, s in enumerate(subs):
-        existing_res = results_by_index[idx]
-        task_payloads.append(
-            {
-                "source_ref": s.source_ref,
-                "template_name": s.template_name,
-                "status": existing_res["status"].upper() if existing_res else "PENDING",
-                "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
-                "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
-                "error": existing_res.get("error") if existing_res else None,
-            }
-        )
-
+    job_id = f"job_{uuid.uuid4().hex}"
     create_job_with_tasks(
-        tenant_id=acc,
-        channel="rcs",
-        filename=filename,
-        submitted_by=user,
-        tasks_data=task_payloads,
-        job_id=job_id,
+        tenant_id=acc, channel="rcs", filename=filename, submitted_by=user, job_id=job_id,
+        tasks_data=[
+            {**rcs_submission_payload(s), "submitted_by": user, "source_file": filename,
+             **(asdict(preliminary[index]) if index in preliminary else {"status": "PENDING"})}
+            for index, s in enumerate(subs)
+        ],
     )
-
-    new_entries = []
-    if to_submit:
-        before_count = len(load_rcs_log(RCS_LOG_PATH))
-        await asyncio.to_thread(
-            run_rcs,
-            [s for _, s in to_submit],
-            RCS_LOG_PATH,
-            client=acc,
-            user=user,
-            source_file=filename,
-        )
-        all_entries = load_rcs_log(RCS_LOG_PATH)
-        new_entries = all_entries[before_count:]
-
-        by_ref: dict[str, list[dict]] = collections.defaultdict(list)
-        for e in new_entries:
-            key = str(e.get("source_ref") or e.get("template_name") or "").strip().lower()
-            by_ref[key].append(e)
-
-        for idx, s in to_submit:
-            s_key = str(s.source_ref or s.template_name or "").strip().lower()
-            matched_pool = by_ref.get(s_key) or by_ref.get(str(s.template_name or "").strip().lower())
-            if matched_pool:
-                res_item = matched_pool.pop(0)
-                results_by_index[idx] = res_item
-                tid = f"task_{job_id}_{idx:04d}"
-                record_task_result(
-                    task_id=tid,
-                    status=res_item.get("status", "FAILED"),
-                    approval_status=res_item.get("approval_status") or "pending",
-                    provider_ref_id=res_item.get("provider_ref_id") or res_item.get("template_id"),
-                    error=_clean_error_message(res_item.get("error")),
-                )
-                QUEUE_MANAGER.broadcast_event(
-                    job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item}
-                )
-
+    try:
+        for index, result in preliminary.items():
+            results_by_index[index] = log_rcs_result(result, RCS_LOG_PATH, task_id=f"task_{job_id}_{index:04d}")
+        if to_submit:
+            submission_task = asyncio.create_task(asyncio.to_thread(
+                run_rcs, [s for _, s in to_submit], RCS_LOG_PATH,
+                client=acc, user=user, source_file=filename,
+                task_ids=[f"task_{job_id}_{index:04d}" for index, _ in to_submit],
+            ))
+            cancelled = False
+            while True:
+                try:
+                    entries = await asyncio.shield(submission_task)
+                    break
+                except asyncio.CancelledError:
+                    # A disconnected caller cannot cancel a provider POST, even repeatedly.
+                    cancelled = True
+                    if submission_task.cancelled():
+                        raise RuntimeError("RCS worker cancelled; provider outcome unknown.") from None
+            if len(entries) != len(to_submit):
+                raise RuntimeError("RCS runner did not return one result for each submitted row")
+            for (index, _), entry in zip(to_submit, entries, strict=True):
+                results_by_index[index] = entry
+            if cancelled:
+                raise asyncio.CancelledError
+        for entry in results_by_index:
+            if entry is None:
+                raise RuntimeError("RCS batch contains an unrecorded input row")
+            QUEUE_MANAGER.broadcast_event(job_id, "task_update", entry)
+    except (Exception, asyncio.CancelledError) as exc:
+        from db_queue import fail_unfinished_job
+        fail_unfinished_job(job_id, str(exc) or "RCS batch caller cancelled before further dispatch.")
+        snapshot = get_job(job_id)
+        if snapshot:
+            QUEUE_MANAGER.broadcast_event(job_id, "job_status", snapshot)
+        raise
     final_job = get_job(job_id)
     if final_job:
         QUEUE_MANAGER.broadcast_event(job_id, "job_status", final_job)
-    all_combined = [e for e in results_by_index if e is not None]
-    if len(all_combined) < (len(duplicate_entries) + len(new_entries)):
-        used_ids = {id(e) for e in all_combined}
-        for e in duplicate_entries + new_entries:
-            if id(e) not in used_ids:
-                all_combined.append(e)
-    cleaned_entries = []
-    for e in all_combined:
-        entry = dict(e)
-        if "error" in entry:
-            entry["error"] = _clean_error_message(entry["error"])
-        cleaned_entries.append(entry)
+    results = [{**entry, "error": _clean_error_message(entry.get("error"))} for entry in results_by_index]
+    duplicates = sum(entry["status"] == "duplicate" for entry in results)
+    submitted = sum(entry["status"] == "submitted" for entry in results)
+    failed = sum(entry["status"] in ("failed", "blocked_aspect_ratio") for entry in results)
     log_activity(
-        user=user,
-        action="TEMPLATE_SUBMISSION",
-        account=acc,
-        channel="rcs",
-        details={
-            "filename": filename,
-            "count": len(cleaned_entries),
-            "net_new_submitted": len(to_submit),
-            "duplicates_skipped": len(duplicate_entries),
-            "templates": [e.get("template_name") for e in cleaned_entries],
-            "successful": len([e for e in cleaned_entries if e.get("status") in ("submitted", "duplicate")]),
-            "failed": len([e for e in cleaned_entries if e.get("status") == "failed"]),
-        },
-        status="success" if any(e.get("status") in ("submitted", "duplicate") for e in cleaned_entries) else "failed",
-    )
-    blocked_count = len(
-        [
-            e
-            for e in cleaned_entries
-            if e.get("approval_status") == "blocked_aspect_ratio" or e.get("status") == "blocked_aspect_ratio"
-        ]
+        user=user, action="TEMPLATE_SUBMISSION", account=acc, channel="rcs",
+        details={"filename": filename, "count": len(results), "net_new_submitted": submitted,
+                 "duplicates_skipped": duplicates, "successful": submitted + duplicates,
+                 "failed": failed, "templates": [entry["template_name"] for entry in results]},
+        status="success" if submitted + duplicates else "failed",
     )
     return {
-        "job_id": job_id,
-        "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
-        "total": len(subs),
-        "submitted": len(to_submit),
-        "skipped_duplicates": len(duplicate_entries),
-        "blocked_aspect_ratio": blocked_count,
-        "results": [_json_safe(e) for e in cleaned_entries],
+        "job_id": job_id, "status": final_job["status"] if final_job else "COMPLETED",
+        "total": len(subs), "submitted": submitted, "skipped_duplicates": duplicates,
+        "blocked_aspect_ratio": sum(entry["status"] == "blocked_aspect_ratio" for entry in results),
+        "results": [_json_safe(entry) for entry in results],
     }
 
 
@@ -2063,7 +2011,6 @@ async def submit_file(
                 auto_route,
                 file.filename or "upload.csv",
                 current_user,
-                fix_aspect_ratio=fix_aspect_ratio,
             )
         return await _submit_wa_batch(
             tmp_path,
@@ -2120,16 +2067,17 @@ def get_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)
     tasks = get_job_tasks(job_id)
     return {
         "job": _json_safe(job),
-        "tasks": [_json_safe(t) for t in tasks],
+        "tasks": [_json_safe({key: value for key, value in t.items() if key != "payload_json"}) for t in tasks],
     }
 
 
 @app.get("/api/jobs/{job_id}/stream")
-async def stream_job_endpoint(job_id: str):
+async def stream_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
     """Server-Sent Events (SSE) stream yielding real-time per-task progress and job completion events."""
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    require_tenant_access(job["tenant_id"], current_user)
 
     return StreamingResponse(
         QUEUE_MANAGER.sse_event_stream(job_id),
@@ -2143,12 +2091,13 @@ async def stream_job_endpoint(job_id: str):
 
 
 @app.post("/api/jobs/{job_id}/resume")
-def resume_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
+async def resume_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
     """Resume a job currently paused due to auth expiration (PAUSED_FOR_AUTH)."""
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
     require_tenant_access(job["tenant_id"], current_user)
+    QUEUE_MANAGER.bind_event_loop()
     resumed = QUEUE_MANAGER.notify_credentials_updated(job["tenant_id"])
     return {"ok": True, "resumed_jobs": resumed}
 
@@ -2249,8 +2198,42 @@ def poll(
     acc = account.lower()
     chan = channel.lower()
     try:
+        if chan == "rcs":
+            bot_id = get_rcs_bot_id(acc)
+            pending = [entry for entry in load_rcs_log(RCS_LOG_PATH, client=acc, pending_only=True)
+                       if entry.get("bot_id") == bot_id]
+            if not pending:
+                return {"checked": 0, "updated": 0}
+            inventory = {}
+            for template in _fetch_rcs_inventory(acc):
+                if not isinstance(template, dict):
+                    continue
+                vi = template.get("viTemplate") if isinstance(template.get("viTemplate"), dict) else {}
+                live_bot = str(template.get("botId") or vi.get("botId") or "")
+                if live_bot and live_bot != bot_id:
+                    continue
+                ref = str(template.get("templateId") or template.get("id") or "")
+                if ref:
+                    inventory[ref] = template
+            updates = {}
+            for entry in pending:
+                live = inventory.get(str(entry["provider_ref_id"]))
+                if live is None:
+                    continue
+                approval = _rcs_approval_status(live.get("status"))
+                if approval == "unknown" or approval == entry["approval_status"]:
+                    continue
+                updates[entry["task_id"]] = {
+                    "approval_status": approval,
+                    "approval_reason": live.get("reason") or live.get("rejectionReason"),
+                    "provider_response": live,
+                }
+            updated = update_rcs_results(updates, RCS_LOG_PATH, client=acc)
+            log_activity(user=user, action="STATUS_POLL", account=acc, channel="rcs",
+                         details={"checked_count": len(pending), "updated_count": updated}, status="success")
+            return {"checked": len(pending), "updated": updated}
         if chan != "whatsapp":
-            return {"checked": 0}
+            return {"checked": 0, "updated": 0}
         all_pending = pending_entries(LOG_PATH)
         matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
         poll_res = poll_pending(LOG_PATH, client=acc)
@@ -2266,6 +2249,8 @@ def poll(
             status="success",
         )
         return _json_safe(poll_res)
+    except HTTPException:
+        raise
     except Exception as exc:
         # Never leak a 500 on Poll — surface a clean, actionable error (e.g. missing credentials).
         logger.exception("Error in poll for %s (%s): %s", acc, chan, exc)
@@ -3716,6 +3701,189 @@ def test_gemini_endpoint(
         return _json_safe({"ok": False, "error": str(exc)})
 
 
+def _resolve_jira_creative(path=None, attachment_id=None, filename=None) -> Path:
+    """Resolve only Jira's private cache, including attachment cache-miss recovery."""
+    from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
+
+    cache_dir = MEDIA_CACHE_DIR.resolve()
+
+    def permitted(candidate):
+        resolved = Path(candidate).resolve()
+        return resolved if resolved.is_relative_to(cache_dir) and resolved.is_file() else None
+
+    if path:
+        for candidate in (Path(path), cache_dir / Path(path).name):
+            target = permitted(candidate)
+            if target:
+                return target
+    if attachment_id:
+        target = permitted(download_jira_attachment(str(attachment_id), filename or "creative.png"))
+        if target:
+            return target
+    if filename:
+        clean_fn = re.sub(r"[^\w\-.]", "_", Path(filename).name)
+        for candidate in cache_dir.glob(f"*{clean_fn}"):
+            target = permitted(candidate)
+            if target:
+                return target
+    raise FileNotFoundError("Creative file not found in the permitted Jira cache.")
+
+
+def _jira_whatsapp_components(wa: dict, account: str) -> list[dict]:
+    """Build the same footer-merged copy, samples and business CTAs for preview/save."""
+    comps = []
+    header_type = (wa.get("header_type") or "").upper().strip()
+    header_text = (wa.get("header_text") or "").strip()
+    if header_type == "IMAGE":
+        comps.append({"type": "HEADER", "format": "IMAGE", "media_file": wa.get("media_file")})
+    elif (header_type == "TEXT" or not header_type) and header_text:
+        comps.append({
+            "type": "HEADER", "format": "TEXT", "text": header_text,
+            "example": {"header_text": ["Exclusive"]} if re.findall(r"\{\{(\d+)\}\}", header_text) else None,
+        })
+    body_text = str(wa.get("body") or "").strip()
+    footer_text = (wa.get("footer_text") or "").strip()
+    if footer_text and footer_text.lower() not in body_text.lower():
+        body_text = f"{body_text}\n\n{footer_text}".strip()
+    body_vars = wa.get("variables") or re.findall(r"\{\{(\d+)\}\}", body_text)
+    sample_vals = [str(v) for v in (wa.get("sample_values") or []) if str(v).strip()]
+    if body_vars and not sample_vals:
+        from submission_client import normalize_whatsapp_text_variables
+
+        _, sample_vals = normalize_whatsapp_text_variables(body_text, client=account)
+        if not sample_vals:
+            defaults = ["Rahul", "5,00,000", "9.99%", "24 months", "Exclusive", "Tata Capital"]
+            sample_vals = [defaults[i % len(defaults)] for i in range(len(body_vars))]
+    comps.append({
+        "type": "BODY", "text": body_text, "variables": body_vars,
+        "example": {"body_text": [sample_vals]} if sample_vals else None,
+    })
+    btn_list = [dict(button) for button in wa["buttons"]] if isinstance(wa.get("buttons"), list) and wa["buttons"] else []
+    if not btn_list:
+        btn_type = (wa.get("button_type") or "NONE").upper().strip()
+        btn_text = (wa.get("button_text") or "").strip()
+        btn_url = (wa.get("button_url") or "").strip()
+        if not btn_url or btn_url.rstrip("/") in (
+            "https://www.tatacapital.com", "http://www.tatacapital.com", "https://tatacapital.com",
+        ):
+            btn_url = "https://u3.mnge.co/"
+        if btn_type == "URL" and (btn_url or btn_text):
+            btn_list.append({"type": "URL", "text": btn_text or "Check Offer", "url": btn_url})
+        elif btn_type in ("QUICK_REPLY", "QUICKREPLY") and btn_text:
+            btn_list.append({"type": "QUICK_REPLY", "text": btn_text})
+        elif btn_type in ("PHONE_NUMBER", "PHONE", "CALL") and btn_text:
+            btn_list.append({
+                "type": "PHONE_NUMBER", "text": btn_text,
+                "phone_number": wa.get("phone_number") or wa.get("button_phone") or "+919876543210",
+            })
+    if btn_list:
+        comps.append({"type": "BUTTONS", "buttons": btn_list})
+    return comps
+
+
+def _jira_rcs_suggestions(draft: dict, carousel: bool = False) -> list[dict]:
+    if "suggestions" in draft:
+        return draft["suggestions"]
+    label = draft.get("button_text") or draft.get("action_label") or ("Explore Now" if carousel else None)
+    if not label:
+        return []
+    return [{
+        "suggestionType": "url_action", "text": label, "postbackData": label,
+        "url": draft.get("button_url") or draft.get("action_url") or "https://u3.mnge.co/",
+    }]
+
+
+def _jira_draft_input(draft: dict, channel: str, account: str) -> dict:
+    # Never trust browser warning flags or mutate the operator's draft.
+    item = {
+        "template_name": draft.get("template_name"), "category": draft.get("category", "MARKETING"),
+    }
+
+    def load_media(target, source):
+        try:
+            creative = _resolve_jira_creative(
+                source.get("media_file") or source.get("media_url") or source.get("mediaUrl"),
+                source.get("media_attachment_id") or source.get("attachment_id"),
+                source.get("media_filename"),
+            )
+            target["image_bytes"] = creative.read_bytes()
+            if not target["image_bytes"]:
+                target["media_error"] = "Creative file is empty."
+        except Exception as exc:
+            target["media_error"] = f"Creative could not be inspected: {exc}"
+
+    if channel == "whatsapp":
+        item["components"] = _jira_whatsapp_components(draft, account)
+        for component in item["components"]:
+            if component.get("format") == "IMAGE":
+                load_media(component, draft)
+    else:
+        cards = draft.get("carousel_cards") or []
+        is_carousel = draft.get("template_type") in ("carousel", "carousal") or len(cards) >= 2
+        has_media = bool(draft.get("media_file"))
+        item.update({
+            "template_type": "carousel" if is_carousel else "richcard" if has_media else "text",
+            "text_message": draft.get("body") or "",
+            "card_title": draft.get("card_title") or "",
+            "card_description": draft.get("body") or "",
+            "suggestions": _jira_rcs_suggestions(draft),
+        })
+        if is_carousel:
+            item["carousel_cards"] = []
+            for card in cards:
+                inspected_card = {
+                    "card_title": card.get("card_title") or "Offer",
+                    "card_description": card.get("card_description") or card.get("body") or "",
+                    "suggestions": _jira_rcs_suggestions(card, carousel=True),
+                }
+                load_media(inspected_card, card)
+                item["carousel_cards"].append(inspected_card)
+        elif has_media or draft.get("template_type") in ("richcard", "rich_card", "image"):
+            item["template_type"] = "richcard"
+            load_media(item, draft)
+    return item
+
+
+def _inspect_jira_draft(draft: dict, channel: str, account: str, live_names=None) -> dict:
+    item = _jira_draft_input(draft, channel, account)
+    inspected = _inspect_single_submission(item, live_names or set(), {}, account, channel)
+    result = dict(draft)
+    for field in (
+        "aspect_ratio_warnings", "aspect_ratio_blocked", "grammar_warnings", "compliance_warnings",
+    ):
+        result[field] = inspected[field]
+    result["aspect_ratio_block_reason"] = inspected.get("aspect_ratio_block_reason")
+    result["duplicate_warning"] = inspected.get("duplicate_warning")
+    return result
+
+
+def _jira_live_names(account: str, channel: str) -> set[str]:
+    try:
+        if channel == "whatsapp":
+            from submission_client import fetch_template_list
+
+            templates, _ = fetch_template_list(client=account)
+        else:
+            templates = _fetch_rcs_inventory(account)
+        return {
+            str(template.get("template_name") or template.get("viTemplate", {}).get("name") or "").strip().lower()
+            for template in templates
+        }
+    except Exception as exc:
+        logger.warning("Jira %s duplicate lookup unavailable for %s: %s", channel, account, exc)
+        return set()
+
+
+def _require_jira_accounts(account: str, whatsapp_account: str, current_user: dict) -> None:
+    from auth import TATA_SUB_ACCOUNTS
+
+    _require_tata_jira_access(current_user)
+    if account not in TATA_SUB_ACCOUNTS or whatsapp_account not in TATA_SUB_ACCOUNTS:
+        raise HTTPException(status_code=403, detail="Jira briefs cannot be routed to another tenant")
+    require_tenant_access(account, current_user)
+    require_tenant_access(whatsapp_account, current_user)
+
+
 def _require_tata_jira_access(current_user: dict) -> None:
     """Jira campaign briefs and their creatives belong to Tata, not Bajaj."""
     from auth import TATA_SUB_ACCOUNTS
@@ -3790,6 +3958,7 @@ def get_jira_brief_endpoint(
 
         # Cross-reference parsed WhatsApp templates against live WABA catalog (safe fallback if token expired/missing)
         target_client = (account or parsed.account or "tcl_promo").lower().strip()
+        _require_jira_accounts(target_client, target_client, current_user)
         live_templates = []
         try:
             from submission_client import _match_template, fetch_template_list
@@ -3819,7 +3988,11 @@ def get_jira_brief_endpoint(
                 wa_copy["exists_on_waba"] = False
                 wa_copy["live_status"] = "not_submitted"
                 wa_copy["live_ref_id"] = None
-            wa_with_live.append(wa_copy)
+            wa_with_live.append(_inspect_jira_draft(
+                wa_copy, "whatsapp", target_client,
+                {wa["template_name"].lower()} if matched else set(),
+            ))
+        rcs_live_names = _jira_live_names(target_client, "rcs") if parsed.rcs_templates else set()
         parsed_dict = {
             "issue_key": parsed.issue_key,
             "summary": parsed.summary,
@@ -3831,7 +4004,10 @@ def get_jira_brief_endpoint(
             "is_email_campaign": getattr(parsed, "is_email_campaign", False),
             "campaign_type_label": getattr(parsed, "campaign_type_label", "Whitelisting & Messaging"),
             "whatsapp_templates": wa_with_live,
-            "rcs_templates": parsed.rcs_templates,
+            "rcs_templates": [
+                _inspect_jira_draft(draft, "rcs", target_client, rcs_live_names)
+                for draft in parsed.rcs_templates
+            ],
             "sms_templates": parsed.sms_templates,
             "email_templates": getattr(parsed, "email_templates", []),
             "moengage_campaign": parsed.moengage_campaign,
@@ -3847,6 +4023,8 @@ def get_jira_brief_endpoint(
         }
 
         return _json_safe({"ok": True, "brief": parsed_dict})
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Failed to parse Jira brief for %s: %s", issue_key, exc)
         raise HTTPException(status_code=500, detail=f"Failed to parse brief {issue_key}: {exc!s}") from exc
@@ -3862,6 +4040,118 @@ class JiraSubmitRequest(BaseModel):
     rcs_templates: list[dict] | None = None
 
 
+class JiraPreviewRequest(BaseModel):
+    account: str | None = None
+    whatsapp_account: str | None = None
+    whatsapp_templates: list[dict] = []
+    rcs_templates: list[dict] = []
+
+
+@app.post("/api/jira/preview")
+def preview_jira_brief_endpoint(req: JiraPreviewRequest, current_user: dict = Depends(get_current_user)):
+    """Reinspect edited drafts and current private creative bytes without submitting."""
+    acc = (req.account or "tcl_promo").lower().strip()
+    wa_acc = (req.whatsapp_account or acc).lower().strip()
+    _require_jira_accounts(acc, wa_acc, current_user)
+    wa_names = _jira_live_names(wa_acc, "whatsapp") if req.whatsapp_templates else set()
+    rcs_names = _jira_live_names(acc, "rcs") if req.rcs_templates else set()
+    return _json_safe({
+        "whatsapp_templates": [
+            _inspect_jira_draft(draft, "whatsapp", wa_acc, wa_names) for draft in req.whatsapp_templates
+        ],
+        "rcs_templates": [
+            _inspect_jira_draft(draft, "rcs", acc, rcs_names) for draft in req.rcs_templates
+        ],
+    })
+
+class JiraValidationCommentRequest(JiraPreviewRequest):
+    confirmed: StrictBool = False
+    expected_comment: str | None = None
+
+
+def _jira_validation_comment(issue_key: str, req: JiraPreviewRequest) -> str:
+    account = (req.account or "tcl_promo").lower().strip()
+    whatsapp_account = (req.whatsapp_account or account).lower().strip()
+    sections = []
+    for channel, drafts, destination in (
+        ("whatsapp", req.whatsapp_templates, whatsapp_account),
+        ("rcs", req.rcs_templates, account),
+    ):
+        for draft in drafts:
+            inspected = _inspect_jira_draft(draft, channel, destination)
+            errors = []
+            for warning in inspected.get("aspect_ratio_warnings", []):
+                if warning.get("blocked"):
+                    errors.append(
+                        f"- {warning.get('component', 'Creative')}: "
+                        f"{warning.get('error') or warning.get('action') or inspected.get('aspect_ratio_block_reason')}"
+                    )
+            if inspected.get("aspect_ratio_blocked") and not errors:
+                errors.append(f"- Creative: {inspected.get('aspect_ratio_block_reason') or 'Creative validation failed.'}")
+            for warning in inspected.get("compliance_warnings", []):
+                if warning.get("severity") == "error":
+                    errors.append(f"- {warning.get('type', 'Compliance')}: {warning.get('issue', 'Validation failed.')}")
+                    if warning.get("recommendation"):
+                        errors.append(f"  Fix: {warning['recommendation']}")
+            if errors:
+                sections.append(
+                    f"{'WhatsApp' if channel == 'whatsapp' else 'RCS'} — "
+                    f"{draft.get('template_name') or 'Unnamed template'} ({destination})\n"
+                    + "\n".join(errors)
+                )
+    if not sections:
+        raise HTTPException(status_code=400, detail="No current validation errors to report.")
+    return (
+        f"Pre-whitelisting validation errors for {issue_key}\n\n"
+        + "\n\n".join(sections)
+        + "\n\nPlease correct these errors before whitelisting. No templates were submitted by this report."
+    )
+
+
+@app.post("/api/jira/validation-comment/{issue_key}")
+def post_jira_validation_comment_endpoint(
+    issue_key: str,
+    req: JiraValidationCommentRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Preview errors without writes; post only the exact comment explicitly approved by a human."""
+    account = (req.account or "tcl_promo").lower().strip()
+    whatsapp_account = (req.whatsapp_account or account).lower().strip()
+    _require_jira_accounts(account, whatsapp_account, current_user)
+    clean_key = issue_key.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*-\d+", clean_key):
+        raise HTTPException(status_code=400, detail="A valid Jira ticket key is required.")
+    comment_text = _jira_validation_comment(clean_key, req)
+    if not req.confirmed:
+        return {"ok": True, "posted": False, "comment_text": comment_text}
+    if req.expected_comment != comment_text:
+        raise HTTPException(status_code=409, detail="Validation errors changed or the comment was not reviewed. Review the current comment before confirming.")
+
+    from jira_client import add_jira_comment, fetch_jira_issue
+
+    try:
+        issue = fetch_jira_issue(clean_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not verify the Jira ticket. No comment was posted.") from exc
+    if str(issue.get("key") or "").upper() != clean_key:
+        raise HTTPException(status_code=404, detail="Jira ticket not found. No comment was posted.")
+    try:
+        result = add_jira_comment(clean_key, comment_text)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Comment delivery could not be confirmed. Check the Jira ticket before attempting another post.") from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=502, detail="Jira refused the comment. No successful delivery was confirmed.")
+    if not result.get("comment_id"):
+        raise HTTPException(status_code=502, detail="Comment delivery could not be confirmed. Check the Jira ticket before attempting another post.")
+    log_activity(
+        user=current_user.get("name", "Operator"), action="JIRA_VALIDATION_COMMENT",
+        account=account, channel="all",
+        details={"issue_key": clean_key, "comment_id": result["comment_id"]}, status="success",
+    )
+    return {"ok": True, "posted": True, "comment_text": comment_text, "comment_id": result["comment_id"]}
+
+
+
 @app.post("/api/jira/submit/{issue_key}")
 async def submit_jira_brief_endpoint(
     issue_key: str,
@@ -3869,8 +4159,8 @@ async def submit_jira_brief_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Submit extracted WhatsApp and/or RCS templates from a Jira brief directly to Karix,
-    record results in database queue, and post automated comment back to Jira ticket.
+    Submit selected WhatsApp/RCS templates and record their outcomes.
+    Jira comments are a separate, explicitly human-confirmed action.
     """
     _require_tata_jira_access(current_user)
     from briefing_parser import parse_jira_brief
@@ -3917,107 +4207,25 @@ async def submit_jira_brief_endpoint(
     if "whatsapp" in req.channels:
         # The RCS/general account does not need a WABA when WhatsApp is routed elsewhere.
         for wa in wa_sources:
-            comps: list[TemplateComponent] = []
-
-            # 1. HEADER component (IMAGE or TEXT)
-            header_type = (wa.get("header_type") or "").upper().strip()
-            header_text = (wa.get("header_text") or "").strip()
-            if header_type == "IMAGE" and wa.get("media_file"):
-                comps.append(
-                    TemplateComponent(
-                        type="HEADER",
-                        format="IMAGE",
-                        media_file=wa["media_file"],
-                    )
+            actual = await asyncio.to_thread(_jira_draft_input, wa, "whatsapp", wa_acc)
+            quality = _inspect_single_submission(actual, set(), {}, wa_acc, "whatsapp")
+            if quality["aspect_ratio_blocked"]:
+                res = SubmissionResult(
+                    source_ref=f"{issue_key}_{wa['template_name']}",
+                    template_name=wa["template_name"],
+                    status=SubmissionStatus.BLOCKED_ASPECT_RATIO,
+                    approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
+                    error=quality["aspect_ratio_block_reason"],
+                    client=wa_acc, channel="whatsapp",
+                    submitted_by=user_name, source_file=f"Jira: {issue_key}",
                 )
-            elif (header_type == "TEXT" or not header_type) and header_text:
-                h_vars = re.findall(r"\{\{(\d+)\}\}", header_text)
-                h_example = {"header_text": ["Exclusive"]} if h_vars else None
-                comps.append(
-                    TemplateComponent(
-                        type="HEADER",
-                        format="TEXT",
-                        text=header_text,
-                        example=h_example,
-                    )
-                )
-
-            # 2. BODY component with variables & sample values
-            # Strictly never emit a FOOTER component — merge any footer_text into body_text
-            body_text = str(wa.get("body") or "").strip()
-            footer_text = (wa.get("footer_text") or "").strip()
-            if footer_text and footer_text.lower() not in body_text.lower():
-                body_text = f"{body_text}\n\n{footer_text}".strip()
-            body_vars = wa.get("variables") or []
-            if not body_vars:
-                body_vars = re.findall(r"\{\{(\d+)\}\}", body_text)
-
-            sample_vals = [str(v) for v in (wa.get("sample_values") or []) if str(v).strip()]
-            if body_vars and not sample_vals:
-                from submission_client import normalize_whatsapp_text_variables
-
-                _, auto_samples = normalize_whatsapp_text_variables(body_text, client=wa_acc)
-                if auto_samples:
-                    sample_vals = auto_samples
-                else:
-                    defaults = ["Rahul", "5,00,000", "9.99%", "24 months", "Exclusive", "Tata Capital"]
-                    sample_vals = [defaults[i % len(defaults)] for i in range(len(body_vars))]
-
-            body_example = {"body_text": [sample_vals]} if sample_vals else None
-            comps.append(
-                TemplateComponent(
-                    type="BODY",
-                    text=body_text,
-                    variables=body_vars,
-                    example=body_example,
-                )
-            )
-
-            # 4. BUTTONS component (URL, QUICK_REPLY, PHONE_NUMBER)
-            btn_list = []
-            if wa.get("buttons") and isinstance(wa.get("buttons"), list):
-                btn_list.extend(wa["buttons"])
-            else:
-                btn_type = (wa.get("button_type") or "NONE").upper().strip()
-                btn_text = (wa.get("button_text") or "").strip()
-                raw_btn_url = (wa.get("button_url") or "").strip()
-                if not raw_btn_url or raw_btn_url.rstrip("/") in (
-                    "https://www.tatacapital.com",
-                    "http://www.tatacapital.com",
-                    "https://tatacapital.com",
-                ):
-                    raw_btn_url = "https://u3.mnge.co/"
-                if btn_type == "URL" and (raw_btn_url or btn_text):
-                    btn_list.append(
-                        {
-                            "type": "URL",
-                            "text": btn_text or "Check Offer",
-                            "url": raw_btn_url,
-                        }
-                    )
-                elif btn_type in ("QUICK_REPLY", "QUICKREPLY") and btn_text:
-                    btn_list.append(
-                        {
-                            "type": "QUICK_REPLY",
-                            "text": btn_text,
-                        }
-                    )
-                elif btn_type in ("PHONE_NUMBER", "PHONE", "CALL") and btn_text:
-                    btn_list.append(
-                        {
-                            "type": "PHONE_NUMBER",
-                            "text": btn_text,
-                            "phone_number": wa.get("phone_number") or wa.get("button_phone") or "+919876543210",
-                        }
-                    )
-
-            if btn_list:
-                comps.append(
-                    TemplateComponent(
-                        type="BUTTONS",
-                        buttons=btn_list,
-                    )
-                )
+                log_result(res, LOG_PATH)
+                submitted_wa.append({
+                    "template_name": res.template_name, "status": res.status.value,
+                    "approval_status": res.approval_status.value, "error": res.error,
+                })
+                continue
+            comps = [TemplateComponent(**component) for component in actual["components"]]
             from config import get_waba_id
 
             submission = TemplateSubmission(
@@ -4058,22 +4266,29 @@ async def submit_jira_brief_endpoint(
     # 2. Submit RCS templates
     if "rcs" in req.channels:
         for rcs in rcs_sources:
-            suggestions = []
-            btn_text = rcs.get("button_text") or rcs.get("action_label")
-            btn_url = rcs.get("button_url") or rcs.get("action_url") or "https://u3.mnge.co/"
-            if btn_text:
-                suggestions.append(
-                    {
-                        "suggestionType": "url_action",
-                        "text": btn_text,
-                        "postbackData": btn_text,
-                        "url": btn_url,
-                    }
+            actual = await asyncio.to_thread(_jira_draft_input, rcs, "rcs", acc)
+            quality = _inspect_single_submission(actual, set(), {}, acc, "rcs")
+            if quality["aspect_ratio_blocked"]:
+                rcs_res = RcsSubmissionResult(
+                    source_ref=f"{issue_key}_{rcs['template_name']}",
+                    template_name=rcs["template_name"],
+                    status=RcsSubmissionStatus.BLOCKED_ASPECT_RATIO,
+                    approval_status="blocked_aspect_ratio",
+                    error=quality["aspect_ratio_block_reason"],
+                    client=acc, channel="rcs", bot_id=get_rcs_bot_id(acc),
+                    submitted_by=user_name, source_file=f"Jira: {issue_key}",
                 )
+                log_rcs_result(rcs_res, RCS_LOG_PATH)
+                submitted_rcs.append({
+                    "template_name": rcs_res.template_name, "status": rcs_res.status.value,
+                    "template_id": None, "error": rcs_res.error,
+                })
+                continue
+            suggestions = actual["suggestions"]
 
-            has_media = bool(rcs.get("media_file"))
+            has_media = bool(actual.get("image_bytes"))
             c_cards = rcs.get("carousel_cards") or []
-            is_carousel = rcs.get("template_type") in ("carousel", "carousal") or len(c_cards) >= 2
+            is_carousel = actual["template_type"] == "carousel"
             if is_carousel:
                 rcs_type = "carousel"
                 formatted_cards = []
@@ -4088,14 +4303,8 @@ async def submit_jira_brief_endpoint(
                         "media_filename": card.get("media_filename"),
                         "button_text": btn_label,
                         "button_url": btn_link,
-                        "suggestions": [
-                            {
-                                "suggestionType": "url_action",
-                                "text": btn_label,
-                                "postbackData": btn_label,
-                                "url": btn_link,
-                            }
-                        ],
+                        "image_bytes": actual["carousel_cards"][len(formatted_cards)]["image_bytes"],
+                        "suggestions": actual["carousel_cards"][len(formatted_cards)]["suggestions"],
                     })
                 c_cards = formatted_cards
             elif has_media:
@@ -4116,6 +4325,8 @@ async def submit_jira_brief_endpoint(
                 card_description=card_desc,
                 text_message=text_msg,
                 media_url=rcs.get("media_file"),
+                image_bytes=actual.get("image_bytes"),
+                image_filename=rcs.get("media_filename"),
                 suggestions=suggestions,
                 carousel_cards=c_cards,
                 source_ref=f"{issue_key}_{rcs['template_name']}",
@@ -4143,8 +4354,8 @@ async def submit_jira_brief_endpoint(
                         "error": str(rcs_exc),
                     }
                 )
-    # Jira remains strictly READ-ONLY per project policy (zero comments/writes to Jira)
-    jira_comment_res = {"ok": True, "skipped": True, "message": "Jira comment skipped (Jira is strictly read-only)"}
+    # Submission never posts a Jira comment; error reports require separate human approval.
+    jira_comment_res = {"ok": True, "skipped": True, "message": "No comment posted; validation reports require human confirmation."}
     log_activity(
         user=user_name,
         action="JIRA_BRIEF_SUBMISSION",
@@ -4156,7 +4367,7 @@ async def submit_jira_brief_endpoint(
             "rcs_account": acc,
             "whatsapp_count": len(submitted_wa),
             "rcs_count": len(submitted_rcs),
-            "jira_comment_posted": jira_comment_res.get("ok", False),
+            "jira_comment_posted": False,
         },
         status="success",
     )
@@ -4179,52 +4390,16 @@ def download_jira_creative_endpoint(
     attachment_id: str | None = Query(None),
     filename: str | None = Query(None),
     inline: bool = Query(False),
-    token: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     """Download or preview a creative attachment from a Jira brief."""
-    user = current_user
-    if token:
-        from auth import decode_access_token
-
-        decoded = decode_access_token(token)
-        if decoded:
-            user = decoded
-    _require_tata_jira_access(user)
+    _require_tata_jira_access(current_user)
     import mimetypes
     from fastapi.responses import FileResponse
-    from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
-
-    target_path: Path | None = None
-
-    if path:
-        cand = Path(path)
-        if not cand.is_absolute():
-            cand = Path.cwd() / cand
-        resolved = cand.resolve()
-        cache_dir = MEDIA_CACHE_DIR.resolve()
-        if resolved.is_relative_to(cache_dir) and resolved.is_file():
-            target_path = resolved
-        if target_path is None:
-            by_name = cache_dir / Path(path).name
-            if by_name.is_file():
-                target_path = by_name
-
-    if target_path is None and attachment_id:
-        try:
-            target_path = download_jira_attachment(attachment_id, filename or "creative.png")
-        except Exception as exc:
-            raise HTTPException(status_code=404, detail=f"Could not download Jira attachment: {exc!s}") from exc
-
-    if target_path is None and filename:
-        cache_dir = MEDIA_CACHE_DIR.resolve()
-        clean_fn = re.sub(r"[^\w\-.]", "_", Path(filename).name)
-        matches = list(cache_dir.glob(f"*{clean_fn}"))
-        if matches:
-            target_path = matches[0]
-
-    if target_path is None or not target_path.is_file():
-        raise HTTPException(status_code=404, detail="Creative file not found in cache.")
+    try:
+        target_path = _resolve_jira_creative(path, attachment_id, filename)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Could not load creative: {exc}") from exc
 
     dl_name = filename or target_path.name
     dl_name = re.sub(r"^(?:jira|custom|zip)_[A-Za-z0-9]+_", "", dl_name)

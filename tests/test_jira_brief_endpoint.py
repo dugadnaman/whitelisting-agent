@@ -219,7 +219,7 @@ def _mixed_submission_payload():
 
 def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit_user, client):
     from models import ApprovalStatus, SubmissionResult, SubmissionStatus
-    from rcs_models import RcsSubmissionResult
+    from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
 
     jira_submit_user("tata")
     waba_accounts = []
@@ -246,6 +246,7 @@ def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit
         return RcsSubmissionResult(
             source_ref=submission.source_ref, template_name=submission.template_name,
             template_id="rcs-id", client=client,
+            status=RcsSubmissionStatus.SUBMITTED, approval_status="pending",
         )
 
     payload = _mixed_submission_payload()

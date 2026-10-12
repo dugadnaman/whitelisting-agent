@@ -5,6 +5,7 @@ automated copy remediation (grammar + Meta policy compliance), autonomous
 resubmission, and catalog status management.
 """
 
+import json
 import logging
 import os
 import re
@@ -17,7 +18,7 @@ from db import init_database
 from db_queue import create_job_with_tasks, record_task_result
 from grammar_checker import lint_and_fix_body
 from loader import _row_to_submission
-from rcs_client import fetch_rcs_templates, submit_rcs_template
+from rcs_client import RcsInventoryUnavailable, fetch_rcs_templates, submit_rcs_template
 from rcs_models import RcsTemplateSubmission
 from rcs_tracker import load_rcs_log
 from submission_client import (
@@ -46,7 +47,7 @@ def tool_inspect_template(
     q = name_or_query.strip().lower()
 
     if chan == "rcs":
-        local_entries = load_rcs_log("rcs_submission_log.jsonl")
+        local_entries = load_rcs_log("rcs_submission_log.jsonl", client=acc)
         local_match = next(
             (
                 e
@@ -55,15 +56,25 @@ def tool_inspect_template(
             ),
             None,
         )
-        live_list = fetch_rcs_templates(client=acc)
-        live_match = next(
-            (
-                t
-                for t in live_list
-                if q in t.get("viTemplate", {}).get("name", "").lower() or q in str(t.get("templateId", "")).lower()
-            ),
-            None,
-        )
+        try:
+            live_list = fetch_rcs_templates(client=acc)
+        except RcsInventoryUnavailable as exc:
+            return {
+                "found": local_match is not None, "template": local_match,
+                "error": str(exc), "live": False, "channel": "rcs", "account": acc,
+            }
+        live_match = None
+        for item in live_list:
+            vi = item.get("viTemplate", {})
+            if isinstance(vi, str):
+                try:
+                    vi = json.loads(vi)
+                except (ValueError, TypeError):
+                    vi = {}
+            vi = vi if isinstance(vi, dict) else {}
+            if q in str(vi.get("name", "")).lower() or q in str(item.get("templateId", "")).lower():
+                live_match = {**item, "viTemplate": vi}
+                break
 
         if not local_match and not live_match:
             return {
@@ -536,12 +547,21 @@ def tool_list_templates(
     s_filter = status_filter.lower().strip() if status_filter else None
 
     if chan == "rcs":
-        live = fetch_rcs_templates(client=acc)
+        try:
+            live = fetch_rcs_templates(client=acc)
+        except RcsInventoryUnavailable as exc:
+            return {"error": str(exc), "account": acc, "channel": "rcs"}
         results = []
         for t in live:
             st = str(t.get("status", "SUBMITTED")).lower()
             if not s_filter or s_filter in st:
                 vi = t.get("viTemplate", {})
+                if isinstance(vi, str):
+                    try:
+                        vi = json.loads(vi)
+                    except (ValueError, TypeError):
+                        vi = {}
+                vi = vi if isinstance(vi, dict) else {}
                 results.append(
                     {
                         "name": vi.get("name") or str(t.get("templateId")),

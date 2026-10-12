@@ -126,7 +126,7 @@ function ClickCountWorkspacePicker() {
           </div>
         )}
       </section>
-      {workspace ? <ImportedBasePicker key={workspace.id} workspace={workspace} busy={busy} onBusyChange={setBusy} /> : (
+      {workspace ? <ImportedBasePicker key={`${workspace.id}:${workspace.timezone}`} workspace={workspace} busy={busy} onBusyChange={setBusy} /> : (
         <div className="rounded-xl border border-dashed border-gray-300 px-6 py-14 text-center">
           <h2 className="text-sm font-semibold text-gray-700">Start with a workspace</h2>
           <p className="mt-2 text-sm text-gray-500">Your imported bases and counting options will appear here.</p>
@@ -265,6 +265,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
   const [metadataReload, setMetadataReload] = useState(0);
   const [today, setToday] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [startOverrides, setStartOverrides] = useState<Record<string, string>>({});
   const [jobs, setJobs] = useState<Record<string, BaseJob>>({});
   const metadataCache = useRef(new Map<string, ClickCountBaseMetadata>());
   const submitLock = useRef(false);
@@ -351,6 +352,8 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
     requestControllers.current.clear();
     pollers.current.clear();
     setJobs({});
+    const selected = new Set(bases.map((base) => base.id));
+    setStartOverrides((current) => Object.fromEntries(Object.entries(current).filter(([id]) => selected.has(id))));
     submitLock.current = false;
   }, [selectedKey]);
 
@@ -423,7 +426,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
     requestControllers.current.set(base.id, controller);
     try {
       const query = await startClickCountQuery(
-        { workspace_id: workspace.id, base_id: base.id, end_date: endDate },
+        { workspace_id: workspace.id, base_id: base.id, end_date: endDate, ...(startOverrides[base.id] === undefined ? {} : { start_date: startOverrides[base.id] }) },
         AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]),
       );
       if (controller.signal.aborted) return;
@@ -447,10 +450,13 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
   }
 
   const selectedMetadata = bases.map((base) => metadata[base.id]).filter((base): base is ClickCountBaseMetadata => Boolean(base));
-  const maxStartDate = selectedMetadata.reduce((latest, base) => base.start_date > latest ? base.start_date : latest, '');
+  const maxStartDate = selectedMetadata.reduce((latest, base) => {
+    const start = startOverrides[base.id] ?? base.start_date;
+    return start > latest ? start : latest;
+  }, '');
   const metadataReady = selectedMetadata.length === bases.length && loadingIds.length === 0 && Object.keys(metadataErrors).length === 0;
   const loading = new Set(loadingIds);
-  const validDates = metadataReady && Boolean(today && isValidClickCountRange(maxStartDate, endDate, workspace.timezone));
+  const validDates = metadataReady && Boolean(today) && selectedMetadata.every((base) => isValidClickCountRange(startOverrides[base.id] ?? base.start_date, endDate, workspace.timezone));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -471,10 +477,26 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
     }
   }
 
-  function changeEndDate(value: string) {
+  function clearResults() {
     pollers.current.forEach((_poller, baseId) => stopPoller(baseId));
-    setEndDate(value);
     setJobs({});
+  }
+
+  function changeEndDate(value: string) {
+    if (busy || submitLock.current) return;
+    clearResults();
+    setEndDate(value);
+  }
+
+  function changeStartDate(baseId: string, value?: string) {
+    if (busy || submitLock.current) return;
+    clearResults();
+    setStartOverrides((current) => {
+      const next = { ...current };
+      if (value === undefined) delete next[baseId];
+      else next[baseId] = value;
+      return next;
+    });
   }
 
   return (
@@ -484,12 +506,12 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-sm font-bold text-blue-700" aria-hidden="true">3</span>
           <div>
             <h2 className="text-sm font-semibold text-gray-900">Set your date range</h2>
-            <p className="mt-1 text-xs leading-5 text-gray-500">Start dates come from when each base was imported.</p>
+            <p className="mt-1 text-xs leading-5 text-gray-500">Start dates are fetched from each base&apos;s creation time. Edit them for your report, or reset to automatic.</p>
           </div>
         </div>
         <div className="max-h-48 overflow-auto rounded-lg border border-gray-200">
           <table className="min-w-full divide-y divide-gray-200 text-left text-xs">
-            <caption className="sr-only">Selected bases and their automatic start dates</caption>
+            <caption className="sr-only">Selected bases and editable report start dates</caption>
             <thead className="sticky top-0 bg-gray-50 text-gray-500">
               <tr><th scope="col" className="px-3 py-2.5 font-medium">Selected base</th><th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Start date</th></tr>
             </thead>
@@ -498,7 +520,14 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
                 <tr key={base.id}>
                   <td className="break-words px-3 py-3 text-gray-700">{base.name}</td>
                   <td className="whitespace-nowrap px-3 py-3 tabular-nums text-gray-600">
-                    {loading.has(base.id) ? 'Loading…' : metadata[base.id]?.start_date || 'Unavailable'}
+                    {metadata[base.id] ? (
+                      <div className="min-w-40 space-y-2">
+                        <label htmlFor={`click-start-${base.id}`} className="sr-only">Report start date for {base.name}</label>
+                        <input id={`click-start-${base.id}`} type="date" className={input} value={startOverrides[base.id] ?? metadata[base.id].start_date} min="0001-01-01" max={endDate && endDate < today ? endDate : today} required disabled={busy || !today} onChange={(event) => changeStartDate(base.id, event.target.value)} aria-describedby={`click-start-help-${base.id}`} />
+                        <p id={`click-start-help-${base.id}`} className="text-[11px] text-gray-500">{startOverrides[base.id] === undefined ? 'Automatic' : 'Manual'} · Base created {metadata[base.id].start_date}</p>
+                        <button type="button" className={secondary} disabled={busy || startOverrides[base.id] === undefined} onClick={() => changeStartDate(base.id)}>Reset to automatic</button>
+                      </div>
+                    ) : loading.has(base.id) ? 'Loading…' : 'Unavailable'}
                   </td>
                 </tr>
               ))}
@@ -512,12 +541,12 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
           <button type="button" className={secondary} onClick={() => setMetadataReload((value) => value + 1)}>Retry base dates</button>
         )}
         <div>
-          <label htmlFor="click-end" className="mb-1.5 block text-sm font-medium text-gray-700">Count clicks through</label>
+          <label htmlFor="click-end" className="mb-1.5 block text-sm font-medium text-gray-700">Report end date (inclusive)</label>
           <input id="click-end" type="date" className={input} value={endDate} min={maxStartDate} max={today} required aria-describedby="click-date-help" disabled={busy || !metadataReady || !today || maxStartDate > today} onChange={(event) => changeEndDate(event.target.value)} />
           <p id="click-date-help" className="mt-2 text-xs leading-5 text-gray-500">Includes the whole end date in {workspace.timezone}. One end date applies to every selected base.</p>
         </div>
-        {today && maxStartDate > today && <p role="alert" className="text-sm text-red-700">At least one selected base was created after today in this workspace; no common date range is available yet.</p>}
-        {endDate && !validDates && metadataReady && <p role="alert" className="text-sm text-red-700">Choose an end date from {maxStartDate} through {today}.</p>}
+        {today && maxStartDate > today && <p role="alert" className="text-sm text-red-700">At least one report start date is after today in this workspace. Choose an earlier start date.</p>}
+        {endDate && !validDates && metadataReady && <p role="alert" className="text-sm text-red-700">Choose valid start dates on or before the end date, and an end date no later than {today}.</p>}
         <div className="border-t border-gray-100 pt-4">
           <button type="submit" className={`${primary} w-full`} disabled={!validDates || busy} onClick={(event) => { if (event.detail > 1) event.preventDefault(); }}>
             {busy ? `Counting ${bases.length} ${bases.length === 1 ? 'base' : 'bases'}…` : Object.keys(jobs).length ? `Count ${bases.length} ${bases.length === 1 ? 'base' : 'bases'} again` : `Count ${bases.length} selected ${bases.length === 1 ? 'base' : 'bases'}`}

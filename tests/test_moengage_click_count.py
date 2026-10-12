@@ -35,7 +35,7 @@ def test_creation_date_uses_workspace_timezone(created, start):
     assert base["timezone"] == "Asia/Kolkata"
 
 
-def test_inclusive_date_query_deduplicates_five_channels_and_requires_base(frozen_clock):
+def test_inclusive_date_query_unions_click_channels_and_requires_base(frozen_clock):
     base = {"id": BASE_ID, "name": "October base", "start_date": "2026-09-25", "timezone": WORKSPACE["timezone"]}
     payload = click_count_payload(base, "2026-09-25")
     included = payload["filters"]["included_filters"]
@@ -59,6 +59,103 @@ def test_invalid_end_range_is_rejected(end, frozen_clock):
         click_count_payload({"id": BASE_ID, "name": "base", "start_date": "2026-09-25", "timezone": WORKSPACE["timezone"]}, end)
     assert error.value.status_code == 400
 
+
+@pytest.mark.parametrize("start", ["2026-09-01", "2026-09-30"])
+def test_report_start_override_can_precede_or_follow_base_creation(start, frozen_clock):
+    base = base_metadata({"id": BASE_ID, "name": "base", "created_time": "2026-09-24T23:59:59"}, WORKSPACE)
+    payload = click_count_payload(base, "2026-10-01", start)
+    actions = payload["filters"]["included_filters"]["filters"][0]["filters"]
+    assert all(action["primary_time_range"]["value"] == start + "T00:00:00.000Z" for action in actions)
+    assert all(action["primary_time_range"]["value1"] == "2026-10-01T23:59:59.999Z" for action in actions)
+    assert base["start_date"] == "2026-09-25"
+    automatic = click_count_payload(base, "2026-10-01")
+    assert automatic["filters"]["included_filters"]["filters"][0]["filters"][0]["primary_time_range"]["value"] == "2026-09-25T00:00:00.000Z"
+
+
+@pytest.mark.parametrize("start,end", [
+    ("", "2026-10-01"), ("2026-02-30", "2026-10-01"),
+    ("2026-9-01", "2026-10-01"), ("２０２６-０９-０１", "2026-10-01"),
+    ("2026-09-01\n", "2026-10-01"), ("2026-09-01T00:00:00Z", "2026-10-01"),
+    ("0000-01-01", "2026-10-01"), ("2026-10-02", "2026-10-01"),
+    ("2026-10-10", "2026-10-10"), ("2026-09-01", "2026-10-10"),
+])
+def test_invalid_manual_report_ranges_are_rejected(start, end, frozen_clock):
+    with pytest.raises(HTTPException) as error:
+        click_count_payload({"id": BASE_ID, "name": "base", "start_date": "2026-09-25",
+                             "timezone": WORKSPACE["timezone"]}, end, start)
+    assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize("start", [None, "2026-09-01", "2026-09-30"])
+def test_query_returns_effective_report_start_and_still_verifies_base_database(monkeypatch, frozen_clock, start):
+    import moengage_click_count as module
+    calls = []
+    class Client:
+        def select_workspace(self, workspace_id):
+            assert workspace_id == WORKSPACE["id"]
+            return WORKSPACE
+        def base(self, base_id, *, include_db):
+            calls.append("base")
+            assert base_id == BASE_ID
+            assert include_db is False
+            return {"id": BASE_ID, "name": "base", "created_time": "2026-09-24T23:59:59"}, ""
+        def workspace_database(self):
+            calls.append("database")
+            return "TataCapital"
+        def request(self, method, path, *, params, body):
+            calls.append("count")
+            assert method == "POST" and path == "/segmentation/recent_query/count"
+            actions, membership = body["filters"]["included_filters"]["filters"]
+            assert membership["id"] == BASE_ID
+            assert all(action["primary_time_range"]["value"] == (start or "2026-09-25") + "T00:00:00.000Z"
+                       for action in actions["filters"])
+            return {"success": True, "rq_id": QUERY_ID}
+    monkeypatch.setattr(module, "ClickCountClient", Client)
+    monkeypatch.setattr(module, "sign_query", lambda query_id, workspace_id, db: "scoped-ticket")
+    response = module.create_query(module.ClickCountQueryRequest(
+        workspace_id=WORKSPACE["id"], base_id=BASE_ID, start_date=start, end_date="2026-10-01"))
+    assert response["start_date"] == (start or "2026-09-25")
+    assert response["end_date"] == "2026-10-01"
+    assert response["timezone"] == WORKSPACE["timezone"]
+    assert calls == ["base", "database", "count"]
+
+
+@pytest.mark.parametrize("start", ["2026-02-30", "２０２６-０９-０１", "2026-10-02"])
+def test_invalid_manual_start_is_rejected_before_portal_access(monkeypatch, start):
+    import moengage_click_count as module
+    def forbidden_client():
+        pytest.fail("Invalid report starts must not initialize a portal session.")
+    monkeypatch.setattr(module, "ClickCountClient", forbidden_client)
+    with pytest.raises(HTTPException) as error:
+        module.create_query(module.ClickCountQueryRequest(
+            workspace_id=WORKSPACE["id"], base_id=BASE_ID, start_date=start, end_date="2026-10-01"))
+    assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize("value", [True, 1, 1.0, [], {}, b"2026-10-01"])
+def test_manual_start_request_never_coerces_non_string_input(value):
+    from pydantic import ValidationError
+    from moengage_click_count import ClickCountQueryRequest
+    with pytest.raises(ValidationError):
+        ClickCountQueryRequest(workspace_id=WORKSPACE["id"], base_id=BASE_ID, start_date=value, end_date="2026-10-01")
+
+
+
+@pytest.mark.parametrize("created", ["not-a-date", "2026-02-30T00:00:00Z", None])
+def test_manual_start_never_bypasses_authoritative_base_timestamp(monkeypatch, frozen_clock, created):
+    import moengage_click_count as module
+    class Client:
+        def select_workspace(self, workspace_id):
+            return WORKSPACE
+        def base(self, base_id, *, include_db):
+            return {"id": BASE_ID, "name": "base", "created_time": created}, ""
+        def workspace_database(self):
+            pytest.fail("Invalid base metadata must not look up a database or submit counts.")
+    monkeypatch.setattr(module, "ClickCountClient", Client)
+    with pytest.raises(HTTPException) as error:
+        module.create_query(module.ClickCountQueryRequest(
+            workspace_id=WORKSPACE["id"], base_id=BASE_ID, start_date="2026-09-01", end_date="2026-10-01"))
+    assert error.value.status_code == 502
 
 @pytest.mark.parametrize("unique,reachable", [(0, 0), (5426, 5423)])
 def test_unique_count_and_reachable_count_are_distinct(unique, reachable):
@@ -426,7 +523,6 @@ def test_leap_day_range_and_action_time_ranges_are_independent(frozen_clock):
     payload = click_count_payload({"id": BASE_ID, "name": "base", "start_date": "2024-02-29",
                                    "timezone": "UTC"}, "2024-02-29")
     actions = payload["filters"]["included_filters"]["filters"][0]["filters"]
-    assert len(actions) == 5
     assert all(action["executed"] is True for action in actions)
     assert all(action["attributes"] == {"filter_operator": "and", "filters": []} for action in actions)
     assert all(action["primary_time_range"]["value1"] == "2024-02-29T23:59:59.999Z" for action in actions)

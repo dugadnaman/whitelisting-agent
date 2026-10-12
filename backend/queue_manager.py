@@ -15,17 +15,23 @@ import collections
 import json
 import logging
 import time
+from dataclasses import asdict
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from config import get_waba_id
 from db_queue import (
+    JOB_TERMINAL_STATUSES,
+    claim_task,
+    fail_unfinished_job,
     get_job,
     get_job_tasks,
     list_paused_jobs,
     record_task_result,
+    release_task_for_auth,
     resume_paused_jobs_for_tenant,
     update_job_status,
+    validate_task_scope,
 )
 from models import (
     ApprovalStatus,
@@ -99,14 +105,14 @@ class QueueManager:
         self._resume_events: dict[str, asyncio.Event] = {}  # tenant_id -> Event
         self._sse_listeners: dict[str, set[asyncio.Queue[str]]] = collections.defaultdict(set)
         self._active_worker_tasks: set[asyncio.Task] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def get_bucket_for_tenant(self, tenant_id: str) -> WabaTokenBucket:
         """Get or initialize the isolated token bucket for a tenant's WABA."""
-        clean_tenant = (tenant_id or "bajaj").lower().strip()
-        try:
-            waba_id = get_waba_id(clean_tenant)
-        except Exception:
-            waba_id = f"waba_{clean_tenant}"
+        clean_tenant = str(tenant_id or "").lower().strip()
+        if not clean_tenant:
+            raise ValueError("Queue rate limits require an explicit tenant")
+        waba_id = get_waba_id(clean_tenant)
 
         if waba_id not in self._buckets:
             # Default to 10 req/s, burst capacity 15
@@ -159,12 +165,13 @@ class QueueManager:
         """
         clean_tenant = tenant_id.lower().strip()
         self._auth_circuits[clean_tenant] = False
+        paused_jobs = list_paused_jobs(clean_tenant)
         resumed_count = resume_paused_jobs_for_tenant(clean_tenant)
 
         # Wake up any workers waiting on the resume event
         event = self._resume_events.get(clean_tenant)
-        if event:
-            event.set()
+        if event and self._loop and not self._loop.is_closed():
+            self._loop.call_soon_threadsafe(event.set)
 
         logger.info(
             "Auto-resume triggered for %s: resumed %d paused job(s)",
@@ -173,18 +180,16 @@ class QueueManager:
         )
 
         # Broadcast auth_resumed event
-        for j in list_paused_jobs(clean_tenant):
-            self.broadcast_event(
-                j["id"],
-                event="auth_resumed",
-                data={"job_id": j["id"], "tenant_id": clean_tenant},
-            )
-
+        for j in paused_jobs:
+            self.broadcast_event(j["id"], event="auth_resumed", data={"job_id": j["id"], "tenant_id": clean_tenant})
+            if self._loop and not self._loop.is_closed():
+                self._loop.call_soon_threadsafe(self.start_job_execution, j["id"], clean_tenant, j["channel"])
         return resumed_count
 
     def subscribe_job(self, job_id: str) -> asyncio.Queue[str]:
         """Subscribe an SSE connection to live job events."""
-        q: asyncio.Queue[str] = asyncio.Queue()
+        self.bind_event_loop()
+        q: asyncio.Queue[str] = asyncio.Queue(maxsize=128)
         self._sse_listeners[job_id].add(q)
         return q
 
@@ -201,13 +206,22 @@ class QueueManager:
         listeners = self._sse_listeners.get(job_id)
         if not listeners:
             return
+        if self._loop and not self._loop.is_closed():
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+            if current_loop is not self._loop:
+                self._loop.call_soon_threadsafe(self.broadcast_event, job_id, event, data)
+                return
 
+        if event == "task_update" and "payload_json" in data:
+            data = {key: value for key, value in data.items() if key != "payload_json"}
         payload = f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
         for q in list(listeners):
-            try:
-                q.put_nowait(payload)
-            except Exception:
-                pass
+            if q.full():
+                q.get_nowait()
+            q.put_nowait(payload)
 
     async def sse_event_stream(self, job_id: str) -> AsyncGenerator[str, None]:
         """Yield Server-Sent Events for a job until it settles or client disconnects."""
@@ -217,92 +231,136 @@ class QueueManager:
             initial_job = get_job(job_id)
             if initial_job:
                 yield f"event: job_status\ndata: {json.dumps(initial_job, default=str)}\n\n"
+                if initial_job.get("status") in JOB_TERMINAL_STATUSES:
+                    return
+            else:
+                return
 
             while True:
                 try:
                     payload = await asyncio.wait_for(q.get(), timeout=20.0)
                     yield payload
+                    event_data = json.loads(payload.split("\ndata: ", 1)[1].strip())
+                    if event_data.get("status") in JOB_TERMINAL_STATUSES:
+                        return
+                    job = get_job(job_id)
+                    if job and job.get("status") in JOB_TERMINAL_STATUSES:
+                        yield f"event: job_status\ndata: {json.dumps(job, default=str)}\n\n"
+                        return
                 except TimeoutError:
                     # Keep-alive heartbeat
                     yield ": ping\n\n"
                     # Check if job settled while waiting
                     job = get_job(job_id)
-                    if job and job.get("status") in ("COMPLETED", "PARTIALLY_COMPLETED", "FAILED"):
+                    if job and job.get("status") in JOB_TERMINAL_STATUSES:
                         yield f"event: job_status\ndata: {json.dumps(job, default=str)}\n\n"
                         break
         finally:
             self.unsubscribe_job(job_id, q)
 
+    def bind_event_loop(self) -> None:
+        self._loop = asyncio.get_running_loop()
+
     def start_job_execution(self, job_id: str, tenant_id: str, channel: str = "whatsapp") -> asyncio.Task:
         """Spawn asynchronous background task to execute all pending tasks in the job."""
+        self.bind_event_loop()
         task = asyncio.create_task(self._process_job_tasks(job_id, tenant_id, channel))
         self._active_worker_tasks.add(task)
         task.add_done_callback(self._active_worker_tasks.discard)
         return task
 
     async def _process_job_tasks(self, job_id: str, tenant_id: str, channel: str) -> None:
-        """
-        Background worker processing tasks through fair-share rate limiter
-        and handling circuit-breaker pause / resume logic.
-        """
-        clean_tenant = tenant_id.lower().strip()
-        bucket = self.get_bucket_for_tenant(clean_tenant)
-        update_job_status(job_id, "RUNNING")
-        self.broadcast_event(job_id, "job_status", {"job_id": job_id, "status": "RUNNING"})
-
-        tasks = get_job_tasks(job_id)
-        for task_row in tasks:
-            task_id = task_row["id"]
-            if task_row["status"] != "PENDING":
-                # Already resolved (e.g. duplicate during upload ingestion)
-                continue
-
-            # Check if circuit breaker is tripped; if so, wait for auto-resume event
-            while self.is_auth_tripped(clean_tenant):
-                event = self._resume_events.setdefault(clean_tenant, asyncio.Event())
-                logger.info("Worker paused on %s waiting for credential resume event...", clean_tenant)
-                await event.wait()
-
-            # Acquire rate limit token from WABA bucket
-            await bucket.acquire(1.0)
-
-            # Re-check circuit breaker after token wait
-            if self.is_auth_tripped(clean_tenant):
-                continue
-
-            # Execute submission
-            payload_dict = json.loads(task_row["payload_json"])
-            result = await self._execute_task_submission(task_row, payload_dict, clean_tenant, channel)
-
-            # Check if execution triggered a 401 Session Expiration
-            err_str = str(result.error or "")
-            if "401" in err_str or "session expired" in err_str.lower() or "unauthorised" in err_str.lower():
-                self.trip_auth_circuit(clean_tenant, job_id, err_str)
-                # Keep task PENDING so it re-executes cleanly on resume
-                continue
-
-            # Check if carrier returned a 429 rate limit
-            if "429" in err_str or "too many requests" in err_str.lower():
-                bucket.record_429(backoff_sec=45.0)
-
-            # Record final task result in database
-            updated_task = record_task_result(
-                task_id=task_id,
-                status=result.status.value,
-                approval_status=result.approval_status.value,
-                provider_ref_id=result.provider_ref_id,
-                error=result.error,
-                approval_reason=result.approval_reason,
-            )
-
-            # Broadcast row progress to SSE clients
-            if updated_task:
-                self.broadcast_event(job_id, "task_update", updated_task)
-
-        # Final job status check & broadcast
-        final_job = get_job(job_id)
-        if final_job:
-            self.broadcast_event(job_id, "job_status", final_job)
+        """Claim every row before dispatch; an interrupted POST is never replayed."""
+        clean_tenant = str(tenant_id or "").lower().strip()
+        channel = str(channel or "").lower().strip()
+        job = get_job(job_id)
+        if not job or job["tenant_id"] != clean_tenant or job["channel"] != channel:
+            raise ValueError("Queue job does not belong to the selected tenant/channel")
+        if job["status"] in JOB_TERMINAL_STATUSES:
+            self.broadcast_event(job_id, "job_status", job)
+            return
+        try:
+            if channel == "rcs":
+                bucket = self._buckets.setdefault(f"rcs:{clean_tenant}", WabaTokenBucket(f"rcs:{clean_tenant}"))
+            else:
+                bucket = self.get_bucket_for_tenant(clean_tenant)
+            if job["status"] == "QUEUED":
+                update_job_status(job_id, "RUNNING")
+            for task_row in get_job_tasks(job_id):
+                if task_row["status"] != "PENDING":
+                    continue
+                observed_pause = False
+                while True:
+                    job = get_job(job_id)
+                    if not job or job["status"] in JOB_TERMINAL_STATUSES:
+                        return
+                    if job["status"] == "PAUSED_FOR_AUTH" or (self.is_auth_tripped(clean_tenant) and not observed_pause):
+                        observed_pause = True
+                        if job["status"] != "PAUSED_FOR_AUTH":
+                            update_job_status(job_id, "PAUSED_FOR_AUTH", "Tenant credentials require refresh before dispatch.")
+                        event = self._resume_events.setdefault(clean_tenant, asyncio.Event())
+                        try:
+                            await asyncio.wait_for(event.wait(), timeout=1.0)
+                        except TimeoutError:
+                            pass
+                        continue
+                    self._auth_circuits[clean_tenant] = False
+                    await bucket.acquire()
+                    claimed = claim_task(task_row["id"], clean_tenant, channel)
+                    if claimed is None:
+                        if (get_job(job_id) or {}).get("status") == "PAUSED_FOR_AUTH":
+                            continue
+                        break
+                    cancelled = False
+                    try:
+                        payload = json.loads(claimed["payload_json"])
+                        validate_task_scope(claimed, payload, clean_tenant, channel)
+                        execution = asyncio.create_task(self._execute_task_submission(claimed, payload, clean_tenant, channel))
+                        while True:
+                            try:
+                                result = await asyncio.shield(execution)
+                                break
+                            except asyncio.CancelledError:
+                                # Repeated caller cancellation must not cancel the provider thread.
+                                cancelled = True
+                                if execution.cancelled():
+                                    raise RuntimeError("Submission operation cancelled; provider outcome unknown.") from None
+                        if str(result.client or "").lower().strip() != clean_tenant or result.channel != channel:
+                            raise ValueError("Provider result does not belong to the claimed tenant/channel")
+                    except Exception as exc:
+                        result = SubmissionResult(
+                            source_ref=claimed["source_ref"], template_name=claimed["template_name"],
+                            status=SubmissionStatus.FAILED, approval_status=ApprovalStatus.UNKNOWN,
+                            error=f"Submission interrupted; provider outcome may be unknown: {exc}",
+                            client=clean_tenant, channel=channel,
+                        )
+                    from rcs_runner import is_definitive_auth_refusal
+                    if is_definitive_auth_refusal(result) and not cancelled:
+                        self.trip_auth_circuit(clean_tenant, job_id, str(result.error))
+                        release_task_for_auth(claimed["id"])
+                        continue
+                    if "429" in str(result.error or ""):
+                        bucket.record_429(backoff_sec=45.0)
+                    result_payload = asdict(result)
+                    result_payload.update(source_ref=claimed["source_ref"], template_name=claimed["template_name"])
+                    updated = record_task_result(
+                        claimed["id"], str(result.status), str(result.approval_status or "unknown"),
+                        provider_ref_id=result.provider_ref_id, error=result.error,
+                        approval_reason=result.approval_reason, result_payload=result_payload,
+                        retry_count=getattr(result, "retry_count", 0),
+                    )
+                    if updated:
+                        self.broadcast_event(job_id, "task_update", updated)
+                    if cancelled:
+                        raise asyncio.CancelledError
+                    break
+        except (Exception, asyncio.CancelledError) as exc:
+            fail_unfinished_job(job_id, str(exc) or "Submission worker cancelled before dispatch.")
+            raise
+        finally:
+            final_job = get_job(job_id)
+            if final_job:
+                self.broadcast_event(job_id, "job_status", final_job)
 
     async def _execute_task_submission(
         self,
@@ -310,38 +368,19 @@ class QueueManager:
         payload_dict: dict[str, Any],
         clean_tenant: str,
         channel: str,
-    ) -> SubmissionResult:
+    ) -> Any:
         """Run single template submission in threadpool to avoid blocking event loop."""
         if channel == "rcs":
-            # RCS template submission
             from rcs_client import submit_rcs_template
-            from rcs_models import RcsSubmissionStatus, RcsTemplateSubmission
+            from rcs_runner import rcs_submission_from_payload
 
-            rcs_sub = RcsTemplateSubmission(
-                client=clean_tenant,
-                template_name=task_row["template_name"],
-                template_type=payload_dict.get("template_type", "RICH_CARD_STANDALONE"),
-                source_ref=task_row["source_ref"] or task_row["template_name"],
-                content_message=payload_dict.get("content_message", {}),
-            )
+            rcs_sub = rcs_submission_from_payload(payload_dict)
             rcs_res = await asyncio.to_thread(submit_rcs_template, rcs_sub, client=clean_tenant)
-            status_map = {
-                RcsSubmissionStatus.SUBMITTED: SubmissionStatus.SUBMITTED,
-                RcsSubmissionStatus.DUPLICATE: SubmissionStatus.DUPLICATE,
-                RcsSubmissionStatus.FAILED: SubmissionStatus.FAILED,
-            }
-            return SubmissionResult(
-                source_ref=rcs_res.source_ref,
-                template_name=rcs_res.template_name,
-                status=status_map.get(rcs_res.status, SubmissionStatus.FAILED),
-                provider_ref_id=rcs_res.template_id,
-                error=rcs_res.error,
-                approval_status=ApprovalStatus.APPROVED
-                if rcs_res.status == RcsSubmissionStatus.SUBMITTED
-                else ApprovalStatus.UNKNOWN,
-                client=clean_tenant,
-                channel="rcs",
-            )
+            rcs_res.source_ref = task_row["source_ref"]
+            rcs_res.template_name = task_row["template_name"]
+            rcs_res.submitted_by = payload_dict.get("submitted_by") or rcs_res.submitted_by
+            rcs_res.source_file = payload_dict.get("source_file") or rcs_res.source_file
+            return rcs_res
 
         # WhatsApp template submission
         # Build TemplateSubmission object

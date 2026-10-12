@@ -14,6 +14,7 @@ from pathlib import Path
 
 from db import get_db as _get_db
 from db import init_database
+from db_queue import init_queue_db
 
 logger = logging.getLogger(__name__)
 
@@ -22,21 +23,8 @@ ACTIVITY_LOG_PATH = "activity_log.jsonl"
 
 
 def init_store() -> None:
-    """Initialize database tables, indexes, and migrate existing JSONL logs."""
+    """Ensure activity tables exist without repeating identity/queue migrations."""
     init_database()
-    try:
-        from auth import init_auth_db
-
-        init_auth_db()
-    except Exception as e:
-        logger.debug("Auth DB init check: %s", e)
-    try:
-        from db_queue import init_queue_db
-
-        init_queue_db()
-    except Exception as e:
-        logger.debug("Queue DB init check: %s", e)
-    return
 
 
 def register_or_update_user(name: str, role: str = "Operator") -> dict:
@@ -296,5 +284,7 @@ def get_activity_summary(log_path: str = ACTIVITY_LOG_PATH) -> dict:
         }
 
 
-# Initialize on import
+# Legacy queue migration belongs to startup, not every activity read/write.
 init_store()
+
+init_queue_db()

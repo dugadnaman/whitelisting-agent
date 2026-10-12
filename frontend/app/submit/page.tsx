@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTabState } from '@/lib/tab-state';
-import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates } from '@/lib/api';
+import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates, streamJobEvents } from '@/lib/api';
 import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
 import { useApp, getRcsDetails } from '@/lib/context';
 import { formatChannel, formatError } from '@/lib/format';
@@ -27,6 +27,27 @@ function StatusBadge({ status }: { status: string }) {
       {label}
     </span>
   );
+}
+
+function mergeJobResults(results: Template[], tasks: JobTask[]): Template[] {
+  const byId = new Map<string, JobTask>();
+  const bySource = new Map<string, JobTask | null>();
+  for (const task of tasks) {
+    byId.set(task.id, task);
+    const key = `${task.source_ref ?? ''}\0${task.template_name.toLowerCase()}`;
+    bySource.set(key, bySource.has(key) ? null : task);
+  }
+  return results.map((result) => {
+    const task = result.task_id ? byId.get(result.task_id)
+      : bySource.get(`${result.source_ref ?? ''}\0${result.template_name.toLowerCase()}`);
+    if (!task) return result;
+    return {
+      ...result, status: task.status.toLowerCase() as Template['status'],
+      approval_status: task.approval_status.toLowerCase() as Template['approval_status'],
+      provider_ref_id: task.provider_ref_id ?? result.provider_ref_id,
+      error: task.error ?? null,
+    };
+  });
 }
 
 
@@ -69,8 +90,9 @@ export default function SubmitPage() {
   const [autoSkipDuplicates, setAutoSkipDuplicates] = useTabState<boolean>('submit_auto_skip_duplicates', true);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const streamControllerRef = useRef<AbortController | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const selectionVersionRef = useRef(0);
 
   // Phase 1 Identification Mode
   const [activeTab, setActiveTab] = useTabState<'SUBMIT' | 'IDENTIFY'>('submit_active_tab', 'SUBMIT');
@@ -154,50 +176,29 @@ export default function SubmitPage() {
   };
   const pollJobFallback = useCallback((jobId: string) => {
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
-    let attempts = 0;
     let inFlight = false;
     const interval = setInterval(async () => {
       if (inFlight) return;
-      attempts++;
-      if (attempts > 60) {
-        clearInterval(interval);
-        pollTimerRef.current = null;
-        setState((prev) => (prev.step === 'submitted' ? { ...prev, isStreaming: false } : prev));
-        return;
-      }
       inFlight = true;
       try {
         const data = await fetchJob(jobId);
+        if (pollTimerRef.current !== interval) return;
         if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.job.status)) {
           clearInterval(interval);
           pollTimerRef.current = null;
           setState((prev) => {
-            if (prev.step !== 'submitted') return prev;
-            const taskMap: Record<string, JobTask> = {};
-            for (const t of data.tasks) {
-              taskMap[t.template_name.toLowerCase()] = t;
-            }
-            const nextResults = prev.results.map((r) => {
-              const t = taskMap[r.template_name.toLowerCase()];
-              if (t) {
-                return {
-                  ...r,
-                  status: (t.status.toLowerCase() as Template['status']),
-                  approval_status: (t.approval_status.toLowerCase() as Template['approval_status']),
-                  provider_ref_id: t.provider_ref_id || r.provider_ref_id,
-                  error: t.error || r.error,
-                };
-              }
-              return r;
-            });
+            if (prev.step !== 'submitted' || prev.jobId !== jobId) return prev;
+            const nextResults = mergeJobResults(prev.results, data.tasks);
             return { ...prev, results: nextResults, isStreaming: false, authPaused: false };
           });
         } else if (data.job.status === 'PAUSED_FOR_AUTH') {
-          setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: true, authPausedMessage: data.job.error_message } : prev));
+          setState((prev) => (prev.step === 'submitted' && prev.jobId === jobId ? { ...prev, authPaused: true, authPausedMessage: data.job.error_message } : prev));
         }
       } catch {
+        if (pollTimerRef.current !== interval) return;
         clearInterval(interval);
         pollTimerRef.current = null;
+        setState((prev) => (prev.step === 'submitted' && prev.jobId === jobId ? { ...prev, isStreaming: false } : prev));
       } finally {
         inFlight = false;
       }
@@ -206,101 +207,91 @@ export default function SubmitPage() {
   }, []);
 
   const setupJobStream = useCallback((jobId: string) => {
-    if (typeof window === 'undefined') return;
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
+    streamControllerRef.current?.abort();
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
-    const es = new EventSource(`/api/jobs/${encodeURIComponent(jobId)}/stream`);
-    eventSourceRef.current = es;
-
-    es.addEventListener('task_update', (e: MessageEvent) => {
+    const controller = new AbortController();
+    streamControllerRef.current = controller;
+    void (async () => {
       try {
-        const task = JSON.parse(e.data);
-        setState((prev) => {
-          if (prev.step !== 'submitted') return prev;
-          const nextResults = prev.results.map((r) => {
-            if (
-              (r.template_name && task.template_name && r.template_name.toLowerCase() === task.template_name.toLowerCase()) ||
-              (r.source_ref && task.source_ref && r.source_ref === task.source_ref)
-            ) {
-              return {
-                ...r,
-                status: ((task.status || r.status).toLowerCase() as Template['status']),
-                approval_status: ((task.approval_status || r.approval_status).toLowerCase() as Template['approval_status']),
-                provider_ref_id: task.provider_ref_id || r.provider_ref_id,
-                error: task.error || r.error,
-              };
+        for await (const message of streamJobEvents(jobId, controller.signal)) {
+          const data = JSON.parse(message.data);
+          if (message.event === 'task_update') {
+            setState((prev) => {
+              if (prev.step !== 'submitted' || prev.jobId !== jobId) return prev;
+              const nextResults = prev.results.map((r) => {
+                const matches = r.task_id ? r.task_id === data.id
+                  : r.template_name?.toLowerCase() === data.template_name?.toLowerCase() && r.source_ref === data.source_ref;
+                return matches ? {
+                  ...r,
+                  status: ((data.status || r.status).toLowerCase() as Template['status']),
+                  approval_status: ((data.approval_status || r.approval_status).toLowerCase() as Template['approval_status']),
+                  provider_ref_id: data.provider_ref_id ?? r.provider_ref_id,
+                  error: data.error ?? null,
+                } : r;
+              });
+              return { ...prev, results: nextResults };
+            });
+          } else if (message.event === 'auth_paused') {
+            setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
+              ? { ...prev, authPaused: true, authPausedMessage: data.message } : prev);
+          } else if (message.event === 'auth_resumed') {
+            setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
+              ? { ...prev, authPaused: false, authPausedMessage: undefined } : prev);
+          } else if (message.event === 'job_status') {
+            if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.status)) {
+              const snapshot = await fetchJob(jobId);
+              if (controller.signal.aborted) return;
+              setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
+                ? { ...prev, results: mergeJobResults(prev.results, snapshot.tasks), isStreaming: false, authPaused: false } : prev);
+              return;
             }
-            return r;
-          });
-          return { ...prev, results: nextResults };
-        });
-      } catch (err) {
-        console.debug('Task update parse notice:', err);
-      }
-    });
-
-    es.addEventListener('auth_paused', (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data);
-        setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: true, authPausedMessage: data.message } : prev));
-      } catch (err) {
-        console.debug('Auth pause parse notice:', err);
-      }
-    });
-
-    es.addEventListener('auth_resumed', () => {
-      setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: false, authPausedMessage: undefined } : prev));
-    });
-
-    es.addEventListener('job_status', (e: MessageEvent) => {
-      try {
-        const job = JSON.parse(e.data);
-        if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(job.status)) {
-          es.close();
-          eventSourceRef.current = null;
-          setState((prev) => (prev.step === 'submitted' ? { ...prev, isStreaming: false, authPaused: false } : prev));
-        } else if (job.status === 'PAUSED_FOR_AUTH') {
-          setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: true, authPausedMessage: job.error_message } : prev));
+            if (data.status === 'PAUSED_FOR_AUTH') {
+              setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
+                ? { ...prev, authPaused: true, authPausedMessage: data.error_message } : prev);
+            }
+          }
         }
+        // An EOF before a terminal status is a lost stream, not job completion.
+        if (!controller.signal.aborted) pollJobFallback(jobId);
       } catch (err) {
-        console.debug('Job status parse notice:', err);
+        if (!controller.signal.aborted) {
+          console.debug('Job stream unavailable; using authenticated polling:', err);
+          pollJobFallback(jobId);
+        }
+      } finally {
+        if (streamControllerRef.current === controller) streamControllerRef.current = null;
       }
-    });
-
-    es.onerror = () => {
-      es.close();
-      eventSourceRef.current = null;
-      pollJobFallback(jobId);
-    };
+    })();
   }, [pollJobFallback]);
 
   useEffect(() => {
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
     pollTimerRef.current = null;
     return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
+      selectionVersionRef.current++;
+      streamControllerRef.current?.abort();
+      clearInterval(pollTimerRef.current as NodeJS.Timeout);
     };
   }, []);
   useEffect(() => {
+    selectionVersionRef.current++;
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
     pollTimerRef.current = null;
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
+    streamControllerRef.current?.abort();
+    streamControllerRef.current = null;
     setState({ step: 'idle' });
     setFile(null);
   }, [account, channel]);
 
   const handleFile = useCallback(
     async (selected: File) => {
+      const version = ++selectionVersionRef.current;
+      streamControllerRef.current?.abort();
+      clearInterval(pollTimerRef.current as NodeJS.Timeout);
+      pollTimerRef.current = null;
       if (!isAcceptedFile(selected)) {
         setState({ step: 'error', message: 'Please upload a .csv, .xlsx, or .xls file.', previews: null });
         return;
@@ -309,8 +300,10 @@ export default function SubmitPage() {
       setState({ step: 'previewing' });
       try {
         const previews = await previewFile(selected, account, channel);
+        if (version !== selectionVersionRef.current) return;
         setState({ step: 'previewed', previews });
       } catch (err) {
+        if (version !== selectionVersionRef.current) return;
         setState({
           step: 'error',
           message: err instanceof Error ? err.message : 'Failed to parse template file.',
@@ -353,6 +346,9 @@ export default function SubmitPage() {
   );
 
   const handleClear = useCallback(() => {
+    selectionVersionRef.current++;
+    streamControllerRef.current?.abort();
+    clearInterval(pollTimerRef.current as NodeJS.Timeout);
     setFile(null);
     setState({ step: 'idle' });
     if (inputRef.current) inputRef.current.value = '';
@@ -369,13 +365,15 @@ export default function SubmitPage() {
       return;
     }
     setShowBlockedModal(false);
+    const version = selectionVersionRef.current;
     setState({ step: 'submitting' });
     try {
       const res = await submitFile(
         file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates,
         channel !== 'rcs', channel === 'rcs' ? activeRcs.botId : undefined
       );
-      const isComplete = res.status === 'COMPLETED' || !res.job_id;
+      if (version !== selectionVersionRef.current) return;
+      const isComplete = !res.job_id || ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(res.status || '');
       setState({
         step: 'submitted',
         submitted: res.submitted,
@@ -387,6 +385,7 @@ export default function SubmitPage() {
         setupJobStream(res.job_id);
       }
     } catch (err) {
+      if (version !== selectionVersionRef.current) return;
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
       setState({
         step: 'error',

@@ -11,6 +11,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
@@ -185,19 +186,21 @@ class DBConnection:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        if exc_type is not None:
-            self.rollback()
-        else:
-            self.commit()
-        self.close()
+        try:
+            if exc_type is not None:
+                self.rollback()
+            else:
+                self.commit()
+        finally:
+            self.close()
 
 
-def get_db(timeout_sec: float = 15.0, *, strict_backend: bool = False) -> DBConnection:
+def get_db(timeout_sec: float = 15.0, *, strict_backend: bool = True) -> DBConnection:
     """
     Return an active database connection.
     Connects to PostgreSQL if DATABASE_URL is configured, otherwise SQLite.
     """
-    # Authentication callers must not switch identity stores on database outage.
+    # Queue and identity stores must not silently change on a configured database outage.
     pg_url = get_database_url()
     if pg_url:
         try:
@@ -295,8 +298,8 @@ SQLITE_SCHEMA_DDL = [
         category TEXT,
         language TEXT,
         payload_json TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('PENDING', 'SUBMITTED', 'DUPLICATE', 'FAILED')),
-        approval_status TEXT NOT NULL CHECK(approval_status IN ('pending', 'approved', 'rejected', 'unknown')),
+        status TEXT NOT NULL CHECK(status IN ('PENDING', 'PROCESSING', 'SUBMITTED', 'DUPLICATE', 'FAILED', 'BLOCKED_ASPECT_RATIO')),
+        approval_status TEXT NOT NULL CHECK(approval_status IN ('pending', 'approved', 'rejected', 'unknown', 'blocked_aspect_ratio')),
         provider_ref_id TEXT,
         error TEXT,
         approval_reason TEXT,
@@ -664,24 +667,101 @@ POSTGRES_SCHEMA_DDL = [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_moe_batch_rows_claim ON moengage_draft_batch_rows(account, workspace_id, source_ref, row_id) WHERE status NOT IN ('preview_ready', 'blocked');",
 ]
 
+_INIT_LOCK = threading.Lock()
+_INITIALIZED_TARGETS: set[tuple[Any, ...]] = set()
 
-def init_database(conn: DBConnection | None = None) -> None:
-    """Initialize tables and indexes on the selected or supplied database connection."""
+
+def _target_key(conn: DBConnection) -> tuple[Any, ...] | None:
+    if conn.is_postgres:
+        identity = conn.execute("SELECT current_database(), current_schema()").fetchone()
+        params = conn.raw_connection.get_dsn_parameters()
+        return ("postgres", params.get("host"), params.get("port"), *identity)
+    row = conn.execute("PRAGMA database_list").fetchone()
+    filename = row[2] if row else ""
+    if not filename:
+        # Separate in-memory connections have separate schemas; never cache by path.
+        return None
+    stat = Path(filename).stat()
+    version = conn.execute("PRAGMA schema_version").fetchone()[0]
+    return ("sqlite", filename, stat.st_dev, stat.st_ino, version)
+
+
+def _upgrade_sqlite_task_states(conn: DBConnection) -> None:
+    """Preserve existing rows and custom schema while extending legacy CHECKs."""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'job_tasks'").fetchone()
+    sql = row[0] if row else ""
+    replacements = {
+        "status": "'PENDING', 'PROCESSING', 'SUBMITTED', 'DUPLICATE', 'FAILED', 'BLOCKED_ASPECT_RATIO'",
+        "approval_status": "'pending', 'approved', 'rejected', 'unknown', 'blocked_aspect_ratio'",
+    }
+    upgraded = sql
+    for column, values in replacements.items():
+        pattern = rf"CHECK\s*\(\s*{column}\s+IN\s*\(([^)]*)\)\s*\)"
+        match = re.search(pattern, upgraded, re.IGNORECASE)
+        required = ("'PROCESSING'", "'BLOCKED_ASPECT_RATIO'") if column == "status" else ("'blocked_aspect_ratio'",)
+        if match and any(value not in match.group(1) for value in required):
+            # Keep any custom states supported by an existing installation.
+            existing = [value.strip() for value in match.group(1).split(",")]
+            combined = existing + [value.strip() for value in values.split(",") if value.strip() not in existing]
+            upgraded = re.sub(pattern, f"CHECK({column} IN ({', '.join(combined)}))", upgraded, flags=re.IGNORECASE)
+    if upgraded == sql:
+        return
+    objects = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE tbl_name = 'job_tasks' AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+    ).fetchall()
+    columns = [row["name"] for row in conn.execute("PRAGMA table_info(job_tasks)").fetchall()]
+    quoted = ", ".join('"' + name.replace('"', '""') + '"' for name in columns)
+    create_sql = re.sub(
+        r'(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:job_tasks|"job_tasks"|`job_tasks`|\[job_tasks\])',
+        r"\1job_tasks_upgrade", upgraded, count=1, flags=re.IGNORECASE,
+    )
+    conn.execute(create_sql)
+    conn.execute(f"INSERT INTO job_tasks_upgrade ({quoted}) SELECT {quoted} FROM job_tasks")
+    conn.execute("DROP TABLE job_tasks")
+    conn.execute("ALTER TABLE job_tasks_upgrade RENAME TO job_tasks")
+    for obj in objects:
+        conn.execute(obj[0])
+
+
+def init_database(conn: DBConnection | None = None, force: bool = False) -> None:
+    """Initialize each actual schema once; coordinate PostgreSQL cold starts."""
     if conn is None:
         with get_db() as owned:
-            init_database(owned)
+            init_database(owned, force=force)
         return
-    ddl_list = POSTGRES_SCHEMA_DDL if conn.is_postgres else SQLITE_SCHEMA_DDL
-    for stmt in ddl_list:
-        clean_stmt = stmt.strip()
-        if clean_stmt:
-            conn.execute(clean_stmt)
-    if conn.is_postgres:
-        conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_tenant_id VARCHAR(100)")
-    elif "requested_tenant_id" not in {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}:
-        conn.execute("ALTER TABLE users ADD COLUMN requested_tenant_id TEXT")
-    conn.commit()
-
+    key = _target_key(conn)
+    if not force and key is not None and key in _INITIALIZED_TARGETS:
+        return
+    with _INIT_LOCK:
+        key = _target_key(conn)
+        if not force and key is not None and key in _INITIALIZED_TARGETS:
+            return
+        if conn.is_postgres:
+            # Every process takes this lock before acquiring any schema DDL lock.
+            conn.execute("SELECT pg_advisory_xact_lock(1262572105, 1)")
+        elif not conn.raw_connection.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        ddl_list = POSTGRES_SCHEMA_DDL if conn.is_postgres else SQLITE_SCHEMA_DDL
+        for stmt in ddl_list:
+            if stmt.strip():
+                conn.execute(stmt.strip())
+        if conn.is_postgres:
+            row = conn.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema = current_schema() AND table_name = 'users' AND column_name = 'requested_tenant_id'"
+            ).fetchone()
+            if not row:
+                conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_tenant_id VARCHAR(100)")
+        else:
+            _upgrade_sqlite_task_states(conn)
+            if "requested_tenant_id" not in {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}:
+                conn.execute("ALTER TABLE users ADD COLUMN requested_tenant_id TEXT")
+        conn.commit()
+        key = _target_key(conn)
+        if key is not None:
+            if len(_INITIALIZED_TARGETS) >= 256:
+                _INITIALIZED_TARGETS.clear()
+            _INITIALIZED_TARGETS.add(key)
 
 # ---------------------------------------------------------------------------
 # Migration Utility (SQLite -> PostgreSQL)

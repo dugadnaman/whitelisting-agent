@@ -174,6 +174,33 @@ test('query acceptance is queued and bound to the submitted identity and inclusi
   assert.equal((await api.startClickCountQuery(request)).query_id, query.query_id);
 });
 
+test('explicit earlier and later report starts are sent once and bound to the accepted range', async () => {
+  for (const start of ['2025-12-01', '2026-01-03']) {
+    const payload = { ...request, start_date: start };
+    const calls = [];
+    const api = clientFor(async (url, init) => {
+      calls.push({ url, init });
+      return json({ ...query, start_date: start });
+    });
+    assert.equal((await api.startClickCountQuery(payload)).start_date, start);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(JSON.parse(calls[0].init.body), payload);
+    assert.equal(calls[0].init.method, 'POST');
+    const mismatch = clientFor(async () => json(query));
+    await assert.rejects(mismatch.startClickCountQuery(payload), isProtocolError(mismatch));
+  }
+});
+
+test('report start validation accepts dates before import and rejects malformed, reversed or future starts', () => {
+  const api = clientFor(async () => { throw new Error('Unexpected request'); });
+  const now = new Date('2026-01-03T00:00:00Z');
+  assert.equal(api.isValidClickCountRange('2025-12-01', request.end_date, workspace.timezone, now), true);
+  for (const start of ['', '2026-1-01', '2026-02-30', '２０２６-０１-０１', '2026-01-01\n', '0000-01-01', '2026-01-04']) {
+    assert.equal(api.isValidClickCountRange(start, request.end_date, workspace.timezone, now), false, start);
+  }
+  assert.equal(api.isValidClickCountRange('2026-01-04', '2026-01-04', workspace.timezone, now), false);
+});
+
 test('status validates ticket, state and exact nonnegative counts including zero', async () => {
   const success = { query_id: query.query_id, status: 'success', user_count: 0, reachable_users: 0 };
   for (const value of [null, { ...success, query_id: 'another.ticket' }, { ...success, status: 'unknown' }, { ...success, status: ['success'] },

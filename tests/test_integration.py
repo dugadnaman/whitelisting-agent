@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sys
+import pytest
 
 # Optionally load .env file if python-dotenv is available
 try:
@@ -24,6 +25,7 @@ from models import ApprovalStatus
 from submission_client import check_status
 
 
+@pytest.mark.live_karix
 def test_check_status():
     """Verify check_status can reach the API and find a known template.
 
@@ -68,6 +70,7 @@ def test_check_status():
     print(f"✓ Status reason: {reason}")
 
 
+@pytest.mark.live_karix
 def test_list_all_templates():
     """
     Verify fetch_template_list can fetch live templates from the WABA.

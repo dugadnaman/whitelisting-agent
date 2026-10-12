@@ -7,6 +7,7 @@ JSONL tracker round-trips, and client submission with mocked network.
 
 import os
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -25,6 +26,21 @@ from rcs_tracker import load_rcs_log, log_rcs_result, update_rcs_result
 
 
 class TestRcsPipeline(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.addCleanup(patch.stopall)
+        patch("rcs_config._load_env_file", return_value=None).start()
+        patch.dict(os.environ, {
+            "TATA_RCS_AUTH_TOKEN": "local-test-token",
+            "TATA_RCS_ESMEADDR": "72434700000000",
+            "TATA_RCS_BOT_ID": "Uv9tdd0KNADbq3pX",
+            "DATABASE_URL": "", "POSTGRES_URL": "", "POSTGRESQL_URL": "",
+        }).start()
+        patch("db.DB_PATH", Path(self.temp.name) / "private.sqlite").start()
+        patch("db.DEFAULT_SQLITE_PATH", Path(self.temp.name) / "private.sqlite").start()
+        patch("db.get_database_url", return_value="").start()
+
     def test_normalize_row_keys(self):
         raw = {
             "Template Name": "A",
@@ -76,11 +92,7 @@ class TestRcsPipeline(unittest.TestCase):
         self.assertEqual(reply.suggestions[0]["suggestionType"], "reply")
 
     def test_tracker_log_and_read(self):
-        tmp_log = "scratch/test_rcs_log.jsonl"
-        Path("scratch").mkdir(parents=True, exist_ok=True)
-        if os.path.exists(tmp_log):
-            os.remove(tmp_log)
-
+        tmp_log = str(Path(self.temp.name) / "test_rcs_log.jsonl")
         res = RcsSubmissionResult(
             source_ref="Test_Ref",
             template_name="Test_Tpl",
@@ -108,7 +120,7 @@ class TestRcsPipeline(unittest.TestCase):
         mock_resp = MagicMock()
         mock_resp.ok = True
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"status": "success", "message": "Template Added"}
+        mock_resp.json.return_value = {"status": "success", "message": "Template Added", "templateId": "provider-123"}
         mock_post.return_value = mock_resp
 
         sub = RcsTemplateSubmission(
@@ -122,7 +134,7 @@ class TestRcsPipeline(unittest.TestCase):
         result = submit_rcs_template(sub)
         self.assertEqual(result.status, RcsSubmissionStatus.SUBMITTED)
         self.assertEqual(result.template_name, "Test_Tpl")
-        self.assertIsNotNone(result.template_id)
+        self.assertEqual(result.template_id, "provider-123")
 
 
 if __name__ == "__main__":

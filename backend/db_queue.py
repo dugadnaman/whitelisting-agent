@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,11 +19,6 @@ from db import get_db, init_database
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(
-    os.environ.get(
-        "KARIX_DB_PATH", "data/karix_store.db" if (Path("data") / "karix_store.db").exists() else "karix_store.db"
-    )
-)
 SUBMISSION_LOG_PATH = Path("submission_log.jsonl")
 RCS_SUBMISSION_LOG_PATH = Path("rcs_submission_log.jsonl")
 
@@ -36,6 +30,32 @@ APPROVAL_PRECEDENCE: dict[str, int] = {
     "approved": 2,
     "rejected": 2,
 }
+
+TASK_TERMINAL_STATUSES = frozenset({"SUBMITTED", "DUPLICATE", "FAILED", "BLOCKED_ASPECT_RATIO"})
+JOB_TERMINAL_STATUSES = frozenset({"COMPLETED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"})
+
+
+def _lock_job(conn: Any, job_id: str) -> None:
+    # A write first serializes SQLite writers and takes the PostgreSQL row lock.
+    conn.execute("UPDATE ingestion_jobs SET updated_at = updated_at WHERE id = ?", (job_id,))
+
+
+def _settle_job(conn: Any, job_id: str, now: str) -> None:
+    conn.execute(
+        """
+        UPDATE ingestion_jobs SET status =
+            CASE
+                WHEN status = 'CANCELLED' THEN status
+                WHEN submitted_count + duplicate_count + failed_count < total_count
+                    THEN CASE WHEN status = 'PAUSED_FOR_AUTH' THEN status ELSE 'RUNNING' END
+                WHEN failed_count = 0 THEN 'COMPLETED'
+                WHEN submitted_count + duplicate_count > 0 THEN 'PARTIALLY_COMPLETED'
+                ELSE 'FAILED'
+            END, updated_at = ?
+        WHERE id = ?
+        """,
+        (now, job_id),
+    )
 
 
 def init_queue_db() -> None:
@@ -58,6 +78,10 @@ def create_job_with_tasks(
     Atomically creates an ingestion_job and enqueues all template tasks in one transaction.
     Returns the created job dict.
     """
+    tenant_id = str(tenant_id or "").lower().strip()
+    channel = str(channel or "").lower().strip()
+    if not tenant_id or channel not in ("whatsapp", "rcs"):
+        raise ValueError("A tenant and an explicit whatsapp/rcs channel are required.")
     now = datetime.now(UTC).isoformat()
     jid = job_id or f"job_{uuid.uuid4().hex[:12]}"
     total_count = len(tasks_data)
@@ -80,12 +104,14 @@ def create_job_with_tasks(
             cat = t.get("category")
             lang = t.get("language")
             payload = json.dumps(t, default=str)
-            initial_status = t.get("status", "PENDING").upper()
-            if initial_status not in ("PENDING", "SUBMITTED", "DUPLICATE", "FAILED"):
+            initial_status = str(t.get("status") or "PENDING").upper()
+            if initial_status not in TASK_TERMINAL_STATUSES | {"PENDING", "PROCESSING"}:
                 initial_status = "PENDING"
-            approval = (t.get("approval_status") or "pending").lower()
-            if approval not in ("pending", "approved", "rejected", "unknown"):
+            approval = str(t.get("approval_status") or "pending").lower()
+            if approval == "submitted":
                 approval = "pending"
+            if approval not in (*APPROVAL_PRECEDENCE, "blocked_aspect_ratio"):
+                approval = "unknown"
             pref = str(t["provider_ref_id"]) if t.get("provider_ref_id") is not None else None
             err = str(t["error"]) if t.get("error") is not None else None
 
@@ -120,6 +146,15 @@ def create_job_with_tasks(
             """,
             task_rows,
         )
+        submitted = sum(row[9] == "SUBMITTED" for row in task_rows)
+        duplicate = sum(row[9] == "DUPLICATE" for row in task_rows)
+        failed = sum(row[9] in ("FAILED", "BLOCKED_ASPECT_RATIO") for row in task_rows)
+        conn.execute(
+            "UPDATE ingestion_jobs SET submitted_count = ?, duplicate_count = ?, failed_count = ? WHERE id = ?",
+            (submitted, duplicate, failed, jid),
+        )
+        if total_count == submitted + duplicate + failed or any(row[9] == "PROCESSING" for row in task_rows):
+            _settle_job(conn, jid, now)
 
     return get_job(jid) or {"id": jid, "status": "QUEUED", "total_count": total_count}
 
@@ -149,17 +184,102 @@ def get_job_task(task_id: str) -> dict[str, Any] | None:
 
 
 def update_job_status(job_id: str, status: str, error_message: str | None = None) -> None:
-    """Update high-level job lifecycle status (e.g. RUNNING, PAUSED_FOR_AUTH)."""
+    """Update a live job without reopening an already settled job."""
     now = datetime.now(UTC).isoformat()
     with get_db() as conn:
         conn.execute(
             """
             UPDATE ingestion_jobs
-            SET status = ?, error_message = coalesce(?, error_message), updated_at = ?
-            WHERE id = ?
+            SET status = ?, error_message = ?, updated_at = ?
+            WHERE id = ? AND status NOT IN ('COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED', 'CANCELLED')
             """,
             (status, error_message, now, job_id),
         )
+
+
+def validate_task_scope(task: dict[str, Any], payload: dict[str, Any], tenant_id: str, channel: str) -> None:
+    """Reject persisted or payload ownership mismatches before provider dispatch."""
+    if not isinstance(payload, dict):
+        raise ValueError("Task payload must be a JSON object.")
+    if task.get("tenant_id") != tenant_id or task.get("channel") != channel:
+        raise ValueError("Task does not belong to the selected tenant/channel.")
+    for field in ("client", "tenant_id", "account"):
+        if field in payload and str(payload[field] or "").lower().strip() != tenant_id:
+            raise ValueError(f"Task payload {field} does not match its owning tenant.")
+    if "channel" in payload and str(payload["channel"] or "").lower().strip() != channel:
+        raise ValueError("Task payload channel does not match its owning channel.")
+    for field in ("source_ref", "template_name"):
+        if field in payload and str(payload[field] or "") != str(task.get(field) or ""):
+            raise ValueError(f"Task payload {field} does not match its owning row.")
+
+
+def claim_task(task_id: str, tenant_id: str, channel: str) -> dict[str, Any] | None:
+    """Atomically reserve one pending task before any external side effect."""
+    now = datetime.now(UTC).isoformat()
+    tenant_id = str(tenant_id or "").lower().strip()
+    channel = str(channel or "").lower().strip()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE ingestion_jobs SET updated_at = updated_at WHERE id = (SELECT job_id FROM job_tasks WHERE id = ?)",
+            (task_id,),
+        )
+        cur = conn.execute(
+            """
+            UPDATE job_tasks SET status = 'PROCESSING', updated_at = ?
+            WHERE id = ? AND tenant_id = ? AND channel = ? AND status = 'PENDING'
+                AND job_id IN (
+                    SELECT id FROM ingestion_jobs
+                    WHERE tenant_id = ? AND channel = ?
+                        AND status IN ('QUEUED', 'RUNNING')
+                )
+            """,
+            (now, task_id, tenant_id, channel, tenant_id, channel),
+        )
+        if cur.rowcount != 1:
+            return None
+        conn.execute(
+            """UPDATE ingestion_jobs SET status = 'RUNNING', updated_at = ?
+                WHERE id = (SELECT job_id FROM job_tasks WHERE id = ?) AND status = 'QUEUED'""",
+            (now, task_id),
+        )
+        row = conn.execute("SELECT * FROM job_tasks WHERE id = ?", (task_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def release_task_for_auth(task_id: str) -> None:
+    """Only a definitive authentication refusal may release a claim for retry."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE ingestion_jobs SET updated_at = updated_at WHERE id = (SELECT job_id FROM job_tasks WHERE id = ?)",
+            (task_id,),
+        )
+        conn.execute(
+            "UPDATE job_tasks SET status = 'PENDING', updated_at = ? WHERE id = ? AND status = 'PROCESSING'",
+            (datetime.now(UTC).isoformat(), task_id),
+        )
+
+
+def fail_unfinished_job(job_id: str, error: str) -> None:
+    """Fail unclaimed rows after an explicit worker interruption, never another worker's active POST."""
+    now = datetime.now(UTC).isoformat()
+    with get_db() as conn:
+        _lock_job(conn, job_id)
+        cur = conn.execute(
+            """
+            UPDATE job_tasks SET status = 'FAILED', approval_status = 'unknown', error = ?, updated_at = ?
+            WHERE job_id = ? AND status = 'PENDING'
+                AND NOT EXISTS (SELECT 1 FROM job_tasks active
+                                WHERE active.job_id = ? AND active.status = 'PROCESSING')
+            """,
+            (str(error), now, job_id, job_id),
+        )
+        if cur.rowcount:
+            conn.execute(
+                "UPDATE ingestion_jobs SET failed_count = failed_count + ?, error_message = ? WHERE id = ?",
+                (cur.rowcount, str(error), job_id),
+            )
+        # Never expire claims by age or settle an overlapping worker's provider call.
+        _settle_job(conn, job_id, now)
 
 
 def _clean_sql_str(val: Any) -> str | None:
@@ -177,80 +297,77 @@ def record_task_result(
     provider_ref_id: str | None = None,
     error: str | None = None,
     approval_reason: str | None = None,
+    result_payload: dict[str, Any] | None = None,
+    retry_count: int | None = None,
 ) -> dict[str, Any] | None:
-    """
-    Record task outcome, atomically incrementing parent job counters and resolving job settlement.
-    """
+    """Persist one outcome and its counter delta in a serialized transaction."""
     now = datetime.now(UTC).isoformat()
     norm_status = str(status or "FAILED").upper()
-    if norm_status not in ("PENDING", "SUBMITTED", "DUPLICATE", "FAILED"):
+    if norm_status not in TASK_TERMINAL_STATUSES | {"PENDING"}:
         norm_status = "FAILED"
-
-    norm_approval = str(approval_status or "pending").lower()
-    if norm_approval not in ("pending", "approved", "rejected", "unknown"):
+    norm_approval = str(approval_status or "unknown").lower()
+    if norm_approval == "submitted":
+        norm_approval = "pending"
+    if norm_approval not in (*APPROVAL_PRECEDENCE, "blocked_aspect_ratio"):
         norm_approval = "unknown"
 
-    safe_error = _clean_sql_str(error)
-    safe_provider_ref = _clean_sql_str(provider_ref_id)
-    safe_reason = _clean_sql_str(approval_reason)
-
     with get_db() as conn:
+        # Lock the parent before reading task state: all result writers share it.
+        conn.execute(
+            "UPDATE ingestion_jobs SET updated_at = updated_at WHERE id = (SELECT job_id FROM job_tasks WHERE id = ?)",
+            (task_id,),
+        )
         task = conn.execute("SELECT * FROM job_tasks WHERE id = ?", (task_id,)).fetchone()
         if not task:
             return None
-
-        job_id = task["job_id"]
+        old_status = task["status"]
+        if old_status in TASK_TERMINAL_STATUSES:
+            return dict(task)
+        old_approval = str(task["approval_status"] or "unknown").lower()
+        if old_approval in ("approved", "rejected"):
+            norm_approval = old_approval
+            approval_reason = task["approval_reason"]
+        payload_json = task["payload_json"]
+        if result_payload is not None:
+            try:
+                payload = json.loads(payload_json)
+            except (TypeError, ValueError):
+                if norm_status != "FAILED":
+                    raise
+                payload = {}
+            if not isinstance(payload, dict):
+                if norm_status != "FAILED":
+                    raise ValueError("Task payload must be a JSON object.")
+                payload = {}
+            payload.update(result_payload)
+            payload.update(
+                client=task["tenant_id"], channel=task["channel"],
+                source_ref=task["source_ref"], template_name=task["template_name"],
+            )
+            payload_json = json.dumps(payload, default=str)
         conn.execute(
             """
             UPDATE job_tasks
             SET status = ?, approval_status = ?, provider_ref_id = coalesce(?, provider_ref_id),
-                error = ?, approval_reason = ?, updated_at = ?
+                error = ?, approval_reason = ?, payload_json = ?, retry_count = coalesce(?, retry_count), updated_at = ?
             WHERE id = ?
             """,
-            (norm_status, norm_approval, safe_provider_ref, safe_error, safe_reason, now, task_id),
+            (norm_status, norm_approval, _clean_sql_str(provider_ref_id), _clean_sql_str(error),
+             _clean_sql_str(approval_reason), payload_json, retry_count, now, task_id),
         )
-
-        # Recalculate job summary counts atomically
-        stats = conn.execute(
-            """
-            SELECT
-                count(*) as total,
-                sum(case when status = 'SUBMITTED' then 1 else 0 end) as submitted,
-                sum(case when status = 'DUPLICATE' then 1 else 0 end) as duplicate,
-                sum(case when status = 'FAILED' then 1 else 0 end) as failed,
-                sum(case when status = 'PENDING' then 1 else 0 end) as pending
-            FROM job_tasks WHERE job_id = ?
-            """,
-            (job_id,),
-        ).fetchone()
-
-        _ = stats["total"] or 0
-        submitted = stats["submitted"] or 0
-        duplicate = stats["duplicate"] or 0
-        failed = stats["failed"] or 0
-        pending = stats["pending"] or 0
-
-        # Determine job settlement status
-        job_status = "RUNNING"
-        if pending == 0:
-            if failed == 0:
-                job_status = "COMPLETED"
-            elif submitted + duplicate > 0:
-                job_status = "PARTIALLY_COMPLETED"
-            else:
-                job_status = "FAILED"
-
         conn.execute(
             """
             UPDATE ingestion_jobs
-            SET submitted_count = ?, duplicate_count = ?, failed_count = ?,
-                status = case when status = 'PAUSED_FOR_AUTH' and ? != 'COMPLETED' then status else ? end,
-                updated_at = ?
+            SET submitted_count = submitted_count + ?, duplicate_count = duplicate_count + ?,
+                failed_count = failed_count + ?
             WHERE id = ?
             """,
-            (submitted, duplicate, failed, job_status, job_status, now, job_id),
+            (int(norm_status == "SUBMITTED") - int(old_status == "SUBMITTED"),
+             int(norm_status == "DUPLICATE") - int(old_status == "DUPLICATE"),
+             int(norm_status in ("FAILED", "BLOCKED_ASPECT_RATIO")) - int(old_status in ("FAILED", "BLOCKED_ASPECT_RATIO")),
+             task["job_id"]),
         )
-
+        _settle_job(conn, task["job_id"], now)
         updated_task = conn.execute("SELECT * FROM job_tasks WHERE id = ?", (task_id,)).fetchone()
         return dict(updated_task) if updated_task else None
 
@@ -261,6 +378,7 @@ def update_template_approval_monotonic(
     new_approval_status: str,
     provider_ref_id: str | None = None,
     approval_reason: str | None = None,
+    channel: str = "whatsapp",
 ) -> int:
     """
     Monotonic approval state machine:
@@ -276,45 +394,28 @@ def update_template_approval_monotonic(
     if norm_new not in APPROVAL_PRECEDENCE:
         return 0
 
-    new_rank = APPROVAL_PRECEDENCE[norm_new]
     updated_count = 0
 
+    channel = str(channel).lower().strip()
+    # This name-based updater belongs to WhatsApp callbacks. RCS uses exact task IDs.
+    if channel != "whatsapp":
+        return 0
     with get_db() as conn:
-        rows = conn.execute(
+        # Guard in the UPDATE itself, not a stale pre-update snapshot.
+        cur = conn.execute(
             """
-            SELECT id, approval_status, provider_ref_id
-            FROM job_tasks
-            WHERE lower(tenant_id) = ? AND lower(template_name) = ?
+            UPDATE job_tasks
+            SET approval_status = ?, provider_ref_id = coalesce(?, provider_ref_id),
+                approval_reason = coalesce(?, approval_reason), updated_at = ?
+            WHERE tenant_id = ? AND lower(template_name) = ? AND channel = ?
+                AND (approval_status NOT IN ('approved', 'rejected') OR approval_status = ?)
+                AND (approval_status = 'unknown' OR approval_status = ?
+                     OR (approval_status = 'pending' AND ? IN ('pending', 'approved', 'rejected')))
             """,
-            (clean_tenant, clean_name.lower()),
-        ).fetchall()
-
-        for r in rows:
-            curr_status = r["approval_status"].lower()
-            curr_rank = APPROVAL_PRECEDENCE.get(curr_status, 0)
-
-            # Terminal states (APPROVED, REJECTED) are immutable
-            if curr_status in ("approved", "rejected") and norm_new != curr_status:
-                logger.debug(
-                    "Monotonic guard: rejected downgrade for %s from %s to %s",
-                    clean_name,
-                    curr_status,
-                    norm_new,
-                )
-                continue
-
-            # Check rank monotonicity
-            if new_rank >= curr_rank:
-                conn.execute(
-                    """
-                    UPDATE job_tasks
-                    SET approval_status = ?, provider_ref_id = coalesce(?, provider_ref_id),
-                        approval_reason = coalesce(?, approval_reason), updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (norm_new, provider_ref_id, approval_reason, now, r["id"]),
-                )
-                updated_count += 1
+            (norm_new, _clean_sql_str(provider_ref_id), _clean_sql_str(approval_reason), now,
+             clean_tenant, clean_name.lower(), channel, norm_new, norm_new, norm_new),
+        )
+        updated_count = cur.rowcount
 
     return updated_count
 
@@ -348,6 +449,107 @@ def resume_paused_jobs_for_tenant(tenant_id: str) -> int:
             (now, clean_tenant),
         )
         return cur.rowcount
+
+
+def _rehome_legacy_rcs_tasks() -> None:
+    """Repair the old mixed-account container, preserving IDs and provider outcomes."""
+    now = datetime.now(UTC).isoformat()
+    with get_db() as conn:
+        _lock_job(conn, "job_legacy_rcs")
+        legacy = conn.execute(
+            "SELECT * FROM ingestion_jobs WHERE id = 'job_legacy_rcs' AND tenant_id = 'legacy_import' AND channel = 'rcs'"
+        ).fetchone()
+        if not legacy:
+            return
+        rows = conn.execute("SELECT * FROM job_tasks WHERE job_id = 'job_legacy_rcs' ORDER BY id").fetchall()
+        source_by_id = {}
+        source_available = RCS_SUBMISSION_LOG_PATH.exists()
+        if source_available:
+            with RCS_SUBMISSION_LOG_PATH.open(encoding="utf-8") as stream:
+                index = 0
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    try:
+                        source_by_id[f"task_job_legacy_rcs_{index:04d}"] = json.loads(line)
+                    except ValueError:
+                        source_by_id[f"task_job_legacy_rcs_{index:04d}"] = None
+                    index += 1
+        groups: dict[str, list[Any]] = {}
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+                stored_tenant = str(payload.get("client") or "").lower().strip()
+                source = source_by_id.get(row["id"])
+                if source_available:
+                    tenant = str(source.get("client") or "").lower().strip() if isinstance(source, dict) else ""
+                    valid = (
+                        tenant and tenant == stored_tenant
+                        and str(source.get("template_name") or "").strip() == row["template_name"]
+                        and str(source.get("source_ref") or source.get("template_name") or "") == row["source_ref"]
+                        and str(source.get("channel") or "rcs").lower().strip() == "rcs"
+                    )
+                else:
+                    tenant = stored_tenant
+                    # The old importer guessed BAJAJ, so that value needs original-source proof.
+                    valid = tenant and tenant != "bajaj"
+                valid = valid and str(payload.get("channel") or "rcs").lower().strip() == "rcs"
+            except (TypeError, ValueError, AttributeError):
+                valid = False
+            if not valid:
+                logger.warning("Quarantining legacy RCS task %s: no explicit owning account/channel.", row["id"])
+                continue
+            restored_payload = {**(source or {}), **payload, "client": tenant, "channel": "rcs"}
+            approval = row["approval_status"]
+            if (
+                source_available and not source.get("approval_status") and approval == "approved"
+                and row["updated_at"] == row["created_at"]
+                and not row["approval_reason"] and not payload.get("approval_reason")
+                and not payload.get("provider_response") and not source.get("provider_response")
+                and not payload.get("updated_at")
+            ):
+                # Only provably untouched rows can carry the importer's invented approval.
+                approval = "unknown"
+                restored_payload["approval_status"] = approval
+            groups.setdefault(tenant, []).append((row, restored_payload, approval))
+        for tenant, tasks in sorted(groups.items()):
+            jid = f"job_legacy_rcs_{tenant}"
+            conn.execute(
+                """INSERT INTO ingestion_jobs (id, tenant_id, channel, filename, total_count,
+                    submitted_count, duplicate_count, failed_count, status, submitted_by, created_at, updated_at)
+                    VALUES (?, ?, 'rcs', ?, 0, 0, 0, 0, 'QUEUED', ?, ?, ?)
+                    ON CONFLICT (id) DO NOTHING""",
+                (jid, tenant, legacy["filename"], legacy["submitted_by"], legacy["created_at"], now),
+            )
+            _lock_job(conn, jid)
+            owner = conn.execute("SELECT tenant_id, channel FROM ingestion_jobs WHERE id = ?", (jid,)).fetchone()
+            if owner["tenant_id"] != tenant or owner["channel"] != "rcs":
+                raise ValueError("Legacy RCS migration job belongs to another account/channel")
+            conn.executemany(
+                "UPDATE job_tasks SET job_id = ?, tenant_id = ?, channel = 'rcs', payload_json = ?, approval_status = ? WHERE id = ? AND job_id = 'job_legacy_rcs'",
+                [(jid, tenant, json.dumps(payload, default=str), approval, row["id"]) for row, payload, approval in tasks],
+            )
+            _recount_job(conn, jid, now)
+        remaining = conn.execute("SELECT count(*) AS c FROM job_tasks WHERE job_id = 'job_legacy_rcs'").fetchone()["c"]
+        if remaining:
+            _recount_job(conn, "job_legacy_rcs", now)
+        else:
+            conn.execute("DELETE FROM ingestion_jobs WHERE id = 'job_legacy_rcs' AND tenant_id = 'legacy_import'")
+
+
+def _recount_job(conn: Any, job_id: str, now: str) -> None:
+    counts = conn.execute(
+        """SELECT count(*) AS total,
+            coalesce(sum(CASE WHEN status = 'SUBMITTED' THEN 1 ELSE 0 END), 0) AS submitted,
+            coalesce(sum(CASE WHEN status = 'DUPLICATE' THEN 1 ELSE 0 END), 0) AS duplicate,
+            coalesce(sum(CASE WHEN status IN ('FAILED', 'BLOCKED_ASPECT_RATIO') THEN 1 ELSE 0 END), 0) AS failed
+            FROM job_tasks WHERE job_id = ?""", (job_id,),
+    ).fetchone()
+    conn.execute(
+        "UPDATE ingestion_jobs SET total_count = ?, submitted_count = ?, duplicate_count = ?, failed_count = ? WHERE id = ?",
+        (counts["total"], counts["submitted"], counts["duplicate"], counts["failed"], job_id),
+    )
+    _settle_job(conn, job_id, now)
 
 
 def migrate_legacy_jsonl_if_needed() -> None:
@@ -398,45 +600,48 @@ def migrate_legacy_jsonl_if_needed() -> None:
             except Exception as exc:
                 logger.warning("WhatsApp legacy JSONL migration warning: %s", exc)
 
-    # 2. RCS JSONL
-    if RCS_SUBMISSION_LOG_PATH.exists():
-        with get_db() as conn:
-            has_rcs = conn.execute("SELECT count(*) as c FROM ingestion_jobs WHERE id = 'job_legacy_rcs'").fetchone()[
-                "c"
-            ]
-        if has_rcs == 0:
+    # RCS history is account-owned. Never infer an account, approval, or replayable task.
+    _rehome_legacy_rcs_tasks()
+    if not RCS_SUBMISSION_LOG_PATH.exists():
+        return
+    groups: dict[str, list[dict[str, Any]]] = {}
+    with RCS_SUBMISSION_LOG_PATH.open(encoding="utf-8") as stream:
+        for index, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
             try:
-                lines = [
-                    json.loads(line)
-                    for line in RCS_SUBMISSION_LOG_PATH.read_text(encoding="utf-8").splitlines()
-                    if line.strip()
-                ]
-                if lines:
-                    tasks = []
-                    for entry in lines:
-                        tname = entry.get("template_name", "unknown")
-                        tasks.append(
-                            {
-                                "template_name": tname,
-                                "source_ref": entry.get("source_ref", tname),
-                                "status": entry.get("status", "submitted"),
-                                "approval_status": entry.get("approval_status", "approved"),
-                                "provider_ref_id": entry.get("provider_ref_id") or entry.get("template_id"),
-                                "error": entry.get("error"),
-                                "client": entry.get("client", "bajaj"),
-                                "channel": "rcs",
-                            }
-                        )
-                    create_job_with_tasks(
-                        tenant_id="legacy_import",
-                        channel="rcs",
-                        filename="rcs_submission_log.jsonl",
-                        submitted_by="Legacy Importer",
-                        tasks_data=tasks,
-                        job_id="job_legacy_rcs",
-                    )
-                    with get_db() as conn:
-                        conn.execute("UPDATE ingestion_jobs SET status = 'COMPLETED' WHERE id = 'job_legacy_rcs'")
-                    logger.info("Migrated %d legacy RCS entries into job_legacy_rcs", len(tasks))
-            except Exception as exc:
-                logger.warning("RCS legacy JSONL migration warning: %s", exc)
+                entry = json.loads(line)
+                tenant = str(entry.get("client") or "").lower().strip()
+                name = str(entry.get("template_name") or "").strip()
+                if not tenant or not name or str(entry.get("channel") or "rcs").lower().strip() != "rcs":
+                    raise ValueError("missing explicit account/template name or mismatched channel")
+            except (TypeError, ValueError, AttributeError) as exc:
+                logger.warning("Skipping RCS legacy JSONL row %d: %s", index, exc)
+                continue
+            status = str(entry.get("status") or "").upper()
+            if status not in TASK_TERMINAL_STATUSES:
+                status = "FAILED"
+                entry["error"] = entry.get("error") or "Legacy submission outcome unknown; reconcile before resubmitting."
+            groups.setdefault(tenant, []).append({
+                **entry, "client": tenant, "channel": "rcs", "template_name": name,
+                "status": status, "approval_status": entry.get("approval_status") or "unknown",
+                "provider_ref_id": entry.get("provider_ref_id") or entry.get("template_id"),
+            })
+    for tenant, tasks in sorted(groups.items()):
+        jid = f"job_legacy_rcs_{tenant}"
+        existing = get_job(jid)
+        if existing:
+            if existing["tenant_id"] != tenant or existing["channel"] != "rcs":
+                raise ValueError("Legacy RCS migration job belongs to another account/channel")
+            continue
+        try:
+            create_job_with_tasks(
+                tenant_id=tenant, channel="rcs", filename=RCS_SUBMISSION_LOG_PATH.name,
+                submitted_by="Legacy Importer", tasks_data=tasks, job_id=jid,
+            )
+            logger.info("Migrated %d legacy RCS entries for %s.", len(tasks), tenant)
+        except Exception:
+            # Deterministic IDs + one atomic insert transaction prevent concurrent startup duplicates.
+            winner = get_job(jid)
+            if not winner or winner["tenant_id"] != tenant or winner["channel"] != "rcs":
+                raise

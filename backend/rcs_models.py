@@ -68,6 +68,9 @@ class RcsTemplateSubmission:
     source_ref: str = ""
     aspect_ratio_blocked: bool = False
     aspect_ratio_error: str | None = None
+    file_name: str | None = None
+    image_bytes: bytes | None = None
+    image_filename: str | None = None  # Local source name, never a provider fileName.
 
     def __post_init__(self):
         if not self.source_ref:
@@ -81,7 +84,7 @@ class RcsSubmissionResult:
     source_ref: str
     template_name: str
     template_id: str | None = None
-    status: RcsSubmissionStatus = RcsSubmissionStatus.SUBMITTED
+    status: RcsSubmissionStatus = RcsSubmissionStatus.FAILED
     provider_ref_id: str | None = None
     approval_status: str | None = None
     approval_reason: str | None = None
@@ -93,6 +96,9 @@ class RcsSubmissionResult:
     submitted_by: str = "Anonymous Operator"
     source_file: str | None = None  # name of the uploaded spreadsheet, for dashboard attribution
     submitted_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    bot_id: str = ""
+    outcome_uncertain: bool = False
+    auth_refused: bool = False  # Definitive provider auth rejection, safe to release an owned claim.
 
     def __post_init__(self):
         if not self.template_id and self.provider_ref_id:

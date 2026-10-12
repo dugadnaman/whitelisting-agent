@@ -245,6 +245,27 @@ def test_http_lifecycle_deduplicates_repeated_cross_channel_clicks_and_requires_
     assert portal.posts == 1
 
 
+@pytest.mark.parametrize("range_choice,expected_count", [("earlier", 4), ("later", 2)])
+def test_manual_report_start_changes_real_count_without_changing_base_membership(client, portal, provision_user, range_choice, expected_count):
+    _, headers = provision_user(tenant="tata")
+    earlier = (datetime.fromisoformat(portal.start).date() - timedelta(days=1)).isoformat()
+    portal.users.extend([
+        {"member": True, "reachable": True, "events": [("MOE_SMS_CLICKED", portal.start + "T12:00:00.000Z")]},
+        {"member": True, "reachable": True, "events": [("MOE_EMAIL_CLICK", earlier + "T12:00:00.000Z")]},
+        {"member": False, "reachable": True, "events": [("MOE_SMS_CLICKED", earlier + "T12:00:00.000Z")]},
+    ])
+    portal.states = ["success"]
+    chosen_start = earlier if range_choice == "earlier" else portal.end
+    accepted = client.post(PREFIX + "/queries", json={**submission(portal), "start_date": chosen_start}, headers=headers)
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["start_date"] == chosen_start
+    result = client.get(PREFIX + "/queries/" + accepted.json()["query_id"],
+                        params={"workspace_id": WORKSPACE_ID}, headers=headers)
+    assert result.status_code == 200, result.text
+    assert result.json()["user_count"] == expected_count
+    assert portal.posts == 1
+
+
 def test_http_completed_empty_cohort_is_zero_not_pending(client, portal, provision_user):
     _, headers = provision_user(tenant="tata")
     portal.users = []
@@ -287,7 +308,6 @@ def test_http_native_provider_failure_is_terminal_without_a_false_zero_or_resubm
     ({"end_date": "2026-02-30"}, 400),
     ({"end_date": ""}, 400),
     ({"end_date": 123}, 422),
-    ({"start_date": "2000-01-01"}, 422),
 ])
 def test_invalid_submission_never_creates_an_upstream_query(client, portal, provision_user, updates, expected):
     _, headers = provision_user(tenant="tata")

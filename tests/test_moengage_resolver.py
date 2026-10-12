@@ -8,7 +8,10 @@ Tests:
 5. Mocked integration with sync_karix_rcs_to_moengage.
 """
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from moengage_resolver import (
     check_semantic_duplicate_pair,
@@ -18,6 +21,31 @@ from moengage_resolver import (
 from moengage_sync import sync_karix_rcs_to_moengage
 
 
+@pytest.fixture(autouse=True)
+def offline_typesafe(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+
+
+@pytest.fixture
+def attribute_provider(monkeypatch):
+    import typesafe_sdk
+
+    roles = ["USER_FIRST_NAME", "USER_EMI_AMOUNT", "USER_DUE_DATE", "USER_LOAN_ACCOUNT", "USER_PAYMENT_URL"]
+    response = SimpleNamespace(
+        choices={
+            f"var_{idx}": SimpleNamespace(choice=role, confidence=0.93)
+            for idx, role in enumerate(roles, start=1)
+        },
+        nouls={"is_duplicate": SimpleNamespace(noul=0.94)},
+    )
+    provider = MagicMock()
+    provider.__enter__.return_value = provider
+    provider.system_one.return_value = response
+    monkeypatch.setenv("TYPESAFE_API_KEY", "offline-provider-fixture")
+    monkeypatch.setattr(typesafe_sdk, "TypeSafeClient", MagicMock(return_value=provider))
+    return provider
+
+
 def test_semantic_duplicate_identical_content():
     """Verify templates with identical message body are detected as duplicates regardless of name."""
     cand_name = "tcl_festive_offer_v2"
@@ -25,7 +53,7 @@ def test_semantic_duplicate_identical_content():
     exist_name = "TCL Festive Offer Q4"
     exist_body = "Dear Customer, get pre-approved Personal Loan up to Rs. 5 Lakhs from Tata Capital. Apply today at tatacapital.com."
 
-    prob = check_semantic_duplicate_pair(cand_name, cand_body, exist_name, exist_body, allow_ai=True)
+    prob = check_semantic_duplicate_pair(cand_name, cand_body, exist_name, exist_body, allow_ai=False)
     assert prob >= 0.90
 
 
@@ -36,7 +64,7 @@ def test_semantic_duplicate_distinct_content():
     exist_name = "tcl_credit_card"
     exist_body = "Get 5X reward points on all supermarket and weekend dining transactions."
 
-    prob = check_semantic_duplicate_pair(cand_name, cand_body, exist_name, exist_body, allow_ai=True)
+    prob = check_semantic_duplicate_pair(cand_name, cand_body, exist_name, exist_body, allow_ai=False)
     assert prob < 0.25
 
 
@@ -67,14 +95,14 @@ def test_find_semantic_duplicate_in_list():
     cand_name = "tcl_pl_festive_diwali_v3"
     cand_body = "Celebrate Diwali with instant pre approved personal loans from Tata Capital. Apply now!"
 
-    res = find_semantic_duplicate(cand_name, cand_body, existing_list, threshold=0.80, allow_ai=True)
+    res = find_semantic_duplicate(cand_name, cand_body, existing_list, threshold=0.80, allow_ai=False)
     assert res.is_duplicate is True
     assert res.matched_template_name == "tcl_personal_loan_diwali"
     assert res.probability >= 0.80
 
 
-def test_moengage_attribute_resolver_calibration():
-    """Verify positional variables are mapped to appropriate UserAttribute tags."""
+def test_moengage_attribute_provider_choices_are_translated(attribute_provider):
+    """Provider-selected semantic roles map to consumer personalization tags."""
     tmpl_text = "Dear {{1}}, your EMI of Rs. {{2}} is due on {{3}} for Loan Account {{4}}. Pay via link {{5}}."
     trans = resolve_moengage_attributes(tmpl_text, allow_ai=True)
 
@@ -96,6 +124,46 @@ def test_moengage_attribute_resolver_calibration():
     assert "{{UserAttribute['payment_url']}}" in trans.translated_text
     assert "{{1}}" not in trans.translated_text
 
+    request = attribute_provider.system_one.call_args.kwargs
+    assert request["state"] == {"template_text": tmpl_text}
+    assert set(request["questions"]) == {"var_1", "var_2", "var_3", "var_4", "var_5"}
+    assert all(mapping.confidence == 0.93 for mapping in trans.mappings)
+
+
+def test_repeated_variable_uses_one_provider_mapping(attribute_provider):
+    text = "Dear {{1}}, welcome back {{1}}."
+    trans = resolve_moengage_attributes(text)
+    assert trans.ai_resolved is True
+    assert len(trans.mappings) == 1
+    assert trans.translated_text == "Dear {{UserAttribute['first_name']}}, welcome back {{UserAttribute['first_name']}}."
+    assert set(attribute_provider.system_one.call_args.kwargs["questions"]) == {"var_1"}
+
+
+def test_semantic_duplicate_provider_probability_is_consumed(attribute_provider):
+    probability = check_semantic_duplicate_pair("candidate", "Your EMI is due soon.", "existing", "Loan repayment reminder.")
+    assert probability == 0.94
+    assert attribute_provider.system_one.call_args.kwargs["state"] == {
+        "candidate_template": {"name": "candidate", "body": "Your EMI is due soon."},
+        "existing_template": {"name": "existing", "body": "Loan repayment reminder."},
+    }
+
+
+def test_semantic_duplicate_provider_failure_does_not_claim_duplicate(attribute_provider):
+    attribute_provider.system_one.side_effect = RuntimeError("provider unavailable")
+    assert check_semantic_duplicate_pair("candidate", "Your EMI is due soon.", "existing", "Loan repayment reminder.") == 0.0
+
+
+def test_attribute_provider_failure_does_not_claim_ai_resolution(attribute_provider):
+    attribute_provider.system_one.side_effect = RuntimeError("provider unavailable")
+    trans = resolve_moengage_attributes("Dear {{1}}, your EMI is due.")
+    assert trans.ai_resolved is False
+    assert trans.mappings[0].semantic_type == "FALLBACK_DEFAULT"
+
+
+def test_uncredentialed_attribute_resolution_is_truthful():
+    trans = resolve_moengage_attributes("Dear {{1}}, your EMI is due.", allow_ai=True)
+    assert trans.ai_resolved is False
+    assert trans.mappings[0].semantic_type == "FALLBACK_DEFAULT"
 
 def test_moengage_resolver_offline_fallback():
     """Verify deterministic fallback when allow_ai=False."""
@@ -107,7 +175,7 @@ def test_moengage_resolver_offline_fallback():
     assert "{{1}}" not in trans.translated_text
 
 
-def test_sync_karix_rcs_to_moengage_dedup_and_attributes_integration():
+def test_sync_karix_rcs_to_moengage_dedup_and_attributes_integration(attribute_provider):
     """Verify sync skips semantic duplicates and resolves attributes before creation."""
     fake_karix_templates = [
         # Duplicate template

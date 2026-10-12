@@ -638,9 +638,13 @@ def find_template_by_content(
                 logger.warning("Error fetching live WhatsApp templates for %s: %s", client, fetch_error)
             live_templates = fetched or []
         elif chan == "rcs":
-            from rcs_client import fetch_rcs_templates
+            from rcs_client import RcsInventoryUnavailable, fetch_rcs_templates
 
-            live_templates = fetch_rcs_templates(client=client) or []
+            try:
+                live_templates = fetch_rcs_templates(client=client)
+            except RcsInventoryUnavailable as exc:
+                fetch_error = str(exc)
+                live_templates = []
         else:
             from sms_tracker import load_sms_submissions
 

@@ -25,6 +25,7 @@ export interface StartClickCountRequest {
   workspace_id: string;
   base_id: string;
   end_date: string;
+  start_date?: string;
 }
 
 export interface ClickCountQuery {
@@ -181,6 +182,7 @@ export async function startClickCountQuery(payload: StartClickCountRequest, sign
   const data = await readResponse<ClickCountQuery>(res, signal);
   assertResponse(typeof data === 'object' && data !== null && isText(data.query_id) && data.query_id.length <= 4096 && data.status === 'queued'
     && data.workspace_id === payload.workspace_id && data.base_id === payload.base_id && data.end_date === payload.end_date
+    && (payload.start_date === undefined || data.start_date === payload.start_date)
     && isText(data.workspace_name) && isText(data.base_name) && isTimezone(data.timezone)
     && isCalendarDate(data.start_date) && isCalendarDate(data.end_date) && data.start_date <= data.end_date);
   return data;

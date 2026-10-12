@@ -18,6 +18,7 @@ KARIX_RCS_SAVE_URL = "https://rcsgui.karix.solutions/api/rcstemplate/save"
 KARIX_RCS_UPDATE_URL = "https://rcsgui.karix.solutions/api/rcstemplate/update"
 KARIX_RCS_DELETE_URL = "https://rcsgui.karix.solutions/api/rcstemplate/delete"
 KARIX_RCS_FETCH_URL = "https://rcsgui.karix.solutions/api/v1.0/rcstemplate/getTemplatesWithFilter"
+KARIX_RCS_FETCH_TEMPLATES_URL = "https://rcsgui.karix.solutions/api/rcstemplate/fetchTemplates"
 KARIX_RCS_MEDIA_UPLOAD_URL = "https://rcsgui.karix.solutions/v1.0/templates/mediaUpload"
 
 # Default Bot IDs / Sender IDs
@@ -51,21 +52,12 @@ DEFAULT_RCS_ESMEADDRS: dict[str, str] = {
     "apparel": "71189600000000",
 }
 
-DEFAULT_RCS_AUTH_TOKENS: dict[str, str] = {
-    "tcl_promo": "EcLwxXg5cE7XYSbvx5rQRQ==",
-    "tcl_trans": "EcLwxXg5cE7XYSbvx5rQRQ==",
-    "tchfl": "eneXEZn4OVb0eqj3jT7JtA==",
-    "wealth": "MvL8v1ofIKrxhLMVbICrbw==",
-    "moneyfy": "eneXEZn4OVb0eqj3jT7JtA==",
-    "apparel": "yzHtsfT8v5DZ6XV3stK4YQ==",
-    "bajaj": "af2vdbyFh3RX8eee",
-}
+DEFAULT_RCS_AUTH_TOKENS: dict[str, str] = {}
 TATA_RCS_BOT_ID = "Uv9tdd0KNADbq3pX"
 BAJAJ_RCS_BOT_ID = "af2vdbyFh3RX8eee"
 # Legacy Lounge URLs
 KARIX_LOUNGE_BASE_URL = "https://karix.solutions/lounge/LoungePage"
 KARIX_DLT_ACTION_URL = f"{KARIX_LOUNGE_BASE_URL}/dltRegistrationAction.php"
-_PREEXISTING_ENV = frozenset(os.environ.keys())
 
 
 def _load_env_file() -> None:
@@ -98,20 +90,16 @@ def _load_env_file() -> None:
 def _account_prefix(client: str) -> str:
     import re
 
-    return re.sub(r"[^a-zA-Z0-9_]", "_", client).strip("_").upper()
+    if not isinstance(client, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", client.strip()):
+        raise ValueError("RCS account must be an explicit account key")
+    return client.strip().upper()
 
 
 def get_rcs_bot_id(client: str = "tata") -> str:
     """Return the active RCS Bot ID / Sender ID for the given client."""
     _load_env_file()
-    c = (client or "tata").lower().strip()
+    c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
-    if c in DEFAULT_RCS_BOT_IDS and not os.environ.get(f"{prefix}_RCS_BOT_ID"):
-        return DEFAULT_RCS_BOT_IDS[c]
-    if c == "tata":
-        return os.environ.get("TATA_RCS_BOT_ID") or os.environ.get("TATA_RCS_SENDER_ID") or TATA_RCS_BOT_ID
-    elif c == "bajaj":
-        return os.environ.get("BAJAJ_RCS_BOT_ID") or os.environ.get("BAJAJ_RCS_SENDER_ID") or BAJAJ_RCS_BOT_ID
     bot = (
         os.environ.get(f"{prefix}_RCS_BOT_ID")
         or os.environ.get(f"{prefix}_RCS_SENDER_ID")
@@ -128,7 +116,7 @@ def get_rcs_bot_id(client: str = "tata") -> str:
 def get_rcs_bot_name(client: str = "tcl_promo") -> str:
     """Return the active RCS Bot Name for the given client."""
     _load_env_file()
-    c = (client or "tcl_promo").lower().strip()
+    c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
     return os.environ.get(f"{prefix}_RCS_BOT_NAME") or DEFAULT_RCS_BOT_NAMES.get(c, "")
 
@@ -136,10 +124,10 @@ def get_rcs_bot_name(client: str = "tcl_promo") -> str:
 def get_rcs_entity_id(client: str = "tata") -> str:
     """Return the Entity ID for RCS DLT templates."""
     _load_env_file()
-    c = (client or "tata").lower().strip()
+    c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
     if c == "bajaj":
-        return os.environ.get("BAJAJ_ENTITY_ID") or os.environ.get("ENTITY_ID") or "110100001654"
+        return os.environ.get("BAJAJ_ENTITY_ID") or "110100001654"
     elif c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"):
         return (
             os.environ.get(f"{prefix}_ENTITY_ID")
@@ -147,28 +135,21 @@ def get_rcs_entity_id(client: str = "tata") -> str:
             or os.environ.get("TATA_RCS_ENTITY_ID")
             or "1001490234791338781"
         )
-    return os.environ.get(f"{prefix}_ENTITY_ID") or os.environ.get("ENTITY_ID") or ""
+    return os.environ.get(f"{prefix}_ENTITY_ID") or ""
 
 
 def get_rcs_esmeaddr(client: str = "tata") -> str:
     """Return the ESME address specifically configured for RCS for the given client."""
     _load_env_file()
-    c = (client or "tata").lower().strip()
+    c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
     esme = (
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
-        or DEFAULT_RCS_ESMEADDRS.get(c)
         or os.environ.get(f"{prefix}_ESMEADDR")
-        or (
-            os.environ.get("TATA_ESMEADDR")
-            if c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy")
-            else None
-        )
+        or DEFAULT_RCS_ESMEADDRS.get(c)
     )
     if not esme:
-        from config import get_esmeaddr
-
-        return get_esmeaddr(c)
+        raise OSError(f"Missing RCS ESME address for {client} ({prefix}_RCS_ESMEADDR).")
     return str(esme).strip()
 
 
@@ -178,30 +159,16 @@ def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
     Strictly isolated per client account. Never leaks credentials across accounts.
     """
     _load_env_file()
-    c = (client or "tata").lower().strip()
+    c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
 
-    if c == "bajaj":
-        bearer = (
-            os.environ.get("BAJAJ_RCS_AUTH_TOKEN")
-            or os.environ.get("BAJAJ_KARIX_BEARER_TOKEN")
-            or os.environ.get("BAJAJ_WABA_AUTH_TOKEN")
-            or os.environ.get("KARIX_BEARER_TOKEN")
-            or os.environ.get("WABA_AUTH_TOKEN")
-        )
-        session = os.environ.get("BAJAJ_KARIX_SESSION") or os.environ.get("KARIX_SESSION")
-        user = os.environ.get("BAJAJ_KARIX_USER") or os.environ.get("KARIX_USER")
-    else:
-        bearer = (
-            os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
-            or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
-            or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
-            or os.environ.get(f"{prefix}_AUTH_TOKEN")
-            or DEFAULT_RCS_AUTH_TOKENS.get(c)
-        )
-        session = os.environ.get(f"{prefix}_KARIX_SESSION")
-        user = os.environ.get(f"{prefix}_KARIX_USER")
-    if not bearer:
+    bearer = (
+        os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
+        or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+    )
+    session = os.environ.get(f"{prefix}_KARIX_SESSION")
+    user = os.environ.get(f"{prefix}_KARIX_USER")
+    if not bearer or not bearer.strip():
         raise OSError(
             f"Missing required RCS Bearer token for {client} ({prefix}_KARIX_BEARER_TOKEN or {prefix}_RCS_AUTH_TOKEN). "
             f"Please enter Bearer Token in Settings under {client}."

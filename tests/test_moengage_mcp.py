@@ -5,6 +5,8 @@ Unit and endpoint tests for MoEngage MCP Client & OAuth 2.0 Connector (backend/m
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from api import app
@@ -18,7 +20,19 @@ from moengage_mcp import (
 )
 from moengage_ops_client import fetch_mcp_ops_records
 
+@pytest.fixture(autouse=True)
+def isolated_mcp_credentials(monkeypatch):
+    """MCP unit tests must neither load nor persist developer OAuth credentials."""
+    import moengage_mcp
 
+    for key in tuple(__import__("os").environ):
+        if "MOENGAGE" in key:
+            monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(moengage_mcp, "_load_env_file", lambda: None)
+    monkeypatch.setattr(moengage_mcp, "_load_db_mcp_creds", lambda: {})
+    monkeypatch.setattr(moengage_mcp, "update_env_vars", lambda mapping: None)
+    monkeypatch.setattr(moengage_mcp, "_MCP_SESSIONS", {})
+    monkeypatch.setattr(moengage_mcp, "_PENDING_OAUTH_STATES", {})
 
 def test_mcp_status_and_config_json():
     """Verify get_mcp_status returns standard mcpServers.moengage JSON configuration."""
@@ -77,13 +91,11 @@ def test_mcp_oauth_dynamic_registration_and_pkce_flow():
         assert done["return_to"] == "/settings"
 
 
-def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
+def test_mcp_rpc_initialize_list_tools_and_call_tool_sse(monkeypatch):
     """Verify MCP JSON-RPC client handles initialize, tools/list, and tools/call over SSE."""
-    with (
-        patch.dict("os.environ", {}, clear=False),
-        patch("moengage_mcp.update_env_vars"),
-    ):
-        save_mcp_tokens(account="tata", access_token="valid_mcp_token", expires_in=86400)
+    # Keep the prerequisite token alive throughout the RPC calls, not a shorter patch.dict scope.
+    monkeypatch.setenv("TATA_MOENGAGE_MCP_ACCESS_TOKEN", "valid_mcp_token")
+    monkeypatch.setenv("MOENGAGE_MCP_ACCESS_TOKEN", "valid_mcp_token")
 
     def fake_post(url, headers=None, json=None, timeout=25, **kwargs):
         method = (json or {}).get("method")
@@ -149,12 +161,12 @@ def test_mcp_rpc_initialize_list_tools_and_call_tool_sse():
 
     with patch("moengage_mcp.requests.post", side_effect=fake_post):
         conn = check_mcp_connection("tata")
-        assert conn["ok"] is True
+        assert conn["ok"] is True, conn
         assert conn["tool_count"] == 4
         assert "search_campaigns" in conn["tools"]
 
         call_res = call_mcp_tool("search_campaigns", {"limit": 10}, account="tata")
-        assert call_res["ok"] is True
+        assert call_res["ok"] is True, call_res
         assert isinstance(call_res["data"], list)
         assert call_res["data"][0]["campaign_name"] == "TCL_PAPL_Diwali_WA"
 
