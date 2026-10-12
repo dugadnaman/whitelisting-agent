@@ -16,9 +16,9 @@ import type {
 } from '@/lib/moengage-click-count';
 
 const panel = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm';
-const input = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-50 disabled:text-gray-500';
-const primary = 'rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50';
-const secondary = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50';
+const input = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500';
+const primary = 'rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
+const secondary = 'rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -79,33 +79,59 @@ function ClickCountWorkspacePicker() {
 
   const workspace = workspaces.find((item) => item.id === workspaceId);
   return (
-    <div className="mx-auto max-w-4xl space-y-5 p-8">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-900">Tata Click Counts</h1>
-        <p className="mt-1 text-sm text-gray-500">Count multiple imported MoEngage bases simultaneously across an inclusive date range.</p>
-      </header>
-      <div className={panel}>
-        <h2 className="text-sm font-semibold text-gray-900">Fixed click criteria</h2>
-        <p className="mt-2 text-sm text-gray-600">For each selected base: WhatsApp OR Email OR SMS OR Android push OR iOS push clicks, AND base membership. Users are deduplicated within each base; counts are not summed because the same user may belong to multiple bases.</p>
-      </div>
-      <section className={`${panel} space-y-4`} aria-label="Click count selection" aria-busy={loading || busy}>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <label htmlFor="click-workspace" className="mb-1 block text-sm font-medium text-gray-700">MoEngage workspace</label>
-          <select id="click-workspace" className={input} value={workspaceId} disabled={loading || busy || Boolean(error)} onChange={(event) => setWorkspaceId(event.target.value)}>
-            <option value="">Select a workspace</option>
-            {workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-          </select>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-blue-700">Tata Capital · Audience analytics</p>
+          <h1 className="text-3xl font-bold tracking-tight text-gray-900">Tata Click Counter</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">See how many unique users clicked across your channels. Select imported bases and count them in one run.</p>
         </div>
-        {loading && <p role="status" className="text-sm text-gray-500">Loading Tata workspaces…</p>}
-        {error && <ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} />}
+        <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600">Reporting only · No campaigns sent</span>
+      </header>
+      <aside className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-blue-100 bg-blue-50/60 px-5 py-4" aria-label="How clicks are counted">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-blue-800">Clicks across any of these channels</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {['WhatsApp', 'Email', 'SMS', 'Android push', 'iOS push'].map((channel) => (
+              <span key={channel} className="rounded-md border border-blue-100 bg-white px-2.5 py-1 text-xs font-medium text-gray-700">{channel}</span>
+            ))}
+          </div>
+        </div>
+        <p className="max-w-sm text-xs leading-5 text-gray-600">Only users in each selected base are counted, once per base. Results stay separate—overlapping bases are never summed.</p>
+      </aside>
+      <section className={panel} aria-label="Click count selection" aria-busy={loading || busy}>
+        <div className="grid items-center gap-4 md:grid-cols-2">
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-sm font-bold text-blue-700" aria-hidden="true">1</span>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Choose your workspace</h2>
+              <p className="mt-1 text-xs leading-5 text-gray-500">Bases and results stay within this MoEngage workspace.</p>
+            </div>
+          </div>
+          <div>
+            <label htmlFor="click-workspace" className="mb-1.5 block text-xs font-medium text-gray-600">MoEngage workspace</label>
+            <select id="click-workspace" className={input} value={workspaceId} disabled={loading || busy || Boolean(error)} onChange={(event) => setWorkspaceId(event.target.value)}>
+              <option value="">Select a workspace</option>
+              {workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+            {workspace && <p className="mt-1.5 text-xs text-gray-500">Reporting timezone: {workspace.timezone}</p>}
+          </div>
+        </div>
+        {loading && <p role="status" className="mt-4 text-sm text-gray-500">Loading Tata workspaces…</p>}
+        {error && <div className="mt-4"><ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} /></div>}
         {!loading && !error && workspaces.length === 0 && (
-          <div className="space-y-2">
+          <div className="mt-4 space-y-2">
             <p role="status" className="text-sm text-gray-500">No Tata MoEngage workspaces are available.</p>
             <button type="button" className={secondary} onClick={() => setReload((value) => value + 1)}>Reload workspaces</button>
           </div>
         )}
-        {workspace && <ImportedBasePicker key={workspace.id} workspace={workspace} busy={busy} onBusyChange={setBusy} />}
       </section>
+      {workspace ? <ImportedBasePicker key={workspace.id} workspace={workspace} busy={busy} onBusyChange={setBusy} /> : (
+        <div className="rounded-xl border border-dashed border-gray-300 px-6 py-14 text-center">
+          <h2 className="text-sm font-semibold text-gray-700">Start with a workspace</h2>
+          <p className="mt-2 text-sm text-gray-500">Your imported bases and counting options will appear here.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -156,45 +182,70 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
   }
 
   return (
-    <>
-      {bases.length > 20 && (
-        <div>
-          <label htmlFor="click-base-search" className="mb-1 block text-sm font-medium text-gray-700">Search imported bases</label>
-          <input id="click-base-search" type="search" className={input} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="Search by base name" />
-        </div>
-      )}
-      {loading && <p role="status" className="text-sm text-gray-500">Loading imported bases…</p>}
-      {error && <ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} />}
-      {!loading && !error && bases.length === 0 && (
-        <div className="space-y-2">
-          <p role="status" className="text-sm text-gray-500">This workspace has no imported bases.</p>
-          <button type="button" className={secondary} onClick={() => setReload((value) => value + 1)}>Reload imported bases</button>
-        </div>
-      )}
-      {!loading && !error && bases.length > 0 && (
-        <fieldset>
-          <legend className="mb-2 text-sm font-medium text-gray-700">Imported bases · {selectedIds.length} selected</legend>
-          <div className="mb-2 flex justify-end gap-2">
-            <button type="button" className={secondary} disabled={busy || filteredBases.every((base) => selected.has(base.id))} onClick={selectVisible}>Select visible</button>
-            <button type="button" className={secondary} disabled={busy || selectedIds.length === 0} onClick={() => setSelectedIds([])}>Clear</button>
+    <div className="grid items-start gap-6 xl:grid-cols-12">
+      <section className={`${panel} xl:col-span-7`} aria-label="Imported base selection" aria-busy={loading}>
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-sm font-bold text-blue-700" aria-hidden="true">2</span>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Select imported bases</h2>
+              <p className="mt-1 text-xs leading-5 text-gray-500">Choose one or more audiences to compare.</p>
+            </div>
           </div>
-          <div id="click-bases" className="max-h-72 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2">
-            {filteredBases.map((base) => {
-              const checked = selected.has(base.id);
-              return (
-                <label key={base.id} className="flex cursor-pointer items-start gap-2 rounded px-2 py-2 text-sm hover:bg-gray-50">
-                  <input type="checkbox" className="mt-0.5 h-4 w-4" checked={checked} disabled={busy} onChange={() => toggleBase(base.id)} />
-                  <span className="break-all text-gray-700">{base.name}</span>
-                </label>
-              );
-            })}
+          <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{selectedIds.length} selected</span>
+        </div>
+        {loading && <p role="status" className="py-8 text-center text-sm text-gray-500">Loading imported bases…</p>}
+        {error && <ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} />}
+        {!loading && !error && bases.length === 0 && (
+          <div className="space-y-3 rounded-lg bg-gray-50 px-4 py-8 text-center">
+            <p role="status" className="text-sm text-gray-500">This workspace has no imported bases.</p>
+            <button type="button" className={secondary} onClick={() => setReload((value) => value + 1)}>Reload imported bases</button>
           </div>
-          {filteredBases.length === 0 && <p role="status" className="mt-2 text-sm text-gray-500">No bases match your search.</p>}
-          <p className="mt-2 text-xs text-gray-500">All selected bases start together. Each result remains separate.</p>
-        </fieldset>
+        )}
+        {!loading && !error && bases.length > 0 && (
+          <fieldset>
+            <legend className="sr-only">Imported bases · {selectedIds.length} selected</legend>
+            <div className="mb-3">
+              <label htmlFor="click-base-search" className="sr-only">Search imported bases</label>
+              <input id="click-base-search" type="search" className={input} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="Search imported bases…" />
+            </div>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-gray-500">{filteredBases.length} of {bases.length} bases shown</p>
+              <div className="flex gap-2">
+                <button type="button" className={secondary} disabled={busy || filteredBases.every((base) => selected.has(base.id))} onClick={selectVisible}>Select visible</button>
+                <button type="button" className={secondary} disabled={busy || selectedIds.length === 0} onClick={() => setSelectedIds([])}>Clear</button>
+              </div>
+            </div>
+            <div id="click-bases" className="max-h-80 space-y-2 overflow-y-auto">
+              {filteredBases.map((base) => {
+                const checked = selected.has(base.id);
+                return (
+                  <label key={base.id} className={`flex items-center gap-3 rounded-lg border p-3 text-sm transition-colors ${busy ? 'cursor-not-allowed' : 'cursor-pointer'} ${checked ? 'border-blue-200 bg-blue-50/60' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
+                    <input type="checkbox" className="h-4 w-4 shrink-0 accent-blue-600 focus-visible:ring-2 focus-visible:ring-blue-500" checked={checked} disabled={busy} onChange={() => toggleBase(base.id)} />
+                    <span className={`min-w-0 flex-1 break-words ${checked ? 'font-medium text-blue-900' : 'text-gray-700'}`}>{base.name}</span>
+                    {checked && <span className="shrink-0 text-xs font-medium text-blue-700">Selected</span>}
+                  </label>
+                );
+              })}
+            </div>
+            {filteredBases.length === 0 && <p role="status" className="py-8 text-center text-sm text-gray-500">No bases match your search.</p>}
+            <p className="mt-4 border-t border-gray-100 pt-3 text-xs leading-5 text-gray-500">Selected bases stay visible while searching. Each base gets its own result.</p>
+          </fieldset>
+        )}
+      </section>
+      {selectedBases.length > 0 ? <MultiBaseCountForm workspace={workspace} bases={selectedBases} onBusyChange={onBusyChange} /> : (
+        <aside className={`${panel} xl:col-span-5`}>
+          <div className="flex items-start gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-sm font-bold text-gray-500" aria-hidden="true">3</span>
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Set your date range</h2>
+              <p className="mt-1 text-xs leading-5 text-gray-500">Select a base to load its start date and choose an end date.</p>
+            </div>
+          </div>
+          <div className="mt-5 rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500">Your counting options will appear here.</div>
+        </aside>
       )}
-      {selectedBases.length > 0 && <MultiBaseCountForm workspace={workspace} bases={selectedBases} onBusyChange={onBusyChange} />}
-    </>
+    </div>
   );
 }
 
@@ -427,80 +478,141 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <div className="overflow-x-auto rounded-lg border border-gray-200">
-        <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
-          <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-            <tr><th className="px-3 py-2">Imported base</th><th className="px-3 py-2">Automatic start date</th></tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {bases.map((base) => (
-              <tr key={base.id}>
-                <td className="px-3 py-2 text-gray-700">{base.name}</td>
-                <td className="px-3 py-2 text-gray-600">
-                  {loading.has(base.id) ? 'Loading…' : metadata[base.id]?.start_date || 'Unavailable'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {Object.entries(metadataErrors).map(([baseId, message]) => (
-        <ErrorNotice key={baseId} message={`${bases.find((base) => base.id === baseId)?.name || baseId}: ${message}`} />
-      ))}
-      {Object.keys(metadataErrors).length > 0 && (
-        <button type="button" className={secondary} onClick={() => setMetadataReload((value) => value + 1)}>Retry base dates</button>
-      )}
-      <div>
-        <label htmlFor="click-end" className="mb-1 block text-sm font-medium text-gray-700">End date · inclusive for all selected bases</label>
-        <input id="click-end" type="date" className={input} value={endDate} min={maxStartDate} max={today} required disabled={busy || !metadataReady || !today || maxStartDate > today} onChange={(event) => changeEndDate(event.target.value)} />
-        <p className="mt-1 text-xs text-gray-500">Each base keeps its own automatic start date. The common end date uses {workspace.timezone} and includes the whole selected day.</p>
-      </div>
-      {today && maxStartDate > today && <p role="alert" className="text-sm text-red-700">At least one selected base was created after today in this workspace; no common date range is available yet.</p>}
-      {endDate && !validDates && metadataReady && <p role="alert" className="text-sm text-red-700">Choose an end date from {maxStartDate} through {today}.</p>}
-      <button type="submit" className={primary} disabled={!validDates || busy} onClick={(event) => { if (event.detail > 1) event.preventDefault(); }}>
-        {busy ? `Counting ${bases.length} bases…` : Object.keys(jobs).length ? `Count ${bases.length} bases again` : `Count ${bases.length} selected ${bases.length === 1 ? 'base' : 'bases'}`}
-      </button>
-      {Object.keys(jobs).length > 0 && (
-        <section className="space-y-3" aria-label="Query results" aria-live="polite">
-          {bases.map((base) => {
-            const job = jobs[base.id];
-            if (!job) return null;
-            const status = job.status;
-            return (
-              <article key={base.id} className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-                <h2 className="text-sm font-semibold text-gray-900">{base.name}</h2>
-                {job.query && <p className="mt-1 text-xs text-gray-500">{job.query.start_date} – {job.query.end_date} · {job.query.timezone}</p>}
-                {job.submitting && <p role="status" className="mt-3 text-sm font-medium text-blue-700">Starting query…</p>}
-                {job.error && <div className="mt-3"><ErrorNotice message={job.error} /></div>}
-                {job.unknownSubmission && (
-                  <button type="button" className={`${secondary} mt-3`} onClick={() => updateJob(base.id, { unknownSubmission: false })}>
-                    I understand this query may already exist
-                  </button>
-                )}
-                {status?.status === 'success' && (
-                  <>
-                    <p className="mt-3 text-4xl font-bold text-blue-800">{status.user_count === null ? 'Count unavailable' : status.user_count.toLocaleString()}</p>
-                    <p className="mt-1 text-sm text-gray-600">Unique users who clicked in this imported base.</p>
-                    {status.reachable_users !== null && <p className="mt-2 text-xs text-gray-500">Reachable users: {status.reachable_users.toLocaleString()}</p>}
-                  </>
-                )}
-                {status?.status === 'failed' && !job.error && <div className="mt-3"><ErrorNotice message={status.error || 'The click count query failed.'} /></div>}
-                {status && (status.status === 'queued' || status.status === 'running') && (
-                  <div className="mt-3 space-y-2">
-                    <p role="status" className="text-sm font-medium text-blue-700">
-                      {job.pollingPaused ? 'Status checking paused; the final outcome is unknown.' : status.status === 'queued' ? 'Query queued…' : 'Query running…'}
-                    </p>
-                    <button type="button" className={secondary} onClick={() => job.pollingPaused ? resumePolling(base.id) : pausePolling(base.id)}>
-                      {job.pollingPaused ? 'Check status again' : 'Stop checking'}
-                    </button>
-                  </div>
-                )}
-              </article>
-            );
-          })}
-        </section>
-      )}
-    </form>
+    <>
+      <form onSubmit={submit} className={`${panel} space-y-4 xl:col-span-5`}>
+        <div className="flex items-start gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-sm font-bold text-blue-700" aria-hidden="true">3</span>
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Set your date range</h2>
+            <p className="mt-1 text-xs leading-5 text-gray-500">Start dates come from when each base was imported.</p>
+          </div>
+        </div>
+        <div className="max-h-48 overflow-auto rounded-lg border border-gray-200">
+          <table className="min-w-full divide-y divide-gray-200 text-left text-xs">
+            <caption className="sr-only">Selected bases and their automatic start dates</caption>
+            <thead className="sticky top-0 bg-gray-50 text-gray-500">
+              <tr><th scope="col" className="px-3 py-2.5 font-medium">Selected base</th><th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Start date</th></tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {bases.map((base) => (
+                <tr key={base.id}>
+                  <td className="break-words px-3 py-3 text-gray-700">{base.name}</td>
+                  <td className="whitespace-nowrap px-3 py-3 tabular-nums text-gray-600">
+                    {loading.has(base.id) ? 'Loading…' : metadata[base.id]?.start_date || 'Unavailable'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {Object.entries(metadataErrors).map(([baseId, message]) => (
+          <ErrorNotice key={baseId} message={`${bases.find((base) => base.id === baseId)?.name || baseId}: ${message}`} />
+        ))}
+        {Object.keys(metadataErrors).length > 0 && (
+          <button type="button" className={secondary} onClick={() => setMetadataReload((value) => value + 1)}>Retry base dates</button>
+        )}
+        <div>
+          <label htmlFor="click-end" className="mb-1.5 block text-sm font-medium text-gray-700">Count clicks through</label>
+          <input id="click-end" type="date" className={input} value={endDate} min={maxStartDate} max={today} required aria-describedby="click-date-help" disabled={busy || !metadataReady || !today || maxStartDate > today} onChange={(event) => changeEndDate(event.target.value)} />
+          <p id="click-date-help" className="mt-2 text-xs leading-5 text-gray-500">Includes the whole end date in {workspace.timezone}. One end date applies to every selected base.</p>
+        </div>
+        {today && maxStartDate > today && <p role="alert" className="text-sm text-red-700">At least one selected base was created after today in this workspace; no common date range is available yet.</p>}
+        {endDate && !validDates && metadataReady && <p role="alert" className="text-sm text-red-700">Choose an end date from {maxStartDate} through {today}.</p>}
+        <div className="border-t border-gray-100 pt-4">
+          <button type="submit" className={`${primary} w-full`} disabled={!validDates || busy} onClick={(event) => { if (event.detail > 1) event.preventDefault(); }}>
+            {busy ? `Counting ${bases.length} ${bases.length === 1 ? 'base' : 'bases'}…` : Object.keys(jobs).length ? `Count ${bases.length} ${bases.length === 1 ? 'base' : 'bases'} again` : `Count ${bases.length} selected ${bases.length === 1 ? 'base' : 'bases'}`}
+          </button>
+          <p className="mt-2 text-center text-xs leading-5 text-gray-500">Runs all selected bases together. No messages are sent.</p>
+        </div>
+      </form>
+      <section className="min-w-0 xl:col-span-12" aria-label="Query results" aria-live="polite">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Results by base</h2>
+            <p className="mt-1 text-xs text-gray-500">Unique clickers across channels, deduplicated within each base.</p>
+          </div>
+          {Object.keys(jobs).length > 0 && <span className="text-xs font-medium text-gray-500">{bases.filter((base) => jobs[base.id]?.status?.status === 'success').length} of {bases.length} complete</span>}
+        </div>
+        {Object.keys(jobs).length === 0 ? (
+          <div className="rounded-xl border border-dashed border-gray-300 px-6 py-10 text-center">
+            <p className="text-sm font-medium text-gray-700">Ready when you are</p>
+            <p className="mt-2 text-xs text-gray-500">Choose an end date and start counting. Each base will appear here separately.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" role="region" aria-label="Click count results table" tabIndex={0}>
+            <table className="w-full min-w-[960px] text-left text-sm">
+              <caption className="sr-only">Click count results for each selected base. Counts are separate and are not summed.</caption>
+              <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
+                <tr>
+                  <th scope="col" className="px-4 py-3 font-medium">Imported base</th>
+                  <th scope="col" className="whitespace-nowrap px-4 py-3 font-medium">Start date</th>
+                  <th scope="col" className="whitespace-nowrap px-4 py-3 font-medium">End date</th>
+                  <th scope="col" className="px-4 py-3 font-medium">Status</th>
+                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-right font-medium">Unique clickers</th>
+                  <th scope="col" className="whitespace-nowrap px-4 py-3 text-right font-medium">Reachable users</th>
+                  <th scope="col" className="px-4 py-3 font-medium">Details / actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {bases.map((base) => {
+                  const job = jobs[base.id];
+                  if (!job) return null;
+                  const status = job.status;
+                  const failed = status?.status === 'failed' || (!job.submitting && !status && Boolean(job.error) && !job.unknownSubmission);
+                  const badge = job.submitting ? 'Starting' : job.unknownSubmission ? 'Outcome unknown' : job.pollingPaused ? 'Checking paused' : status?.status === 'success' ? 'Complete' : failed ? 'Failed' : status?.status === 'running' ? 'Running' : 'Queued';
+                  const badgeStyle = status?.status === 'success' ? 'bg-emerald-50 text-emerald-700' : failed ? 'bg-red-50 text-red-700' : job.unknownSubmission || job.pollingPaused ? 'bg-amber-50 text-amber-800' : 'bg-blue-50 text-blue-700';
+                  return (
+                    <tr key={base.id} className="align-top hover:bg-gray-50/50" aria-label={`${base.name} result`}>
+                      <th scope="row" className="min-w-[180px] break-words px-4 py-4 font-semibold text-gray-900">{base.name}</th>
+                      <td className="whitespace-nowrap px-4 py-4 text-xs leading-5 text-gray-600">
+                        {job.query ? (
+                          <>
+                            <p className="tabular-nums">{job.query.start_date}</p>
+                            <p className="text-gray-500">{job.query.timezone}</p>
+                          </>
+                        ) : <span className="text-gray-400">Awaiting query</span>}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-4 text-xs leading-5 tabular-nums text-gray-600">
+                        {job.query ? job.query.end_date : <span className="text-gray-400">Awaiting query</span>}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-block whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-semibold ${badgeStyle}`}>{badge}</span>
+                      </td>
+                      <td className="px-4 py-4 text-right font-semibold tabular-nums text-gray-900">
+                        {status?.status === 'success' ? status.user_count === null ? 'Unavailable' : status.user_count.toLocaleString() : <span aria-label="Not available yet" className="font-normal text-gray-400">—</span>}
+                      </td>
+                      <td className="px-4 py-4 text-right tabular-nums text-gray-700">
+                        {status?.status === 'success' && status.reachable_users !== null ? status.reachable_users.toLocaleString() : <span aria-label="Not available yet" className="text-gray-400">—</span>}
+                      </td>
+                      <td className="min-w-[240px] px-4 py-4">
+                        {job.submitting && <p role="status" className="text-xs font-medium text-blue-700">Starting query…</p>}
+                        {job.error && <ErrorNotice message={job.error} />}
+                        {job.unknownSubmission && (
+                          <button type="button" className={`${secondary} mt-3`} onClick={() => updateJob(base.id, { unknownSubmission: false })}>
+                            I understand this query may already exist
+                          </button>
+                        )}
+                        {status?.status === 'failed' && !job.error && <ErrorNotice message={status.error || 'The click count query failed.'} />}
+                        {status && (status.status === 'queued' || status.status === 'running') && (
+                          <div className="space-y-3">
+                            <p role="status" className="text-xs font-medium text-blue-700">
+                              {job.pollingPaused ? 'Status checking paused; the final outcome is unknown.' : status.status === 'queued' ? 'Query queued…' : 'Query running…'}
+                            </p>
+                            <button type="button" className={secondary} onClick={() => job.pollingPaused ? resumePolling(base.id) : pausePolling(base.id)}>
+                              {job.pollingPaused ? 'Check status again' : 'Stop checking'}
+                            </button>
+                          </div>
+                        )}
+                        {status?.status === 'success' && !job.error && <span className="text-xs text-gray-500">No action needed</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </>
   );
 }
