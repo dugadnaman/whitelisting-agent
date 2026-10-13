@@ -2368,16 +2368,20 @@ def _extract_images_from_zip(zip_path: Path) -> list[str]:
         logger.warning("Could not extract ZIP %s: %s", zip_path, exc)
     return images
 
+_XLSX_IMAGE_CACHE: dict[tuple[str, float], dict[str, list[str]]] = {}
+
 def _extract_images_from_xlsx(xlsx_path: Path) -> dict[str, list[str]]:
     """
     Extract embedded drawing images from an Excel (.xlsx) file sheet-by-sheet,
     saving raw image bytes to MEDIA_CACHE_DIR and returning a map of
     {sheet_name: [saved_image_paths]}.
     """
-    image_map: dict[str, list[str]] = {}
     if not xlsx_path.exists():
-        return image_map
-
+        return {}
+    cache_key = (str(xlsx_path.resolve()), xlsx_path.stat().st_mtime)
+    if cache_key in _XLSX_IMAGE_CACHE:
+        return _XLSX_IMAGE_CACHE[cache_key]
+    image_map: dict[str, list[str]] = {}
     try:
         import openpyxl
 
@@ -2405,9 +2409,8 @@ def _extract_images_from_xlsx(xlsx_path: Path) -> dict[str, list[str]]:
         wb.close()
     except Exception as exc:
         logger.debug("Could not extract embedded images from xlsx %s: %s", xlsx_path, exc)
-
+    _XLSX_IMAGE_CACHE[cache_key] = image_map
     return image_map
-
 
 def _parse_swcm_campaign_tables(adf_doc: dict[str, Any] | None, summary: str = "") -> list[dict[str, Any]]:
     """
@@ -2759,7 +2762,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
             local_path = str(att["local_path"])
             p = Path(local_path)
             if fn.lower().endswith((".xlsx", ".xls", ".csv")):
-                excel_attachment_paths.append(p)
+                if not any(p.name == ep.name or (p.stat().st_size == ep.stat().st_size and p.stem.split("(")[0].strip() == ep.stem.split("(")[0].strip()) for ep in excel_attachment_paths):
+                    excel_attachment_paths.append(p)
                 if fn.lower().endswith(".xlsx"):
                     xlsx_imgs = _extract_images_from_xlsx(p)
                     for s_name, img_paths in xlsx_imgs.items():
@@ -2781,7 +2785,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
                 p = download_jira_attachment(att_id, fn)
                 local_path = str(p)
                 if fn.lower().endswith((".xlsx", ".xls", ".csv")):
-                    excel_attachment_paths.append(p)
+                    if not any(p.name == ep.name or (p.stat().st_size == ep.stat().st_size and p.stem.split("(")[0].strip() == ep.stem.split("(")[0].strip()) for ep in excel_attachment_paths):
+                        excel_attachment_paths.append(p)
                     if fn.lower().endswith(".xlsx"):
                         xlsx_imgs = _extract_images_from_xlsx(p)
                         for s_name, img_paths in xlsx_imgs.items():

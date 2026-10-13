@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 
 _DECISION_CACHE: dict[str, dict[str, Any]] = {}
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
-
+_CIRCUIT_FAILURES: int = 0
+_CIRCUIT_OPEN_UNTIL: float = 0.0
 
 def get_gemini_api_key() -> str:
     """Retrieve the Google Gemini API key from the process environment or .env."""
@@ -156,6 +157,21 @@ def analyze_template_semantics(
     if cache_key in _DECISION_CACHE:
         return _DECISION_CACHE[cache_key]
 
+    import time
+    global _CIRCUIT_FAILURES, _CIRCUIT_OPEN_UNTIL
+    if time.time() < _CIRCUIT_OPEN_UNTIL:
+        fallback = _heuristic_decision(
+            clean_text,
+            summary=summary,
+            sheet_name=sheet_name,
+            candidate_header=candidate_header,
+            candidate_title=candidate_title,
+            candidate_cta_text=candidate_cta_text,
+            candidate_cta_url=candidate_cta_url,
+            channel=channel,
+        )
+        _DECISION_CACHE[cache_key] = fallback
+        return fallback
     api_key = get_gemini_api_key()
     if not api_key:
         decision = _heuristic_decision(
@@ -247,6 +263,7 @@ def analyze_template_semantics(
     try:
         resp = requests.post(url, json=payload, timeout=timeout)
         if resp.ok:
+            _CIRCUIT_FAILURES = 0
             data = resp.json()
             raw_json = data["candidates"][0]["content"]["parts"][0]["text"]
             raw_decision = json.loads(raw_json)
@@ -285,9 +302,18 @@ def analyze_template_semantics(
             }
             _DECISION_CACHE[cache_key] = decision
             return decision
+        else:
+            _CIRCUIT_FAILURES += 1
+            if _CIRCUIT_FAILURES >= 2:
+                _CIRCUIT_OPEN_UNTIL = time.time() + 60.0
+                logger.warning("Gemini API returned %s; opening circuit breaker for 60s", resp.status_code)
     except Exception as exc:
-        logger.warning("Gemini semantic analysis fallback to local classifications: %s", exc)
-
+        _CIRCUIT_FAILURES += 1
+        if _CIRCUIT_FAILURES >= 2:
+            _CIRCUIT_OPEN_UNTIL = time.time() + 60.0
+            logger.warning("Gemini API failed (%s); opening circuit breaker for 60s", exc)
+        else:
+            logger.warning("Gemini semantic analysis fallback to local classifications: %s", exc)
     fallback = _heuristic_decision(
         clean_text,
         summary=summary,

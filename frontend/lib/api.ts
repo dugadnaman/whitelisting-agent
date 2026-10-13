@@ -1172,7 +1172,7 @@ export async function fetchJiraIssues(params?: {
 export async function fetchJiraBrief(issueKey: string, account?: string): Promise<JiraBriefData> {
   const cleanKey = encodeURIComponent(issueKey.trim().toUpperCase());
   const qs = account ? `?account=${encodeURIComponent(account)}` : "";
-  const res = await fetchWithRetry(getApiUrl(`/api/jira/brief/${cleanKey}${qs}`));
+  const res = await fetchWithRetry(getApiUrl(`/api/jira/brief/${cleanKey}${qs}`), undefined, 1, 1000, 120000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   const data = await res.json();
   return data.brief;
@@ -1601,20 +1601,37 @@ export async function syncKarixRcsToMoEngage(account: string = "tata"): Promise<
   return res.json();
 }
 
-export async function fetchMoEngageOpsDashboard(mode: string = "last_week", customStart?: string, customEnd?: string, workspace?: string) {
+export async function fetchMoEngageOpsDashboard(mode: string = "last_week", customStart?: string, customEnd?: string, workspace?: string, signal?: AbortSignal) {
   const qs = new URLSearchParams({ mode });
   if (customStart) qs.set("custom_start", customStart);
   if (customEnd) qs.set("custom_end", customEnd);
   if (workspace && workspace !== "all") qs.set("workspace", workspace);
-  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/dashboard?${qs.toString()}`));
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/dashboard?${qs.toString()}`), { signal, cache: "no-store" });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
+}
+
+export async function downloadMoEngageOpsExcel(mode: string, customStart?: string, customEnd?: string, workspace?: string): Promise<void> {
+  const qs = new URLSearchParams({ mode });
+  if (customStart) qs.set("custom_start", customStart);
+  if (customEnd) qs.set("custom_end", customEnd);
+  if (workspace && workspace !== "all") qs.set("workspace", workspace);
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/export-excel?${qs.toString()}`), { cache: "no-store" });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "MoEngage_Ops_Dashboard_Live.xlsx";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function syncMoEngageOps() {
   const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/sync`), {
     method: "POST",
-  });
+  }, 0, 800, 600000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -1629,7 +1646,8 @@ export async function updateMoEngageWorkspace(data: {
   workspace_name: string;
   vertical: string;
   workspace_id: string;
-  api_key: string;
+  api_key?: string;
+  original_workspace_name?: string;
   data_center?: string;
   is_active?: boolean;
 }) {
@@ -1637,7 +1655,7 @@ export async function updateMoEngageWorkspace(data: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  });
+  }, 0);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -1667,7 +1685,7 @@ export async function uploadMoEngageExportFile(
   const res = await fetchWithRetry(getApiUrl(`/api/moengage/ops/upload-export?${qs.toString()}`), {
     method: "POST",
     body: form,
-  });
+  }, 0);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

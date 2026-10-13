@@ -13,6 +13,7 @@ import os
 import secrets
 import re
 import tempfile
+import time
 import threading
 import uuid
 from concurrent.futures import Future
@@ -3948,6 +3949,8 @@ def get_jira_issues_endpoint(
         raise HTTPException(status_code=500, detail=f"Jira API error: {exc!s}") from exc
 
 
+_PARSED_BRIEF_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
 @app.get("/api/jira/brief/{issue_key}")
 def get_jira_brief_endpoint(
     issue_key: str,
@@ -3974,7 +3977,13 @@ def get_jira_brief_endpoint(
                     continue
         issue_key = clean_key
         issue_data = fetch_jira_issue(issue_key)
-        parsed = parse_jira_brief(issue_data, download_creatives=download_creatives)
+        cache_key = f"{issue_key}_{download_creatives}_{issue_data.get('updated', '')}"
+        cached_entry = _PARSED_BRIEF_CACHE.get(cache_key)
+        if cached_entry and (time.time() - cached_entry[0]) < 300:
+            parsed = cached_entry[1]
+        else:
+            parsed = parse_jira_brief(issue_data, download_creatives=download_creatives)
+            _PARSED_BRIEF_CACHE[cache_key] = (time.time(), parsed)
 
         # Cross-reference parsed WhatsApp templates against live WABA catalog (safe fallback if token expired/missing)
         target_client = (account or parsed.account or "tcl_promo").lower().strip()
@@ -4841,13 +4850,47 @@ def resolve_moengage_attributes_endpoint(
     return _json_safe(res.to_dict())
 
 
+MOENGAGE_OPS_UPLOAD_MAX_BYTES = 20 * 1024 * 1024
+_MOENGAGE_OPS_CONFIG_LOCK = threading.Lock()
+
+
 class MoEngageWorkspaceUpdateRequest(BaseModel):
     workspace_name: str
     vertical: str
     workspace_id: str
-    api_key: str
+    api_key: str | None = None
     data_center: str = "03"
-    is_active: bool = True
+    is_active: StrictBool = True
+    original_workspace_name: str | None = None
+
+
+def _authorize_moengage_ops(current_user: dict = Depends(get_current_user)) -> dict:
+    require_tenant_access("tata", current_user)
+    return current_user
+
+
+def _validate_moengage_ops_filters(mode, custom_start, custom_end, workspace):
+    from moengage_ops_client import get_date_range_bounds, normalize_ops_workspace_filter
+
+    mode = mode.strip().lower()
+    try:
+        get_date_range_bounds(mode, custom_start, custom_end)
+        workspace = normalize_ops_workspace_filter(workspace)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return mode, workspace
+
+
+def _public_moengage_ops_workspace(config):
+    return {
+        "workspace_name": config.workspace_name,
+        "vertical": config.vertical,
+        "workspace_id": config.workspace_id,
+        "api_key": "********" if config.api_key else "",
+        "api_key_configured": bool(config.api_key),
+        "data_center": config.data_center,
+        "is_active": config.is_active,
+    }
 
 
 @app.get("/api/moengage/ops/dashboard")
@@ -4856,106 +4899,151 @@ def get_moengage_ops_dashboard(
     custom_start: str | None = Query(None),
     custom_end: str | None = Query(None),
     workspace: str | None = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(_authorize_moengage_ops),
 ):
-    """
-    Get aggregated MoEngage Operations KPI metrics, channel breakdowns,
-    and vertical delivery summaries matching MoEngage_Ops_Dashboard.xlsx.
-    """
+    """Get cached MoEngage Operations metrics for the selected reporting window."""
     from moengage_ops_client import compute_ops_dashboard_metrics, load_cached_ops_records
 
-    records = load_cached_ops_records()
-    metrics = compute_ops_dashboard_metrics(
-        records,
-        mode=mode,
-        custom_start=custom_start,
-        custom_end=custom_end,
-        workspace_filter=workspace,
-    )
+    mode, workspace = _validate_moengage_ops_filters(mode, custom_start, custom_end, workspace)
+    try:
+        records = load_cached_ops_records()
+        metrics = compute_ops_dashboard_metrics(
+            records, mode=mode, custom_start=custom_start, custom_end=custom_end, workspace_filter=workspace
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _json_safe(metrics)
 
 
 @app.post("/api/moengage/ops/sync")
 async def sync_moengage_ops_endpoint(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(_authorize_moengage_ops),
 ):
-    """Trigger live sync of campaigns and flows across all registered MoEngage workspaces."""
+    """Trigger live sync across the registered Tata MoEngage workspaces."""
     from moengage_ops_client import compute_ops_dashboard_metrics, sync_all_moengage_ops
 
-    records = await asyncio.to_thread(sync_all_moengage_ops)
-    metrics = compute_ops_dashboard_metrics(records, mode="last_week")
-    return _json_safe(
-        {
-            "ok": True,
-            "total_records": len(records),
-            "metrics": metrics,
-        }
-    )
+    try:
+        records = await asyncio.to_thread(sync_all_moengage_ops)
+        metrics = compute_ops_dashboard_metrics(records, mode="last_week")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail="MoEngage sync failed; cached data was not replaced.") from exc
+    return _json_safe({"ok": True, "total_records": len(records), "metrics": metrics})
 
 
 @app.get("/api/moengage/ops/export-excel")
 def export_moengage_ops_excel_endpoint(
-    current_user: dict = Depends(get_current_user),
+    mode: str = Query("last_week"),
+    custom_start: str | None = Query(None),
+    custom_end: str | None = Query(None),
+    workspace: str | None = Query(None),
+    current_user: dict = Depends(_authorize_moengage_ops),
 ):
-    """Export live synced MoEngage ops data into MoEngage_Ops_Dashboard_Live.xlsx."""
+    """Download a request-private workbook matching the selected reporting filters."""
+    from starlette.background import BackgroundTask
     from moengage_ops_client import export_ops_dashboard_excel
 
-    out_path = export_ops_dashboard_excel()
-    return FileResponse(
-        out_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename="MoEngage_Ops_Dashboard_Live.xlsx",
-    )
+    mode, workspace = _validate_moengage_ops_filters(mode, custom_start, custom_end, workspace)
+    with tempfile.NamedTemporaryFile(prefix="moengage-ops-", suffix=".xlsx", delete=False) as tmp:
+        out_path = tmp.name
+    try:
+        export_ops_dashboard_excel(
+            output_path=out_path, mode=mode, custom_start=custom_start,
+            custom_end=custom_end, workspace_filter=workspace,
+        )
+        return FileResponse(
+            out_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename="MoEngage_Ops_Dashboard_Live.xlsx",
+            background=BackgroundTask(os.unlink, out_path),
+        )
+    except Exception as exc:
+        os.unlink(out_path)
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise
 
 
 @app.get("/api/moengage/ops/workspaces")
 def get_moengage_ops_workspaces(
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(_authorize_moengage_ops),
 ):
-    """List registered MoEngage workspaces for ops reporting."""
-    from dataclasses import asdict
-
+    """List workspace configuration without returning provider credentials."""
     from moengage_ops_client import load_workspace_configs
 
-    configs = load_workspace_configs()
-    return [asdict(c) for c in configs]
+    return [_public_moengage_ops_workspace(config) for config in load_workspace_configs()]
 
 
 @app.post("/api/moengage/ops/workspaces")
 def update_moengage_ops_workspace(
     body: MoEngageWorkspaceUpdateRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(_authorize_moengage_ops),
 ):
-    """Add or update a MoEngage workspace configuration."""
-    from moengage_ops_client import MoEngageWorkspaceConfig, load_workspace_configs, save_workspace_configs
+    """Add or update a workspace; blank or masked keys retain saved credentials."""
+    from moengage_ops_client import (
+        MoEngageWorkspaceConfig, load_workspace_configs, normalize_ops_workspace_filter, save_workspace_configs,
+    )
 
-    configs = load_workspace_configs()
-    found = False
-    for i, c in enumerate(configs):
-        if c.vertical.lower() == body.vertical.lower() or c.workspace_name.lower() == body.workspace_name.lower():
-            configs[i] = MoEngageWorkspaceConfig(
-                workspace_name=body.workspace_name,
-                vertical=body.vertical,
-                workspace_id=body.workspace_id,
-                api_key=body.api_key,
-                data_center=body.data_center,
-                is_active=body.is_active,
-            )
-            found = True
-            break
-    if not found:
-        configs.append(
-            MoEngageWorkspaceConfig(
-                workspace_name=body.workspace_name,
-                vertical=body.vertical,
-                workspace_id=body.workspace_id,
-                api_key=body.api_key,
-                data_center=body.data_center,
-                is_active=body.is_active,
-            )
+    name = body.workspace_name.strip()
+    workspace_id = body.workspace_id.strip()
+    data_center = body.data_center.strip()
+    if not name or len(name) > 100 or any(ord(char) < 32 or ord(char) == 127 for char in name):
+        raise HTTPException(status_code=400, detail="Workspace name must contain 1–100 characters without control characters.")
+    if workspace_id and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", workspace_id):
+        raise HTTPException(status_code=400, detail="Workspace ID must contain 1–128 letters, digits, underscores or hyphens.")
+    if data_center not in {"01", "02", "03", "04", "05", "06", "101"}:
+        raise HTTPException(status_code=400, detail="Choose a supported MoEngage data center: 01–06 or 101.")
+    try:
+        vertical = normalize_ops_workspace_filter(body.vertical)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if vertical is None:
+        raise HTTPException(status_code=400, detail="Choose a concrete workspace vertical.")
+    key = (body.api_key or "").strip()
+    preserve_key = not key or all(char in "*•" for char in key)
+    if not preserve_key and (len(key) > 1024 or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in key)):
+        raise HTTPException(status_code=400, detail="API key must be at most 1024 characters without whitespace or control characters.")
+
+    with _MOENGAGE_OPS_CONFIG_LOCK:
+        configs = load_workspace_configs()
+        matches = [
+            i for i, config in enumerate(configs)
+            if config.workspace_name.strip().casefold() == name.casefold()
+            or config.vertical.strip().casefold() == vertical.casefold()
+        ]
+        if body.original_workspace_name is not None:
+            originals = [
+                i for i, config in enumerate(configs)
+                if config.workspace_name.strip().casefold() == body.original_workspace_name.strip().casefold()
+            ]
+            if not originals:
+                raise HTTPException(status_code=404, detail="Original workspace no longer exists; refresh the workspace list.")
+            matches = list(set(matches + originals))
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail="Workspace name and vertical match different configurations.")
+        index = matches[0] if matches else None
+        previous = configs[index] if index is not None else None
+        if workspace_id and any(
+            i != index and config.workspace_id.strip().casefold() == workspace_id.casefold()
+            for i, config in enumerate(configs)
+        ):
+            raise HTTPException(status_code=409, detail="Workspace ID is already registered to another vertical.")
+        if preserve_key:
+            key = previous.api_key if previous is not None else ""
+        if body.is_active and (not workspace_id or not key):
+            raise HTTPException(status_code=400, detail="Active workspaces require a workspace ID and an API key.")
+        config = MoEngageWorkspaceConfig(
+            workspace_name=name, vertical=vertical, workspace_id=workspace_id, api_key=key,
+            campaign_report_key=previous.campaign_report_key if previous is not None else None,
+            data_center=data_center, is_active=body.is_active,
         )
-    save_workspace_configs(configs)
-    return {"ok": True, "workspace": body.dict()}
+        if index is None:
+            configs.append(config)
+        else:
+            configs[index] = config
+        save_workspace_configs(configs)
+    return {"ok": True, "workspace": _public_moengage_ops_workspace(config)}
 
 
 @app.post("/api/moengage/ops/upload-export")
@@ -4966,41 +5054,48 @@ async def upload_moengage_export_endpoint(
     custom_start: str | None = Query(None),
     custom_end: str | None = Query(None),
     workspace_filter: str | None = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(_authorize_moengage_ops),
 ):
-    """
-    Upload and ingest a raw campaign export file (ZIP/CSV/XLSX) downloaded directly
-    from the MoEngage Dashboard (Export button). Instantly updates the ops metrics.
-    Supports single CSV/XLSX files or ZIP archives containing multiple CSV files.
-    """
-    from moengage_ops_client import compute_ops_dashboard_metrics, ingest_moengage_export_file, load_cached_ops_records
+    """Ingest a bounded MoEngage export and return the selected reporting metrics."""
+    from moengage_ops_client import (
+        compute_ops_dashboard_metrics, ingest_moengage_export_file, load_cached_ops_records,
+        normalize_ops_workspace_filter,
+    )
 
-    suffix = Path(file.filename or "export.csv").suffix.lower()
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
+    mode, workspace_filter = _validate_moengage_ops_filters(mode, custom_start, custom_end, workspace_filter)
     try:
-        res = ingest_moengage_export_file(tmp_path, default_vertical=vertical)
-        records = load_cached_ops_records()
-        metrics = compute_ops_dashboard_metrics(
-            records,
-            mode=mode,
-            custom_start=custom_start,
-            custom_end=custom_end,
-            workspace_filter=workspace_filter,
-        )
-        return _json_safe(
-            {
-                "ok": True,
-                "filename": file.filename,
-                "result": res,
-                "metrics": metrics,
-            }
-        )
+        vertical = normalize_ops_workspace_filter(vertical)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if vertical is None:
+        raise HTTPException(status_code=400, detail="Choose a concrete upload vertical.")
+    filename = Path((file.filename or "").replace("\\", "/")).name
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".zip", ".csv", ".tsv", ".xlsx", ".xls"}:
+        raise HTTPException(status_code=400, detail="Upload a ZIP, CSV, TSV, XLSX or XLS export.")
+    safe_name = re.sub(r"[^A-Za-z0-9_. -]", "_", Path(filename).stem)[:180] + suffix
+    try:
+        with tempfile.TemporaryDirectory(prefix="moengage-ops-upload-") as directory:
+            tmp_path = Path(directory) / safe_name
+            with tmp_path.open("wb") as tmp:
+                size = 0
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > MOENGAGE_OPS_UPLOAD_MAX_BYTES:
+                        raise HTTPException(status_code=413, detail="MoEngage exports must not exceed 20 MiB.")
+                    tmp.write(chunk)
+            if not size:
+                raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+            res = await asyncio.to_thread(ingest_moengage_export_file, tmp_path, default_vertical=vertical)
+            records = load_cached_ops_records()
+            metrics = compute_ops_dashboard_metrics(
+                records, mode=mode, custom_start=custom_start, custom_end=custom_end, workspace_filter=workspace_filter
+            )
+            return _json_safe({"ok": True, "filename": file.filename, "result": res, "metrics": metrics})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
-        if os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        await file.close()
 
 class MoEngageDraftPreviewRequest(BaseModel):
     account: str
