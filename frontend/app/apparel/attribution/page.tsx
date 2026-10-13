@@ -127,6 +127,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
         }
       }
     } else { setGoogle(null); errors.google = String(googleResult.reason?.message || googleResult.reason); }
+    if (sessionResult.status === 'fulfilled') {
       setSession(sessionResult.value);
       if (!setupLoaded.current) setProfileId(sessionResult.value.profile_id || 'default');
     } else { setSession(null); errors.session = String(sessionResult.reason?.message || sessionResult.reason); }
