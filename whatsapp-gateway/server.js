@@ -26,6 +26,24 @@ const SESSION_DIR = process.env.WHATSAPP_SESSION_DIR || path.join(__dirname, 'se
 if (!fs.existsSync(SESSION_DIR)) {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
 }
+const PID_FILE = path.join(SESSION_DIR, 'gateway.pid');
+try {
+  if (fs.existsSync(PID_FILE)) {
+    const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
+    if (existingPid && existingPid !== process.pid) {
+      try {
+        process.kill(existingPid, 0);
+        console.log(`[WhatsApp Gateway] Terminating duplicate instance (PID ${existingPid})...`);
+        process.kill(existingPid, 'SIGTERM');
+      } catch (e) {}
+    }
+  }
+  fs.writeFileSync(PID_FILE, String(process.pid));
+} catch (e) {}
+
+process.on('exit', () => {
+  try { if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE); } catch (e) {}
+});
 
 const app = express();
 app.use(express.json());
@@ -104,6 +122,11 @@ async function connectToWhatsApp() {
           console.error('[WhatsApp Gateway] Failed to clear session dir:', e);
         }
         setTimeout(connectToWhatsApp, 2000);
+      } else if (statusCode === 440) {
+        reconnectAttempts++;
+        const delay = Math.min(60000, Math.max(10000, reconnectAttempts * 5000));
+        console.log(`[WhatsApp Gateway] Session replaced by another client (code 440). Waiting ${delay / 1000}s before reconnect...`);
+        setTimeout(connectToWhatsApp, delay);
       } else if (shouldReconnect) {
         reconnectAttempts++;
         const delay = Math.min(30000, reconnectAttempts * 2000);
@@ -300,8 +323,8 @@ app.post('/send-message', async (req, res) => {
     else if (group && typeof group === 'string') {
       const q = group.trim().toLowerCase();
       if (!cachedGroups.length) await refreshGroups();
-      const match = cachedGroups.find((g) => g.name.toLowerCase() === q)
-        || cachedGroups.find((g) => g.name.toLowerCase().includes(q));
+      const match = cachedGroups.find((g) => (g.name || '').toLowerCase() === q)
+        || cachedGroups.find((g) => (g.name || '').toLowerCase().includes(q));
       if (match) {
         targetJid = match.id;
         resolvedName = match.name;
