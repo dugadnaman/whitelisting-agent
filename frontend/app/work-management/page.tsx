@@ -343,6 +343,33 @@ export default function WorkManagementPage() {
   const [loadingQr, setLoadingQr] = useState<boolean>(false);
   const [whatsappGroups, setWhatsappGroups] = useState<Array<{ id: string; name: string; participants_count: number }>>([]);
   const [forceOffSchedule, setForceOffSchedule] = useState<boolean>(false);
+  const [testingWhatsApp, setTestingWhatsApp] = useState<boolean>(false);
+  const handleSendTestWhatsApp = async () => {
+    setTestingWhatsApp(true);
+    try {
+      const res = await dispatchAlerts({
+        project: selectedProject,
+        stage: alertStage,
+        dry_run: false,
+        send_google_chat: false,
+        send_email: false,
+        send_whatsapp: true,
+        whatsapp_group_name: whatsappGroupName || undefined,
+        whatsapp_group_id: whatsappGroupId || undefined,
+        force: true,
+      });
+      const wa = res.whatsapp_result;
+      if (wa?.delivered) {
+        alert(`✅ WhatsApp message delivered to "${wa.recipient || whatsappGroupName}"! Check your group.`);
+      } else {
+        alert(`⚠️ WhatsApp delivery failed: ${wa?.error || wa?.message || 'Gateway unreachable'}`);
+      }
+    } catch (err: unknown) {
+      alert(`Failed to send test message: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTestingWhatsApp(false);
+    }
+  };
   const DEFAULT_GCHAT_WEBHOOK =
     'https://chat.googleapis.com/v1/spaces/AAQAsqKm6oQ/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=er00Zc1ZFnDfrmthvXlRvtkWQHXDd862nhHl9TlguLk';
   const [googleChatWebhookUrl, setGoogleChatWebhookUrl] = useState<string>(DEFAULT_GCHAT_WEBHOOK);
@@ -3020,6 +3047,14 @@ export default function WorkManagementPage() {
                     </div>
                     <button
                       type="button"
+                      onClick={handleSendTestWhatsApp}
+                      disabled={testingWhatsApp}
+                      className="px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex items-center gap-1.5 shrink-0 transition disabled:opacity-50"
+                    >
+                      <span>🧪</span> {testingWhatsApp ? 'Sending...' : 'Ping Group Test'}
+                    </button>
+                    <button
+                      type="button"
                       onClick={handleOpenWhatsAppModal}
                       className="px-2.5 py-1 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg flex items-center gap-1.5 shrink-0 transition"
                     >
@@ -3164,13 +3199,14 @@ export default function WorkManagementPage() {
                 onClick={() => handleDispatchAlerts(false)}
                 disabled={
                   alertsDispatching ||
-                  alertsPreview?.recipient_count === 0 ||
+                  (alertsPreview?.recipient_count === 0 && !forceOffSchedule) ||
                   ((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule) ||
-                  (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail)
+                  (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail && !sendWhatsApp)
                 }
                 className={`px-5 py-2 rounded-lg text-xs font-bold shadow-md transition-all flex items-center gap-1.5 active:scale-95 ${
                   (((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule) ||
-                    (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail))
+                    (alertsPreview?.recipient_count === 0 && !forceOffSchedule) ||
+                    (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail && !sendWhatsApp))
                     ? 'bg-gray-400 text-white cursor-not-allowed'
                     : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                 }`}
@@ -3179,10 +3215,12 @@ export default function WorkManagementPage() {
                 <span>
                   {alertsDispatching
                     ? 'Dispatching...'
-                    : alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail
+                    : alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail && !sendWhatsApp
                     ? 'Google Chat paused for weekend (IST)'
                     : (!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule
                     ? 'Blocked: Off-Schedule (Check Force Override)'
+                    : alertsPreview?.recipient_count === 0
+                    ? 'Dispatch All-Clear Status'
                     : `Dispatch Live Alerts (${alertsPreview?.recipient_count || 0})`}
                 </span>
               </button>
