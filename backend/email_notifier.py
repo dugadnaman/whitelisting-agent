@@ -1138,12 +1138,20 @@ def format_whatsapp_sla_message(
     total_tata = len(tata_tickets)
     total_tickets = total_attributics + total_tata
 
-    stage_headers = {
-        "MORNING": ("🌞 *10:00 AM SLA Kickoff • Daily Workload*", f"Good morning team! We have *{total_tickets}* campaigns scheduled for delivery today."),
-        "MIDDAY": ("🥪 *1:00 PM SLA Checkpoint • Midday Status*", f"Midday status check: *{total_tickets}* campaigns remain pending for delivery today."),
-        "EOD": ("🚨 *4:00 PM Urgent SLA Escalation • Attention Required*", f"CRITICAL ESCALATION: *{total_tickets}* campaigns due today remain incomplete and require immediate attention."),
-    }
-    title, desc = stage_headers.get(stage, (f"🚨 *SLA Alert • {stage}*", f"*{total_tickets}* campaigns due today."))
+    if total_tickets == 0:
+        zero_msgs = {
+            "MORNING": ("🌞 *10:00 AM SLA Kickoff • Daily Workload*", "Good morning team! *0* campaigns scheduled for delivery today. All queues are currently clear! 🎉"),
+            "MIDDAY": ("🥪 *1:00 PM SLA Checkpoint • Midday Status*", "Midday status check: *0* pending campaigns remaining for today. All SLAs are on track! ✅"),
+            "EOD": ("🎉 *4:00 PM SLA Wrap-Up • All Done*", "EOD status: *0* unfinished campaigns! All campaigns due today are completed. Great work team! 🚀"),
+        }
+        title, desc = zero_msgs.get(stage, (f"✅ *SLA Status • {stage}*", "All campaigns due today are completed."))
+    else:
+        stage_headers = {
+            "MORNING": ("🌞 *10:00 AM SLA Kickoff • Daily Workload*", f"Good morning team! We have *{total_tickets}* campaigns scheduled for delivery today."),
+            "MIDDAY": ("🥪 *1:00 PM SLA Checkpoint • Midday Status*", f"Midday status check: *{total_tickets}* campaigns remain pending for delivery today."),
+            "EOD": ("🚨 *4:00 PM Urgent SLA Escalation • Attention Required*", f"CRITICAL ESCALATION: *{total_tickets}* campaigns due today remain incomplete and require immediate attention."),
+        }
+        title, desc = stage_headers.get(stage, (f"🚨 *SLA Alert • {stage}*", f"*{total_tickets}* campaigns due today."))
 
     lines = [
         title,
@@ -1195,8 +1203,8 @@ def send_whatsapp_sla_alert(
         }
 
     url = gateway_url or os.getenv("WHATSAPP_GATEWAY_URL") or "http://127.0.0.1:5005"
-    target_group = group_name or os.getenv("WHATSAPP_SLA_GROUP_NAME") or "Tata Capital Campaigns"
-    target_id = group_id or os.getenv("WHATSAPP_SLA_GROUP_ID")
+    target_group = group_name or os.getenv("WHATSAPP_SLA_GROUP_NAME") or "Internal_TCL<>Att"
+    target_id = group_id or os.getenv("WHATSAPP_SLA_GROUP_ID") or "120363413267146720@g.us"
 
     message_text = format_whatsapp_sla_message(stage, operators, ist_time_str)
 
@@ -1451,6 +1459,9 @@ async def run_scheduler_loop() -> None:
                             stage="MORNING",
                             operator_name="Daily 10:00 AM Scheduler",
                             force=True,
+                            send_whatsapp=True,
+                            whatsapp_group_name="Internal_TCL<>Att",
+                            whatsapp_group_id="120363413267146720@g.us",
                         )
 
                 # Check 1:00 PM slot (13:00 to 13:05 window)
@@ -1464,6 +1475,9 @@ async def run_scheduler_loop() -> None:
                             stage="MIDDAY",
                             operator_name="Daily 1:00 PM Scheduler",
                             force=True,
+                            send_whatsapp=True,
+                            whatsapp_group_name="Internal_TCL<>Att",
+                            whatsapp_group_id="120363413267146720@g.us",
                         )
 
                 # Check 4:00 PM slot (16:00 to 16:05 window)
@@ -1477,6 +1491,9 @@ async def run_scheduler_loop() -> None:
                             stage="EOD",
                             operator_name="Daily 4:00 PM Scheduler",
                             force=True,
+                            send_whatsapp=True,
+                            whatsapp_group_name="Internal_TCL<>Att",
+                            whatsapp_group_id="120363413267146720@g.us",
                         )
         except Exception as exc:
             logger.error("Error in alert scheduler loop: %s", exc)
