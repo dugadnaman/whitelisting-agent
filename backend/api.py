@@ -16,7 +16,7 @@ import tempfile
 import time
 import threading
 import uuid
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
@@ -1186,7 +1186,7 @@ def _inspect_rcs_compliance(item: dict) -> list[dict]:
                 "type": "RCS_TECHNICAL_COMPLIANCE",
                 "severity": "error",
                 "component": component,
-                "issue": f"{component}: {exc}",
+                "issue": str(exc),
                 "recommendation": "Correct this field before submitting to Karix.",
             })
 
@@ -3949,7 +3949,7 @@ def get_jira_issues_endpoint(
         raise HTTPException(status_code=500, detail=f"Jira API error: {exc!s}") from exc
 
 
-_PARSED_BRIEF_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_PARSED_BRIEF_CACHE: dict[str, tuple[float, Any]] = {}
 
 @app.get("/api/jira/brief/{issue_key}")
 def get_jira_brief_endpoint(
@@ -3978,28 +3978,35 @@ def get_jira_brief_endpoint(
         issue_key = clean_key
         issue_data = fetch_jira_issue(issue_key)
         cache_key = f"{issue_key}_{download_creatives}_{issue_data.get('updated', '')}"
-        cached_entry = _PARSED_BRIEF_CACHE.get(cache_key)
+        cached_entry = _PARSED_BRIEF_CACHE.get(cache_key) if issue_data.get("updated") else None
         if cached_entry and (time.time() - cached_entry[0]) < 300:
             parsed = cached_entry[1]
         else:
             parsed = parse_jira_brief(issue_data, download_creatives=download_creatives)
-            _PARSED_BRIEF_CACHE[cache_key] = (time.time(), parsed)
+            if issue_data.get("updated"):
+                _PARSED_BRIEF_CACHE[cache_key] = (time.time(), parsed)
 
-        # Cross-reference parsed WhatsApp templates against live WABA catalog (safe fallback if token expired/missing)
+        # Independent live catalogs must not add their network waits to one another.
         target_client = (account or parsed.account or "tcl_promo").lower().strip()
         _require_jira_accounts(target_client, target_client, current_user)
         live_templates = []
-        try:
-            from submission_client import _match_template, fetch_template_list
-
-            live_templates, _ = fetch_template_list(client=target_client)
-        except Exception as fetch_err:
-            logger.warning(
-                "Could not fetch live WABA templates for cross-referencing on %s: %s",
-                target_client,
-                fetch_err,
-            )
-            live_templates = []
+        rcs_live_names = set()
+        inventory_errors = {}
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            wa_inventory = pool.submit(_fetch_whatsapp_inventory, target_client) if parsed.whatsapp_templates else None
+            rcs_inventory = pool.submit(_fetch_rcs_inventory, target_client) if parsed.rcs_templates else None
+            if wa_inventory:
+                live_templates, error = wa_inventory.result()
+                if error:
+                    inventory_errors["whatsapp"] = error
+            if rcs_inventory:
+                try:
+                    rcs_live_names = {
+                        str(template.get("template_name") or template.get("viTemplate", {}).get("name") or "").strip().lower()
+                        for template in rcs_inventory.result()
+                    }
+                except Exception as exc:
+                    inventory_errors["rcs"] = str(exc)
 
         from submission_client import _match_template
 
@@ -4021,7 +4028,6 @@ def get_jira_brief_endpoint(
                 wa_copy, "whatsapp", target_client,
                 {wa["template_name"].lower()} if matched else set(),
             ))
-        rcs_live_names = _jira_live_names(target_client, "rcs") if parsed.rcs_templates else set()
         parsed_dict = {
             "issue_key": parsed.issue_key,
             "summary": parsed.summary,
@@ -4050,6 +4056,15 @@ def get_jira_brief_endpoint(
                 total_campaigns=getattr(parsed, "channel_counts", {}).get("total", 0),
             ),
         }
+        for channel, error in inventory_errors.items():
+            logger.warning("Jira %s inventory lookup unavailable for %s: %s", channel, target_client, error)
+            for draft in parsed_dict[f"{channel}_templates"]:
+                draft["compliance_warnings"].append({
+                    "type": "LIVE_INVENTORY_UNAVAILABLE", "severity": "warning",
+                    "component": "Live duplicate check",
+                    "issue": "Live inventory is unavailable; duplicate and submission status could not be verified.",
+                    "recommendation": "Refresh the brief once provider inventory is available before whitelisting.",
+                })
 
         return _json_safe({"ok": True, "brief": parsed_dict})
     except HTTPException:

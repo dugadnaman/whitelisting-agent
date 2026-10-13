@@ -263,3 +263,82 @@ def test_attached_spreadsheet_comprehensive_content_mapping(tmp_path: Path):
     assert rcs_draft["card_title"] == "Durga Pooja Special"
     assert rcs_draft["action_label"] == "Check Rates"
     assert rcs_draft["action_url"] == "https://u3.mnge.co/home"
+
+
+def test_jira_duplicate_workbook_bytes_keep_copy_and_embedded_creative(tmp_path, monkeypatch):
+    import shutil
+    from PIL import Image
+    import briefing_parser
+
+    monkeypatch.setattr(briefing_parser, "MEDIA_CACHE_DIR", tmp_path)
+    image_path = tmp_path / "landscape.png"
+    Image.new("RGB", (1280, 720), "teal").save(image_path)
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "WhatsApp"
+    sheet["A1"] = "LAS_Whitelisting"
+    body = "Dear Customer, your Tata Capital loan offer of Rs. 250000 is ready. Review the details and apply today."
+    sheet["A2"] = body
+    sheet["B2"] = "Apply Now https://example.com/offer"
+    sheet.add_image(openpyxl.drawing.image.Image(image_path), "C2")
+    original = tmp_path / "jira_38175_PL_Bulls_Eye.xlsx"
+    workbook.save(original)
+    duplicate = tmp_path / "jira_38243_PL_Bulls_Eye_GUID.xlsx"
+    shutil.copyfile(original, duplicate)
+    sheet["A2"] = body.replace("250000", "500000")
+    revised = tmp_path / "jira_38244_PL_Bulls_Eye_revised.xlsx"
+    workbook.save(revised)
+    issue = {
+        "key": "TCN-557", "summary": "PQPL Bulls Eye", "description_text": "",
+        "attachments": [
+            {"id": str(index), "filename": path.name, "local_path": str(path)}
+            for index, path in enumerate((original, duplicate, revised), 1)
+        ],
+    }
+    parsed = parse_jira_brief(issue)
+    assert len(parsed.whatsapp_templates) == 2
+    assert {draft["body"] for draft in parsed.whatsapp_templates} == {body, body.replace("250000", "500000")}
+    for draft in parsed.whatsapp_templates:
+        assert draft["header_text"] is None  # internal workflow name is never customer copy
+        assert draft["button_text"] == "Apply Now"
+        assert draft["button_url"] == "https://example.com/offer"
+        assert draft["header_type"] == "IMAGE"
+        assert Path(draft["media_file"]).read_bytes() == image_path.read_bytes()
+    assert len([a for a in parsed.attachments_mapped if a["target_channel"] == "SPREADSHEET_BRIEF"]) == 3
+
+
+def test_generated_rcs_names_fit_provider_limit_without_renaming_explicit_names(tmp_path):
+    from api import _inspect_rcs_compliance
+    from rcs_client import normalize_rcs_template_name
+
+    workbook = openpyxl.Workbook()
+    standalone = workbook.active
+    standalone.title = "RCS"
+    standalone.append(["Channel", "Content"])
+    for number in range(1, 13):
+        standalone.append(["RCS", f"Dear Customer, your Tata Capital loan offer number {number} is ready. Apply today."])
+    carousel = workbook.create_sheet("RCS Carousel")
+    carousel.append(["Channel", "Content"])
+    for number in range(1, 3):
+        carousel.append(["RCS", f"Dear Customer, compare Tata Capital loan option {number} and apply for your offer today."])
+    explicit = workbook.create_sheet("Named RCS")
+    explicit.append(["Template Name", "Channel", "Content"])
+    explicit_name = "customer_chosen_name_that_exceeds_25"
+    explicit.append([explicit_name, "RCS", "Dear Customer, your Tata Capital loan is ready for review."])
+    path = tmp_path / "offers.xlsx"
+    workbook.save(path)
+    brief = parse_jira_brief({
+        "key": "TCN-557", "summary": "PQPL Bulls Eye Personal Loan Campaign",
+        "description_text": "",
+        "attachments": [{"id": "1", "filename": path.name, "local_path": str(path)}],
+    })
+
+    generated = [draft for draft in brief.rcs_templates if draft["template_name"] != explicit_name]
+    assert len(generated) == 13
+    names = [normalize_rcs_template_name(draft["template_name"]) for draft in generated]
+    assert len(set(names)) == len(names)
+    assert all(not any(w["component"] == "Template name" for w in _inspect_rcs_compliance(draft)) for draft in generated)
+    carousel_draft = next(draft for draft in generated if draft["template_type"] == "carousel")
+    assert len(carousel_draft["carousel_cards"]) == 2
+    chosen = next(draft for draft in brief.rcs_templates if draft["template_name"] == explicit_name)
+    assert any(w["component"] == "Template name" for w in _inspect_rcs_compliance(chosen))

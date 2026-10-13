@@ -11,6 +11,7 @@ Normalizes placeholders ({{1}}, {{2}}), pairs creative attachments, and maps sub
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import urllib.parse
@@ -771,6 +772,7 @@ def decompose_content(
     explicit_btn_url: str | None = None,
     neighbor_cta: str | None = None,
     summary: str = "",
+    use_ai: bool = True,
 ) -> dict[str, Any]:
     """
     Decompose any raw template content into structured, ready-to-whitelist components.
@@ -853,7 +855,7 @@ def decompose_content(
     lang = detect_language(clean_body)
     cat = detect_category(summary or header_text or "", clean_body)
 
-    # Supreme Gemini Intelligence & Semantic Adjudication on Identified Components
+    # Semantic enrichment is optional; brief loading keeps all local parsing and validation.
     is_complete = True
     completeness_score = 1.0
     missing_components: list[str] = []
@@ -870,7 +872,7 @@ def decompose_content(
             candidate_cta_text=cta_btn,
             candidate_cta_url=cta_url,
             timeout=2,
-        )
+        ) if use_ai else {}
         if ai_res.get("category"):
             cat = ai_res["category"]
         if ai_res.get("language") and lang == "en":
@@ -903,8 +905,10 @@ def decompose_content(
 def _clean_template_name(base: str, channel: str, idx: int) -> str:
     clean = re.sub(r"[^a-zA-Z0-9_]", "_", base.lower()).strip("_")
     clean = re.sub(r"_+", "_", clean)
-    short = clean[:26].strip("_")
-    return f"{short}_{channel.lower()}_{idx}"
+    suffix = f"_{channel.lower()}_{idx}"
+    maximum = 25 - len(suffix) if channel.lower().startswith("rcs") else 26
+    short = clean[:maximum].strip("_")
+    return f"{short}{suffix}"
 
 
 def derive_clean_card_title(body_text: str, account: str | None = None) -> str:
@@ -1630,7 +1634,10 @@ def _identify_sheet_columns(header_row: list[str]) -> dict[str, Any]:
 
     mapping["content_cols"] = content_cols
     return mapping
-def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str, sheet_images: list[str] | None = None) -> list[dict[str, Any]]:
+def _parse_raw_sheet_rows(
+    raw_rows: list[list[str]], sname: str, sheet_images: list[str] | None = None,
+    use_ai: bool = False,
+) -> list[dict[str, Any]]:
     """
     Universally parse template content from 2D raw string rows of any sheet.
     Supports:
@@ -1881,6 +1888,7 @@ def _parse_raw_sheet_rows(raw_rows: list[list[str]], sname: str, sheet_images: l
                         copy_text,
                         explicit_header=neighbor_header,
                         neighbor_cta=neighbor_cta,
+                        use_ai=use_ai,
                     )
 
                     row_chan = _normalize_channel_tag(row[0]) if (row and row[0]) else None
@@ -2074,7 +2082,7 @@ def _parse_dlt_sms_sheet(raw_rows: list[list[str]], sname: str, filename: str = 
     return items
 
 
-def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, Any]]:
+def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False) -> list[dict[str, Any]]:
     """
     Extract multi-channel customer communications (WhatsApp, SMS, Email) from Word documents (.docx).
     Handles client communication briefs segmented by customer tiers (e.g. '1. Customers at or below 50% LTV...').
@@ -2167,7 +2175,7 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
                 if is_new_wa and current_wa:
                     combined = "\n".join(current_wa).strip()
                     if is_valid_template_copy(combined):
-                        decomp = decompose_content(combined)
+                        decomp = decompose_content(combined, use_ai=use_ai)
                         items.append({
                             "channel": "WA",
                             "header": decomp["header_text"],
@@ -2183,7 +2191,7 @@ def extract_templates_from_docx_file(docx_path: str | Path) -> list[dict[str, An
             if current_wa:
                 combined = "\n".join(current_wa).strip()
                 if is_valid_template_copy(combined):
-                    decomp = decompose_content(combined)
+                    decomp = decompose_content(combined, use_ai=use_ai)
                     items.append({
                         "channel": "WA",
                         "header": decomp["header_text"],
@@ -2256,6 +2264,7 @@ def extract_templates_from_excel_file(
     filepath: Path,
     target_month: str | None = None,
     sheet_images_map: dict[str, list[str]] | None = None,
+    use_ai: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Inspect and extract template items from any client spreadsheet (.xlsx, .csv, .xls) across all sheets.
@@ -2280,7 +2289,7 @@ def extract_templates_from_excel_file(
         if _is_dlt_sms_sheet(raw_rows, filename=filepath.name):
             sheet_items = _parse_dlt_sms_sheet(raw_rows, sname, filename=filepath.name)
         else:
-            sheet_items = _parse_raw_sheet_rows(raw_rows, sname, sheet_images=sheet_imgs)
+            sheet_items = _parse_raw_sheet_rows(raw_rows, sname, sheet_images=sheet_imgs, use_ai=use_ai)
         is_carousel_sheet = "carousal" in sname.lower() or "carousel" in sname.lower()
         if is_carousel_sheet and len(sheet_items) >= 2:
             c_cards = []
@@ -2713,13 +2722,16 @@ def parse_ticket_intent(desc: str) -> dict[str, Any]:
     return info
 
 
-def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True) -> ParsedJiraBrief:
+def parse_jira_brief(
+    issue_data: dict[str, Any], download_creatives: bool = True, use_ai: bool = False,
+) -> ParsedJiraBrief:
     """
     Parse a complete Jira ticket dictionary:
     - Extracts from Excel attachments if present (.xlsx, .csv).
     - Extracts multi-channel copy from Word attachments (.docx).
     - Falls back to Jira ADF tables / text.
     - Classifies email mailers (.zip + .docx).
+    Remote semantic enrichment is opt-in, not one synchronous network call per copy.
     """
     key = str(issue_data.get("key", "TCN_001"))
     summary = str(issue_data.get("summary", ""))
@@ -2753,6 +2765,8 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     docx_attachment_paths: list[Path] = []
     zip_creative_paths: list[str] = []
 
+    seen_copy_files: set[bytes] = set()
+    excel_images: dict[Path, dict[str, list[str]]] = {}
     for att in raw_attachments:
         fn = att.get("filename", "")
         att_id = att.get("id")
@@ -2760,51 +2774,40 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         local_path: str | None = None
         if att.get("local_path") and Path(att["local_path"]).exists():
             local_path = str(att["local_path"])
-            p = Path(local_path)
-            if fn.lower().endswith((".xlsx", ".xls", ".csv")):
-                if not any(p.name == ep.name or (p.stat().st_size == ep.stat().st_size and p.stem.split("(")[0].strip() == ep.stem.split("(")[0].strip()) for ep in excel_attachment_paths):
-                    excel_attachment_paths.append(p)
-                if fn.lower().endswith(".xlsx"):
-                    xlsx_imgs = _extract_images_from_xlsx(p)
-                    for s_name, img_paths in xlsx_imgs.items():
-                        zip_creative_paths.extend(img_paths)
-                        for ip in img_paths:
-                            mapped_attachments.append({
-                                "id": Path(ip).stem,
-                                "filename": Path(ip).name,
-                                "local_path": ip,
-                                "mime": "image/jpeg",
-                                "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
-                            })
-            elif fn.lower().endswith((".docx", ".doc")):
-                docx_attachment_paths.append(p)
-            elif fn.lower().endswith(".zip"):
-                zip_creative_paths.extend(_extract_images_from_zip(p))
         elif download_creatives and att_id:
             try:
-                p = download_jira_attachment(att_id, fn)
-                local_path = str(p)
-                if fn.lower().endswith((".xlsx", ".xls", ".csv")):
-                    if not any(p.name == ep.name or (p.stat().st_size == ep.stat().st_size and p.stem.split("(")[0].strip() == ep.stem.split("(")[0].strip()) for ep in excel_attachment_paths):
+                local_path = str(download_jira_attachment(att_id, fn))
+            except Exception as exc:
+                raise RuntimeError(f"Could not download attachment {att_id} ({fn}) for {key}: {exc}") from exc
+
+        if local_path:
+            p = Path(local_path)
+            if fn.lower().endswith((".xlsx", ".xls", ".csv", ".docx", ".doc")):
+                # Jira reuploads may have unrelated/sanitized names; only identical bytes are duplicates.
+                with p.open("rb") as copy_file:
+                    digest = hashlib.file_digest(copy_file, "sha256").digest()
+                duplicate_copy = digest in seen_copy_files
+                seen_copy_files.add(digest)
+                if not duplicate_copy:
+                    if fn.lower().endswith((".xlsx", ".xls", ".csv")):
                         excel_attachment_paths.append(p)
-                    if fn.lower().endswith(".xlsx"):
-                        xlsx_imgs = _extract_images_from_xlsx(p)
-                        for s_name, img_paths in xlsx_imgs.items():
-                            zip_creative_paths.extend(img_paths)
-                            for ip in img_paths:
-                                mapped_attachments.append({
-                                    "id": Path(ip).stem,
-                                    "filename": Path(ip).name,
-                                    "local_path": ip,
-                                    "mime": "image/jpeg",
-                                    "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
-                                })
-                elif fn.lower().endswith((".docx", ".doc")):
-                    docx_attachment_paths.append(p)
-                elif fn.lower().endswith(".zip"):
-                    zip_creative_paths.extend(_extract_images_from_zip(p))
-            except Exception as e:
-                logger.warning("Could not download attachment %s for %s: %s", att_id, key, e)
+                        if fn.lower().endswith(".xlsx"):
+                            xlsx_imgs = _extract_images_from_xlsx(p)
+                            excel_images[p] = xlsx_imgs
+                            for s_name, img_paths in xlsx_imgs.items():
+                                zip_creative_paths.extend(img_paths)
+                                for ip in img_paths:
+                                    mapped_attachments.append({
+                                        "id": Path(ip).stem,
+                                        "filename": Path(ip).name,
+                                        "local_path": ip,
+                                        "mime": "image/jpeg",
+                                        "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
+                                    })
+                    else:
+                        docx_attachment_paths.append(p)
+            elif fn.lower().endswith(".zip"):
+                zip_creative_paths.extend(_extract_images_from_zip(p))
         fn_lower = fn.lower()
         if fn_lower.endswith((".xlsx", ".xls", ".csv")):
             target_chan = "SPREADSHEET_BRIEF"
@@ -2918,12 +2921,15 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
     extracted_items: list[dict[str, str]] = []
 
     for docx_path in docx_attachment_paths:
-        docx_items = extract_templates_from_docx_file(docx_path)
+        docx_items = extract_templates_from_docx_file(docx_path, use_ai=use_ai)
         if docx_items:
             extracted_items.extend(docx_items)
 
     for excel_path in excel_attachment_paths:
-        items = extract_templates_from_excel_file(excel_path, target_month=target_month)
+        items = extract_templates_from_excel_file(
+            excel_path, target_month=target_month, sheet_images_map=excel_images.get(excel_path),
+            use_ai=use_ai,
+        )
         if items:
             extracted_items.extend(items)
     adf_items = _parse_tables_from_adf(desc_raw)
@@ -3075,7 +3081,7 @@ def parse_jira_brief(issue_data: dict[str, Any], download_creatives: bool = True
         try:
             from jira_extractor import extract_template_from_jira_text
 
-            semantic_res = extract_template_from_jira_text(desc_text, summary=summary, allow_ai=True)
+            semantic_res = extract_template_from_jira_text(desc_text, summary=summary, allow_ai=use_ai)
             t_comp = semantic_res.template
             if t_comp.body_text and is_valid_template_copy(t_comp.body_text):
                 chan_decision = semantic_res.routing.target_channel

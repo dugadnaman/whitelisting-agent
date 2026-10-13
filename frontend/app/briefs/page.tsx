@@ -32,6 +32,13 @@ import {
 import { formatError, formatDate } from '@/lib/format';
 import { JiraCreativeImage, JiraCreativeDownload } from '@/components/jira-creative';
 import { carouselCardWarnings, carouselSelectionError, selectedRcsDraft, type SelectableRcsDraft } from '@/lib/jira-carousel';
+import { newRcsTemplateName } from '@/lib/jira-template-name';
+
+const UNCHECKED_WARNINGS: DraftWarnings = {
+  aspect_ratio_warnings: [],
+  compliance_warnings: [],
+  grammar_warnings: [],
+};
 
 function isAspectBlocked(draft: DraftWarnings) {
   return Boolean(draft.aspect_ratio_blocked || draft.aspect_ratio_warnings?.some((warning) => warning.blocked));
@@ -196,9 +203,9 @@ export default function JiraBriefsPage() {
   previewSignatureRef.current = previewSignature;
   const validationReady = validation.signature === previewSignature && validation.status === 'ready'
     && !loadingBrief && selectedKey === brief?.issue_key && !Object.values(uploadingCreative).some(Boolean);
-  const getWaWarnings = (index: number) => (validationReady ? validation.data?.whatsapp_templates[index] : undefined) ?? waTemplates[index];
+  const getWaWarnings = (index: number): DraftWarnings => (validationReady ? validation.data?.whatsapp_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
   const validationError = validation.signature === previewSignature && validation.status === 'error' ? validation.error : undefined;
-  const getRcsWarnings = (index: number) => (validationReady ? validation.data?.rcs_templates[index] : undefined) ?? rcsTemplates[index];
+  const getRcsWarnings = (index: number): DraftWarnings => (validationReady ? validation.data?.rcs_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
   const isRcsEligible = (index: number) => !carouselSelectionError(effectiveRcsTemplates[index]) && !isAspectBlocked(getRcsWarnings(index));
   const creativeSource = (path?: string | null, filename?: string | null, attachmentId?: string | null): JiraCreativeSource => ({
     path,
@@ -716,12 +723,17 @@ export default function JiraBriefsPage() {
 
   const addTemplate = (channel: 'whatsapp' | 'rcs' | 'sms') => {
     if (!brief) return;
-    const suffix = channel === 'whatsapp' ? 'wa' : channel;
-    const prefix = `${brief.issue_key.toLowerCase().replace(/[^a-z0-9_]/g, '_')}_${suffix}_manual`;
-    const names = new Set([...waTemplates, ...rcsTemplates, ...smsTemplates].map((template) => template.template_name));
-    let sequence = 1;
-    while (names.has(`${prefix}_${sequence}`)) sequence += 1;
-    const templateName = `${prefix}_${sequence}`;
+    const names = new Set([...waTemplates, ...rcsTemplates, ...smsTemplates].map((template) => template.template_name.toLowerCase()));
+    let templateName: string;
+    if (channel === 'rcs') {
+      templateName = newRcsTemplateName(brief.issue_key, names, 'rcs_manual');
+    } else {
+      const suffix = channel === 'whatsapp' ? 'wa' : channel;
+      const prefix = `${brief.issue_key.toLowerCase().replace(/[^a-z0-9_]/g, '_')}_${suffix}_manual`;
+      let sequence = 1;
+      while (names.has(`${prefix}_${sequence}`)) sequence += 1;
+      templateName = `${prefix}_${sequence}`;
+    }
     let cardId: string;
 
     if (channel === 'whatsapp') {
@@ -889,7 +901,10 @@ export default function JiraBriefsPage() {
 
       if (toChannel === 'rcs') {
         const newRcs: JiraRcsDraft = {
-          template_name: wa.template_name.replace(/_wa(?:_[a-z]{2})?_\d+$/, '_rcs_1').replace(/_wa$/, '_rcs') || `${wa.template_name}_rcs`,
+          template_name: newRcsTemplateName(
+            wa.template_name.replace(/_wa(?:_[a-z]{2})?_\d+$|_wa$/, ''),
+            new Set(rcsTemplates.map((draft) => draft.template_name.toLowerCase())),
+          ),
           card_title: wa.header_text || wa.body.split('\n')[0].slice(0, 32) || 'Special Offer',
           body: wa.body,
           media_file: wa.media_file,
@@ -999,7 +1014,10 @@ export default function JiraBriefsPage() {
         setActiveTab('whatsapp');
       } else if (toChannel === 'rcs') {
         const newRcs: JiraRcsDraft = {
-          template_name: sms.template_name.replace(/_sms_\d+$/, '_rcs_1').replace(/_sms$/, '_rcs') || `${sms.template_name}_rcs`,
+          template_name: newRcsTemplateName(
+            sms.template_name.replace(/_sms_\d+$|_sms$/, ''),
+            new Set(rcsTemplates.map((draft) => draft.template_name.toLowerCase())),
+          ),
           card_title: sms.text.split('\n')[0].slice(0, 32) || 'Special Offer',
           body: sms.text,
           action_type: 'URL',
@@ -1695,7 +1713,7 @@ export default function JiraBriefsPage() {
 
                   {(waTemplates.length > 0 || rcsTemplates.length > 0) && !validationReady && (
                     <div role={validationError ? 'alert' : 'status'} className={`p-3 rounded-lg border text-xs ${validationError ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
-                      <p>{validationError ? `Creative and copy validation failed: ${validationError}` : 'Checking current creative and copy. Whitelisting is paused until validation completes; any displayed warnings are from the previous inspection.'}</p>
+                      <p>{validationError ? `Creative and copy validation failed: ${validationError}` : 'Checking current creative and copy. Whitelisting is paused until validation completes.'}</p>
                       {validationError && (
                         <button type="button" className="mt-1 font-semibold underline" onClick={() => {
                           setValidation({ signature: previewSignature, status: 'pending' });

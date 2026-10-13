@@ -276,3 +276,89 @@ def test_jira_validation_comment_does_not_claim_success_after_provider_failure(p
         })
     assert failed.status_code == 502
     assert writer.call_count == 1
+
+
+def test_jira_brief_loads_catalogs_concurrently_and_preserves_cached_copy(preview_case):
+    import threading
+    from briefing_parser import RcsTemplateDraft
+
+    client, brief, creative, _ = preview_case
+    brief.rcs_templates = [asdict(RcsTemplateDraft(
+        template_name="jira_rcs_cached", card_title="Your offer", body="Review your loan offer.",
+        media_file=str(creative), media_filename=creative.name,
+    ))]
+    rcs_started = threading.Event()
+    simultaneous = []
+
+    def wa_inventory(client):
+        simultaneous.append(rcs_started.wait(2))
+        return [], "Provider inventory unavailable"
+
+    def rcs_inventory(client):
+        rcs_started.set()
+        return []
+
+    with (
+        patch("api._PARSED_BRIEF_CACHE", {}),
+        patch("jira_client.fetch_jira_issue", return_value={"key": brief.issue_key, "updated": "cache-test-revision"}),
+        patch("briefing_parser.parse_jira_brief", return_value=brief) as parser,
+        patch("submission_client.fetch_template_list", side_effect=wa_inventory),
+        patch("api._fetch_rcs_inventory", side_effect=rcs_inventory),
+    ):
+        first = client.get(f"/api/jira/brief/{brief.issue_key}")
+        rcs_started.clear()
+        second = client.get(f"/api/jira/brief/{brief.issue_key}")
+    assert simultaneous == [True, True]
+    assert parser.call_count == 1
+    assert first.status_code == second.status_code == 200
+    for response in (first, second):
+        loaded = response.json()["brief"]
+        assert loaded["whatsapp_templates"][0]["body"] == brief.whatsapp_templates[0]["body"]
+        assert loaded["rcs_templates"][0]["body"] == "Review your loan offer."
+        for channel in ("whatsapp", "rcs"):
+            assert loaded[f"{channel}_templates"][0]["aspect_ratio_blocked"] is True
+        assert any(
+            warning["type"] == "LIVE_INVENTORY_UNAVAILABLE"
+            for warning in loaded["whatsapp_templates"][0]["compliance_warnings"]
+        )
+    assert "compliance_warnings" not in brief.whatsapp_templates[0]
+
+
+def test_jira_rcs_preview_revalidates_edited_name_with_shared_karix_validator(preview_case):
+    from briefing_parser import RcsTemplateDraft
+
+    client, _, _, _ = preview_case
+    draft = asdict(RcsTemplateDraft(
+        template_name="x" * 26, card_title="", body="Your loan application is ready.",
+        template_type="text",
+    ))
+    with patch("api._fetch_rcs_inventory", return_value=[]):
+        initial = client.post("/api/jira/preview", json={
+            "account": "tcl_promo", "whatsapp_templates": [], "rcs_templates": [draft],
+        })
+        assert initial.status_code == 200
+        initial_draft = initial.json()["rcs_templates"][0]
+        assert any(w["component"] == "Template name" for w in initial_draft["compliance_warnings"])
+        initial_draft["template_name"] = "t551_01_13oct26"
+        corrected = client.post("/api/jira/preview", json={
+            "account": "tcl_promo", "whatsapp_templates": [], "rcs_templates": [initial_draft],
+        })
+    assert corrected.status_code == 200
+    assert not any(w["severity"] == "error" for w in corrected.json()["rcs_templates"][0]["compliance_warnings"])
+
+
+def test_jira_attachment_download_failure_is_explicit_not_a_blank_brief(preview_case):
+    client, _, _, _ = preview_case
+    with (
+        patch("jira_client.fetch_jira_issue", return_value={
+            "key": "TCN-557", "summary": "PQPL Bulls Eye", "description_text": "",
+            "attachments": [{"id": "38175", "filename": "PL Bulls Eye.xlsx"}],
+        }),
+        patch("briefing_parser.download_jira_attachment", side_effect=TimeoutError("download timed out")),
+        patch("submission_client.fetch_template_list") as inventory,
+    ):
+        response = client.get("/api/jira/brief/TCN-557")
+    assert response.status_code == 500
+    assert "38175" in response.json()["detail"]
+    assert "download timed out" in response.json()["detail"]
+    inventory.assert_not_called()

@@ -20,7 +20,7 @@ export function carouselSelectionError(draft: JiraRcsDraft): string | null {
     : null;
 }
 
-export function carouselCardWarnings(draft: SelectableRcsDraft, warnings: JiraRcsDraft, index: number): DraftWarnings {
+export function carouselCardWarnings(draft: SelectableRcsDraft, warnings: DraftWarnings, index: number): DraftWarnings {
   if (draft.excluded_card_indices?.includes(index)) return {};
   const selectedIndex = (draft.carousel_cards || []).slice(0, index)
     .filter((_, cardIndex) => !draft.excluded_card_indices?.includes(cardIndex)).length;
