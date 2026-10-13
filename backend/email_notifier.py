@@ -530,6 +530,9 @@ def preview_due_today_alerts(
         "total_due_today_incomplete": len(tickets),
         "recipient_count": len(drafts),
         "drafts": [d.to_dict() for d in drafts],
+        "whatsapp_message": format_whatsapp_sla_message(resolved_stage, operators, ist_now.strftime("%Y-%m-%d %I:%M %p")),
+        "whatsapp_group_name": os.getenv("WHATSAPP_SLA_GROUP_NAME") or "Tata Capital Campaigns",
+        "whatsapp_gateway_configured": bool(os.getenv("WHATSAPP_GATEWAY_URL") or os.getenv("WHATSAPP_SLA_GROUP_NAME")),
     }
 
 
@@ -1112,6 +1115,144 @@ def send_google_chat_sla_alert(
         }
 
 
+def format_whatsapp_sla_message(
+    stage: str,
+    operators: list[OperatorTicketSummary],
+    ist_time_str: str,
+) -> str:
+    """Format an SLA alert message specifically optimized for WhatsApp group broadcast."""
+    import collections
+
+    attributics_by_op: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    tata_tickets: list[tuple[dict[str, Any], dict[str, str], str]] = []
+
+    for op in operators:
+        for t in op.tickets:
+            cls = classify_ticket_ownership(t)
+            if cls["ownership"] == "Tata Capital":
+                tata_tickets.append((t, cls, op.operator_name))
+            else:
+                attributics_by_op[op.operator_name].append(t)
+
+    total_attributics = sum(len(tkts) for tkts in attributics_by_op.values())
+    total_tata = len(tata_tickets)
+    total_tickets = total_attributics + total_tata
+
+    stage_headers = {
+        "MORNING": ("🌞 *10:00 AM SLA Kickoff • Daily Workload*", f"Good morning team! We have *{total_tickets}* campaigns scheduled for delivery today."),
+        "MIDDAY": ("🥪 *1:00 PM SLA Checkpoint • Midday Status*", f"Midday status check: *{total_tickets}* campaigns remain pending for delivery today."),
+        "EOD": ("🚨 *4:00 PM Urgent SLA Escalation • Attention Required*", f"CRITICAL ESCALATION: *{total_tickets}* campaigns due today remain incomplete and require immediate attention."),
+    }
+    title, desc = stage_headers.get(stage, (f"🚨 *SLA Alert • {stage}*", f"*{total_tickets}* campaigns due today."))
+
+    lines = [
+        title,
+        f"⏰ *Time:* {ist_time_str} IST",
+        "",
+        desc,
+    ]
+
+    if attributics_by_op:
+        lines.append("")
+        lines.append(f"👥 *Attributics Action Required ({total_attributics} pending)*:")
+        for op_name, op_tkts in attributics_by_op.items():
+            tkt_strs = []
+            for t in op_tkts:
+                c = classify_ticket_ownership(t)
+                st = c["short_reason"]
+                tkt_strs.append(f"`{t.get('key')}` [{st}]")
+            lines.append(f"• *{op_name}* ({len(op_tkts)}): {', '.join(tkt_strs)}")
+
+    if tata_tickets:
+        lines.append("")
+        lines.append(f"🏢 *Client Dependencies ({total_tata} waiting on Tata)*:")
+        for t, cls, op_name in tata_tickets:
+            lines.append(f"• `{t.get('key')}`: {cls['short_reason']} (Assigned: {op_name})")
+
+    lines.append("")
+    lines.append("🔗 *Dashboard:* https://whitelisting-agent.onrender.com/work-management")
+    return "\n".join(lines)
+
+
+def send_whatsapp_sla_alert(
+    stage: str,
+    operators: list[OperatorTicketSummary],
+    ist_time_str: str,
+    gateway_url: str | None = None,
+    group_name: str | None = None,
+    group_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Send formatted SLA alert directly to an existing WhatsApp group via the self-hosted gateway.
+    100% free of cost, no per-message Meta fees.
+    """
+    if get_current_ist_time().weekday() >= 5:
+        return {
+            "delivered": False,
+            "skipped": True,
+            "channel": "WhatsApp",
+            "message": "WhatsApp SLA alerts are paused on Saturdays and Sundays (IST).",
+        }
+
+    url = gateway_url or os.getenv("WHATSAPP_GATEWAY_URL") or "http://127.0.0.1:5005"
+    target_group = group_name or os.getenv("WHATSAPP_SLA_GROUP_NAME") or "Tata Capital Campaigns"
+    target_id = group_id or os.getenv("WHATSAPP_SLA_GROUP_ID")
+
+    message_text = format_whatsapp_sla_message(stage, operators, ist_time_str)
+
+    # In pytest without explicit URL, simulate
+    if os.environ.get("PYTEST_CURRENT_TEST") and not gateway_url:
+        return {
+            "delivered": True,
+            "simulated": True,
+            "channel": "WhatsApp",
+            "message": "WhatsApp simulated in test environment.",
+            "recipient": target_id or target_group,
+        }
+
+    try:
+        import requests
+
+        payload = {
+            "message": message_text,
+        }
+        if target_id:
+            payload["group_id"] = target_id
+        else:
+            payload["group"] = target_group
+
+        endpoint = f"{url.rstrip('/')}/send-message"
+        resp = requests.post(endpoint, json=payload, timeout=15)
+        if resp.ok:
+            data = resp.json()
+            logger.info("Successfully sent WhatsApp SLA alert to %s for %s", target_id or target_group, stage)
+            return {
+                "delivered": True,
+                "simulated": False,
+                "channel": "WhatsApp",
+                "recipient": target_id or target_group,
+                "message": f"Alert posted to WhatsApp group '{target_id or target_group}'.",
+                "message_id": data.get("message_id"),
+            }
+        err_msg = resp.text[:200]
+        logger.error("WhatsApp gateway error: HTTP %s: %s", resp.status_code, err_msg)
+        return {
+            "delivered": False,
+            "simulated": False,
+            "channel": "WhatsApp",
+            "error": f"HTTP {resp.status_code}: {err_msg}",
+            "message": f"WhatsApp gateway returned status {resp.status_code}",
+        }
+    except Exception as exc:
+        logger.error("Failed to post WhatsApp SLA alert: %s", exc)
+        return {
+            "delivered": False,
+            "simulated": False,
+            "channel": "WhatsApp",
+            "error": str(exc),
+            "message": f"WhatsApp gateway unreachable at {url}: {exc}",
+        }
+
 def dispatch_due_today_alerts(
     project: str = "ALL",
     stage: str = "AUTO",
@@ -1119,7 +1260,11 @@ def dispatch_due_today_alerts(
     operator_name: str = "Automated Dispatcher",
     send_google_chat: bool = True,
     send_email: bool = True,
+    send_whatsapp: bool = True,
     google_chat_webhook_url: str | None = None,
+    whatsapp_gateway_url: str | None = None,
+    whatsapp_group_name: str | None = None,
+    whatsapp_group_id: str | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
     """
@@ -1183,8 +1328,34 @@ def dispatch_due_today_alerts(
             "channel": "Google Chat",
             "message": "No operator-owned pending campaigns due today.",
         }
+    # 2. WhatsApp Group Broadcast (strictly simulated when dry_run=True)
+    whatsapp_res: dict[str, Any] = {}
+    if dry_run and send_whatsapp:
+        whatsapp_res = {
+            "delivered": True,
+            "simulated": True,
+            "channel": "WhatsApp",
+            "message": "Dry run preview mode — no real WhatsApp message dispatched.",
+            "recipient": whatsapp_group_name or os.getenv("WHATSAPP_SLA_GROUP_NAME") or "Tata Capital Campaigns",
+        }
+    elif send_whatsapp and operators:
+        whatsapp_res = send_whatsapp_sla_alert(
+            resolved_stage,
+            operators,
+            preview["ist_time"],
+            gateway_url=whatsapp_gateway_url,
+            group_name=whatsapp_group_name,
+            group_id=whatsapp_group_id,
+        )
+    elif send_whatsapp:
+        whatsapp_res = {
+            "delivered": False,
+            "skipped": True,
+            "channel": "WhatsApp",
+            "message": "No operator-owned pending campaigns due today.",
+        }
 
-    # 2. Direct Email Dispatch
+    # 3. Direct Email Dispatch
     results: list[dict[str, Any]] = []
     delivered_count = 0
     failed_count = 0
@@ -1226,6 +1397,7 @@ def dispatch_due_today_alerts(
                 "simulated_count": simulated_count,
                 "failed_count": failed_count,
                 "google_chat_delivered": google_chat_res.get("delivered", False),
+                "whatsapp_delivered": whatsapp_res.get("delivered", False),
                 "recipients": [d["recipient_email"] for d in draft_dicts],
                 "operator_name": operator_name,
                 "dry_run": dry_run,
@@ -1244,6 +1416,7 @@ def dispatch_due_today_alerts(
         "simulated_count": simulated_count,
         "failed_count": failed_count,
         "google_chat_result": google_chat_res,
+        "whatsapp_result": whatsapp_res,
         "dry_run": dry_run,
         "dispatched_by": operator_name,
         "results": results,

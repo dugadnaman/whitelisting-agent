@@ -287,6 +287,8 @@ export function getAuthToken(): string | null {
 export function setAuthToken(token: string): void {
   if (typeof window !== "undefined") {
     localStorage.setItem("karix_jwt_token", token);
+    profileRequest = null;
+    prefetchedOpsDashboard = null;
   }
 }
 
@@ -294,6 +296,8 @@ export function clearAuthToken(): void {
   if (typeof window !== "undefined") {
     localStorage.removeItem("karix_jwt_token");
     localStorage.removeItem("karix_user_profile");
+    profileRequest = null;
+    prefetchedOpsDashboard = null;
   }
 }
 
@@ -898,12 +902,25 @@ export async function approveAccessRequest(userId: string): Promise<AuthUser> {
 
 
 
+let profileRequest: { token: string | null; promise: Promise<AuthUser> } | null = null;
+
 export async function fetchMe(): Promise<AuthUser> {
   const token = getAuthToken();
-  const res = await fetchWithRetry(getApiUrl("/api/auth/me"));
-  if ((res.status === 401 || res.status === 403) && getAuthToken() === token) clearAuthToken();
-  if (!res.ok) throw new Error(await getErrorMessage(res));
-  return res.json();
+  if (profileRequest?.token === token) return profileRequest.promise;
+  const promise = (async () => {
+    const res = await fetchWithRetry(getApiUrl("/api/auth/me"));
+    if ((res.status === 401 || res.status === 403) && getAuthToken() === token) clearAuthToken();
+    if (!res.ok) throw new Error(await getErrorMessage(res));
+    const profile: AuthUser = await res.json();
+    if (getAuthToken() !== token) throw new Error("Your session changed. Please sign in again.");
+    return profile;
+  })();
+  profileRequest = { token, promise };
+  try {
+    return await promise;
+  } finally {
+    if (profileRequest?.promise === promise) profileRequest = null;
+  }
 }
 
 export async function fetchTeam(tenantId?: string): Promise<AuthUser[]> {
@@ -1601,7 +1618,36 @@ export async function syncKarixRcsToMoEngage(account: string = "tata"): Promise<
   return res.json();
 }
 
+let prefetchedOpsDashboard: { token: string; promise: Promise<unknown>; expiresAt: number } | null = null;
+
+export function prefetchMoEngageOpsDashboard(): void {
+  const token = getAuthToken();
+  if (!token || (prefetchedOpsDashboard?.token === token && prefetchedOpsDashboard.expiresAt > Date.now())) return;
+  const promise = fetchMoEngageOpsDashboard();
+  prefetchedOpsDashboard = { token, promise, expiresAt: Infinity };
+  // One-shot startup handoff, not a persistent dashboard cache.
+  void promise.then(() => {
+    if (prefetchedOpsDashboard?.promise === promise) prefetchedOpsDashboard.expiresAt = Date.now() + 5000;
+  }, () => {
+    if (prefetchedOpsDashboard?.promise === promise) prefetchedOpsDashboard = null;
+  });
+}
+
 export async function fetchMoEngageOpsDashboard(mode: string = "last_week", customStart?: string, customEnd?: string, workspace?: string, signal?: AbortSignal) {
+  const token = getAuthToken();
+  if (prefetchedOpsDashboard && prefetchedOpsDashboard.expiresAt <= Date.now()) prefetchedOpsDashboard = null;
+  const prefetched = prefetchedOpsDashboard;
+  if (mode === "last_week" && !customStart && !customEnd && (!workspace || workspace === "all") && prefetched?.token === token) {
+    try {
+      signal?.throwIfAborted();
+      const metrics = await prefetched.promise;
+      signal?.throwIfAborted();
+      if (getAuthToken() !== token) throw new Error("Your session changed. Please sign in again.");
+      return metrics;
+    } finally {
+      if (!signal?.aborted && prefetchedOpsDashboard === prefetched) prefetchedOpsDashboard = null;
+    }
+  }
   const qs = new URLSearchParams({ mode });
   if (customStart) qs.set("custom_start", customStart);
   if (customEnd) qs.set("custom_end", customEnd);
@@ -1633,6 +1679,7 @@ export async function syncMoEngageOps() {
     method: "POST",
   }, 0, 800, 600000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
+  prefetchedOpsDashboard = null;
   return res.json();
 }
 
@@ -1687,6 +1734,7 @@ export async function uploadMoEngageExportFile(
     body: form,
   }, 0);
   if (!res.ok) throw new Error(await getErrorMessage(res));
+  prefetchedOpsDashboard = null;
   return res.json();
 }
 
@@ -1901,6 +1949,7 @@ export type AlertsDispatchResponse = {
   simulated_count: number;
   failed_count: number;
   google_chat_result?: { delivered?: boolean; simulated?: boolean; skipped?: boolean; message?: string; error?: string };
+  whatsapp_result?: { delivered?: boolean; simulated?: boolean; skipped?: boolean; recipient?: string; message?: string; error?: string };
   dry_run: boolean;
   dispatched_by: string;
   results: Array<{
@@ -1919,7 +1968,11 @@ export type AlertsDispatchOptions = {
   dry_run?: boolean;
   send_google_chat?: boolean;
   send_email?: boolean;
+  send_whatsapp?: boolean;
   google_chat_webhook_url?: string;
+  whatsapp_gateway_url?: string;
+  whatsapp_group_name?: string;
+  whatsapp_group_id?: string;
   force?: boolean;
 };
 
@@ -1967,6 +2020,44 @@ export async function toggleAlertScheduler(enabled: boolean): Promise<AlertSched
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ enabled }),
   });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchWhatsAppGatewayStatus(): Promise<{
+  ok: boolean;
+  status: string;
+  connected: boolean;
+  user?: { id: string; name: string };
+  has_qr?: boolean;
+  groups_count?: number;
+  error?: string;
+}> {
+  const res = await fetchWithRetry(getApiUrl('/api/whatsapp-gateway/status'), undefined, 0, 0, 5000);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchWhatsAppGatewayQr(): Promise<{
+  ok: boolean;
+  status: string;
+  raw_qr?: string;
+  qr_image?: string;
+  message?: string;
+  error?: string;
+}> {
+  const res = await fetchWithRetry(getApiUrl('/api/whatsapp-gateway/qr'), undefined, 0, 0, 5000);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function fetchWhatsAppGatewayGroups(): Promise<{
+  ok: boolean;
+  count: number;
+  groups: Array<{ id: string; name: string; participants_count: number }>;
+  error?: string;
+}> {
+  const res = await fetchWithRetry(getApiUrl('/api/whatsapp-gateway/groups'), undefined, 0, 0, 10000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

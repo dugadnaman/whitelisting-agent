@@ -69,3 +69,6 @@ agents/apparel-attribution/data/*.lock
 error_log.jsonl
 learned_patterns.json
 prototypes/
+whatsapp-gateway/node_modules/
+whatsapp-gateway/session_auth/
+whatsapp_session/

@@ -14,6 +14,9 @@ import {
   toggleAlertScheduler,
   assignUnassignedTicketsToNeel,
   updateAllocationSetting,
+  fetchWhatsAppGatewayStatus,
+  fetchWhatsAppGatewayQr,
+  fetchWhatsAppGatewayGroups,
 } from '@/lib/api';
 import type {
   AlertEmailDraft,
@@ -22,6 +25,25 @@ import type {
   AlertSchedulerStatusResponse,
 } from '@/lib/api';
 import { useApp } from '@/lib/context';
+
+type WhatsAppGatewayStatusInfo = {
+  ok: boolean;
+  status: string;
+  connected: boolean;
+  user?: { id: string; name: string };
+  has_qr?: boolean;
+  groups_count?: number;
+  error?: string;
+};
+
+type WhatsAppGatewayQrInfo = {
+  ok: boolean;
+  status: string;
+  raw_qr?: string;
+  qr_image?: string;
+  message?: string;
+  error?: string;
+};
 
 type JiraUserItem = {
   account_id: string;
@@ -312,6 +334,14 @@ export default function WorkManagementPage() {
   const [activePreviewEmail, setActivePreviewEmail] = useState<AlertEmailDraft | null>(null);
   const [sendGoogleChat, setSendGoogleChat] = useState<boolean>(true);
   const [sendDirectEmail, setSendDirectEmail] = useState<boolean>(true);
+  const [sendWhatsApp, setSendWhatsApp] = useState<boolean>(true);
+  const [whatsappGroupName, setWhatsappGroupName] = useState<string>('Tata Capital Campaigns');
+  const [whatsappGroupId, setWhatsappGroupId] = useState<string>('');
+  const [whatsappGatewayStatus, setWhatsappGatewayStatus] = useState<WhatsAppGatewayStatusInfo | null>(null);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState<boolean>(false);
+  const [whatsappQr, setWhatsappQr] = useState<WhatsAppGatewayQrInfo | null>(null);
+  const [loadingQr, setLoadingQr] = useState<boolean>(false);
+  const [whatsappGroups, setWhatsappGroups] = useState<Array<{ id: string; name: string; participants_count: number }>>([]);
   const [forceOffSchedule, setForceOffSchedule] = useState<boolean>(false);
   const DEFAULT_GCHAT_WEBHOOK =
     'https://chat.googleapis.com/v1/spaces/AAQAsqKm6oQ/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=er00Zc1ZFnDfrmthvXlRvtkWQHXDd862nhHl9TlguLk';
@@ -320,8 +350,32 @@ export default function WorkManagementPage() {
     if (typeof window !== 'undefined') {
       const savedGchat = localStorage.getItem('google_chat_webhook_url');
       if (savedGchat) setGoogleChatWebhookUrl(savedGchat);
+      const savedGroup = localStorage.getItem('whatsapp_sla_group_name');
+      if (savedGroup) setWhatsappGroupName(savedGroup);
+      const savedGroupId = localStorage.getItem('whatsapp_sla_group_id');
+      if (savedGroupId) setWhatsappGroupId(savedGroupId);
     }
   }, []);
+
+  const handleOpenWhatsAppModal = async () => {
+    setShowWhatsAppModal(true);
+    setLoadingQr(true);
+    try {
+      const status = await fetchWhatsAppGatewayStatus();
+      setWhatsappGatewayStatus(status);
+      if (status.connected) {
+        const groupsRes = await fetchWhatsAppGatewayGroups().catch(() => ({ groups: [] }));
+        setWhatsappGroups(groupsRes.groups || []);
+      } else {
+        const qrRes = await fetchWhatsAppGatewayQr();
+        setWhatsappQr(qrRes);
+      }
+    } catch {
+      setWhatsappGatewayStatus({ ok: false, status: 'OFFLINE', connected: false });
+    } finally {
+      setLoadingQr(false);
+    }
+  };
 
   const handleOpenAlertsModal = async () => {
     setShowAlertModal(true);
@@ -383,7 +437,10 @@ export default function WorkManagementPage() {
         dry_run: dryRun,
         send_google_chat: sendGoogleChat,
         send_email: sendDirectEmail,
+        send_whatsapp: sendWhatsApp,
         google_chat_webhook_url: googleChatWebhookUrl || undefined,
+        whatsapp_group_name: whatsappGroupName || undefined,
+        whatsapp_group_id: whatsappGroupId || undefined,
         force: forceOffSchedule,
       });
 
@@ -402,6 +459,15 @@ export default function WorkManagementPage() {
       }
       if (sendDirectEmail) {
         summary += `• ✉️ Direct Outbound Email: ${res.real_sent_count} sent, ${res.failed_count} failed\n`;
+      }
+      if (sendWhatsApp) {
+        const wa = res.whatsapp_result;
+        const status = wa?.simulated
+          ? 'Simulated (dry run)'
+          : wa?.delivered
+          ? `Delivered to WhatsApp group (${wa.recipient || whatsappGroupName})`
+          : wa?.error || wa?.message || 'Not delivered';
+        summary += `• 📱 WhatsApp Group: ${status}\n`;
       }
       alert(summary);
       setShowAlertModal(false);
@@ -2877,7 +2943,7 @@ export default function WorkManagementPage() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 {/* Channel 1: Google Chat */}
                 <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-all ${
                   sendGoogleChat ? 'bg-white border-emerald-500 ring-2 ring-emerald-50 shadow-xs' : 'bg-gray-100/60 border-gray-200 opacity-60'
@@ -2890,10 +2956,10 @@ export default function WorkManagementPage() {
                   />
                   <div>
                     <span className="font-bold text-gray-900 block flex items-center gap-1">
-                      <span>💬</span> Google Chat Space Broadcast
+                      <span>💬</span> Google Chat Space
                     </span>
                     <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
-                      Posts rich interactive card with ticket links into your team's Google Chat room.
+                      Posts rich interactive card with ticket links into Google Chat room.
                     </span>
                   </div>
                 </label>
@@ -2917,7 +2983,56 @@ export default function WorkManagementPage() {
                     </span>
                   </div>
                 </label>
+
+                {/* Channel 3: WhatsApp Group Broadcast */}
+                <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-all ${
+                  sendWhatsApp ? 'bg-white border-green-500 ring-2 ring-green-50 shadow-xs' : 'bg-gray-100/60 border-gray-200 opacity-60'
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={sendWhatsApp}
+                    onChange={(e) => setSendWhatsApp(e.target.checked)}
+                    className="mt-0.5 rounded text-green-600 focus:ring-green-500"
+                  />
+                  <div>
+                    <span className="font-bold text-gray-900 block flex items-center gap-1">
+                      <span>📱</span> WhatsApp Group
+                    </span>
+                    <span className="text-[11px] text-gray-500 leading-tight block mt-0.5">
+                      Posts 3-stage SLA alert to your team's WhatsApp group free of cost.
+                    </span>
+                  </div>
+                </label>
               </div>
+
+              {sendWhatsApp && (
+                <div className="pt-2 border-t border-gray-200/80 space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="text-[11px] font-bold text-gray-600 shrink-0">WhatsApp Group:</span>
+                      <input
+                        type="text"
+                        value={whatsappGroupName}
+                        onChange={(e) => setWhatsappGroupName(e.target.value)}
+                        placeholder="e.g. Tata Capital Campaigns"
+                        className="flex-1 border border-gray-300 rounded-lg px-2.5 py-1 text-xs text-gray-800 placeholder-gray-400 font-mono"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleOpenWhatsAppModal}
+                      className="px-2.5 py-1 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg flex items-center gap-1.5 shrink-0 transition"
+                    >
+                      <span>📲</span> {whatsappGatewayStatus?.connected ? 'Gateway Linked ✓' : 'Link WhatsApp (Scan QR)'}
+                    </button>
+                  </div>
+                  {whatsappGatewayStatus?.connected && (
+                    <div className="text-[10px] text-green-700 font-medium flex items-center gap-1">
+                      <span>✅</span> Gateway Connected as {whatsappGatewayStatus.user?.name || whatsappGatewayStatus.user?.id || 'Connected User'}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex items-center gap-1.5 text-[10px] text-gray-500 bg-gray-100/70 p-2 rounded-lg">
                 <span>🔒</span>
@@ -3075,6 +3190,122 @@ export default function WorkManagementPage() {
           </div>
         </div>
       </div>
+      )}
+      {/* WhatsApp Gateway Pairing Modal */}
+      {showWhatsAppModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 overflow-y-auto flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200 flex flex-col overflow-hidden">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📱</span>
+                <div>
+                  <h3 className="font-bold text-sm">Self-Hosted WhatsApp Gateway</h3>
+                  <p className="text-[11px] text-gray-400">100% Free &amp; Private Outbound Group Dispatcher</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppModal(false)}
+                className="text-gray-400 hover:text-white text-lg font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              {loadingQr ? (
+                <div className="py-12 text-center text-gray-500">Checking gateway &amp; loading QR code...</div>
+              ) : whatsappGatewayStatus?.connected ? (
+                <div className="space-y-4">
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-800 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <span>✅</span> WhatsApp Gateway Connected
+                    </div>
+                    <p className="text-[11px] text-green-700">
+                      Linked as: <strong>{whatsappGatewayStatus.user?.name || whatsappGatewayStatus.user?.id}</strong>
+                    </p>
+                  </div>
+
+                  {whatsappGroups.length > 0 && (
+                    <div className="space-y-1.5">
+                      <label className="font-bold text-gray-700 block">Select Target WhatsApp Group:</label>
+                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                        {whatsappGroups.map((g) => (
+                          <button
+                            key={g.id}
+                            type="button"
+                            onClick={() => {
+                              setWhatsappGroupName(g.name);
+                              setWhatsappGroupId(g.id);
+                              if (typeof window !== 'undefined') {
+                                localStorage.setItem('whatsapp_sla_group_name', g.name);
+                                localStorage.setItem('whatsapp_sla_group_id', g.id);
+                              }
+                            }}
+                            className={`w-full text-left p-2.5 text-xs hover:bg-gray-50 transition flex items-center justify-between ${
+                              whatsappGroupName === g.name ? 'bg-green-50 font-bold text-green-800' : 'text-gray-800'
+                            }`}
+                          >
+                            <span>{g.name}</span>
+                            <span className="text-[10px] text-gray-400">{g.participants_count} members</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="text-gray-600 leading-relaxed text-[11px]">
+                    <ol className="list-decimal pl-4 space-y-1">
+                      <li>Open <strong>WhatsApp</strong> on your phone</li>
+                      <li>Tap <strong>Settings / Menu (⋮)</strong> &rarr; <strong>Linked Devices</strong></li>
+                      <li>Tap <strong>Link a Device</strong></li>
+                      <li>Scan the QR code below:</li>
+                    </ol>
+                  </div>
+
+                  <div className="w-56 h-56 mx-auto bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-center p-2 shadow-inner">
+                    {whatsappQr?.qr_image ? (
+                      <img src={whatsappQr.qr_image} alt="WhatsApp QR Code" className="w-full h-full object-contain rounded-lg" />
+                    ) : (
+                      <div className="text-gray-400 text-center text-xs">
+                        {whatsappGatewayStatus?.status === 'OFFLINE' ? (
+                          <div className="space-y-1 p-2">
+                            <p className="font-bold text-amber-700">Gateway Offline</p>
+                            <p className="text-[10px] text-gray-500">Run: <code>cd whatsapp-gateway &amp;&amp; npm start</code></p>
+                          </div>
+                        ) : (
+                          'Generating QR code...'
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-center">
+                    <button
+                      type="button"
+                      onClick={handleOpenWhatsAppModal}
+                      className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold transition"
+                    >
+                      🔄 Refresh QR Code / Check Connection
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-gray-50 border-t border-gray-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppModal(false)}
+                className="px-4 py-1.5 bg-gray-800 text-white rounded-lg text-xs font-semibold hover:bg-gray-900 transition"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

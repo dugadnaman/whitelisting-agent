@@ -541,3 +541,30 @@ def test_scheduler_db_persistence_deduplication():
     # Create new instance (simulating server reboot)
     state2 = AlertSchedulerState()
     assert state2.is_already_sent_today(test_day, test_stage) is True
+
+
+def test_whatsapp_sla_alert_formatting_and_dispatch():
+    """Verify WhatsApp SLA message formatting, simulation, and multi-channel dispatch."""
+    from email_notifier import format_whatsapp_sla_message, send_whatsapp_sla_alert, dispatch_due_today_alerts
+
+    operators = [
+        OperatorTicketSummary(
+            operator_name="Neel Shah",
+            operator_email="neel.shah@attributics.com",
+            role="Core Operator",
+            pending_count=1,
+            tickets=[{"key": "TCN-99", "summary": "Test WhatsApp Campaign", "status": "In Progress"}],
+        )
+    ]
+
+    msg = format_whatsapp_sla_message("MORNING", operators, "10:00 AM IST")
+    assert "SLA Kickoff" in msg
+    assert "Neel Shah" in msg
+    assert "TCN-99" in msg
+
+    with patch("email_notifier.get_due_today_incomplete_tickets", return_value=[]):
+        res = dispatch_due_today_alerts(stage="MORNING", dry_run=True, send_whatsapp=True, send_google_chat=False, send_email=False)
+        assert res["ok"] is True
+        assert res["whatsapp_result"]["simulated"] is True
+        assert res["whatsapp_result"]["channel"] == "WhatsApp"
+

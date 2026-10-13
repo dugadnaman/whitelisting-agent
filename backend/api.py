@@ -5776,9 +5776,12 @@ class DispatchAlertsRequest(BaseModel):
     dry_run: bool = False
     send_google_chat: bool = True
     send_email: bool = True
+    send_whatsapp: bool = True
     google_chat_webhook_url: str | None = None
+    whatsapp_gateway_url: str | None = None
+    whatsapp_group_name: str | None = None
+    whatsapp_group_id: str | None = None
     force: bool = False
-
 
 class SchedulerToggleRequest(BaseModel):
     enabled: bool
@@ -5822,7 +5825,11 @@ def dispatch_alerts_endpoint(
         operator_name=operator,
         send_google_chat=body.send_google_chat,
         send_email=body.send_email,
+        send_whatsapp=body.send_whatsapp,
         google_chat_webhook_url=body.google_chat_webhook_url,
+        whatsapp_gateway_url=body.whatsapp_gateway_url,
+        whatsapp_group_name=body.whatsapp_group_name,
+        whatsapp_group_id=body.whatsapp_group_id,
         force=body.force,
     )
     return _json_safe(data)
@@ -5869,6 +5876,39 @@ def scheduler_toggle_endpoint(
             "message": f"Automated alert scheduler is now {'ENABLED' if body.enabled else 'DISABLED'}.",
         }
     )
+
+
+@app.get("/api/whatsapp-gateway/status")
+def whatsapp_gateway_status_endpoint(current_user: dict = Depends(get_current_user)):
+    """Check status of the self-hosted WhatsApp Gateway."""
+    gw_url = os.getenv("WHATSAPP_GATEWAY_URL") or "http://127.0.0.1:5005"
+    try:
+        r = http_client.get(f"{gw_url.rstrip('/')}/status", timeout=4)
+        return r.json()
+    except Exception as exc:
+        return {"ok": False, "status": "OFFLINE", "connected": False, "error": f"Gateway unreachable at {gw_url}: {exc}"}
+
+
+@app.get("/api/whatsapp-gateway/qr")
+def whatsapp_gateway_qr_endpoint(current_user: dict = Depends(get_current_user)):
+    """Get active QR code data and base64 image from WhatsApp gateway for mobile pairing."""
+    gw_url = os.getenv("WHATSAPP_GATEWAY_URL") or "http://127.0.0.1:5005"
+    try:
+        r = http_client.get(f"{gw_url.rstrip('/')}/qr", timeout=4)
+        return r.json()
+    except Exception as exc:
+        return {"ok": False, "status": "OFFLINE", "error": f"Gateway unreachable: {exc}"}
+
+
+@app.get("/api/whatsapp-gateway/groups")
+def whatsapp_gateway_groups_endpoint(current_user: dict = Depends(get_current_user)):
+    """List WhatsApp groups available on the connected WhatsApp gateway account."""
+    gw_url = os.getenv("WHATSAPP_GATEWAY_URL") or "http://127.0.0.1:5005"
+    try:
+        r = http_client.get(f"{gw_url.rstrip('/')}/groups", timeout=8)
+        return r.json()
+    except Exception as exc:
+        return {"ok": False, "groups": [], "error": f"Gateway unreachable: {exc}"}
 
 
 @app.get("/api/work-management/alerts/delivery-logs")
