@@ -84,7 +84,6 @@ from rcs_config import (
     DEFAULT_RCS_BOT_IDS,
     DEFAULT_RCS_BOT_NAMES,
     DEFAULT_RCS_ESMEADDRS,
-    get_rcs_auth_headers,
     get_rcs_bot_id,
     get_rcs_bot_name,
     get_rcs_entity_id,
@@ -129,7 +128,7 @@ from sms_tracker import (
     log_sms_dlr,
     log_sms_submission,
 )
-from submission_client import _GOVERNOR, _STATUS_MAP, delete_templates_bulk
+from submission_client import _GOVERNOR, _STATUS_MAP, check_portal_credentials, delete_templates_bulk
 from tracker import load_log, log_result, pending_entries
 from apparel_attribution import router as apparel_attribution_router
 from moengage_click_count import router as moengage_click_count_router
@@ -2836,9 +2835,13 @@ def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str, acc: st
     default_entity = DEFAULT_ENTITY_IDS.get(acc, "110100001654" if acc == "bajaj" else "1001490234791338781")
     entity_val = creds.entity_id.strip() if creds.entity_id and creds.entity_id.strip() else default_entity
 
+    raw_token = creds.rcs_auth_token or creds.bearer_token or creds.lounge_cookie
+    token_val = re.sub(r"^(?:Authorization\s*:\s*)?Bearer(?:\s+|$)", "", (raw_token or "").strip(), flags=re.IGNORECASE).strip() if raw_token else None
+
     fields = [
         (bot_val, f"{prefix}_RCS_BOT_ID"),
-        (creds.rcs_auth_token, f"{prefix}_RCS_AUTH_TOKEN"),
+        (token_val, f"{prefix}_RCS_AUTH_TOKEN"),
+        (token_val, f"{prefix}_KARIX_BEARER_TOKEN"),
         (esme_val, f"{prefix}_RCS_ESMEADDR"),
         (entity_val, f"{prefix}_ENTITY_ID"),
     ]
@@ -2995,28 +2998,22 @@ def _commit_credentials_to_github() -> str | None:
 
 
 def _test_rcs_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -> dict:
+    token = None
+    if creds:
+        raw_token = creds.rcs_auth_token or creds.bearer_token or creds.lounge_cookie
+        if raw_token and raw_token.strip():
+            token = re.sub(r"^(?:Authorization\s*:\s*)?Bearer(?:\s+|$)", "", raw_token.strip(), flags=re.IGNORECASE).strip()
     try:
-        entity_id = (
-            creds.entity_id.strip() if creds and creds.entity_id and creds.entity_id.strip() else None
-        ) or get_rcs_entity_id(acc)
-        headers = get_rcs_auth_headers(acc)
-        resp = http_client.get(
-            "https://karix.solutions/lounge/LoungePage/dltRegistration.php",
-            headers=headers,
-            timeout=15,
+        templates = fetch_rcs_templates(
+            client=acc, bot_id=creds.rcs_bot_id if creds else None, auth_token=token,
         )
-        has_auth = "sign_in" not in resp.url and resp.status_code == 200
-        if has_auth or entity_id:
-            return {
-                "ok": True,
-                "message": f"RCS Configured for {acc_name} (Entity ID: {entity_id or 'Configured'})",
-            }
         return {
-            "ok": False,
-            "message": f"RCS Session/Cookie for {acc_name} returned {resp.status_code}",
+            "ok": True,
+            "message": f"RCS connection verified for {acc_name} ({len(templates)} templates accessible).",
+            "template_count": len(templates),
         }
-    except Exception as exc:
-        return {"ok": False, "message": f"RCS Test error for {acc_name}: {exc}"}
+    except (RcsInventoryUnavailable, OSError, ValueError) as exc:
+        return {"ok": False, "message": f"RCS connection failed for {acc_name}: {exc}"}
 
 
 def _test_whatsapp_channel(
@@ -3029,6 +3026,29 @@ def _test_whatsapp_channel(
     w_id_key: str,
     w_tok_key: str,
 ) -> dict:
+    saved_portal_token = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN") or (
+        os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else None
+    )
+    portal_requested = (
+        creds is not None and creds.bearer_token is not None
+        or (creds is None or creds.waba_auth_token is None) and bool(saved_portal_token)
+    )
+    if portal_requested:
+        valid, message = check_portal_credentials(
+            acc,
+            bearer_token=creds.bearer_token if creds else None,
+            session_id=creds.session if creds else None,
+            portal_user=creds.user if creds else None,
+            waba_id=creds.waba_id.strip() if creds and creds.waba_id else None,
+        )
+        message = f"{acc_name} WhatsApp: {message}"
+        log_activity(
+            user=creds.user_name if creds and creds.user_name else "Anonymous Operator",
+            action="CREDENTIALS_TEST", account=acc, channel="whatsapp",
+            details={"message": message, "valid": valid},
+            status="success" if valid else "failed",
+        )
+        return {"ok": valid, "message": message}
     results = []
     try:
         waba_id = (
@@ -3118,6 +3138,8 @@ def test_credentials(
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
     _load_env_file()
+    if chan == "rcs":
+        return _test_rcs_channel(acc, acc_name, creds)
 
     w_id_key = "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")
     w_tok_key = (
@@ -3143,8 +3165,6 @@ def test_credentials(
 
     if chan == "sms":
         return _test_sms_channel(acc, acc_name, creds)
-    elif chan == "rcs":
-        return _test_rcs_channel(acc, acc_name, creds)
     return _test_whatsapp_channel(acc, acc_name, prefix, is_tata, is_bajaj, creds, w_id_key, w_tok_key)
 
 

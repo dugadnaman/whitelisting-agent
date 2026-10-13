@@ -507,14 +507,16 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str | None = Non
     return result
 
 
-def fetch_rcs_templates(bot_id: str | None = None, client: str = "tata") -> list[dict]:
+def fetch_rcs_templates(
+    bot_id: str | None = None, client: str = "tata", *, auth_token: str | None = None,
+) -> list[dict]:
     """Return a valid inventory, including []; raise when provider inventory is unavailable."""
     try:
         c = client.strip().lower()
         configured_bot = get_rcs_bot_id(c)
         if bot_id and bot_id != configured_bot:
             raise ValueError("RCS inventory bot ID does not match the selected account")
-        headers = get_rcs_auth_headers(c)
+        headers = get_rcs_auth_headers(c, auth_token=auth_token)
         resp = requests.post(
             KARIX_RCS_FETCH_TEMPLATES_URL,
             headers=headers,

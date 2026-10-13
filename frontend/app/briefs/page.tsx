@@ -75,7 +75,6 @@ function DraftWarningList({ draft }: { draft: DraftWarnings }) {
   );
 }
 
-
 type JiraPreviewSnapshot = {
   selectedKey: string;
   issueKey?: string;

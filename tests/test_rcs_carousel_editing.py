@@ -48,3 +48,5 @@ def test_build_rcs_carousel_uses_custom_card_cta_and_urls():
     assert cards[1]["suggestions"][0]["text"] == "Check Eligibility"
     assert cards[1]["suggestions"][0]["postbackData"] == "Check Eligibility"
     assert "https://u3.mnge.co/loan-2" in cards[1]["suggestions"][0]["url"]
+
+

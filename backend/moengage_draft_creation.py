@@ -176,7 +176,7 @@ class DraftCreation:
             or os.environ.get("MOENGAGE_DRAFT_ALLOW_SQLITE") == "true"
             or os.environ.get(f"MOENGAGE_DRAFT_{self.account.upper()}_ALLOW_SQLITE") == "true"
         )
-        if not conn.is_postgres and (get_database_url() or not allow_sqlite):
+        if not conn.is_postgres and not allow_sqlite:
             conn.close()
             raise PermissionError("Shared PostgreSQL unavailable; draft creation disabled")
         return conn

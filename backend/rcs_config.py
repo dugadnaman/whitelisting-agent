@@ -7,6 +7,7 @@ Supports official Karix RCS Template Management API:
 """
 
 import os
+import re
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -153,7 +154,7 @@ def get_rcs_esmeaddr(client: str = "tata") -> str:
     return str(esme).strip()
 
 
-def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
+def get_rcs_auth_headers(client: str = "tata", *, auth_token: str | None = None) -> dict[str, str]:
     """
     Build the HTTP headers required for official Karix RCS Bot Builder requests.
     Strictly isolated per client account. Never leaks credentials across accounts.
@@ -162,10 +163,11 @@ def get_rcs_auth_headers(client: str = "tata") -> dict[str, str]:
     c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
 
-    bearer = (
+    bearer = auth_token if auth_token is not None else (
         os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
         or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
     )
+    bearer = re.sub(r"^(?:Authorization\s*:\s*)?Bearer(?:\s+|$)", "", (bearer or "").strip(), flags=re.IGNORECASE).strip()
     session = os.environ.get(f"{prefix}_KARIX_SESSION")
     user = os.environ.get(f"{prefix}_KARIX_USER")
     if not bearer or not bearer.strip():

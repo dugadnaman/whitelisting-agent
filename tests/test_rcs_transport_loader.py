@@ -371,3 +371,122 @@ def test_upload_only_definitive_auth_decline_sets_refusal(provider, http_status)
     assert result.auth_refused is (http_status in (401, 403))
     assert not result.outcome_uncertain
     assert [call[0] for call in provider.calls] == ["/upload"]
+
+
+@pytest.fixture
+def authenticated_provider(provider, monkeypatch):
+    import jwt
+
+    key = "local-rcs-credential-regression-only-signing-key-0123456789abcdef"
+    token = jwt.encode({"sub": "tcl_promo", "exp": 4000000000}, key, algorithm="HS256")
+    original_post = provider.do_POST
+
+    def authenticated_post(handler):
+        authorization = handler.headers.get("Authorization", "")
+        try:
+            scheme, supplied_token = authorization.split(" ", 1)
+            claims = jwt.decode(supplied_token, key, algorithms=["HS256"])
+            authorized = scheme.lower() == "bearer" and claims.get("sub") == "tcl_promo"
+        except (ValueError, jwt.InvalidTokenError):
+            authorized = False
+        if authorized:
+            return original_post(handler)
+        handler.rfile.read(int(handler.headers.get("Content-Length", 0)))
+        handler.send_response(401)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        handler.wfile.write(b'{"error": "Invalid credentials"}')
+
+    monkeypatch.setattr(provider, "do_POST", authenticated_post)
+    provider.routes["/inventory"] = (200, {"templateInfo": [{"name": "Authenticated offer"}]})
+    return provider, token
+
+
+@pytest.mark.parametrize("paste_format", ["{}", "Bearer {}", "Authorization: Bearer {}"])
+def test_valid_rcs_token_copied_from_devtools_authenticates(authenticated_provider, monkeypatch, paste_format):
+    provider, token = authenticated_provider
+    monkeypatch.setenv("TCL_PROMO_RCS_AUTH_TOKEN", paste_format.format(token))
+    templates = rcs_client.fetch_rcs_templates(client="tcl_promo")
+    assert templates == [{"name": "Authenticated offer"}]
+    assert [call[0] for call in provider.calls] == ["/inventory"]
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_rcs_connection_checks_entered_token_without_replacing_saved_credentials(
+    authenticated_provider, monkeypatch, provision_user, valid,
+):
+    import os
+    import api
+    from fastapi.testclient import TestClient
+
+    _, token = authenticated_provider
+    _, headers = provision_user(tenant="tata")
+    monkeypatch.setattr(api, "_load_env_file", lambda: None)
+    supplied = f"Authorization: Bearer {token}" if valid else "invalid-entered-token"
+    response = TestClient(api.app, headers=headers).post("/api/test-credentials", json={
+        "account": "tcl_promo", "channel": "rcs",
+        "rcs_auth_token": supplied, "rcs_bot_id": "Uv9tdd0KNADbq3pX",
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["ok"] is valid, result["message"]
+    if valid:
+        assert result["template_count"] == 1
+    else:
+        assert "401" in result["message"]
+    assert os.environ["TCL_PROMO_RCS_AUTH_TOKEN"] == "local-test-token"
+
+def test_rcs_connection_accepts_token_in_lounge_cookie_field(
+    authenticated_provider, monkeypatch, provision_user,
+):
+    import os
+    import api
+    from fastapi.testclient import TestClient
+
+    _, token = authenticated_provider
+    _, headers = provision_user(tenant="tata")
+    monkeypatch.setattr(api, "_load_env_file", lambda: None)
+    response = TestClient(api.app, headers=headers).post("/api/test-credentials", json={
+        "account": "tcl_promo", "channel": "rcs",
+        "lounge_cookie": f"Bearer {token}", "rcs_bot_id": "Uv9tdd0KNADbq3pX",
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["ok"] is True
+    assert result["template_count"] == 1
+
+
+def test_rcs_connection_refuses_cross_tenant_credentials_before_contacting_provider(
+    authenticated_provider, monkeypatch, provision_user,
+):
+    import api
+    from fastapi.testclient import TestClient
+
+    provider, token = authenticated_provider
+    _, headers = provision_user(tenant="bajaj")
+    monkeypatch.setattr(api, "_load_env_file", lambda: None)
+    response = TestClient(api.app, headers=headers).post("/api/test-credentials", json={
+        "account": "tcl_promo", "channel": "rcs", "rcs_auth_token": token,
+    })
+    assert response.status_code == 403
+    assert provider.calls == []
+
+
+def test_saved_rcs_header_paste_authenticates_inventory_without_changing_another_company(
+    authenticated_provider, monkeypatch, provision_user,
+):
+    import os
+    import api
+    from fastapi.testclient import TestClient
+
+    _, token = authenticated_provider
+    _, headers = provision_user(tenant="tata")
+    monkeypatch.setattr(api, "_commit_credentials_to_github", lambda: None)
+    monkeypatch.setenv("BAJAJ_RCS_AUTH_TOKEN", "bajaj-only-synthetic-token")
+    response = TestClient(api.app, headers=headers).put("/api/credentials", json={
+        "account": "tcl_promo", "channel": "rcs",
+        "rcs_auth_token": f"Authorization: Bearer {token}",
+    })
+    assert response.status_code == 200
+    assert rcs_client.fetch_rcs_templates(client="tcl_promo") == [{"name": "Authenticated offer"}]
+    assert os.environ["BAJAJ_RCS_AUTH_TOKEN"] == "bajaj-only-synthetic-token"

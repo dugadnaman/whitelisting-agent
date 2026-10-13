@@ -300,7 +300,7 @@ export default function SettingsPage() {
         sms_sender_id: smsSenderId.trim() || undefined,
         sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
         rcs_bot_id: rcsBotId.trim() || undefined,
-        rcs_auth_token: rcsAuthToken.trim() || undefined,
+        rcs_auth_token: (rcsAuthToken.trim() || (isRcs ? loungeCookie.trim() : '')) || undefined,
         rcs_esmeaddr: esmeaddr.trim() || undefined,
         user_name: currentOperator,
       });
@@ -365,7 +365,7 @@ export default function SettingsPage() {
         sms_sender_id: smsSenderId.trim() || undefined,
         sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
         rcs_bot_id: rcsBotId.trim() || undefined,
-        rcs_auth_token: rcsAuthToken.trim() || undefined,
+        rcs_auth_token: (rcsAuthToken.trim() || (isRcs ? loungeCookie.trim() : '')) || undefined,
         rcs_esmeaddr: esmeaddr.trim() || undefined,
         gemini_api_key: currentUser?.role === 'superadmin' ? geminiApiKey.trim() || undefined : undefined,
         user_name: currentOperator,
@@ -382,8 +382,8 @@ export default function SettingsPage() {
         });
       } else {
         setBanner({
-          type: 'success',
-          message: `Saved credentials for ${accountTitle} — ${channelTitle}. (${testRes.message})`,
+          type: 'error',
+          message: `Saved credentials for ${accountTitle} — ${channelTitle}, but verification failed. ${testRes.message}`,
         });
       }
     } catch (err) {
@@ -878,7 +878,7 @@ export default function SettingsPage() {
                 ? 'Karix Portal Session for Media Uploads & Official WABA Template API'
                 : isSms
                 ? 'DLT SMS Template Registration via Karix Lounge & Send SMS API'
-                : 'DLT & Rich Card Template Registration via Karix Lounge Session'}
+                : 'RCS bot template registration using Karix bearer authentication'}
             </div>
           </div>
         </div>
@@ -1110,6 +1110,9 @@ export default function SettingsPage() {
                     placeholder="Paste Authorization: Bearer eyJhbGciOi... from rcsgui.karix.solutions DevTools"
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
                   />
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Accepts the token alone, <code>Bearer …</code>, or <code>Authorization: Bearer …</code>. Test Connection checks this portal session, not the separate WABA API token. Copy Session ID and User from the same request.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1442,61 +1445,55 @@ export default function SettingsPage() {
           </>
         ) : (
           <>
-            {/* Active / Expiring Karix Lounge Session Section */}
+            {/* RCS requests use bearer authentication, not the legacy Lounge cookie. */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔑 Active Karix Lounge Session</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                      Session Cookie — Refresh When Expired
-                    </span>
+                  <h4 className="text-xs font-bold text-gray-900">
+                    Karix RCS Authorization
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Browser session cookie from <code>lounge.karix.solutions</code> required for automated RCS &amp; DLT template submissions.
+                    Copy the authorization header from a working RCS request for {accountTitle}.
                   </p>
                 </div>
-                {loungeCookie ? (
-                  <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
-                    ✓ Lounge Session Cookie Set
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 shrink-0">
-                    Paste Cookie From Browser
+                {rcsAuthToken && (
+                  <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 shrink-0">
+                    Token entered — test to verify
                   </span>
                 )}
               </div>
-
               <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
-                <label htmlFor="lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
+                <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Current RCS Bearer Token ({envPrefix}_RCS_AUTH_TOKEN)
                 </label>
                 <input
-                  id="lounge_cookie"
+                  id="rcs_auth_token"
                   type="password"
-                  value={loungeCookie}
-                  onChange={(e) => setLoungeCookie(e.target.value)}
-                  placeholder="Paste PHPSESSID=... cookie from lounge.karix.solutions DevTools"
+                  autoComplete="off"
+                  value={rcsAuthToken}
+                  onChange={(e) => setRcsAuthToken(e.target.value)}
+                  placeholder="Paste the token, Bearer token, or Authorization: Bearer token"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
                 />
                 <p className="text-[11px] text-gray-400 mt-1">
-                  Session cookie from your logged-in browser session at <code>lounge.karix.solutions</code>. Refresh this whenever your Lounge session expires.
+                  Test Connection checks this token against the RCS template API without saving it.
+                  After a successful test, save it to use for whitelisting. A Lounge session cookie is not an RCS bearer token.
                 </p>
               </div>
             </div>
 
-            {/* Permanent Account Identifiers & Static RCS API Token (Pre-Configured) */}
+            {/* RCS routing identifiers are separate from the editable bearer token. */}
             <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔒 Permanent RCS Identifiers &amp; API Token</span>
+                    <span>RCS Routing Identifiers</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
                       Pre-configured
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Permanent RCS API Token, fixed Bot ID, ESME routing address, and DLT Entity ID for {accountTitle}.
+                    Bot ID, ESME routing address, and entity ID for {accountTitle}.
                   </p>
                 </div>
                 <button
@@ -1509,14 +1506,7 @@ export default function SettingsPage() {
               </div>
 
               {!editPermanent ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">RCS Permanent Token</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
-                      {rcsAuthToken ? '••••••••••••••••' : 'Pre-configured'}
-                    </div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Permanent Token</div>
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">RCS Bot ID</div>
                     <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Pre-configured'}</div>
@@ -1535,19 +1525,6 @@ export default function SettingsPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
-                  <div className="sm:col-span-3">
-                    <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      Karix RCS Permanent API Token ({envPrefix}_RCS_AUTH_TOKEN)
-                    </label>
-                    <input
-                      id="rcs_auth_token"
-                      type="password"
-                      value={rcsAuthToken}
-                      onChange={(e) => setRcsAuthToken(e.target.value)}
-                      placeholder="e.g. yzHtsfT8v5DZ6XV3stK4YQ=="
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
                   <div>
                     <label htmlFor="rcs_bot_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
                       Karix RCS Bot ID

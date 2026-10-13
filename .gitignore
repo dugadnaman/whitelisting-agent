@@ -65,3 +65,7 @@ agents/apparel-attribution/backend/credentials/
 agents/apparel-attribution/browser-profile/
 agents/apparel-attribution/data/*.json
 agents/apparel-attribution/data/*.lock
+
+error_log.jsonl
+learned_patterns.json
+prototypes/

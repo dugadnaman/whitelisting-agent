@@ -1512,6 +1512,52 @@ def _parse_karix_json(resp) -> dict | list:
         return {}
 
 
+def check_portal_credentials(
+    client: str,
+    *,
+    bearer_token: str | None = None,
+    session_id: str | None = None,
+    portal_user: str | None = None,
+    waba_id: str | None = None,
+) -> tuple[bool, str]:
+    """Validate the exact portal credentials without saving or falling back to WABA auth."""
+    try:
+        headers = get_portal_auth_headers(
+            client, bearer_token=bearer_token, session_id=session_id, portal_user=portal_user,
+        )
+        headers["Content-Type"] = "application/json"
+        response = get_http_session().post(
+            f"{KARIX_BASE_URL}/getAllTemplates",
+            headers=headers,
+            json={"wabaId": waba_id or get_waba_id(client), "esmeaddr": get_esmeaddr(client), "start": 0, "limit": 1},
+            timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
+        )
+        if response.status_code in (401, 403):
+            return False, f"Portal session refused (HTTP {response.status_code}). Paste Bearer Token, Session ID and User from the same logged-in Karix request."
+        if not response.ok:
+            return False, f"Portal connection returned HTTP {response.status_code}."
+        data = _parse_karix_json(response)
+        if isinstance(data, list):
+            return True, "Portal credentials valid."
+        if isinstance(data, dict):
+            if data.get("Failed") == "No Records Found":
+                return True, "Portal credentials valid (no templates found)."
+            if data.get("Failed") or data.get("error") or data.get("success") is False:
+                return False, "Portal rejected the credentials. Check Bearer Token, Session ID and User from the same Karix session."
+            success = data.get("Success")
+            response_data = data.get("response")
+            if isinstance(success, dict) or isinstance(data.get("templates"), list) or (
+                isinstance(response_data, dict) and isinstance(response_data.get("templates"), list)
+            ):
+                return True, "Portal credentials valid."
+        return False, "Portal validation returned an unrecognized response; credentials could not be verified."
+    except requests.RequestException as exc:
+        return False, f"Portal connection failed ({type(exc).__name__}). Check network access and try again."
+    except OSError as exc:
+        return False, str(exc)
+
+
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
     Fetch the full template list for a client's WABA (supports Portal API and Official API).

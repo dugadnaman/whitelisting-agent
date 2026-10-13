@@ -75,10 +75,16 @@ def _account_prefix(client: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", client).strip("_").upper()
 
 
-def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
+def get_portal_auth_headers(
+    client: str = "bajaj",
+    *,
+    bearer_token: str | None = None,
+    session_id: str | None = None,
+    portal_user: str | None = None,
+) -> dict[str, str]:
     """
-    Build HTTP headers for the legacy portal media-upload endpoint.
-    Strictly isolated per account. Never cross-contaminates another account.
+    Build HTTP headers for portal requests, optionally using an unsaved Settings snapshot.
+    Overrides stay request-local; saved credentials remain strictly isolated per account.
     """
     _load_env_file()
     c = (client or "bajaj").lower().strip()
@@ -95,6 +101,15 @@ def get_portal_auth_headers(client: str = "bajaj") -> dict[str, str]:
         bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
         session = os.environ.get(f"{prefix}_KARIX_SESSION")
         user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
+    if bearer_token is not None:
+        bearer = bearer_token
+    if session_id is not None:
+        session = session_id
+    if portal_user is not None:
+        user = portal_user
+    bearer = re.sub(r"^(?:Authorization\s*:\s*)?Bearer(?:\s+|$)", "", (bearer or "").strip(), flags=re.IGNORECASE).strip()
+    session = (session or "").strip()
+    user = (user or "").strip()
 
     # NOTE: no browser auto-login — the Karix portal requires an OTP only a
     # human can receive. Tokens are entered manually in Settings and persist
