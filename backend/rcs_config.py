@@ -34,6 +34,19 @@ DEFAULT_RCS_BOT_IDS: dict[str, str] = {
     "apparel": "P7hzkqCcW3x96I6T",
 }
 
+APPAREL_ALL_RCS_BOT_IDS: list[str] = [
+    "P7hzkqCcW3x96I6T",
+    "6aa232b4734aa52ea966d1b4",
+    "6aa23696b110433d2a28c793",
+    "6aa2396e734aa52ea966d23f",
+    "6aa23c2d734aa52ea966d26f",
+    "axf2bekeNANA8h90",
+    "pp6wKCHJhdAlvEP6",
+    "Wk4lAtdRnQmXTHXF",
+    "Wk4lBploJGyg1Dlr",
+    "Wk5ESRsm6mAwxjZo",
+]
+
 DEFAULT_RCS_BOT_NAMES: dict[str, str] = {
     "tcl_promo": "Tata Capital Limited",
     "tcl_trans": "Tata Capital Limited",
@@ -101,17 +114,32 @@ def get_rcs_bot_id(client: str = "tata") -> str:
     _load_env_file()
     c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
-    bot = (
-        os.environ.get(f"{prefix}_RCS_BOT_ID")
-        or os.environ.get(f"{prefix}_RCS_SENDER_ID")
-        or DEFAULT_RCS_BOT_IDS.get(c)
-    )
+    env_bot = os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID")
+    bot = DEFAULT_RCS_BOT_IDS.get(c) if (not env_bot or env_bot == "apparel-bot") else env_bot
     if not bot:
         raise OSError(
             f"Missing RCS Bot ID for {client} ({prefix}_RCS_BOT_ID). "
             f"Configure it in Settings under {client} — never fall back to another account's Bot ID."
         )
     return bot
+
+
+def get_rcs_bot_ids(client: str = "tata") -> list[str]:
+    """Return all active RCS Bot IDs / Sender IDs for the given client."""
+    _load_env_file()
+    c = client.strip().lower() if isinstance(client, str) else client
+    if c == "apparel":
+        env_bots = os.environ.get("APPAREL_RCS_BOT_IDS")
+        if env_bots:
+            parsed = [b.strip() for b in env_bots.split(",") if b.strip()]
+            if parsed:
+                return parsed
+        return list(APPAREL_ALL_RCS_BOT_IDS)
+    try:
+        primary = get_rcs_bot_id(c)
+        return [primary] if primary else []
+    except Exception:
+        return []
 
 
 def get_rcs_bot_name(client: str = "tcl_promo") -> str:

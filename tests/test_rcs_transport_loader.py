@@ -490,3 +490,21 @@ def test_saved_rcs_header_paste_authenticates_inventory_without_changing_another
     assert response.status_code == 200
     assert rcs_client.fetch_rcs_templates(client="tcl_promo") == [{"name": "Authenticated offer"}]
     assert os.environ["BAJAJ_RCS_AUTH_TOKEN"] == "bajaj-only-synthetic-token"
+
+
+def test_apparel_all_ten_sender_ids_configured():
+    from rcs_config import APPAREL_ALL_RCS_BOT_IDS, get_rcs_bot_ids, get_rcs_bot_id
+    assert len(APPAREL_ALL_RCS_BOT_IDS) == 10
+    assert "P7hzkqCcW3x96I6T" in APPAREL_ALL_RCS_BOT_IDS
+    assert "6aa232b4734aa52ea966d1b4" in APPAREL_ALL_RCS_BOT_IDS
+    assert "6aa23696b110433d2a28c793" in APPAREL_ALL_RCS_BOT_IDS
+    assert "6aa2396e734aa52ea966d23f" in APPAREL_ALL_RCS_BOT_IDS
+    assert "6aa23c2d734aa52ea966d26f" in APPAREL_ALL_RCS_BOT_IDS
+    assert "axf2bekeNANA8h90" in APPAREL_ALL_RCS_BOT_IDS
+    assert "pp6wKCHJhdAlvEP6" in APPAREL_ALL_RCS_BOT_IDS
+    assert "Wk4lAtdRnQmXTHXF" in APPAREL_ALL_RCS_BOT_IDS
+    assert "Wk4lBploJGyg1Dlr" in APPAREL_ALL_RCS_BOT_IDS
+    assert "Wk5ESRsm6mAwxjZo" in APPAREL_ALL_RCS_BOT_IDS
+    assert get_rcs_bot_ids("apparel") == APPAREL_ALL_RCS_BOT_IDS
+    assert get_rcs_bot_id("apparel") == "P7hzkqCcW3x96I6T"
+

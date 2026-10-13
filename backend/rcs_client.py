@@ -18,6 +18,7 @@ from rcs_config import (
     _account_prefix,
     get_rcs_auth_headers,
     get_rcs_bot_id,
+    get_rcs_bot_ids,
     get_rcs_esmeaddr,
 )
 from rcs_models import (
@@ -513,14 +514,55 @@ def fetch_rcs_templates(
     """Return a valid inventory, including []; raise when provider inventory is unavailable."""
     try:
         c = client.strip().lower()
-        configured_bot = get_rcs_bot_id(c)
-        if bot_id and bot_id != configured_bot:
+        configured_bots = get_rcs_bot_ids(c)
+        if bot_id and bot_id not in configured_bots:
             raise ValueError("RCS inventory bot ID does not match the selected account")
+
         headers = get_rcs_auth_headers(c, auth_token=auth_token)
+        esme = get_rcs_esmeaddr(c)
+
+        if c == "apparel" and not bot_id and len(configured_bots) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _fetch_one_bot(sid: str) -> list[dict]:
+                try:
+                    resp = requests.post(
+                        KARIX_RCS_FETCH_TEMPLATES_URL,
+                        headers=headers,
+                        json={"esmeaddr": esme, "senderId": sid},
+                        timeout=REQUEST_TIMEOUT,
+                        allow_redirects=False,
+                    )
+                    if 200 <= resp.status_code < 300:
+                        data = resp.json()
+                        t_list = data.get("templateInfo") if isinstance(data, dict) and not _provider_failed(data) else []
+                        if isinstance(t_list, list):
+                            for t in t_list:
+                                if isinstance(t, dict) and not t.get("botId"):
+                                    t["botId"] = sid
+                            return t_list
+                except Exception as ex:
+                    logger.warning("Error fetching templates for bot %s on %s: %s", sid, c, ex)
+                return []
+
+            with ThreadPoolExecutor(max_workers=min(len(configured_bots), 10)) as pool:
+                bot_results = list(pool.map(_fetch_one_bot, configured_bots))
+
+            all_templates = []
+            seen_keys = set()
+            for items in bot_results:
+                for item in items:
+                    key = (item.get("templateId"), item.get("botId"))
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        all_templates.append(item)
+            return all_templates
+
+        target_bot = bot_id or (configured_bots[0] if configured_bots else get_rcs_bot_id(c))
         resp = requests.post(
             KARIX_RCS_FETCH_TEMPLATES_URL,
             headers=headers,
-            json={"esmeaddr": get_rcs_esmeaddr(c), "senderId": configured_bot},
+            json={"esmeaddr": esme, "senderId": target_bot},
             timeout=REQUEST_TIMEOUT,
             allow_redirects=False,
         )

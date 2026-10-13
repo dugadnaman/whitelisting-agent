@@ -284,11 +284,11 @@ def create_moengage_rcs_template(
     clean_id = clean_name
 
     if account.lower() == "apparel":
-        # In MoEngage, the Apparel brand sender profile is "RB RCS"
+        from rcs_config import APPAREL_ALL_RCS_BOT_IDS
         resolved_sender = (
-            sender_id if sender_id and sender_id not in ("P7hzkqCcW3x96I6T", "Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID) else None
+            sender_id if sender_id and sender_id not in APPAREL_ALL_RCS_BOT_IDS and sender_id not in ("Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID) else None
         ) or cfg["sender_id"] or "RB RCS"
-        if resolved_sender in ("P7hzkqCcW3x96I6T", "Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID):
+        if resolved_sender in APPAREL_ALL_RCS_BOT_IDS or resolved_sender in ("Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID):
             resolved_sender = "RB RCS"
     else:
         resolved_sender = sender_id or cfg["sender_id"]
@@ -317,7 +317,8 @@ def create_moengage_rcs_template(
     clean_media_url = (media_url or "").strip()
     if not clean_media_url:
         if account.lower() == "apparel":
-            clean_media_url = "https://rm.virbm.com/P7hzkqCcW3x96I6T/d11c5b30238a401da9d653e48936045e.jpeg"
+            bot_tag = sender_id or "P7hzkqCcW3x96I6T"
+            clean_media_url = f"https://rm.virbm.com/{bot_tag}/d11c5b30238a401da9d653e48936045e.jpeg"
         else:
             clean_media_url = "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
 

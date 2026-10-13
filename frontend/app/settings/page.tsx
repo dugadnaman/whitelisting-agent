@@ -1506,23 +1506,57 @@ export default function SettingsPage() {
               </div>
 
               {!editPermanent ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">RCS Bot ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Pre-configured'}</div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Approved Brand Bot</div>
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                    <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                        {selectedAccount === 'apparel' ? 'RCS Bot IDs (10 Bots Active)' : 'RCS Bot ID'}
+                      </div>
+                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Pre-configured'}</div>
+                      <div className="text-[10px] text-emerald-600 font-medium mt-0.5">
+                        {selectedAccount === 'apparel' ? '✓ 10 Brand Bots Configured' : '✓ Approved Brand Bot'}
+                      </div>
+                    </div>
+                    <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Karix ESME Address</div>
+                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || '72434700000000'}</div>
+                      <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Routing Configured</div>
+                    </div>
+                    <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
+                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || '1001490234791338781'}</div>
+                      <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
+                    </div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Karix ESME Address</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || '72434700000000'}</div>
-                    <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Routing Configured</div>
-                  </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || '1001490234791338781'}</div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
-                  </div>
-                </div>
+                  {selectedAccount === 'apparel' && (
+                    <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs space-y-1.5 mt-2">
+                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                        All Configured Apparel RCS Sender IDs (10 Karix Bot IDs)
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {[
+                          "P7hzkqCcW3x96I6T",
+                          "6aa232b4734aa52ea966d1b4",
+                          "6aa23696b110433d2a28c793",
+                          "6aa2396e734aa52ea966d23f",
+                          "6aa23c2d734aa52ea966d26f",
+                          "axf2bekeNANA8h90",
+                          "pp6wKCHJhdAlvEP6",
+                          "Wk4lAtdRnQmXTHXF",
+                          "Wk4lBploJGyg1Dlr",
+                          "Wk5ESRsm6mAwxjZo"
+                        ].map((id) => (
+                          <span key={id} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono bg-purple-50 text-purple-700 border border-purple-200">
+                            {id}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-gray-400">
+                        All 10 sender IDs are active for Karix inventory queries, template sync, and MoEngage routing.
+                      </p>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
                   <div>

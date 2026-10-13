@@ -86,6 +86,7 @@ from rcs_config import (
     DEFAULT_RCS_BOT_NAMES,
     DEFAULT_RCS_ESMEADDRS,
     get_rcs_bot_id,
+    get_rcs_bot_ids,
     get_rcs_bot_name,
     get_rcs_entity_id,
     get_rcs_esmeaddr,
@@ -867,6 +868,7 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
     local_entries = load_rcs_log(RCS_LOG_PATH, client=acc)
     live_templates = _fetch_rcs_inventory(acc)
     bot_id = get_rcs_bot_id(acc)
+    configured_bots = set(get_rcs_bot_ids(acc))
     merged_entries = []
 
     for lt in live_templates:
@@ -874,7 +876,7 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
             continue
         vi = lt.get("viTemplate") if isinstance(lt.get("viTemplate"), dict) else {}
         live_bot = str(lt.get("botId") or vi.get("botId") or "")
-        if live_bot and live_bot != bot_id:
+        if live_bot and live_bot not in configured_bots:
             continue
         name = vi.get("name") or lt.get("template_name") or str(lt.get("templateId", ""))
         t_type = vi.get("type", "text")
@@ -915,11 +917,11 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
             "template_name": name,
             "template_id": str(lt.get("templateId") or lt.get("id") or ""),
             "provider_ref_id": str(lt.get("templateId") or lt.get("id") or ""),
-            "bot_id": bot_id,
+            "bot_id": live_bot or bot_id,
             "template_type": t_type,
             "card_title": card_title,
             "template_message": msg,
-            "sender_ids": [lt.get("botId", "")],
+            "sender_ids": [live_bot] if live_bot else [bot_id],
             "status": "submitted",
             "approval_status": _rcs_approval_status(lt.get("status")),
             "submitted_at": lt.get("createdAt") or lt.get("modifiedAt") or "",
@@ -2746,6 +2748,7 @@ def get_credentials(
         "sms_sender_id": sms_sender_id or "",
         "sms_dlr_auth_token": sms_dlr_auth_token or "",
         "rcs_bot_id": rcs_bot_id,
+        "rcs_bot_ids": get_rcs_bot_ids(acc),
         "rcs_auth_token": rcs_auth_token,
         "rcs_esmeaddr": rcs_esmeaddr,
         "esmeaddr": esmeaddr,
@@ -2754,6 +2757,7 @@ def get_credentials(
         "permanent_defaults": {
             "waba_id": DEFAULT_WABA_IDS.get(acc, BAJAJ_WABA_ID if is_bajaj else ""),
             "rcs_bot_id": DEFAULT_RCS_BOT_IDS.get(acc, ""),
+            "rcs_bot_ids": get_rcs_bot_ids(acc),
             "esmeaddr": DEFAULT_ESMEADDRS.get(acc, ""),
             "rcs_esmeaddr": DEFAULT_RCS_ESMEADDRS.get(acc, ""),
             "entity_id": DEFAULT_ENTITY_IDS.get(acc, "110100001654" if is_bajaj else "1001490234791338781"),
