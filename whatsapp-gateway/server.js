@@ -68,6 +68,29 @@ let reconnectAttempts = 0;
 
 const logger = pino({ level: process.env.LOG_LEVEL || 'warn' });
 
+async function restoreSessionFromDatabase() {
+  const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:8000';
+  try {
+    const res = await fetch(`${backendUrl}/api/whatsapp-gateway/session/restore`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.session && typeof data.session === 'object') {
+        const keys = Object.keys(data.session);
+        if (keys.length > 0) {
+          console.log(`[WhatsApp Gateway] Restoring ${keys.length} session auth keys from database...`);
+          for (const k of keys) {
+            const filePath = path.join(SESSION_DIR, k);
+            fs.writeFileSync(filePath, data.session[k], 'utf-8');
+          }
+          console.log('[WhatsApp Gateway] Successfully restored Baileys session from persistent database!');
+        }
+      }
+    }
+  } catch (err) {
+    console.log('[WhatsApp Gateway] Database session restore notice (will proceed with local disk):', err.message);
+  }
+}
+
 async function connectToWhatsApp() {
   currentStatus = 'CONNECTING';
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -85,7 +108,21 @@ async function connectToWhatsApp() {
     generateHighQualityLinkPreview: false,
   });
 
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('creds.update', async () => {
+    await saveCreds();
+    try {
+      const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:8000';
+      const credsPath = path.join(SESSION_DIR, 'creds.json');
+      if (fs.existsSync(credsPath)) {
+        const content = fs.readFileSync(credsPath, 'utf-8');
+        fetch(`${backendUrl}/api/whatsapp-gateway/session/backup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'creds.json', value: content }),
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  });
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -147,6 +184,23 @@ async function connectToWhatsApp() {
 
       // Refresh groups list
       setTimeout(refreshGroups, 3000);
+      // Persist session files to database so it survives container recreation
+      try {
+        const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:8000';
+        const files = fs.readdirSync(SESSION_DIR);
+        for (const file of files) {
+          if (file.endsWith('.json')) {
+            const content = fs.readFileSync(path.join(SESSION_DIR, file), 'utf-8');
+            fetch(`${backendUrl}/api/whatsapp-gateway/session/backup`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ key: file, value: content }),
+            }).catch(() => {});
+          }
+        }
+        console.log('[WhatsApp Gateway] Persisted session files to database backup.');
+      } catch (e) {}
+
     }
   });
 
@@ -377,9 +431,10 @@ app.post('/send-message', async (req, res) => {
 });
 
 // Start Express server and initiate Baileys
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`[WhatsApp Gateway] HTTP API listening on port ${PORT}`);
   console.log(`[WhatsApp Gateway] Scan QR webview at: http://localhost:${PORT}/qr.html`);
+  await restoreSessionFromDatabase();
   connectToWhatsApp().catch((err) => {
     console.error('[WhatsApp Gateway] Fatal error during WhatsApp startup:', err);
   });

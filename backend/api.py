@@ -163,7 +163,8 @@ async def authenticate_api_requests(request: Request, call_next):
         or method in ("GET", "HEAD") and re.fullmatch(r"/api/media/[^/]+", path)
         or method == "POST" and re.fullmatch(r"/api/webhooks/karix/[a-z0-9_]+", path)
         or method == "POST" and path in ("/api/sms/dlr", "/api/sms/click")
-        or method == "GET" and path in ("/api/moengage/mcp/oauth/callback", "/api/whatsapp-gateway/qr.html")
+        or method == "GET" and path in ("/api/moengage/mcp/oauth/callback", "/api/whatsapp-gateway/qr.html", "/api/whatsapp-gateway/session/restore")
+        or method == "POST" and path == "/api/whatsapp-gateway/session/backup"
     )
     if (path == "/api" or path.startswith("/api/")) and not public:
         try:
@@ -5922,6 +5923,26 @@ def whatsapp_gateway_groups_endpoint(current_user: dict = Depends(get_current_us
         return r.json()
     except Exception as exc:
         return {"ok": False, "groups": [], "error": f"Gateway unreachable: {exc}"}
+
+
+@app.post("/api/whatsapp-gateway/session/backup")
+def backup_whatsapp_session_endpoint(payload: dict = Body(...)):
+    """Backup Baileys auth keys into persistent database."""
+    key = payload.get("key")
+    value = payload.get("value")
+    if key and value:
+        from db import save_whatsapp_session_key
+        save_whatsapp_session_key(str(key), str(value))
+        return {"ok": True}
+    return {"ok": False, "error": "Missing key or value"}
+
+
+@app.get("/api/whatsapp-gateway/session/restore")
+def restore_whatsapp_session_endpoint():
+    """Restore all backed-up Baileys auth keys from persistent database."""
+    from db import get_all_whatsapp_session_data
+    data = get_all_whatsapp_session_data()
+    return {"ok": True, "count": len(data), "session": data}
 
 
 @app.get("/api/work-management/alerts/delivery-logs")

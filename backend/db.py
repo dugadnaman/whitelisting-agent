@@ -449,6 +449,13 @@ SQLITE_SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_moe_batch_rows_identity ON moengage_draft_batch_rows(batch_id, row_id);",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_moe_batch_rows_claim ON moengage_draft_batch_rows(account, workspace_id, source_ref, row_id) WHERE status NOT IN ('preview_ready', 'blocked');",
+    """
+    CREATE TABLE IF NOT EXISTS whatsapp_session_store (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 POSTGRES_SCHEMA_DDL = [
@@ -665,8 +672,14 @@ POSTGRES_SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_moe_batch_rows_identity ON moengage_draft_batch_rows(batch_id, row_id);",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_moe_batch_rows_claim ON moengage_draft_batch_rows(account, workspace_id, source_ref, row_id) WHERE status NOT IN ('preview_ready', 'blocked');",
+    """
+    CREATE TABLE IF NOT EXISTS whatsapp_session_store (
+        key VARCHAR(255) PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at VARCHAR(100) NOT NULL
+    );
+    """,
 ]
-
 _INIT_LOCK = threading.Lock()
 _INITIALIZED_TARGETS: set[tuple[Any, ...]] = set()
 
@@ -843,3 +856,33 @@ def migrate_sqlite_to_postgres(
     dest_conn.close()
     logger.info("Successfully completed SQLite to PostgreSQL migration: %s", migration_report)
     return migration_report
+
+
+def save_whatsapp_session_key(key: str, value: str) -> None:
+    from datetime import datetime, UTC
+    now = datetime.now(UTC).isoformat()
+    with get_db() as conn:
+        if conn.is_postgres:
+            conn.execute(
+                """
+                INSERT INTO whatsapp_session_store (key, value, updated_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+                """,
+                (key, value, now),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO whatsapp_session_store (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (key, value, now),
+            )
+
+
+def get_all_whatsapp_session_data() -> dict[str, str]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT key, value FROM whatsapp_session_store").fetchall()
+        return {r[0]: r[1] for r in rows}
