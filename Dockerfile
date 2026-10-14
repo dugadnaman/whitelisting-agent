@@ -11,6 +11,12 @@ RUN npm ci --legacy-peer-deps
 COPY frontend/ ./
 RUN npm run build
 
+# Build whatsapp-gateway
+WORKDIR /app/whatsapp-gateway
+COPY whatsapp-gateway/package*.json ./
+RUN npm ci --omit=dev
+COPY whatsapp-gateway/ ./
+
 # ==========================================
 # Stage 2: Final Production Runner
 # ==========================================
@@ -21,7 +27,12 @@ ENV PYTHONPATH=/app/backend:/app \
     NODE_ENV=production \
     BACKEND_INTERNAL_URL=http://127.0.0.1:8000 \
     KARIX_DB_PATH=/app/data/karix_store.db \
-    MOENGAGE_DRAFT_TATA_CATALOG_FILE=/app/tata_catalog.json
+    MOENGAGE_DRAFT_TATA_CATALOG_FILE=/app/tata_catalog.json \
+    WHATSAPP_GATEWAY_URL=http://127.0.0.1:5005 \
+    WHATSAPP_SESSION_DIR=/app/data/whatsapp_session \
+    WHATSAPP_GATEWAY_PORT=5005 \
+    WHATSAPP_SLA_GROUP_NAME=Internal_TCL<>Att \
+    WHATSAPP_SLA_GROUP_ID=120363413267146720@g.us
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libstdc++6 \
@@ -45,6 +56,7 @@ COPY samples/ ./samples/
 COPY tests/ ./tests/
 COPY tata_catalog.json* ./
 COPY --from=frontend-builder /app/frontend /app/frontend
+COPY --from=frontend-builder /app/whatsapp-gateway /app/whatsapp-gateway
 COPY docker-entrypoint.py /app/docker-entrypoint.py
 
 # Setup supervisord configuration to run both FastAPI (8000) and Next.js (3000)
@@ -69,9 +81,17 @@ autostart=true\n\
 autorestart=true\n\
 stderr_logfile=/var/log/supervisor/nextjs.err.log\n\
 stdout_logfile=/var/log/supervisor/nextjs.out.log\n\
+\n\
+[program:whatsapp_gateway]\n\
+directory=/app/whatsapp-gateway\n\
+command=/usr/local/bin/node server.js\n\
+autostart=true\n\
+autorestart=true\n\
+stderr_logfile=/var/log/supervisor/whatsapp.err.log\n\
+stdout_logfile=/var/log/supervisor/whatsapp.out.log\n\
 ' > /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 3000 8000
+EXPOSE 3000 8000 5005
 
 # The frontend proxy must reach the backend before this image is ready.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -81,7 +101,7 @@ VOLUME ["/app/data"]
 
 # Create and switch to non-privileged system user for container security
 RUN useradd -m -u 1000 -s /bin/bash appuser && \
-    mkdir -p /app/data /app/media_cache /var/log/supervisor /var/run && \
+    mkdir -p /app/data /app/data/whatsapp_session /app/media_cache /var/log/supervisor /var/run && \
     chown -R appuser:appuser /app /var/log/supervisor /var/run
 
 USER appuser

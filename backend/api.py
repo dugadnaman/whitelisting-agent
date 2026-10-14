@@ -24,7 +24,7 @@ from typing import Any, Literal
 import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictBool
 
 from db_queue import (
@@ -5899,6 +5899,19 @@ def whatsapp_gateway_qr_endpoint(current_user: dict = Depends(get_current_user))
     except Exception as exc:
         return {"ok": False, "status": "OFFLINE", "error": f"Gateway unreachable: {exc}"}
 
+
+@app.get("/api/whatsapp-gateway/qr.html")
+def whatsapp_gateway_qr_html_endpoint():
+    """Proxy interactive QR code pairing page from WhatsApp gateway."""
+    gw_url = os.getenv("WHATSAPP_GATEWAY_URL") or "http://127.0.0.1:5005"
+    try:
+        r = http_client.get(f"{gw_url.rstrip('/')}/qr.html", timeout=5)
+        return HTMLResponse(content=r.text, status_code=r.status_code)
+    except Exception as exc:
+        return HTMLResponse(
+            content=f"<!DOCTYPE html><html><body style='font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f8fafc;'><div style='background:white;padding:2rem;border-radius:1rem;text-align:center;box-shadow:0 4px 6px -1px rgb(0 0 0 / 0.1);'><h3 style='margin-top:0;'>WhatsApp Gateway starting up...</h3><p style='font-size:0.85rem;color:#64748b;'>{exc}</p><p style='font-size:0.75rem;color:#94a3b8;'>Auto-refreshing in 4s...</p></div><meta http-equiv='refresh' content='4'></body></html>",
+            status_code=503,
+        )
 
 @app.get("/api/whatsapp-gateway/groups")
 def whatsapp_gateway_groups_endpoint(current_user: dict = Depends(get_current_user)):
