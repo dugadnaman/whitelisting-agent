@@ -937,6 +937,10 @@ def _merge_rcs_templates(acc: str, status: str | None, search: str | None) -> li
             "cta_text": cta_text or None,
             "cta_url": cta_url or None,
             "suggestions": suggestions,
+            "carousel_cards": carousel_cards if carousel_cards else None,
+            "is_carousel": bool(carousel_cards),
+            "width": vi.get("width") or "MEDIUM",
+            "height": vi.get("height") or "MEDIUM",
         }
         merged_entries.append(entry)
 
@@ -4546,7 +4550,10 @@ class MoEngageRcsSyncRequest(BaseModel):
     cta_url: str | None = None
     sender_id: str | None = None
     account: str | None = None
-
+    template_type: str | None = None
+    carousel_cards: list[dict[str, Any]] | None = None
+    width: str | None = "MEDIUM"
+    height: str | None = "MEDIUM"
 def _require_moengage_account_access(account: str, current_user: dict) -> None:
     if current_user.get("sub") in (None, "usr_anon"):
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -4576,6 +4583,10 @@ async def sync_moengage_rcs_endpoint(
             cta_url=req.cta_url,
             sender_id=req.sender_id,
             account=target_account,
+            template_type=req.template_type or ("carousel" if req.carousel_cards else "card"),
+            carousel_cards=req.carousel_cards,
+            width=req.width or "MEDIUM",
+            height=req.height or "MEDIUM",
         )
 
         log_activity(

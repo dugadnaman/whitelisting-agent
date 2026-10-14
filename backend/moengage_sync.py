@@ -273,6 +273,10 @@ def create_moengage_rcs_template(
     cta_url: str = "https://www.tatacapital.com",
     sender_id: str | None = None,
     account: str = "tata",
+    template_type: str = "card",
+    carousel_cards: list[dict[str, Any]] | None = None,
+    width: str = "MEDIUM",
+    height: str = "MEDIUM",
 ) -> dict[str, Any]:
     """
     Register an RCS template into an account's MoEngage RCS Template Management:
@@ -322,33 +326,122 @@ def create_moengage_rcs_template(
         else:
             clean_media_url = "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
 
-    payload = {
-        "template_type": "rcs",
-        "name": clean_name,
-        "display_name": clean_name,
-        "description": "",
-        "meta_data": {
-            "rcs_template_type": "card",
-            "template_id": clean_id,
-            "sender_ids": [resolved_sender],
-            "provider": "karix",
-            "is_multi_button": False,
-            "data": {
-                "orientation": "VERTICAL",
-                "height": "MEDIUM",
-                "title": (card_title or clean_name)[:200],
-                "description": card_description[:2000],
+    is_carousel = (template_type or "").lower() == "carousel" or bool(carousel_cards and len(carousel_cards) >= 2)
+
+    if is_carousel and carousel_cards:
+        cards_payload = []
+        for idx, card in enumerate(carousel_cards, 1):
+            c_title = (card.get("cardTitle") or card.get("title") or card.get("card_title") or f"{clean_name} {idx}")[:200]
+            c_desc = (card.get("cardDescription") or card.get("description") or card.get("card_description") or card.get("body") or "")[:2000]
+            c_media = card.get("mediaUrl") or card.get("media_url") or clean_media_url
+
+            card_suggs = []
+            raw_suggs = card.get("suggestions", [])
+            if raw_suggs and isinstance(raw_suggs, list):
+                for s in raw_suggs:
+                    s_type = s.get("suggestionType") or s.get("type", "url_action")
+                    s_text = (s.get("text") or s.get("postbackData") or s.get("postback_data") or "Explore")[:25]
+                    s_url = s.get("url") or resolved_cta_url
+                    if s_type in ("url_action", "OPEN_URL") or s.get("url"):
+                        card_suggs.append({
+                            "type": "OPEN_URL",
+                            "text": s_text,
+                            "postback_data": s.get("postbackData") or s_text,
+                            "url": s_url.strip(),
+                            "application": "BROWSER",
+                            "webview_view_mode": "",
+                        })
+                    elif s_type in ("dialer_action", "DIAL_PHONE") or s.get("phoneNumber"):
+                        card_suggs.append({
+                            "type": "DIAL_PHONE",
+                            "text": s_text,
+                            "postback_data": s.get("postbackData") or s_text,
+                            "phone_number": s.get("phoneNumber") or s.get("phone_number") or "+919999999999",
+                        })
+                    else:
+                        card_suggs.append({
+                            "type": "REPLY",
+                            "text": s_text,
+                            "postback_data": s.get("postbackData") or s_text,
+                        })
+
+            if not card_suggs and resolved_cta_url:
+                card_suggs.append({
+                    "type": "OPEN_URL",
+                    "text": resolved_cta_text,
+                    "postback_data": resolved_cta_text[:120],
+                    "url": resolved_cta_url.strip(),
+                    "application": "BROWSER",
+                    "webview_view_mode": "",
+                })
+
+            card_obj = {
+                "title": c_title,
+                "card_title": c_title,
+                "cardTitle": c_title,
+                "description": c_desc,
+                "card_description": c_desc,
+                "cardDescription": c_desc,
                 "media": {
                     "content_type": "contenttype",
                     "type": "IMAGE",
                     "source": "URL",
                     "media_type": "STATIC",
-                    "media_url": clean_media_url,
+                    "media_url": c_media,
                 },
-                "suggestions": suggestions,
+                "suggestions": card_suggs[:4],
+            }
+            cards_payload.append(card_obj)
+
+        payload = {
+            "template_type": "rcs",
+            "name": clean_name,
+            "display_name": clean_name,
+            "description": "",
+            "meta_data": {
+                "rcs_template_type": "carousel",
+                "template_id": clean_id,
+                "sender_ids": [resolved_sender],
+                "provider": "karix",
+                "is_multi_button": False,
+                "data": {
+                    "width": width or "MEDIUM",
+                    "card_width": width or "MEDIUM",
+                    "height": height or "MEDIUM",
+                    "media_height": height or "MEDIUM",
+                    "cards": cards_payload,
+                    "carouselCard": cards_payload,
+                },
             },
-        },
-    }
+        }
+    else:
+        payload = {
+            "template_type": "rcs",
+            "name": clean_name,
+            "display_name": clean_name,
+            "description": "",
+            "meta_data": {
+                "rcs_template_type": "card",
+                "template_id": clean_id,
+                "sender_ids": [resolved_sender],
+                "provider": "karix",
+                "is_multi_button": False,
+                "data": {
+                    "orientation": "VERTICAL",
+                    "height": height or "MEDIUM",
+                    "title": (card_title or clean_name)[:200],
+                    "description": card_description[:2000],
+                    "media": {
+                        "content_type": "contenttype",
+                        "type": "IMAGE",
+                        "source": "URL",
+                        "media_type": "STATIC",
+                        "media_url": clean_media_url,
+                    },
+                    "suggestions": suggestions,
+                },
+            },
+        }
 
     headers = get_moengage_auth_headers(account)
     url = f"{cfg['base_url']}/template_metadata"
@@ -446,15 +539,16 @@ def sync_karix_rcs_to_moengage(
             skipped.append(name)
             continue
 
+        carousel_cards = vi.get("carouselCard", [])
+        is_carousel = vi.get("type") == "carousel" or (bool(carousel_cards) and len(carousel_cards) >= 2)
+
         card = vi.get("standaloneCard") or {}
-        if not card and vi.get("carouselCard"):
-            cards = vi.get("carouselCard", [])
-            card = cards[0] if cards else {}
+        if not card and carousel_cards:
+            card = carousel_cards[0]
 
         card_title = card.get("cardTitle") or vi.get("textMessage", "")[:100] or name
         card_description = card.get("cardDescription") or vi.get("textMessage", "") or ""
         media_url = _extract_rcs_media_url(vi)
-
         # 2. Semantic Duplicate Detection via TypeSafe Noul
         if semantic_dedup and existing:
             try:
@@ -480,14 +574,26 @@ def sync_karix_rcs_to_moengage(
                 logger.debug("Semantic duplicate check bypassed: %s", ex)
 
         # 3. MoEngage Attribute Personalization Tag Resolver via TypeSafe Choice
-        if resolve_attributes and re.search(r"\{\{\d+\}\}", card_description):
-            try:
-                from moengage_resolver import resolve_moengage_attributes
+        if resolve_attributes:
+            if is_carousel and carousel_cards:
+                for c in carousel_cards:
+                    c_desc = c.get("cardDescription", "")
+                    if re.search(r"\{\{\d+\}\}", c_desc) or re.search(r"\[\d+\]", c_desc):
+                        try:
+                            from moengage_resolver import resolve_moengage_attributes
 
-                trans = resolve_moengage_attributes(card_description, allow_ai=True)
-                card_description = trans.translated_text
-            except Exception as ex:
-                logger.debug("MoEngage attribute resolution bypassed: %s", ex)
+                            trans = resolve_moengage_attributes(c_desc, allow_ai=True)
+                            c["cardDescription"] = trans.translated_text
+                        except Exception as ex:
+                            logger.debug("MoEngage attribute resolution bypassed: %s", ex)
+            elif re.search(r"\{\{\d+\}\}", card_description):
+                try:
+                    from moengage_resolver import resolve_moengage_attributes
+
+                    trans = resolve_moengage_attributes(card_description, allow_ai=True)
+                    card_description = trans.translated_text
+                except Exception as ex:
+                    logger.debug("MoEngage attribute resolution bypassed: %s", ex)
 
         # CTA from first suggestion if present
         suggestions = card.get("suggestions", []) or vi.get("suggestions", []) or []
@@ -510,9 +616,13 @@ def sync_karix_rcs_to_moengage(
                 cta_text=cta_text,
                 cta_url=cta_url,
                 account=account,
+                sender_id=lt.get("botId") or vi.get("botId"),
+                template_type="carousel" if is_carousel else "card",
+                carousel_cards=carousel_cards if is_carousel else None,
+                width=vi.get("width") or "MEDIUM",
+                height=vi.get("height") or "MEDIUM",
             )
-            created.append(
-                {
+            created.append({
                     "template_name": name,
                     "template_id": template_id,
                     "moengage_id": res.get("moengage_id"),

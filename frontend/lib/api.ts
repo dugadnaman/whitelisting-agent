@@ -104,6 +104,10 @@ export type Template = {
   media_url?: string;
   cta_text?: string;
   cta_url?: string;
+  carousel_cards?: Array<Record<string, unknown>>;
+  is_carousel?: boolean;
+  width?: string;
+  height?: string;
 };
 
 export type KarixHealth = {
@@ -1331,7 +1335,11 @@ export async function syncRcsTemplateToMoEngage(params: {
   cta_url?: string;
   sender_id?: string;
   account?: string;
-}): Promise<{ ok: boolean; name: string; template_id: string; moengage_id: string }> {
+  template_type?: string;
+  carousel_cards?: Array<Record<string, unknown>>;
+  width?: string;
+  height?: string;
+}) : Promise<{ ok: boolean; name: string; template_id: string; moengage_id: string }> {
   const qs = params.account ? `?account=${encodeURIComponent(params.account)}` : "";
   const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/sync${qs}`), {
     method: "POST",

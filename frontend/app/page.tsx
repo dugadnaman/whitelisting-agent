@@ -132,6 +132,7 @@ export default function DashboardPage() {
 
   const handleSyncSingleRcsToMoEngage = async (t: Template) => {
     const tName = t.template_name;
+    const isCarousel = (t.template_type || '').toLowerCase().includes('carousel') || Boolean(t.carousel_cards?.length);
     try {
       setSyncingSingleRcs((prev) => ({ ...prev, [tName]: true }));
       const res = await syncRcsTemplateToMoEngage({
@@ -144,6 +145,10 @@ export default function DashboardPage() {
         cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
         cta_url: t.cta_url,
         sender_id: account === 'apparel' ? 'RB RCS' : t.sender_ids?.[0],
+        template_type: isCarousel ? 'carousel' : 'card',
+        carousel_cards: t.carousel_cards || undefined,
+        width: t.width,
+        height: t.height,
       });
       setSyncedSingleRcs((prev) => ({ ...prev, [tName]: res.moengage_id }));
       setSyncRcsFeedback({
@@ -194,6 +199,7 @@ export default function DashboardPage() {
 
       for (const t of targets) {
         try {
+          const isCarousel = (t.template_type || '').toLowerCase().includes('carousel') || Boolean(t.carousel_cards?.length);
           await syncRcsTemplateToMoEngage({
             account,
             template_name: t.template_name,
@@ -204,6 +210,10 @@ export default function DashboardPage() {
             cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
             cta_url: t.cta_url,
             sender_id: account === 'apparel' ? 'RB RCS' : t.sender_ids?.[0],
+            template_type: isCarousel ? 'carousel' : 'card',
+            carousel_cards: t.carousel_cards || undefined,
+            width: t.width,
+            height: t.height,
           });
           setSyncedSingleRcs((prev) => ({ ...prev, [t.template_name]: 'synced' }));
           successCount++;
