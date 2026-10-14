@@ -163,7 +163,7 @@ async def authenticate_api_requests(request: Request, call_next):
         or method in ("GET", "HEAD") and re.fullmatch(r"/api/media/[^/]+", path)
         or method == "POST" and re.fullmatch(r"/api/webhooks/karix/[a-z0-9_]+", path)
         or method == "POST" and path in ("/api/sms/dlr", "/api/sms/click")
-        or method == "GET" and path in ("/api/moengage/mcp/oauth/callback", "/api/whatsapp-gateway/qr.html", "/api/whatsapp-gateway/session/restore")
+        or method == "GET" and path in ("/api/moengage/mcp/oauth/callback", "/api/whatsapp-gateway/qr.html", "/api/whatsapp-gateway/status", "/api/whatsapp-gateway/qr", "/api/whatsapp-gateway/session/restore")
         or method == "POST" and path == "/api/whatsapp-gateway/session/backup"
     )
     if (path == "/api" or path.startswith("/api/")) and not public:
@@ -192,6 +192,16 @@ RCS_LOG_PATH = "rcs_submission_log.jsonl"
 @app.get("/healthz")
 def health_check():
     """Health check endpoint for Render zero-downtime deploys and external uptime monitors."""
+    try:
+        import asyncio
+        from email_notifier import SCHEDULER_STATE, run_scheduler_loop
+
+        if SCHEDULER_STATE.task is None or SCHEDULER_STATE.task.done():
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                SCHEDULER_STATE.task = loop.create_task(run_scheduler_loop())
+    except Exception:
+        pass
     return {"status": "ok", "service": "karix-whitelisting-api", "version": "2.1.0"}
 
 
