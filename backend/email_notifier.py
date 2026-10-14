@@ -1448,8 +1448,8 @@ async def run_scheduler_loop() -> None:
                 hour = now_ist.hour
                 minute = now_ist.minute
 
-                # Check 10:00 AM slot (10:00 to 10:05 window)
-                if hour == 10 and 0 <= minute <= 5:
+                # Check 10:00 AM slot (10:00 to 10:45 window)
+                if hour == 10 and 0 <= minute <= 45:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "MORNING"):
                         SCHEDULER_STATE.mark_sent(today_str, "MORNING", {"status": "claimed_by_scheduler"})
                         logger.info("Triggering automated 10:00 AM IST Kickoff SLA reminder...")
@@ -1464,8 +1464,8 @@ async def run_scheduler_loop() -> None:
                             whatsapp_group_id="120363413267146720@g.us",
                         )
 
-                # Check 1:00 PM slot (13:00 to 13:05 window)
-                elif hour == 13 and 0 <= minute <= 5:
+                # Check 1:00 PM slot (13:00 to 13:45 window)
+                elif hour == 13 and 0 <= minute <= 45:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "MIDDAY"):
                         SCHEDULER_STATE.mark_sent(today_str, "MIDDAY", {"status": "claimed_by_scheduler"})
                         logger.info("Triggering automated 1:00 PM IST Midday Checkpoint SLA reminder...")
@@ -1480,8 +1480,8 @@ async def run_scheduler_loop() -> None:
                             whatsapp_group_id="120363413267146720@g.us",
                         )
 
-                # Check 4:00 PM slot (16:00 to 16:05 window)
-                elif hour == 16 and 0 <= minute <= 5:
+                # Check 4:00 PM slot (16:00 to 16:45 window)
+                elif hour == 16 and 0 <= minute <= 45:
                     if not SCHEDULER_STATE.is_already_sent_today(today_str, "EOD"):
                         SCHEDULER_STATE.mark_sent(today_str, "EOD", {"status": "claimed_by_scheduler"})
                         logger.info("Triggering automated 4:00 PM IST EOD Escalation SLA reminder...")

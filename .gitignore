@@ -72,3 +72,6 @@ prototypes/
 whatsapp-gateway/node_modules/
 whatsapp-gateway/session_auth/
 whatsapp_session/
+sla_daemon*.log
+whatsapp_gateway*.log
+data/sla_daemon_state.json
