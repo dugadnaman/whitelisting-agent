@@ -163,7 +163,7 @@ async def authenticate_api_requests(request: Request, call_next):
         or method in ("GET", "HEAD") and re.fullmatch(r"/api/media/[^/]+", path)
         or method == "POST" and re.fullmatch(r"/api/webhooks/karix/[a-z0-9_]+", path)
         or method == "POST" and path in ("/api/sms/dlr", "/api/sms/click")
-        or method == "GET" and path == "/api/moengage/mcp/oauth/callback"
+        or method == "GET" and path in ("/api/moengage/mcp/oauth/callback", "/api/whatsapp-gateway/qr.html")
     )
     if (path == "/api" or path.startswith("/api/")) and not public:
         try:
