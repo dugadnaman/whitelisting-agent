@@ -2,33 +2,37 @@ name: Daily SLA Alert Keepalive & Scheduler Trigger
 
 on:
   schedule:
-    # 04:20 & 04:30 UTC = 09:50 AM & 10:00 AM IST (Morning Kickoff)
+    # Morning Kickoff (09:50, 09:55, 10:00, 10:05 AM IST = 04:20, 04:25, 04:30, 04:35 UTC)
     - cron: '20 4 * * *'
+    - cron: '25 4 * * *'
     - cron: '30 4 * * *'
-    # 07:20 & 07:30 UTC = 12:50 PM & 01:00 PM IST (Midday Checkpoint)
+    - cron: '35 4 * * *'
+    # Midday Checkpoint (12:50, 12:55, 01:00, 01:05 PM IST = 07:20, 07:25, 07:30, 07:35 UTC)
     - cron: '20 7 * * *'
+    - cron: '25 7 * * *'
     - cron: '30 7 * * *'
-    # 10:20 & 10:30 UTC = 03:50 PM & 04:00 PM IST (EOD Escalation)
+    - cron: '35 7 * * *'
+    # EOD Escalation (03:50, 03:55, 04:00, 04:05 PM IST = 10:20, 10:25, 10:30, 10:35 UTC)
     - cron: '20 10 * * *'
+    - cron: '25 10 * * *'
     - cron: '30 10 * * *'
+    - cron: '35 10 * * *'
   workflow_dispatch:
 
 jobs:
-  keepalive:
-    name: Wakeup Render Service & Trigger SLA Scheduler
+  keepalive_and_dispatch:
+    name: Wakeup Render & Trigger SLA Dispatch
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Render Service Health
+      - name: Wakeup Render Service
         run: |
-          echo "Pinging whitelisting-agent.onrender.com to ensure container is awake..."
-          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" --max-time 45 https://whitelisting-agent.onrender.com/api/health)
-          echo "Health Check Response:"
-          echo "$RESPONSE"
-          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d':' -f2)
-          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
-            echo "✅ Web service is awake and healthy (HTTP $STATUS)!"
-          else
-            echo "⚠️ Non-200 status ($STATUS). Retrying once..."
-            sleep 5
-            curl -f -s --max-time 45 https://whitelisting-agent.onrender.com/api/health
-          fi
+          echo "Pinging whitelisting-agent.onrender.com/api/health..."
+          curl -f -s --max-time 45 https://whitelisting-agent.onrender.com/api/health || true
+
+      - name: Trigger SLA Dispatch
+        run: |
+          echo "Triggering SLA dispatch check on whitelisting-agent.onrender.com..."
+          RESPONSE=$(curl -s -X POST https://whitelisting-agent.onrender.com/api/cron/sla-dispatch \
+            -H "Content-Type: application/json" \
+            -d '{"stage": "AUTO"}')
+          echo "Dispatch Response: $RESPONSE"
