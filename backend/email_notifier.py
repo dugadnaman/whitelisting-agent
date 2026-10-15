@@ -1226,7 +1226,7 @@ def send_whatsapp_sla_alert(
         }
         if target_id:
             payload["group_id"] = target_id
-        else:
+        if target_group:
             payload["group"] = target_group
 
         endpoint = f"{url.rstrip('/')}/send-message"

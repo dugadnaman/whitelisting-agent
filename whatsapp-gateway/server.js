@@ -376,19 +376,28 @@ app.post('/send-message', async (req, res) => {
     // 2. Group Name search
     else if (group && typeof group === 'string') {
       const q = group.trim().toLowerCase();
-      if (!cachedGroups.length) await refreshGroups();
-      const match = cachedGroups.find((g) => (g.name || '').toLowerCase() === q)
-        || cachedGroups.find((g) => (g.name || '').toLowerCase().includes(q));
-      if (match) {
-        targetJid = match.id;
-        resolvedName = match.name;
+      const KNOWN_GROUPS = {
+        'internal_tcl<>att': '120363413267146720@g.us',
+        'tata capital campaigns': '120363413267146720@g.us',
+      };
+      if (KNOWN_GROUPS[q]) {
+        targetJid = KNOWN_GROUPS[q];
+        resolvedName = group;
       } else {
-        return res.status(404).json({
-          ok: false,
-          delivered: false,
-          error: `Group matching "${group}" was not found among participating groups.`,
-          available_groups: cachedGroups.map((g) => g.name),
-        });
+        if (!cachedGroups.length) await refreshGroups();
+        const match = cachedGroups.find((g) => (g.name || '').toLowerCase() === q)
+          || cachedGroups.find((g) => (g.name || '').toLowerCase().includes(q));
+        if (match) {
+          targetJid = match.id;
+          resolvedName = match.name;
+        } else {
+          return res.status(404).json({
+            ok: false,
+            delivered: false,
+            error: `Group matching "${group}" was not found among participating groups.`,
+            available_groups: cachedGroups.map((g) => g.name),
+          });
+        }
       }
     }
     // 3. Direct Phone Number (e.g. +919876543210 -> 919876543210@s.whatsapp.net)

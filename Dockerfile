@@ -85,8 +85,8 @@ stdout_logfile=/var/log/supervisor/nextjs.out.log\n\
 [program:whatsapp_gateway]\n\
 directory=/app/whatsapp-gateway\n\
 command=/usr/local/bin/node server.js\n\
-autostart=true\n\
-autorestart=true\n\
+autostart=false\n\
+autorestart=false\n\
 stderr_logfile=/var/log/supervisor/whatsapp.err.log\n\
 stdout_logfile=/var/log/supervisor/whatsapp.out.log\n\
 ' > /etc/supervisor/conf.d/supervisord.conf

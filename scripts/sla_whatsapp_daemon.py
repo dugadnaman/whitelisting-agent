@@ -130,18 +130,18 @@ def run_daemon() -> None:
             hour = now_ist.hour
             minute = now_ist.minute
 
-            # Slot 1: 10:00 AM IST (Window: 10:00 to 10:30)
-            if hour == 10 and 0 <= minute <= 30:
+            # Slot 1: 10:00 AM IST (Window: 10:00 to 10:45)
+            if hour == 10 and 0 <= minute <= 45:
                 if not is_already_sent(today_str, "MORNING"):
                     dispatch_slot("MORNING", today_str)
 
-            # Slot 2: 01:00 PM IST (Window: 13:00 to 13:30)
-            elif hour == 13 and 0 <= minute <= 30:
+            # Slot 2: 01:00 PM IST (Window: 13:00 to 13:45)
+            elif hour == 13 and 0 <= minute <= 45:
                 if not is_already_sent(today_str, "MIDDAY"):
                     dispatch_slot("MIDDAY", today_str)
 
-            # Slot 3: 04:00 PM IST (Window: 16:00 to 16:30)
-            elif hour == 16 and 0 <= minute <= 30:
+            # Slot 3: 04:00 PM IST (Window: 16:00 to 16:45)
+            elif hour == 16 and 0 <= minute <= 45:
                 if not is_already_sent(today_str, "EOD"):
                     dispatch_slot("EOD", today_str)
 
