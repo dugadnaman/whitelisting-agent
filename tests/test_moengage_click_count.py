@@ -45,6 +45,7 @@ def test_inclusive_date_query_unions_click_channels_and_requires_base(frozen_clo
     assert {action["action_name"] for action in channels["filters"]} == {
         "MOE_WHATSAPP_CLICKED", "MOE_EMAIL_CLICK", "MOE_SMS_CLICKED",
         "NOTIFICATION_CLICKED_MOE", "NOTIFICATION_CLICKED_IOS_MOE",
+        "MOE_RCS_CLICKED",
     }
     for action in channels["filters"]:
         assert action["execution"] == {"count": 1, "type": "atleast"}

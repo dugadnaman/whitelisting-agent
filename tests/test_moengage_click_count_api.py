@@ -328,6 +328,7 @@ def test_invalid_calendar_bounds_do_not_submit_queries(client, portal, provision
 @pytest.mark.parametrize("event", [
     "MOE_WHATSAPP_CLICKED", "MOE_EMAIL_CLICK", "MOE_SMS_CLICKED",
     "NOTIFICATION_CLICKED_MOE", "NOTIFICATION_CLICKED_IOS_MOE",
+    "MOE_RCS_CLICKED",
 ])
 def test_each_channel_counts_a_repeated_clicker_once(client, portal, provision_user, event):
     _, headers = provision_user(tenant="tata")
@@ -621,7 +622,8 @@ def test_deterministic_randomized_payload_matches_independent_click_membership_o
     random = Random(20261009)
     simulator = Portal()
     supported = ("MOE_WHATSAPP_CLICKED", "MOE_EMAIL_CLICK", "MOE_SMS_CLICKED",
-                 "NOTIFICATION_CLICKED_MOE", "NOTIFICATION_CLICKED_IOS_MOE")
+                 "NOTIFICATION_CLICKED_MOE", "NOTIFICATION_CLICKED_IOS_MOE",
+                 "MOE_RCS_CLICKED")
     unrelated = ("EMAIL_OPENED", "MOE_SMS_SENT", "MOE_WHATSAPP_DELIVERED")
     other_base_id = "6ac6134b701a0236ad3a2927"
     origin = datetime(2024, 3, 1, 1, 30, tzinfo=UTC)
