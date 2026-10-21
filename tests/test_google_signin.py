@@ -285,32 +285,54 @@ def test_cookie_security_and_allowed_origin_configuration(client, monkeypatch, o
     assert response.json()["client_id"] == CLIENT_ID
 
 
-@pytest.mark.parametrize("account_state", ["unregistered", "inactive", "passwordless", "duplicate", "bad-scope"])
-def test_only_unique_active_password_backed_existing_accounts(client, provision_user, google_token, account_state):
-    user = None
-    if account_state != "unregistered":
-        user, _ = provision_user(email=EMAIL)
-        with db.get_db() as conn:
-            if account_state == "inactive":
-                conn.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user["id"],))
-            elif account_state == "passwordless":
-                conn.execute("UPDATE users SET password_hash = NULL WHERE id = ?", (user["id"],))
-            elif account_state == "duplicate":
-                conn.execute(
-                    "INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
-                    ("duplicate-offline-user", " MEMBER@ATTRIBUTICS.COM ", "not-used", "Duplicate", "bajaj", "operator", "2026-01-01T00:00:00+00:00"),
-                )
-            elif account_state == "bad-scope":
-                conn.execute("UPDATE users SET tenant_id = 'all', role = 'operator' WHERE id = ?", (user["id"],))
-    before = stored(user["id"]) if user else None
+@pytest.mark.parametrize("account_state", ["inactive", "duplicate", "bad-scope"])
+def test_inactive_duplicate_and_bad_scope_fail_closed(client, provision_user, google_token, account_state):
+    user, _ = provision_user(email=EMAIL)
+    with db.get_db() as conn:
+        if account_state == "inactive":
+            conn.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user["id"],))
+        elif account_state == "duplicate":
+            conn.execute(
+                "INSERT INTO users (id, email, password_hash, name, tenant_id, role, created_at, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+                ("duplicate-offline-user", " MEMBER@ATTRIBUTICS.COM ", "not-used", "Duplicate", "bajaj", "operator", "2026-01-01T00:00:00+00:00"),
+            )
+        elif account_state == "bad-scope":
+            conn.execute("UPDATE users SET tenant_id = 'all', role = 'operator' WHERE id = ?", (user["id"],))
+    before = stored(user["id"])
     response = login(client, google_token(start(client)))
     assert response.status_code == (403 if account_state == "bad-scope" else 401)
-    if user:
-        assert stored(user["id"]) == before
-    with db.get_db() as conn:
-        count = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
-    assert count == (0 if user is None else 2 if account_state == "duplicate" else 1)
+    assert stored(user["id"]) == before
 
+
+def test_dotless_alias_matches_existing_account(client, provision_user, google_token):
+    user, _ = provision_user(email="namandugad@attributics.com", tenant="all", role="superadmin")
+    credential = google_token(start(client), claims={"email": "naman.dugad@attributics.com", "name": "Naman Dugad"})
+    response = login(client, credential)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user"]["id"] == user["id"]
+    assert data["user"]["role"] == "superadmin"
+    assert data["user"]["tenant_id"] == "all"
+
+
+def test_unregistered_workspace_user_auto_provisions_as_pending(client, google_token):
+    credential = google_token(start(client), claims={"email": "newcomer@attributics.com", "name": "New Team Member"})
+    response = login(client, credential)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user"]["email"] == "newcomer@attributics.com"
+    assert data["user"]["name"] == "New Team Member"
+    assert data["user"]["tenant_id"] == "unassigned"
+    assert data["user"]["role"] == "operator"
+
+
+def test_passwordless_active_user_can_sign_in_via_google(client, provision_user, google_token):
+    user, _ = provision_user(email=EMAIL)
+    with db.get_db() as conn:
+        conn.execute("UPDATE users SET password_hash = '' WHERE id = ?", (user["id"],))
+    response = login(client, google_token(start(client)))
+    assert response.status_code == 200
+    assert response.json()["user"]["id"] == user["id"]
 
 @pytest.mark.parametrize("body", [None, [], {}, {"credential": 1}, {"credential": ""}, {"credential": "sensitive-test-value", "role": "superadmin"}, {"credential": "sensitive-test-value", "tenant_id": "all"}, {"credential": "sensitive-test-value", "nonce": "injected"}])
 def test_login_body_is_strict_and_errors_do_not_echo_input(client, body):

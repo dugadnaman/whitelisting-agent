@@ -633,10 +633,10 @@ def google_start_endpoint(request: Request, response: Response):
 
 def _google_login_result(request: Request, credential: str) -> dict:
     # Signing-key HTTP lookup and database access must not block the ASGI event loop.
-    email = verify_google_credential(request, credential)
-    auth_res = authenticate_google_user(email)
+    verified = verify_google_credential(request, credential)
+    auth_res = authenticate_google_user(verified["email"], name=verified.get("name"))
     if not auth_res:
-        raise HTTPException(status_code=401, detail="Google sign-in could not be completed. Use an existing active account or contact your administrator.")
+        raise HTTPException(status_code=401, detail="Google sign-in could not be completed. Your account may be inactive or restricted.")
     user = auth_res["user"]
     log_activity(
         user=user.get("name") or user["email"], action="USER_LOGIN",

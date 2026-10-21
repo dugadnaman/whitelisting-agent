@@ -6,6 +6,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
+from typing import Any
 
 import jwt
 from fastapi import HTTPException, Request, Response
@@ -129,8 +130,8 @@ def _challenge_nonce(request: Request, config: GoogleConfig, origin: str) -> str
         raise _error(401, "Google sign-in expired. Please start again.") from None
 
 
-def verify_google_credential(request: Request, credential: str) -> str:
-    """Return only an authoritative, verified email; never consume provider authorization claims."""
+def verify_google_credential(request: Request, credential: str) -> dict[str, Any]:
+    """Return verified identity fields; never consume provider authorization claims."""
     config = google_config()
     if config is None:
         raise _error(503, "Google sign-in is unavailable. Use email and password.")
@@ -181,6 +182,7 @@ def verify_google_credential(request: Request, credential: str) -> str:
             or (domain != "gmail.com" and hosted_domain is None)
         ):
             raise ValueError("Email is not authoritative or allowed")
-        return email
+        name = claims.get("name") if isinstance(claims.get("name"), str) else None
+        return {"email": email, "name": name}
     except (jwt.PyJWTError, TypeError, ValueError, OverflowError, RecursionError):
         raise _error() from None

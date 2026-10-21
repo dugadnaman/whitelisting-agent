@@ -131,15 +131,33 @@ def validate_identity_scope(tenant_id: str, role: str) -> None:
 def _email_matches(conn: DBConnection, email: str) -> list[Any]:
     # Preserve stored legacy emails while comparing their normalized identity.
     trim = "BTRIM" if conn.is_postgres else "TRIM"
-    return conn.execute(
+    cleaned = email.lower().strip()
+    exact = conn.execute(
         f"SELECT * FROM users WHERE LOWER({trim}(email, ?)) = ? LIMIT 2",
-        (string.whitespace, email.lower().strip()),
+        (string.whitespace, cleaned),
     ).fetchall()
+    if exact:
+        return exact
+    # Support dot-insensitive username aliases (e.g. naman.dugad@ vs namandugad@)
+    if "@" in cleaned:
+        local, domain = cleaned.split("@", 1)
+        dotless_local = local.replace(".", "")
+        rows = conn.execute(
+            f"SELECT * FROM users WHERE LOWER({trim}(email, ?)) LIKE ? LIMIT 20",
+            (string.whitespace, f"%@{domain}"),
+        ).fetchall()
+        dotless = [
+            r for r in rows
+            if r["email"].lower().strip().split("@")[0].replace(".", "") == dotless_local
+        ]
+        if len(dotless) == 1:
+            return dotless
+    return []
 
 
 def _user_profile(conn: DBConnection, user_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        f"SELECT {_PROFILE_COLUMNS} FROM users WHERE id = ? AND is_active = 1 AND password_hash IS NOT NULL",
+        f"SELECT {_PROFILE_COLUMNS} FROM users WHERE id = ? AND is_active = 1",
         (user_id,),
     ).fetchone()
     return dict(row) if row else None
@@ -201,27 +219,50 @@ def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
     return {"user": user_data, "token": create_access_token(row["id"], row["email"], row["tenant_id"], row["role"], row["name"])}
 
 
-def authenticate_google_user(email: str) -> dict[str, Any] | None:
-    """Sign in a unique existing password-backed identity without changing its admission."""
+def authenticate_google_user(email: str, name: str | None = None) -> dict[str, Any] | None:
+    """Sign in an active identity matching email (or dotless alias), or provision a new pending operator."""
     configured_jwt_secret()
+    clean_email = email.lower().strip()
     with _auth_db() as conn:
-        matches = _email_matches(conn, email)
-        if len(matches) != 1 or not matches[0]["password_hash"]:
+        matches = _email_matches(conn, clean_email)
+        if len(matches) > 1:
+            logger.warning("Multiple accounts matched email %s; cannot resolve identity", clean_email)
             return None
-        user = _user_profile(conn, matches[0]["id"])
-        if user is None:
-            return None
-        try:
-            validate_identity_scope(user["tenant_id"], user["role"])
-        except (ValueError, TypeError):
-            raise HTTPException(
-                status_code=403, detail="Your account permissions need administrator configuration.",
-            ) from None
-        now = datetime.now(UTC).isoformat()
-        conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (now, user["id"]))
-        user["last_login"] = now
-    return {"user": user, "token": create_access_token(user["id"], user["email"], user["tenant_id"], user["role"], user["name"])}
+        if len(matches) == 1:
+            row = matches[0]
+            if row["is_active"] != 1:
+                return None
+            user = _user_profile(conn, row["id"])
+            if user is None:
+                return None
+            try:
+                validate_identity_scope(user["tenant_id"], user["role"])
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=403, detail="Your account permissions need administrator configuration.",
+                ) from None
+            now = datetime.now(UTC).isoformat()
+            conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (now, user["id"]))
+            user["last_login"] = now
+            return {"user": user, "token": create_access_token(user["id"], user["email"], user["tenant_id"], user["role"], user["name"])}
 
+        # New user with verified Google email: auto-provision as pending unassigned operator
+        now = datetime.now(UTC).isoformat()
+        user_id = f"usr_{uuid.uuid4().hex}"
+        display_name = (name or "").strip() or clean_email.split("@")[0].replace(".", " ").title()
+        conn.execute(
+            "INSERT INTO users (id, email, password_hash, name, tenant_id, role, requested_tenant_id, created_at, last_login, is_active) "
+            "VALUES (?, ?, '', ?, 'unassigned', 'operator', NULL, ?, ?, 1) ON CONFLICT(email) DO NOTHING",
+            (user_id, clean_email, display_name, now, now),
+        )
+        row = conn.execute(
+            f"SELECT {_PROFILE_COLUMNS} FROM users WHERE email = ? AND is_active = 1",
+            (clean_email,),
+        ).fetchone()
+        if not row:
+            return None
+        user = dict(row)
+        return {"user": user, "token": create_access_token(user["id"], user["email"], user["tenant_id"], user["role"], user["name"])}
 
 def get_user_profile(user_id: str) -> dict[str, Any] | None:
     with _auth_db() as conn:
