@@ -15,6 +15,9 @@ services:
       - PYTHONPATH=/app/backend:/app
       - BACKEND_INTERNAL_URL=http://127.0.0.1:8000
       - JWT_SECRET=${JWT_SECRET:?Set a strong persistent JWT_SECRET in .env}
+      - KARIX_GOOGLE_CLIENT_ID=${KARIX_GOOGLE_CLIENT_ID:-}
+      - KARIX_GOOGLE_ALLOWED_ORIGINS=${KARIX_GOOGLE_ALLOWED_ORIGINS:-}
+      - KARIX_GOOGLE_ALLOWED_DOMAINS=${KARIX_GOOGLE_ALLOWED_DOMAINS:-attributics.com}
       - KARIX_DB_PATH=/app/data/karix_store.db
       - APPAREL_ATTRIBUTION_WORKER_URL=http://apparel-worker.internal:8000
       - APPAREL_ATTRIBUTION_TOKEN=${APPAREL_ATTRIBUTION_TOKEN:?Set a strong shared worker token in .env}

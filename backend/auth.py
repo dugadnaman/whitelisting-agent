@@ -201,6 +201,28 @@ def authenticate_user(email: str, password: str) -> dict[str, Any] | None:
     return {"user": user_data, "token": create_access_token(row["id"], row["email"], row["tenant_id"], row["role"], row["name"])}
 
 
+def authenticate_google_user(email: str) -> dict[str, Any] | None:
+    """Sign in a unique existing password-backed identity without changing its admission."""
+    configured_jwt_secret()
+    with _auth_db() as conn:
+        matches = _email_matches(conn, email)
+        if len(matches) != 1 or not matches[0]["password_hash"]:
+            return None
+        user = _user_profile(conn, matches[0]["id"])
+        if user is None:
+            return None
+        try:
+            validate_identity_scope(user["tenant_id"], user["role"])
+        except (ValueError, TypeError):
+            raise HTTPException(
+                status_code=403, detail="Your account permissions need administrator configuration.",
+            ) from None
+        now = datetime.now(UTC).isoformat()
+        conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (now, user["id"]))
+        user["last_login"] = now
+    return {"user": user, "token": create_access_token(user["id"], user["email"], user["tenant_id"], user["role"], user["name"])}
+
+
 def get_user_profile(user_id: str) -> dict[str, Any] | None:
     with _auth_db() as conn:
         return _user_profile(conn, user_id)

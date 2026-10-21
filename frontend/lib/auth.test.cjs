@@ -9,11 +9,12 @@ const compiled = ts.transpileModule(readFileSync(join(__dirname, 'api.ts'), 'utf
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-function authApi(fetchImpl = async () => { throw new Error('Unexpected request'); }) {
+function authApi(fetchImpl = async () => { throw new Error('Unexpected request'); }, clock = Date) {
   const storage = new Map();
   const exports = {};
   vm.runInNewContext(compiled, {
-    exports, module: { exports }, Headers, AbortController, Promise, setTimeout, clearTimeout,
+    exports, module: { exports }, Headers, AbortController, AbortSignal, URLSearchParams, Promise, setTimeout, clearTimeout,
+    Date: clock,
     process: { env: {} }, window: {}, fetch: fetchImpl,
     localStorage: {
       getItem: (key) => storage.get(key) ?? null,
@@ -83,6 +84,44 @@ test('login and invite mutations do not retry failures or change the existing to
   await assert.rejects(api.inviteColleague('colleague@example.com', 'Colleague-password-123', 'Colleague'), /Authentication unavailable/);
   assert.equal(calls, 2);
   assert.equal(storage.get('karix_jwt_token'), 'synthetic-admin-token');
+});
+
+
+test('Google sign-in retains only the application session, never the provider credential', async () => {
+  const { api, storage } = authApi(async () => ({
+    ok: true, status: 200,
+    json: async () => ({ user: user('apparel'), token: 'synthetic-app-token' }),
+  }));
+  await api.loginWithGoogle('synthetic-google-credential');
+  assert.deepEqual([...storage.entries()], [['karix_jwt_token', 'synthetic-app-token']]);
+});
+
+test('Google start and validation failures never retry or replace the existing session', async () => {
+  let calls = 0;
+  const { api, storage } = authApi(async () => {
+    calls += 1;
+    return { ok: false, status: 503, text: async () => JSON.stringify({ detail: 'Google sign-in unavailable' }) };
+  });
+  storage.set('karix_jwt_token', 'synthetic-existing-token');
+  await assert.rejects(api.startGoogleSignIn(), /Google sign-in unavailable/);
+  assert.equal(calls, 1);
+  await assert.rejects(api.loginWithGoogle('synthetic-google-credential'), /Google sign-in unavailable/);
+  assert.equal(calls, 2);
+  assert.equal(storage.get('karix_jwt_token'), 'synthetic-existing-token');
+});
+
+test('aborted Google callbacks cannot persist a late application session', async () => {
+  const controller = new AbortController();
+  const { api, storage } = authApi(async () => ({
+    ok: true, status: 200,
+    json: async () => {
+      controller.abort(new Error('Google callback is stale'));
+      return { user: user('bajaj'), token: 'synthetic-late-token' };
+    },
+  }));
+  storage.set('karix_jwt_token', 'synthetic-existing-token');
+  await assert.rejects(api.loginWithGoogle('synthetic-google-credential', controller.signal), /Google callback is stale/);
+  assert.equal(storage.get('karix_jwt_token'), 'synthetic-existing-token');
 });
 
 test('signup establishes an authenticated pending session without company access', async () => {

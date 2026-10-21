@@ -213,6 +213,33 @@ Verification must include a real login after redeployment and confirmation that 
 - Missing or weak `JWT_SECRET` produces an authentication-configuration error, not a replacement signing key. The native local setup generates its key once; deployed services must keep their configured key persistent.
 
 
+#### Google sign-in for Karix
+
+Google sign-in is an additional way to authenticate an **existing active Karix account**; password login remains available. It does not create an account, approve a company request, choose a tenant from an email domain, promote a role or refresh Karix/MoEngage provider credentials. Unregistered users must request company access through the existing signup process; pending accounts remain pending after Google login. Disabled accounts and ambiguous duplicate email identities cannot sign in.
+
+Configure a **separate Karix Google Cloud OAuth Web application client**. Do not copy the leave application's client, Gmail/Calendar grants or private state.
+
+1. Configure Google's consent screen for the intended workforce/audience.
+2. Add the exact Karix frontend origin(s) to the client's **Authorized JavaScript origins**, including the port for development. Use HTTPS in production; only loopback development can use HTTP.
+3. Set these variables on the backend/container and restart it:
+
+   ```dotenv
+   KARIX_GOOGLE_CLIENT_ID=YOUR-KARIX-WEB-CLIENT.apps.googleusercontent.com
+   KARIX_GOOGLE_ALLOWED_ORIGINS=https://YOUR-KARIX-HOSTNAME
+   KARIX_GOOGLE_ALLOWED_DOMAINS=attributics.com
+   ```
+
+   Multiple origins/domains are comma-separated. For local development, register and configure `http://localhost:3000` and/or `http://127.0.0.1:3000` exactly as used in the browser. Keep the existing persistent `JWT_SECRET`. The client ID is public configuration; this popup flow requires no client secret and no new Gmail/Calendar scopes.
+4. Reload `/login`; the official **Sign in with Google** button appears when configuration is valid. Its result follows the same selected-organization checks and routing as password login.
+
+This uses the [Google Identity Services JavaScript popup flow](https://developers.google.com/identity/gsi/web/reference/js-reference), not the leave application's redirect flow: do **not** register the leave `/auth/google/callback` as a Karix callback. The browser submits the Google ID credential to Karix's own same-origin `/api/auth/google` endpoint. Google credentials are not stored in localStorage or URLs; only the normal Karix session JWT is retained using the existing session mechanism.
+
+The backend binds each attempt to a short-lived HttpOnly nonce cookie and checks an exact allowed Origin before validating Google's fixed-endpoint signing keys, issuer, audience, expiry, nonce and verified authoritative email/domain. Hosted-domain restrictions are identity admission only, never company authorization. No configured client means the Google button is hidden; invalid partial configuration, blocked Google scripts or verification outages must not disable password login. See [Google's server-side verification requirements](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token).
+
+Verification (22 October 2026): **157 backend authentication/security tests** and **20 frontend authentication tests** passed. A real localhost HTTP/JWKS/RSA issuer smoke exercised Google exchange, normal app JWTs, cross-company denial, pending-account restrictions, hostile-Origin rejection, missing post-success challenge rejection and retained password login. Isolated Chromium loaded the official GIS button on desktop and 390px mobile without page overflow; signed fixture callbacks through the actual Next proxy proved organization-mismatch session clearing, fresh-challenge retry and routing to Awaiting company approval. A disabled-config browser fixture hid Google without disabling password sign-in. No real Google identity, Karix provider request, live account, leave credential or production configuration was used.
+
+The production Next build and TypeScript check passed using the exact frontend source in a disposable checkout with clean `npm ci` dependencies. The existing workspace dependency installation blocked reads of `next/headers.d.ts`, causing its initial build/type-check attempts to time out; it was not replaced or modified. Browser/API issuer keys, identities and disposable build/state were removed afterward. Enabling real Google login still requires the Karix-specific Web client and authorized origin configuration above; fixture success is not proof of a real Google login or deployed configuration.
+
 ### 2. Local Development
 
 **Python Backend (FastAPI):**

@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { loginUser, authorizedAccount, clearAuthToken, accountOrganization, isPendingUser } from '@/lib/api';
+import { loginUser, loginWithGoogle, authorizedAccount, clearAuthToken, accountOrganization, isPendingUser, type AuthResponse } from '@/lib/api';
+import GoogleSignIn from '@/components/google-sign-in';
 
 
 export default function LoginPage() {
@@ -13,9 +14,56 @@ export default function LoginPage() {
   const [organization, setOrganization] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(false);
+  const submitting = useRef(false);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  const completeLogin = (res: AuthResponse) => {
+    if (isPendingUser(res.user)) {
+      window.location.href = '/signup';
+      return;
+    }
+
+    const matchesOrganization = !organization || res.user.role === 'superadmin' ||
+      accountOrganization(res.user.tenant_id) === organization;
+    if (!matchesOrganization) {
+      clearAuthToken();
+      throw new Error('This account does not have access to the selected organization. Choose your own organization or contact its administrator.');
+    }
+
+    const preferredAccount = organization
+      ? (organization === 'tata' ? 'tcl_promo' : organization)
+      : localStorage.getItem('karix_account');
+    const targetAccount = authorizedAccount(res.user, preferredAccount);
+    try {
+      localStorage.setItem('karix_account', targetAccount);
+    } catch {}
+
+    window.location.href = targetAccount === 'apparel' ? '/apparel/attribution' : '/';
+  };
+
+  const signIn = async (authenticate: () => Promise<AuthResponse>) => {
+    if (!mounted.current || submitting.current) throw new Error('A sign-in is already in progress. Please wait.');
+    submitting.current = true;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await authenticate();
+      if (mounted.current) completeLogin(res);
+    } catch (err) {
+      submitting.current = false;
+      if (mounted.current) setLoading(false);
+      throw err;
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting.current) return;
     const finalEmail = email.trim();
     const finalPass = password;
 
@@ -24,35 +72,10 @@ export default function LoginPage() {
       return;
     }
 
-    setLoading(true);
-    setError(null);
-
     try {
-      const res = await loginUser(finalEmail, finalPass);
-      if (isPendingUser(res.user)) {
-        window.location.href = '/signup';
-        return;
-      }
-
-      const matchesOrganization = !organization || res.user.role === 'superadmin' ||
-        accountOrganization(res.user.tenant_id) === organization;
-      if (!matchesOrganization) {
-        clearAuthToken();
-        throw new Error('This account does not have access to the selected organization. Choose your own organization or contact its administrator.');
-      }
-
-      const preferredAccount = organization
-        ? (organization === 'tata' ? 'tcl_promo' : organization)
-        : localStorage.getItem('karix_account');
-      const targetAccount = authorizedAccount(res.user, preferredAccount);
-      try {
-        localStorage.setItem('karix_account', targetAccount);
-      } catch {}
-
-      window.location.href = targetAccount === 'apparel' ? '/apparel/attribution' : '/';
+      await signIn(() => loginUser(finalEmail, finalPass));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setLoading(false);
+      if (mounted.current) setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -160,6 +183,11 @@ export default function LoginPage() {
             )}
           </button>
         </form>
+
+        <GoogleSignIn
+          disabled={loading}
+          onCredential={(credential, signal) => signIn(() => loginWithGoogle(credential, signal))}
+        />
 
 
         {/* Sign up link */}

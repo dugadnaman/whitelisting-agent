@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import requests as http_client
-from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, StrictBool
@@ -46,6 +46,7 @@ from auth import (
     TATA_SUB_ACCOUNTS,
     approve_access_request,
     authenticate_user,
+    authenticate_google_user,
     create_access_token,
     get_current_user,
     list_access_requests,
@@ -56,6 +57,7 @@ from auth import (
     security,
     require_admin,
 )
+from google_signin import clear_google_challenge, start_google_signin, verify_google_credential
 from config import (
     BAJAJ_WABA_ID,
     DEFAULT_ENTITY_IDS,
@@ -156,10 +158,12 @@ app.add_middleware(
 async def authenticate_api_requests(request: Request, call_next):
     """Protect every API handler, including legacy routes without an auth dependency."""
     path, method = request.url.path, request.method
+    google_auth_request = method == "POST" and path in ("/api/auth/google/start", "/api/auth/google")
     public = (
         method == "OPTIONS"
         or method in ("GET", "HEAD") and path in ("/api/health", "/healthz")
         or method == "POST" and path in ("/api/auth/login", "/api/auth/signup")
+        or google_auth_request
         or method in ("GET", "HEAD") and re.fullmatch(r"/api/media/[^/]+", path)
         or method == "POST" and re.fullmatch(r"/api/webhooks/karix/[a-z0-9_]+", path)
         or method == "POST" and path in ("/api/sms/dlr", "/api/sms/click", "/api/whatsapp-gateway/session/backup", "/api/cron/sla-dispatch")
@@ -180,7 +184,10 @@ async def authenticate_api_requests(request: Request, call_next):
                 require_tenant_access("tata", identity)
         except HTTPException as exc:
             return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
-    return await call_next(request)
+    response = await call_next(request)
+    if google_auth_request:
+        response.headers["Cache-Control"] = "no-store"
+    return response
 app.include_router(apparel_attribution_router)
 app.include_router(moengage_click_count_router)
 
@@ -616,6 +623,44 @@ def login_endpoint(body: LoginRequest):
         details={"email": body.email, "tenant": user_info.get("tenant_id")},
         status="success",
     )
+    return _json_safe(auth_res)
+
+
+@app.post("/api/auth/google/start")
+def google_start_endpoint(request: Request, response: Response):
+    return start_google_signin(request, response)
+
+
+def _google_login_result(request: Request, credential: str) -> dict:
+    # Signing-key HTTP lookup and database access must not block the ASGI event loop.
+    email = verify_google_credential(request, credential)
+    auth_res = authenticate_google_user(email)
+    if not auth_res:
+        raise HTTPException(status_code=401, detail="Google sign-in could not be completed. Use an existing active account or contact your administrator.")
+    user = auth_res["user"]
+    log_activity(
+        user=user.get("name") or user["email"], action="USER_LOGIN",
+        account=user["tenant_id"], channel="all",
+        details={"email": user["email"], "tenant": user["tenant_id"], "auth_provider": "google"},
+        status="success",
+    )
+    return auth_res
+
+
+@app.post("/api/auth/google")
+async def google_login_endpoint(request: Request, response: Response):
+    # Parse explicitly so validation errors never echo an ID credential back to the browser.
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeError, RecursionError):
+        raise HTTPException(status_code=400, detail="Submit a Google sign-in credential.") from None
+    if (
+        not isinstance(body, dict) or set(body) != {"credential"}
+        or not isinstance(body["credential"], str) or not 1 <= len(body["credential"]) <= 16384
+    ):
+        raise HTTPException(status_code=400, detail="Submit only a Google sign-in credential.")
+    auth_res = await asyncio.to_thread(_google_login_result, request, body["credential"])
+    clear_google_challenge(request, response)
     return _json_safe(auth_res)
 
 

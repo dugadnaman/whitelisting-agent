@@ -33,6 +33,12 @@ export type AuthResponse = {
   token: string;
 };
 
+export type GoogleSignInStart = { enabled: false } | {
+  enabled: true;
+  client_id: string;
+  nonce: string;
+};
+
 export type RequestedTenant = "bajaj" | "tata" | "apparel";
 
 const TATA_ACCOUNTS = ["tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"];
@@ -860,6 +866,34 @@ export async function loginUser(email: string, password: string): Promise<AuthRe
   }
   return data;
 }
+
+export async function startGoogleSignIn(signal?: AbortSignal): Promise<GoogleSignInStart> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/google/start"), {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    signal,
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
+export async function loginWithGoogle(credential: string, signal?: AbortSignal): Promise<AuthResponse> {
+  const res = await fetchWithRetry(getApiUrl("/api/auth/google"), {
+    method: "POST",
+    credentials: "same-origin",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential }),
+    signal,
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  const data: AuthResponse = await res.json();
+  signal?.throwIfAborted();
+  if (data.token) setAuthToken(data.token);
+  return data;
+}
+
 export async function signupUser(
   email: string,
   password: string,
