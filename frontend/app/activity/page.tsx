@@ -90,6 +90,9 @@ export default function ActivityLogsPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Filters
+  const [filterDateRange, setFilterDateRange] = useState<string>('today');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const [filterUser, setFilterUser] = useState<string>('all');
   const [filterAction, setFilterAction] = useState<string>('all');
   const [filterAccount, setFilterAccount] = useState<string>('all');
@@ -98,7 +101,6 @@ export default function ActivityLogsPage() {
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [selectedLog, setSelectedLog] = useState<ActivityLog | null>(null);
-
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Debounce search
@@ -106,10 +108,44 @@ export default function ActivityLogsPage() {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
+  const getDateFilterParams = useCallback(() => {
+    if (filterDateRange === 'all') {
+      return { date_range: 'all' };
+    }
+    if (filterDateRange === 'custom') {
+      return {
+        date_range: 'custom',
+        start_date: customStartDate ? `${customStartDate}T00:00:00` : undefined,
+        end_date: customEndDate ? `${customEndDate}T23:59:59` : undefined,
+      };
+    }
+    const now = new Date();
+    if (filterDateRange === 'today') {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
+      const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
+      return { date_range: 'today', start_date: start, end_date: end };
+    }
+    if (filterDateRange === 'yesterday') {
+      const yest = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      const start = new Date(yest.getFullYear(), yest.getMonth(), yest.getDate(), 0, 0, 0, 0).toISOString();
+      const end = new Date(yest.getFullYear(), yest.getMonth(), yest.getDate(), 23, 59, 59, 999).toISOString();
+      return { date_range: 'yesterday', start_date: start, end_date: end };
+    }
+    if (filterDateRange === '7d') {
+      const past = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7, 0, 0, 0, 0).toISOString();
+      return { date_range: '7d', start_date: past };
+    }
+    if (filterDateRange === '30d') {
+      const past = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30, 0, 0, 0, 0).toISOString();
+      return { date_range: '30d', start_date: past };
+    }
+    return { date_range: filterDateRange };
+  }, [filterDateRange, customStartDate, customEndDate]);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
+      const dateParams = getDateFilterParams();
       const [logsData, statsData] = await Promise.all([
         fetchActivityLogs({
           user: filterUser,
@@ -117,6 +153,7 @@ export default function ActivityLogsPage() {
           account: filterAccount as Account | 'all',
           channel: filterChannel as Channel | 'all',
           search: debouncedSearch,
+          ...dateParams,
           limit: 250,
         }),
         fetchActivityStats(),
@@ -129,7 +166,7 @@ export default function ActivityLogsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterUser, filterAction, filterAccount, filterChannel, debouncedSearch]);
+  }, [filterUser, filterAction, filterAccount, filterChannel, debouncedSearch, getDateFilterParams]);
 
   useEffect(() => {
     loadData();
@@ -313,6 +350,43 @@ export default function ActivityLogsPage() {
 
           {/* Filter Selects */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Date Range Filter (Default: Today to save memory/load) */}
+            <select
+              value={filterDateRange}
+              onChange={(e) => setFilterDateRange(e.target.value)}
+              className={`text-xs border rounded-lg px-3 py-2 outline-none font-semibold transition-colors ${
+                filterDateRange === 'today'
+                  ? 'bg-blue-50 border-blue-300 text-blue-800'
+                  : 'bg-white border-gray-300 text-gray-700'
+              }`}
+            >
+              <option value="today">📅 Today (Default)</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="7d">Past 7 Days</option>
+              <option value="30d">Past 30 Days</option>
+              <option value="all">All Past Activity</option>
+              <option value="custom">Custom Date Range...</option>
+            </select>
+
+            {filterDateRange === 'custom' && (
+              <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1">
+                <span className="text-[10px] text-gray-500 uppercase font-bold">From:</span>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="text-xs bg-white border border-gray-300 rounded px-1.5 py-0.5 text-gray-700"
+                />
+                <span className="text-[10px] text-gray-500 uppercase font-bold">To:</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="text-xs bg-white border border-gray-300 rounded px-1.5 py-0.5 text-gray-700"
+                />
+              </div>
+            )}
+
             {/* User Filter */}
             <select
               value={filterUser}
@@ -393,14 +467,41 @@ export default function ActivityLogsPage() {
 
       {/* Activity Table */}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs overflow-hidden">
-        <div className="p-4 bg-gray-50/80 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="p-4 bg-gray-50/80 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2.5">
             <span className="w-2 h-2 rounded-full bg-blue-600" />
             <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
               Audit Trail ({logs.length} events)
             </h3>
+            {filterDateRange === 'today' ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                <span>📅</span>
+                <span>Today&apos;s Activity</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                <span>🕒</span>
+                <span>
+                  {filterDateRange === 'yesterday'
+                    ? 'Yesterday'
+                    : filterDateRange === '7d'
+                    ? 'Past 7 Days'
+                    : filterDateRange === '30d'
+                    ? 'Past 30 Days'
+                    : filterDateRange === 'custom'
+                    ? 'Custom Range'
+                    : 'All Past Activity'}
+                </span>
+              </span>
+            )}
           </div>
-          <span className="text-[11px] text-gray-400">Newest events first</span>
+          <div className="flex items-center gap-2 text-[11px] text-gray-500">
+            {filterDateRange === 'today' ? (
+              <span className="text-blue-700 font-medium">Memory saver active: showing today only</span>
+            ) : (
+              <span>Newest events first</span>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -432,7 +533,33 @@ export default function ActivityLogsPage() {
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-5 py-12 text-center text-gray-400">
-                    No activity logs found matching the selected filters.
+                    {filterDateRange === 'today' ? (
+                      <div className="flex flex-col items-center gap-2 max-w-sm mx-auto">
+                        <span className="text-2xl">☕</span>
+                        <p className="text-xs font-bold text-gray-700">No activity recorded today yet</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">
+                          Audit trails default to today&apos;s activity to save memory and keep load light. Switch the period filter above to inspect past activity:
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setFilterDateRange('7d')}
+                            className="px-3 py-1.5 text-xs font-semibold bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-300 shadow-2xs transition"
+                          >
+                            View Past 7 Days
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFilterDateRange('all')}
+                            className="px-3 py-1.5 text-xs font-semibold bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 shadow-2xs transition"
+                          >
+                            View All Past Activity
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <span>No activity logs found matching the selected filters.</span>
+                    )}
                   </td>
                 </tr>
               ) : (

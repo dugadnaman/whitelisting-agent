@@ -3263,7 +3263,10 @@ def get_activity_logs(
     account: str = Query("all"),
     channel: str = Query("all"),
     search: str = Query(""),
-    limit: int = Query(200),
+    date_range: str | None = Query(None),
+    start_date: str | None = Query(None),
+    end_date: str | None = Query(None),
+    limit: int = Query(250),
     current_user: dict = Depends(get_current_user),
 ):
     tenant = current_user.get("tenant_id", "all")
@@ -3275,6 +3278,9 @@ def get_activity_logs(
         account=account if account != "all" else None,
         channel=channel if channel != "all" else None,
         search=search if search else None,
+        date_range=date_range if date_range != "all" else None,
+        start_date=start_date,
+        end_date=end_date,
         limit=limit,
     )
     return [_json_safe(r) for r in records]

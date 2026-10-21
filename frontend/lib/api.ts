@@ -764,6 +764,9 @@ export async function fetchActivityLogs(params?: {
   account?: Account | "all";
   channel?: Channel | "all";
   search?: string;
+  date_range?: string;
+  start_date?: string;
+  end_date?: string;
   limit?: number;
 }): Promise<ActivityLog[]> {
   const qs = new URLSearchParams();
@@ -772,8 +775,10 @@ export async function fetchActivityLogs(params?: {
   if (params?.account) qs.set("account", params.account);
   if (params?.channel) qs.set("channel", params.channel);
   if (params?.search) qs.set("search", params.search);
+  if (params?.date_range) qs.set("date_range", params.date_range);
+  if (params?.start_date) qs.set("start_date", params.start_date);
+  if (params?.end_date) qs.set("end_date", params.end_date);
   if (params?.limit) qs.set("limit", String(params.limit));
-
   const res = await fetchWithRetry(getApiUrl(`/api/activity?${qs.toString()}`));
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();

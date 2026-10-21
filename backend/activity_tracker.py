@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from db import get_db as _get_db
@@ -142,15 +142,45 @@ def load_activities(
     search: str | None = None,
     limit: int | None = None,
     offset: int = 0,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    date_range: str | None = None,
     log_path: str = ACTIVITY_LOG_PATH,
 ) -> list[dict]:
     """
     Query activities from SQLite with filtering, search, and unlimited pagination.
+    Supports date range filtering (today, yesterday, 7d, 30d, all, custom) to minimize load and memory.
     """
     init_store()
     query = "SELECT * FROM activities WHERE 1=1"
     params = []
 
+    now_utc = datetime.now(UTC)
+    if date_range == "today" and not start_date and not end_date:
+        today_str = now_utc.strftime("%Y-%m-%d")
+        start_date = f"{today_str}T00:00:00"
+    elif date_range == "yesterday" and not start_date and not end_date:
+        yest_str = (now_utc - timedelta(days=1)).strftime("%Y-%m-%d")
+        start_date = f"{yest_str}T00:00:00"
+        end_date = f"{yest_str}T23:59:59.999999"
+    elif date_range == "7d" and not start_date and not end_date:
+        start_date = (now_utc - timedelta(days=7)).strftime("%Y-%m-%d") + "T00:00:00"
+    elif date_range == "30d" and not start_date and not end_date:
+        start_date = (now_utc - timedelta(days=30)).strftime("%Y-%m-%d") + "T00:00:00"
+
+    if start_date and str(start_date).strip():
+        s = str(start_date).strip()
+        if len(s) == 10 and "T" not in s:
+            s = f"{s}T00:00:00"
+        query += " AND timestamp >= ?"
+        params.append(s)
+
+    if end_date and str(end_date).strip():
+        e = str(end_date).strip()
+        if len(e) == 10 and "T" not in e:
+            e = f"{e}T23:59:59.999999"
+        query += " AND timestamp <= ?"
+        params.append(e)
     if user and user != "all":
         query += " AND LOWER(user) = LOWER(?)"
         params.append(user.strip())
