@@ -52,6 +52,10 @@ def provider(monkeypatch):
             "/inventory": (200, {"templateInfo": []}),
         }
         calls = []
+        def do_GET(self):
+            self.send_response(405)
+            self.end_headers()
+
 
         def do_POST(self):
             body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
@@ -72,6 +76,7 @@ def provider(monkeypatch):
     monkeypatch.setattr(rcs_client, "KARIX_RCS_SAVE_URL", base + "/save")
     monkeypatch.setattr(rcs_client, "KARIX_RCS_MEDIA_UPLOAD_URL", base + "/upload")
     monkeypatch.setattr(rcs_client, "KARIX_RCS_FETCH_TEMPLATES_URL", base + "/inventory")
+    monkeypatch.setattr(rcs_client, "KARIX_RCS_FETCH_URL", base + "/inventory")
     try:
         yield Handler
     finally:
@@ -481,7 +486,6 @@ def test_saved_rcs_header_paste_authenticates_inventory_without_changing_another
 
     _, token = authenticated_provider
     _, headers = provision_user(tenant="tata")
-    monkeypatch.setattr(api, "_commit_credentials_to_github", lambda: None)
     monkeypatch.setenv("BAJAJ_RCS_AUTH_TOKEN", "bajaj-only-synthetic-token")
     response = TestClient(api.app, headers=headers).put("/api/credentials", json={
         "account": "tcl_promo", "channel": "rcs",
@@ -490,6 +494,9 @@ def test_saved_rcs_header_paste_authenticates_inventory_without_changing_another
     assert response.status_code == 200
     assert rcs_client.fetch_rcs_templates(client="tcl_promo") == [{"name": "Authenticated offer"}]
     assert os.environ["BAJAJ_RCS_AUTH_TOKEN"] == "bajaj-only-synthetic-token"
+    from portal_sessions import load_session
+    assert load_session("tcl_promo", "rcs")["bearer_token"] == token
+    assert load_session("bajaj", "rcs") is None
 
 
 def test_apparel_all_ten_sender_ids_configured():

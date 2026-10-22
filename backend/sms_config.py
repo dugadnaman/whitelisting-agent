@@ -59,38 +59,36 @@ def _account_prefix(client: str) -> str:
     """Sanitize client name into uppercase environment variable prefix."""
     return re.sub(r"[^a-zA-Z0-9_]", "_", client).strip("_").upper()
 
+def _setting(client: str, suffix: str, *aliases: str) -> str:
+    """Prefer encrypted one-time setup; never inherit another account's secrets."""
+    from portal_sessions import load_settings
+
+    _load_env_file()
+    prefix = _account_prefix(client)
+    saved = load_settings(client.lower().strip(), "sms")
+    for key in (f"{prefix}_{suffix}", *(f"{prefix}_{alias}" for alias in aliases)):
+        if saved.get(key) or os.environ.get(key):
+            return str(saved.get(key) or os.environ[key]).strip()
+    if client.lower().strip() == "bajaj":
+        for key in (f"KARIX_{suffix}", *(f"KARIX_{alias}" for alias in aliases)):
+            if os.environ.get(key):
+                return os.environ[key].strip()
+    return ""
+
 
 def get_sms_api_url(client: str = "bajaj") -> str:
     """Return the JSON receiver API endpoint for this account."""
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return os.environ.get(f"{prefix}_SMS_API_URL") or os.environ.get("KARIX_SMS_API_URL") or KARIX_SMS_JSON_URL
+    return _setting(client, "SMS_API_URL") or KARIX_SMS_JSON_URL
 
 
 def get_sms_key(client: str = "bajaj") -> str:
     """Return the Karix SMS Access Key (Authorization key)."""
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return (
-        os.environ.get(f"{prefix}_SMS_KEY")
-        or os.environ.get(f"{prefix}_SMS_ACCESS_KEY")
-        or os.environ.get("KARIX_SMS_KEY")
-        or os.environ.get("KARIX_SMS_ACCESS_KEY")
-        or ""
-    ).strip()
+    return _setting(client, "SMS_KEY", "SMS_ACCESS_KEY")
 
 
 def get_sms_username(client: str = "bajaj") -> str:
     """Return the SMS account username for Basic HTTP Authorization."""
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return (
-        os.environ.get(f"{prefix}_SMS_USERNAME")
-        or os.environ.get(f"{prefix}_SMS_USER")
-        or os.environ.get("KARIX_SMS_USERNAME")
-        or os.environ.get("KARIX_SMS_USER")
-        or ""
-    ).strip()
+    return _setting(client, "SMS_USERNAME", "SMS_USER")
 
 
 def get_sms_encryption_key(client: str = "bajaj") -> str:
@@ -99,36 +97,18 @@ def get_sms_encryption_key(client: str = "bajaj") -> str:
 
     Used when encrpt='1' in Send SMS API calls.
     """
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return (os.environ.get(f"{prefix}_SMS_ENCRYPTION_KEY") or os.environ.get("KARIX_SMS_ENCRYPTION_KEY") or "").strip()
+    return _setting(client, "SMS_ENCRYPTION_KEY")
 
 
 def get_sms_sender_id(client: str = "bajaj") -> str:
     """Return the registered DLT sender ID / header name for this account."""
-    _load_env_file()
-    prefix = _account_prefix(client)
     default = BAJAJ_SMS_DEFAULT_SENDER_ID if client.lower() == "bajaj" else TATA_SMS_DEFAULT_SENDER_ID
-    return (
-        os.environ.get(f"{prefix}_SMS_SENDER_ID")
-        or os.environ.get(f"{prefix}_SENDER_ID")
-        or os.environ.get("KARIX_SMS_SENDER_ID")
-        or default
-    ).strip()
+    return _setting(client, "SMS_SENDER_ID", "SENDER_ID") or default
 
 
 def get_sms_dlt_entity_id(client: str = "bajaj") -> str:
     """Return the DLT Entity ID for this client."""
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return (
-        os.environ.get(f"{prefix}_SMS_ENTITY_ID")
-        or os.environ.get(f"{prefix}_DLT_ENTITY_ID")
-        or os.environ.get(f"{prefix}_ENTITY_ID")
-        or os.environ.get("KARIX_SMS_ENTITY_ID")
-        or os.environ.get("KARIX_DLT_ENTITY_ID")
-        or ""
-    ).strip()
+    return _setting(client, "SMS_ENTITY_ID", "DLT_ENTITY_ID", "ENTITY_ID")
 
 
 def get_sms_dlr_auth_token(client: str = "bajaj") -> str:
@@ -137,23 +117,17 @@ def get_sms_dlr_auth_token(client: str = "bajaj") -> str:
 
     Headers received from Karix: 'Authorization: Basic <Static Token>'
     """
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return (os.environ.get(f"{prefix}_SMS_DLR_AUTH_TOKEN") or os.environ.get("KARIX_SMS_DLR_AUTH_TOKEN") or "").strip()
+    return _setting(client, "SMS_DLR_AUTH_TOKEN")
 
 
 def get_sms_dlr_gcm_key(client: str = "bajaj") -> str:
     """Return AES-GCM decryption key for encrypted DLR callbacks."""
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return (os.environ.get(f"{prefix}_SMS_DLR_GCM_KEY") or os.environ.get("KARIX_SMS_DLR_GCM_KEY") or "").strip()
+    return _setting(client, "SMS_DLR_GCM_KEY")
 
 
 def get_sms_dlr_gcm_iv(client: str = "bajaj") -> str:
     """Return AES-GCM IV for encrypted DLR callbacks."""
-    _load_env_file()
-    prefix = _account_prefix(client)
-    return (os.environ.get(f"{prefix}_SMS_DLR_GCM_IV") or os.environ.get("KARIX_SMS_DLR_GCM_IV") or "").strip()
+    return _setting(client, "SMS_DLR_GCM_IV")
 
 
 def get_sms_auth_headers(client: str = "bajaj") -> dict[str, str]:

@@ -114,7 +114,9 @@ def get_rcs_bot_id(client: str = "tata") -> str:
     _load_env_file()
     c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
-    env_bot = os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID")
+    from portal_sessions import load_settings
+    settings = load_settings(c, "rcs")
+    env_bot = settings.get(f"{prefix}_RCS_BOT_ID") or settings.get(f"{prefix}_RCS_SENDER_ID") or os.environ.get(f"{prefix}_RCS_BOT_ID") or os.environ.get(f"{prefix}_RCS_SENDER_ID")
     bot = DEFAULT_RCS_BOT_IDS.get(c) if (not env_bot or env_bot == "apparel-bot") else env_bot
     if not bot:
         raise OSError(
@@ -128,6 +130,11 @@ def get_rcs_bot_ids(client: str = "tata") -> list[str]:
     """Return all active RCS Bot IDs / Sender IDs for the given client."""
     _load_env_file()
     c = client.strip().lower() if isinstance(client, str) else client
+    from portal_sessions import load_settings
+    settings = load_settings(c, "rcs")
+    configured = settings.get(f"{_account_prefix(c)}_RCS_BOT_IDS") or os.environ.get(f"{_account_prefix(c)}_RCS_BOT_IDS")
+    if configured:
+        return [bot.strip() for bot in configured.split(",") if bot.strip()]
     if c == "apparel":
         env_bots = os.environ.get("APPAREL_RCS_BOT_IDS")
         if env_bots:
@@ -147,7 +154,8 @@ def get_rcs_bot_name(client: str = "tcl_promo") -> str:
     _load_env_file()
     c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
-    return os.environ.get(f"{prefix}_RCS_BOT_NAME") or DEFAULT_RCS_BOT_NAMES.get(c, "")
+    from portal_sessions import load_settings
+    return load_settings(c, "rcs").get(f"{prefix}_RCS_BOT_NAME") or os.environ.get(f"{prefix}_RCS_BOT_NAME") or DEFAULT_RCS_BOT_NAMES.get(c, "")
 
 
 def get_rcs_entity_id(client: str = "tata") -> str:
@@ -155,6 +163,10 @@ def get_rcs_entity_id(client: str = "tata") -> str:
     _load_env_file()
     c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
+    from portal_sessions import load_settings
+    saved = load_settings(c, "rcs").get(f"{prefix}_RCS_ENTITY_ID")
+    if saved:
+        return saved
     if c == "bajaj":
         return os.environ.get("BAJAJ_ENTITY_ID") or "110100001654"
     elif c in ("tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"):
@@ -172,7 +184,11 @@ def get_rcs_esmeaddr(client: str = "tata") -> str:
     _load_env_file()
     c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
+    from portal_sessions import load_settings
+    settings = load_settings(c, "rcs")
     esme = (
+        settings.get(f"{prefix}_RCS_ESMEADDR")
+        or
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
         or os.environ.get(f"{prefix}_ESMEADDR")
         or DEFAULT_RCS_ESMEADDRS.get(c)
@@ -182,7 +198,10 @@ def get_rcs_esmeaddr(client: str = "tata") -> str:
     return str(esme).strip()
 
 
-def get_rcs_auth_headers(client: str = "tata", *, auth_token: str | None = None) -> dict[str, str]:
+def get_rcs_auth_headers(
+    client: str = "tata", *, auth_token: str | None = None,
+    session_id: str | None = None, portal_user: str | None = None,
+) -> dict[str, str]:
     """
     Build the HTTP headers required for official Karix RCS Bot Builder requests.
     Strictly isolated per client account. Never leaks credentials across accounts.
@@ -191,17 +210,25 @@ def get_rcs_auth_headers(client: str = "tata", *, auth_token: str | None = None)
     c = client.strip().lower() if isinstance(client, str) else client
     prefix = _account_prefix(c)
 
+    from portal_sessions import load_session, load_settings
+    settings = load_settings(c, "rcs")
+    # A request-local override never inherits headers from another login snapshot.
+    saved = load_session(c, "rcs") if auth_token is None else None
     bearer = auth_token if auth_token is not None else (
-        os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
-        or os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
+        saved.get("bearer_token") if saved else
+        settings.get(f"{prefix}_RCS_AUTH_TOKEN") or os.environ.get(f"{prefix}_RCS_AUTH_TOKEN")
     )
     bearer = re.sub(r"^(?:Authorization\s*:\s*)?Bearer(?:\s+|$)", "", (bearer or "").strip(), flags=re.IGNORECASE).strip()
-    session = os.environ.get(f"{prefix}_KARIX_SESSION")
-    user = os.environ.get(f"{prefix}_KARIX_USER")
-    if not bearer or not bearer.strip():
+    session = session_id if auth_token is not None else (
+        saved.get("session") if saved else settings.get(f"{prefix}_RCS_SESSION") or os.environ.get(f"{prefix}_RCS_SESSION")
+    )
+    user = portal_user if auth_token is not None else (
+        saved.get("user") if saved else settings.get(f"{prefix}_RCS_USER") or os.environ.get(f"{prefix}_RCS_USER")
+    )
+    if not bearer:
         raise OSError(
-            f"Missing required RCS Bearer token for {client} ({prefix}_KARIX_BEARER_TOKEN or {prefix}_RCS_AUTH_TOKEN). "
-            f"Please enter Bearer Token in Settings under {client}."
+            f"Missing RCS Bearer token for {client} ({prefix}_RCS_AUTH_TOKEN). "
+            "Connect Auth Sync in Settings or save this integration's explicit token."
         )
     headers = {
         "Authorization": f"Bearer {bearer.strip()}",

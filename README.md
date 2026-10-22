@@ -175,53 +175,40 @@ When a workflow uses file-backed credentials, load `.env` before creating queue
 records so all queue writes and result updates use the same active database
 backend. The application handles this for autonomous remediation flows.
 
-### Bajaj WhatsApp: Chrome Auth Sync (no credential copy-paste)
+### Enterprise Multi-Channel Auth Sync (no credential copy-paste)
 
-Deploy/restart the updated backend and frontend together. In **Settings → Bajaj → WhatsApp**:
+Deploy/restart the updated backend and frontend together. In **Settings**, choose any account and channel:
 
 1. Click **Download extension ZIP** and unzip it into a permanent local folder.
 2. Open `chrome://extensions` in Chrome 124 or newer, enable **Developer mode**, click
    **Load unpacked**, and select the folder containing `manifest.json`.
-3. Reload Settings, click **Detect extension**, then **Connect extension**.
-4. Log into your usual **Bajaj Karix** portal normally, including the OTP received on
-   your mobile. Open the WhatsApp template list for WABA `286109054585247`.
+3. Reload Settings, click **Detect extension**, then **Connect extension** for the selected account and integration.
+   Each account/integration is paired separately with a five-minute single-use code.
+4. Log into the provider portal normally:
+   - **WhatsApp (Karix)**: Log in with mobile OTP, open the matching template list (`/getAllTemplates`).
+     The extension matches exact WABA and ESME identity and captures Authorization, Session, and User.
+   - **RCS (Karix)**: Log in with mobile OTP, open the matching RCS bot inventory (`/getTemplatesWithFilter`).
+     The extension matches the configured bot ID and ESME address and captures the RCS Bearer token.
+   - **MoEngage**: Log in to the dashboard, select the target in the extension popup if ambiguous,
+     and open workspace inventory (`/dash/auth/listApps`). The backend validates workspace authorization
+     and binds the session via `/changeApp` before saving.
 5. Return to Settings and **Refresh status**. **Check saved session** performs a fresh
-   provider validation; a previous successful check is not a guarantee of current validity.
+   provider validation check.
 
-The extension observes only successful Karix `getAllTemplates` requests with the exact
-Bajaj WABA and ESME. It captures Authorization, Session and User together, validates the
-snapshot through the backend, and notifies the paused account queue after saving.
-It never logs in, reads OTPs, captures other tenants, or sends messages/templates.
-When Karix expires the session, log in again and reopen the template list.
+**Static vs Browser Credentials**:
+- **Renewable browser sessions** (Karix WhatsApp, Karix RCS, MoEngage) sync automatically from real browser requests.
+- **Static credentials** (Karix SMS key/encryption key/DLT ID, Gemini platform key) are configured once in Settings
+  and stored in encrypted database storage. The browser extension does not generate or infer static keys.
+- **Jira Cloud credentials** and **Google service-account JSON** remain deployment-level configurations.
 
-Pairing codes are single-use and expire after five minutes. Device tokens expire after
-90 days, are scoped to extension synchronization, and cannot authenticate ordinary
-agent endpoints. **Disconnect my devices** revokes your devices and pending codes;
-it does not delete the shared Bajaj session or disconnect other operators.
-The extension popup displays failures and offers **Retry sync** and local disconnect.
-If local disconnect cannot reach the backend, revoke devices in Settings.
-
-Captured sessions (and explicit Bajaj manual overrides) are encrypted in the existing
-database, not written to `.env`, `credentials.json`, source code, or Git. They take
-precedence over legacy Bajaj portal environment values, including after backend restarts.
-Settings leaves portal credential fields blank and only sends an override after explicit
-opt-in with all three headers. Existing unrelated credential storage is unchanged.
-Keep `JWT_SECRET` strong, stable, private and backed up: it derives a domain-separated
-session-encryption key. Rotating it requires reconnecting sessions. Use PostgreSQL or
-a persistent SQLite volume; an ephemeral database cannot preserve pairings/sessions.
-
-The download is configured for the exact Settings origin, with no wildcard-domain access.
-Defaults allow `https://whitelisting-agent.onrender.com`, `http://localhost:3000`, and
-`http://127.0.0.1:3000`. For a custom deployment set `KARIX_EXTENSION_AGENT_ORIGINS`
-to its exact origin (comma-separated for multiple deployments); `ALLOWED_ORIGINS`
-is used when that setting is absent. HTTPS is required except on loopback.
-Download and pair a separate configured extension for a different deployment.
-Source assets are in `browser-extension/karix-auth-sync/`; Docker includes them.
-
-Verification: focused authentication/storage regressions and an isolated Chrome extension
-smoke with actual request-header observation, pairing, backend validation and encrypted
-session persistence. The Karix provider in that smoke is a local simulator, not production.
-
+**Security & Isolation**:
+- Credentials and device pairing are strictly isolated per `(account, integration)`. Tokens never cross-contaminate accounts.
+- All captured sessions and Settings overrides are encrypted in PostgreSQL/SQLite using a key derived from `JWT_SECRET`.
+  No credentials are written to `.env`, `credentials.json`, source code, or Git.
+- Settings leaves secret fields blank on load; blank drafts preserve saved values. Manual overrides require an explicit checkbox
+  and a complete valid snapshot.
+- Device tokens expire in 90 days and are strictly scoped to extension synchronization. **Disconnect my devices** revokes
+  all devices for that account/integration without affecting other accounts or operators.
 
 ### RCS submission safety and recovery
 

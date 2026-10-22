@@ -698,6 +698,16 @@ _KARIX_EXTENSION_DDL = [
         validated_at DOUBLE PRECISION NOT NULL,
         validation_state TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS karix_scoped_credentials (
+        account TEXT NOT NULL,
+        integration TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        encrypted_credentials TEXT NOT NULL,
+        updated_at DOUBLE PRECISION NOT NULL,
+        validated_at DOUBLE PRECISION,
+        validation_state TEXT NOT NULL,
+        PRIMARY KEY (account, integration, kind)
+    )""",
 ]
 SQLITE_SCHEMA_DDL.extend(_KARIX_EXTENSION_DDL)
 POSTGRES_SCHEMA_DDL.extend(_KARIX_EXTENSION_DDL)
@@ -756,6 +766,51 @@ def _upgrade_sqlite_task_states(conn: DBConnection) -> None:
     for obj in objects:
         conn.execute(obj[0])
 
+def _upgrade_auth_sync(conn: DBConnection) -> None:
+    """Bind historical extension devices and encrypted Bajaj sessions to their actual scope."""
+    if conn.is_postgres:
+        columns = {row["column_name"] for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'karix_extension_links'"
+        ).fetchall()}
+    else:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(karix_extension_links)").fetchall()}
+    for name, default in (("account", "bajaj"), ("integration", "whatsapp")):
+        if name not in columns:
+            conn.execute(f"ALTER TABLE karix_extension_links ADD COLUMN {name} TEXT NOT NULL DEFAULT '{default}'")
+    legacy = conn.execute("SELECT * FROM karix_portal_sessions").fetchall()
+    if legacy:
+        import json
+        from cryptography.fernet import InvalidToken
+        from portal_sessions import _cipher
+
+        cipher = _cipher()
+        for row in legacy:
+            # The old writer only ever wrote Bajaj WhatsApp. Never guess another tenant.
+            if row["account"] != "bajaj":
+                raise OSError("Unexpected legacy Auth Sync account; explicit migration is required")
+            exists = conn.execute(
+                "SELECT 1 FROM karix_scoped_credentials WHERE account = 'bajaj' AND integration = 'whatsapp' AND kind = 'session'"
+            ).fetchone()
+            if not exists:
+                try:
+                    values = json.loads(cipher.decrypt(row["encrypted_credentials"].encode()))
+                    if not isinstance(values, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in values.items()):
+                        raise ValueError("Invalid legacy credentials")
+                except (InvalidToken, ValueError, TypeError) as exc:
+                    raise OSError("Legacy Auth Sync credentials cannot be decrypted; restore the original JWT_SECRET") from exc
+                encrypted = cipher.encrypt(json.dumps({
+                    "scope": ["bajaj", "whatsapp", "session"], "values": values,
+                }, separators=(",", ":")).encode()).decode()
+                conn.execute(
+                    "INSERT INTO karix_scoped_credentials "
+                    "(account, integration, kind, encrypted_credentials, updated_at, validated_at, validation_state) "
+                    "VALUES ('bajaj', 'whatsapp', 'session', ?, ?, ?, ?)",
+                    (encrypted, row["updated_at"], row["validated_at"], row["validation_state"]),
+                )
+        conn.execute("DELETE FROM karix_portal_sessions")
+
+
 
 def init_database(conn: DBConnection | None = None, force: bool = False) -> None:
     """Initialize each actual schema once; coordinate PostgreSQL cold starts."""
@@ -790,6 +845,7 @@ def init_database(conn: DBConnection | None = None, force: bool = False) -> None
             _upgrade_sqlite_task_states(conn)
             if "requested_tenant_id" not in {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}:
                 conn.execute("ALTER TABLE users ADD COLUMN requested_tenant_id TEXT")
+        _upgrade_auth_sync(conn)
         conn.commit()
         key = _target_key(conn)
         if key is not None:

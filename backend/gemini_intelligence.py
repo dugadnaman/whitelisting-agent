@@ -31,9 +31,13 @@ _CIRCUIT_FAILURES: int = 0
 _CIRCUIT_OPEN_UNTIL: float = 0.0
 
 def get_gemini_api_key() -> str:
-    """Retrieve the Google Gemini API key from the process environment or .env."""
+    """Retrieve the encrypted platform key, with deployment defaults."""
+    from portal_sessions import load_settings
+
     _load_env_file()
-    return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+    saved = load_settings("platform", "gemini")
+    return (saved.get("GEMINI_API_KEY") or saved.get("GOOGLE_API_KEY")
+            or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
 
 
 def is_internal_identifier(name: str | None, summary: str = "", sheet_name: str = "") -> bool:

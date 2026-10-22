@@ -14,6 +14,7 @@ import requests
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
     KARIX_RCS_FETCH_TEMPLATES_URL,
+    KARIX_RCS_FETCH_URL,
     KARIX_RCS_MEDIA_UPLOAD_URL,
     _account_prefix,
     get_rcs_auth_headers,
@@ -33,6 +34,51 @@ from rcs_models import (
 # ---------------------------------------------------------------------------
 REQUEST_TIMEOUT = 30  # seconds
 _VARIABLE_PATTERN = re.compile(r"<[^<>]+>|\[[^\[\]]+\]|\{[^{}]+\}|#[a-zA-Z0-9_\-]+#")
+
+
+def check_rcs_credentials(
+    client: str, *, bearer_token: str, bot_id: str, esmeaddr: str,
+    session_id: str | None = None, portal_user: str | None = None,
+) -> tuple[bool, str]:
+    """Verify this exact RCS snapshot against the configured read-only bot inventory."""
+    try:
+        headers = get_rcs_auth_headers(
+            client, auth_token=bearer_token, session_id=session_id, portal_user=portal_user,
+        )
+        response = requests.get(
+            KARIX_RCS_FETCH_URL, headers=headers, params={"senderId": bot_id},
+            timeout=REQUEST_TIMEOUT, allow_redirects=False,
+        )
+        # Older deployments expose only the repository's documented read-only POST.
+        if response.status_code in (404, 405):
+            response = requests.post(
+                KARIX_RCS_FETCH_TEMPLATES_URL, headers=headers,
+                json={"senderId": bot_id, "esmeaddr": esmeaddr},
+                timeout=REQUEST_TIMEOUT, allow_redirects=False,
+            )
+        if not response.ok or 300 <= response.status_code < 400:
+            return False, "Karix RCS refused the captured session."
+        data = response.json()
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict) and not _provider_failed(data):
+            rows = next((data[key] for key in ("templateInfo", "templates", "data") if isinstance(data.get(key), list)), None)
+            if rows is None and isinstance(data.get("response"), dict):
+                rows = data["response"].get("templates")
+        else:
+            return False, "Karix RCS rejected the captured session."
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            return False, "Karix RCS returned an unrecognized inventory."
+        for row in rows:
+            observed_bot = row.get("senderId") or row.get("botId")
+            observed_esme = row.get("esmeaddr")
+            if observed_bot is not None and str(observed_bot) != bot_id:
+                return False, "Karix RCS returned another bot's inventory."
+            if observed_esme is not None and str(observed_esme) != esmeaddr:
+                return False, "Karix RCS returned another account's inventory."
+        return True, "RCS session verified for the configured bot."
+    except (requests.RequestException, OSError, ValueError, TypeError):
+        return False, "Karix RCS session verification failed."
 
 
 def normalize_rcs_template_name(name: str) -> str:

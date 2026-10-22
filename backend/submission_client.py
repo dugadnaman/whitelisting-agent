@@ -1542,6 +1542,25 @@ def check_portal_credentials(
         if not response.ok:
             return False, f"Portal connection returned HTTP {response.status_code}."
         data = _parse_karix_json(response)
+        # Provider signatures authorize the request; reject any contradictory returned identity.
+        expected_waba = str(waba_id or get_waba_id(client))
+        expected_esme = str(esmeaddr or get_esmeaddr(client))
+        inventories = [data] if isinstance(data, list) else []
+        if isinstance(data, dict):
+            inventories.append([data])
+            for envelope in (data, data.get("Success"), data.get("response")):
+                if isinstance(envelope, dict) and isinstance(envelope.get("templates"), list):
+                    inventories.append(envelope["templates"])
+        for rows in inventories:
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                observed_waba = row.get("wabaId") or row.get("waba_id")
+                observed_esme = row.get("esmeaddr")
+                if observed_waba is not None and str(observed_waba) != expected_waba:
+                    return False, "Portal returned another configured account's WABA inventory."
+                if observed_esme is not None and str(observed_esme) != expected_esme:
+                    return False, "Portal returned another configured account's ESME inventory."
         if isinstance(data, list):
             return True, "Portal credentials valid."
         if isinstance(data, dict):

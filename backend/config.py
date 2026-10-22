@@ -1,13 +1,13 @@
 """
 Configuration for the Karix WhatsApp template submission pipeline.
 
-Portal sessions are loaded from encrypted database storage for Bajaj, with
-legacy environment/file defaults for accounts not connected through Auth Sync.
+Portal sessions and one-time settings are loaded from encrypted scoped storage,
+with account-specific deployment environment defaults.
 Never hardcode new credentials in source files.
 
 Auth model:
     Portal requests require Authorization, Session and User from one login.
-    Bajaj Karix Auth Sync captures these after a human completes mobile OTP.
+    Auth Sync captures these after a human completes mobile OTP.
     Official API requests use WABA_AUTH_TOKEN with the Authentication header;
     submission/listing currently prefer an available portal session.
 """
@@ -98,10 +98,13 @@ def get_portal_auth_headers(
         bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
         session = os.environ.get(f"{prefix}_KARIX_SESSION")
         user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
-    if c == "bajaj" and (bearer_token is None or session_id is None or portal_user is None):
-        from portal_sessions import load_session
-
-        saved_session = load_session()
+    from portal_sessions import load_session, load_settings
+    settings = load_settings(c, "whatsapp")
+    bearer = settings.get(f"{prefix}_KARIX_BEARER_TOKEN", bearer)
+    session = settings.get(f"{prefix}_KARIX_SESSION", session)
+    user = settings.get(f"{prefix}_KARIX_USER", user)
+    if bearer_token is None or session_id is None or portal_user is None:
+        saved_session = load_session(c, "whatsapp")
         if saved_session:
             bearer = saved_session["bearer_token"]
             session = saved_session["session"]
@@ -129,13 +132,8 @@ def get_portal_auth_headers(
     if missing:
         raise OSError(
             f"Missing required Karix portal credentials for {client}: {', '.join(missing)}. "
-            + (
-                "Open Settings → Bajaj → Connect extension, log in with your mobile OTP, "
-                "and open the WhatsApp template list; or use the explicit manual override."
-                if c == "bajaj" else
-                "Open Settings → " + client + " and paste the Portal Bearer Token, Session ID, and User "
-                "from the Karix portal (logged-in browser → DevTools → Network → request headers)."
-            )
+            f"Open Settings → {client} → Connect extension, log in with your mobile OTP, "
+            "and open the WhatsApp template list; or use the explicit manual override."
         )
 
     return {
@@ -164,6 +162,8 @@ def get_official_auth_headers(client: str = "bajaj") -> dict[str, str]:
         )
     else:
         token = os.environ.get(f"{prefix}_WABA_AUTH_TOKEN") or DEFAULT_WABA_AUTH_TOKENS.get(c)
+    from portal_sessions import load_settings
+    token = load_settings(c, "whatsapp").get(f"{prefix}_WABA_AUTH_TOKEN", token)
     if not token:
         expected_key = f"{prefix}_WABA_AUTH_TOKEN" if c != "bajaj" else "BAJAJ_WABA_AUTH_TOKEN"
         raise OSError(
@@ -182,19 +182,15 @@ def get_waba_id(client: str = "bajaj") -> str:
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
 
+    from portal_sessions import load_settings
+    saved = load_settings(c, "whatsapp")
+    waba = saved.get(f"{prefix}_WABA_ID") or os.environ.get(f"{prefix}_WABA_ID")
     if c == "bajaj":
-        from portal_sessions import session_record
-        if session_record():
-            return BAJAJ_WABA_ID
-        return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
-    else:
-        waba = os.environ.get(f"{prefix}_WABA_ID") or DEFAULT_WABA_IDS.get(c)
-        if not waba:
-            raise OSError(
-                f"Missing WABA ID for {client} ({prefix}_WABA_ID). "
-                f"Configure it in Settings under {client} — never fall back to another account's WABA."
-            )
-        return waba
+        waba = waba or os.environ.get("WABA_ID")
+    waba = waba or DEFAULT_WABA_IDS.get(c)
+    if not waba:
+        raise OSError(f"Missing WABA ID for {client} ({prefix}_WABA_ID). Configure this account in Settings.")
+    return waba
 
 
 def _esmeaddr_from_session_token(token: str | None) -> str | None:
@@ -206,15 +202,15 @@ def _esmeaddr_from_session_token(token: str | None) -> str | None:
       'msx42ip072516600000000TATACAPPROMO'   -> 72516600000000
       'mt89yco272389800000000TATACAPWABA'    -> 72389800000000 (TCHFL)
 
-    Every sub-account has its OWN esmeaddr — the authoritative source is the
-    session token itself, not shared config values.
+    Decode only for conflict rejection; configured identity plus provider
+    verification remain authoritative. An unsigned payload never establishes identity.
     """
     if not token or "." not in token:
         return None
     try:
         import base64
 
-        payload = base64.b64decode(token.split(".")[1] + "==").decode("utf-8", errors="replace")
+        payload = base64.urlsafe_b64decode(token.split(".")[1] + "==").decode("utf-8", errors="replace")
         m = re.search(r"(\d{14,15})([A-Z_]+)$", payload)
         if not m:
             return None
@@ -228,35 +224,20 @@ def get_esmeaddr(client: str = "bajaj") -> str:
     """
     Return ESME address for the given client.
 
-    The esmeaddr embedded in the account's portal session token is
-    authoritative (each sub-account has its own); env/config values are
-    fallbacks for accounts without a session token yet.
+    Resolve the server-owned expected identity from encrypted account settings,
+    then exact deployment environment and account defaults; never adopt a token's identity.
     """
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
+    from portal_sessions import load_settings
+    saved = load_settings(c, "whatsapp")
+    esme = saved.get(f"{prefix}_ESMEADDR") or os.environ.get(f"{prefix}_ESMEADDR")
     if c == "bajaj":
-        from portal_sessions import session_record
-        if session_record():
-            return BAJAJ_ESMEADDR
-        token = os.environ.get("BAJAJ_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
-        return (
-            _esmeaddr_from_session_token(token)
-            or os.environ.get("BAJAJ_ESMEADDR")
-            or os.environ.get("ESMEADDR")
-            or BAJAJ_ESMEADDR
-        )
-    token = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
-    esme = (
-        _esmeaddr_from_session_token(token)
-        or os.environ.get(f"{prefix}_ESMEADDR")
-        or DEFAULT_ESMEADDRS.get(c)
-    )
+        esme = esme or os.environ.get("ESMEADDR")
+    esme = esme or DEFAULT_ESMEADDRS.get(c)
     if not esme:
-        raise OSError(
-            f"Missing ESMEADDR for {client} ({prefix}_ESMEADDR or portal session token). "
-            f"Configure credentials in Settings under {client}."
-        )
+        raise OSError(f"Missing ESMEADDR for {client} ({prefix}_ESMEADDR). Configure this account in Settings.")
     return esme
 
 
@@ -265,6 +246,10 @@ def get_template_namespace_id(client: str = "bajaj") -> str:
     _load_env_file()
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
+    from portal_sessions import load_settings
+    saved = load_settings(c, "whatsapp").get(f"{prefix}_TEMPLATE_NAMESPACE_ID")
+    if saved:
+        return saved
     if c == "bajaj":
         return (
             os.environ.get("BAJAJ_TEMPLATE_NAMESPACE_ID")

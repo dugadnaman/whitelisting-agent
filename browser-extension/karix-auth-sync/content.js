@@ -13,14 +13,17 @@
         typeof message.requestId !== 'string' ||
         !/^[A-Za-z0-9_-]{1,128}$/.test(message.requestId)) return;
     if (message.type === 'KARIX_EXTENSION_PAIR' &&
-        (typeof message.code !== 'string' || !message.code || message.code.length > 1024)) return;
+        (typeof message.code !== 'string' || !message.code || message.code.length > 1024 ||
+         typeof message.account !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(message.account) ||
+         !['whatsapp', 'rcs', 'moengage'].includes(message.integration))) return;
     if (activeRequests.has(message.requestId) || activeRequests.size >= 10) return;
     activeRequests.add(message.requestId);
     let result;
     try {
       result = await chrome.runtime.sendMessage({
         type: message.type,
-        ...(message.type === 'KARIX_EXTENSION_PAIR' ? {code: message.code} : {}),
+        ...(message.type === 'KARIX_EXTENSION_PAIR'
+          ? {code: message.code, account: message.account, integration: message.integration} : {}),
       });
       if (!result || typeof result.ok !== 'boolean' || typeof result.message !== 'string') {
         throw new Error('Invalid extension response.');
@@ -34,6 +37,8 @@
       window.postMessage({
         type: 'KARIX_EXTENSION_RESULT', requestId: message.requestId,
         ok: result.ok, message: result.message,
+        ...(result.ok && message.type === 'KARIX_EXTENSION_PAIR'
+          ? {account: result.account, integration: result.integration} : {}),
       }, origin);
     }
   });

@@ -451,6 +451,7 @@ class CredentialUpdate(BaseModel):
     channel: str = "whatsapp"  # "whatsapp" | "rcs" | "sms"
     waba_auth_token: str | None = None
     waba_id: str | None = None
+    esmeaddr: str | None = None
     bearer_token: str | None = None
     session: str | None = None
     user: str | None = None
@@ -2745,7 +2746,7 @@ def get_credentials(
     entity_id = (
         os.environ.get(e_id_key)
         or DEFAULT_ENTITY_IDS.get(acc)
-        or ("110100001654" if is_bajaj else "1001490234791338781")
+        or ""
     )
     lounge_cookie = os.environ.get(l_ck_key) or (os.environ.get("KARIX_LOUNGE_COOKIE") if is_bajaj else "")
     portal_username = os.environ.get(f"{prefix}_PORTAL_USER") or account_obj.get("portal_username") or ""
@@ -2755,36 +2756,43 @@ def get_credentials(
         or (os.environ.get("TATA_TEMPLATE_NAMESPACE_ID") if acc in TATA_SUB_ACCOUNTS else "")
         or GLOBAL_TEMPLATE_NAMESPACE_ID
     )
-    sms_key = os.environ.get(f"{prefix}_SMS_KEY") or os.environ.get("KARIX_SMS_KEY") or ""
+    sms_key = os.environ.get(f"{prefix}_SMS_KEY") or (os.environ.get("KARIX_SMS_KEY") if is_bajaj else "") or ""
     sms_username = (
         os.environ.get(f"{prefix}_SMS_USERNAME")
-        or os.environ.get("KARIX_SMS_USERNAME")
-        or ("bajaj_sms_prod" if is_bajaj else "tatacap_sms_prod")
+        or (os.environ.get("KARIX_SMS_USERNAME") if is_bajaj else "")
+        or ""
     )
     sms_encryption_key = (
-        os.environ.get(f"{prefix}_SMS_ENCRYPTION_KEY") or os.environ.get("KARIX_SMS_ENCRYPTION_KEY") or ""
+        os.environ.get(f"{prefix}_SMS_ENCRYPTION_KEY") or (os.environ.get("KARIX_SMS_ENCRYPTION_KEY") if is_bajaj else "") or ""
     )
     sms_sender_id = os.environ.get(f"{prefix}_SMS_SENDER_ID") or ("BAJAJF" if is_bajaj else "TATACP")
     sms_dlr_auth_token = (
-        os.environ.get(f"{prefix}_SMS_DLR_AUTH_TOKEN") or os.environ.get("KARIX_SMS_DLR_AUTH_TOKEN") or ""
+        os.environ.get(f"{prefix}_SMS_DLR_AUTH_TOKEN") or (os.environ.get("KARIX_SMS_DLR_AUTH_TOKEN") if is_bajaj else "") or ""
     )
 
-    rcs_bot_id = os.environ.get(f"{prefix}_RCS_BOT_ID") or account_obj.get("rcs_bot_id") or get_rcs_bot_id(acc) or ""
+    def optional_identity(getter):
+        try:
+            return getter(acc)
+        except OSError as exc:
+            if str(exc).startswith("Missing"):
+                return ""
+            raise
+    rcs_bot_id = os.environ.get(f"{prefix}_RCS_BOT_ID") or account_obj.get("rcs_bot_id") or optional_identity(get_rcs_bot_id)
     rcs_auth_token = os.environ.get(f"{prefix}_RCS_AUTH_TOKEN") or DEFAULT_RCS_AUTH_TOKENS.get(acc, "")
     rcs_esmeaddr = (
         os.environ.get(f"{prefix}_RCS_ESMEADDR")
         or DEFAULT_RCS_ESMEADDRS.get(acc)
-        or get_rcs_esmeaddr(acc)
+        or optional_identity(get_rcs_esmeaddr)
         or ""
     )
     esmeaddr = (
         os.environ.get(f"{prefix}_ESMEADDR")
         or DEFAULT_ESMEADDRS.get(acc)
-        or get_esmeaddr(acc)
+        or optional_identity(get_esmeaddr)
         or ""
     )
     from portal_sessions import session_record
-    extension_session = is_bajaj and session_record() is not None
+    extension_session = session_record(acc, chan) is not None
     if extension_session:
         # Synced portal secrets stay server-side, not in browser form state.
         bearer_token = session = user = ""
@@ -2798,7 +2806,7 @@ def get_credentials(
     else:
         is_configured = bool(entity_id)
 
-    return {
+    result = {
         "account": acc,
         "channel": chan,
         "extension_session": extension_session,
@@ -2835,55 +2843,43 @@ def get_credentials(
             "portal_username": account_obj.get("portal_username", ""),
         },
     }
+    from portal_sessions import load_settings
+    saved = load_settings(acc, chan)
+    suffixes = {
+        "waba_auth_token": "WABA_AUTH_TOKEN", "waba_id": "WABA_ID",
+        "esmeaddr": "ESMEADDR",
+        "template_namespace_id": "TEMPLATE_NAMESPACE_ID", "entity_id": "ENTITY_ID",
+        "portal_username": "PORTAL_USER", "portal_password": "PORTAL_PASSWORD",
+        "lounge_cookie": "KARIX_LOUNGE_COOKIE", "sms_key": "SMS_KEY",
+        "sms_username": "SMS_USERNAME", "sms_encryption_key": "SMS_ENCRYPTION_KEY",
+        "sms_sender_id": "SMS_SENDER_ID", "sms_dlr_auth_token": "SMS_DLR_AUTH_TOKEN",
+        "rcs_bot_id": "RCS_BOT_ID", "rcs_esmeaddr": "RCS_ESMEADDR",
+    }
+    for field, suffix in suffixes.items():
+        if f"{prefix}_{suffix}" in saved:
+            result[field] = saved[f"{prefix}_{suffix}"]
+    if chan == "rcs" and saved.get(f"{prefix}_RCS_ENTITY_ID"):
+        result["entity_id"] = saved[f"{prefix}_RCS_ENTITY_ID"]
+    if chan == "sms" and saved.get(f"{prefix}_SMS_ENTITY_ID"):
+        result["entity_id"] = saved[f"{prefix}_SMS_ENTITY_ID"]
+    # Renewable secrets are server-side; blank form fields preserve the current snapshot.
+    result.update(bearer_token="", session="", user="", rcs_auth_token="", lounge_cookie="", portal_password="")
+    if chan == "whatsapp":
+        result["is_configured"] = bool(result["waba_id"] and (extension_session or result["waba_auth_token"]))
+    elif chan == "rcs":
+        result["is_configured"] = bool(result["rcs_bot_id"] and (extension_session or saved.get(f"{prefix}_RCS_AUTH_TOKEN") or rcs_auth_token))
+    return result
 
 
-def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata: bool, is_bajaj: bool, acc: str = "") -> dict:
-    mapping = {}
-    default_waba = DEFAULT_WABA_IDS.get(acc, BAJAJ_WABA_ID if is_bajaj else "")
-    waba_val = creds.waba_id.strip() if creds.waba_id and creds.waba_id.strip() else default_waba
-    default_entity = DEFAULT_ENTITY_IDS.get(acc, "110100001654" if is_bajaj else "1001490234791338781")
-    entity_val = creds.entity_id.strip() if creds.entity_id and creds.entity_id.strip() else default_entity
-    default_namespace = GLOBAL_TEMPLATE_NAMESPACE_ID
-    namespace_val = creds.template_namespace_id.strip() if creds.template_namespace_id and creds.template_namespace_id.strip() else default_namespace
-
-    fields = [
-        (
-            creds.waba_auth_token,
-            "TATA_WABA_AUTH_TOKEN"
-            if is_tata
-            else ("BAJAJ_WABA_AUTH_TOKEN" if is_bajaj else f"{prefix}_WABA_AUTH_TOKEN"),
-        ),
-        (waba_val, "TATA_WABA_ID" if is_tata else ("BAJAJ_WABA_ID" if is_bajaj else f"{prefix}_WABA_ID")),
-        (
-            creds.bearer_token,
-            "TATA_KARIX_BEARER_TOKEN"
-            if is_tata
-            else ("BAJAJ_KARIX_BEARER_TOKEN" if is_bajaj else f"{prefix}_KARIX_BEARER_TOKEN"),
-        ),
-        (
-            creds.session,
-            "TATA_KARIX_SESSION" if is_tata else ("BAJAJ_KARIX_SESSION" if is_bajaj else f"{prefix}_KARIX_SESSION"),
-        ),
-        (creds.user, "TATA_KARIX_USER" if is_tata else ("BAJAJ_KARIX_USER" if is_bajaj else f"{prefix}_KARIX_USER")),
-        (creds.portal_username, f"{prefix}_PORTAL_USER"),
-        (creds.portal_password, f"{prefix}_PORTAL_PASSWORD"),
-        (namespace_val, f"{prefix}_TEMPLATE_NAMESPACE_ID"),
-        (entity_val, "TATA_ENTITY_ID" if is_tata else ("BAJAJ_ENTITY_ID" if is_bajaj else f"{prefix}_ENTITY_ID")),
-        (
-            creds.lounge_cookie,
-            "TATA_KARIX_LOUNGE_COOKIE"
-            if is_tata
-            else ("BAJAJ_KARIX_LOUNGE_COOKIE" if is_bajaj else f"{prefix}_KARIX_LOUNGE_COOKIE"),
-        ),
-    ]
-    for val, key in fields:
-        if is_bajaj and key in {"BAJAJ_KARIX_BEARER_TOKEN", "BAJAJ_KARIX_SESSION", "BAJAJ_KARIX_USER"}:
-            continue
-        if val is not None and str(val).strip():
-            v = str(val).strip()
-            mapping[key] = v
-            os.environ[key] = v
-    return mapping
+def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict:
+    fields = {
+        "WABA_AUTH_TOKEN": creds.waba_auth_token, "WABA_ID": creds.waba_id,
+        "ESMEADDR": creds.esmeaddr,
+        "TEMPLATE_NAMESPACE_ID": creds.template_namespace_id, "ENTITY_ID": creds.entity_id,
+        "PORTAL_USER": creds.portal_username, "PORTAL_PASSWORD": creds.portal_password,
+        "KARIX_LOUNGE_COOKIE": creds.lounge_cookie,
+    }
+    return {f"{prefix}_{key}": value.strip() for key, value in fields.items() if value and value.strip()}
 
 
 def _build_sms_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict:
@@ -2894,40 +2890,22 @@ def _build_sms_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict
         (creds.sms_encryption_key, f"{prefix}_SMS_ENCRYPTION_KEY"),
         (creds.sms_sender_id, f"{prefix}_SMS_SENDER_ID"),
         (creds.sms_dlr_auth_token, f"{prefix}_SMS_DLR_AUTH_TOKEN"),
+        (creds.entity_id, f"{prefix}_SMS_ENTITY_ID"),
+        (creds.lounge_cookie, f"{prefix}_KARIX_LOUNGE_COOKIE"),
     ]
     for val, key in fields:
         if val is not None and str(val).strip():
             v = str(val).strip()
             mapping[key] = v
-            os.environ[key] = v
     return mapping
 
 
-def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str, acc: str = "") -> dict:
-    mapping = {}
-    default_bot = DEFAULT_RCS_BOT_IDS.get(acc, "")
-    bot_val = creds.rcs_bot_id.strip() if creds.rcs_bot_id and creds.rcs_bot_id.strip() else default_bot
-    default_esme = DEFAULT_RCS_ESMEADDRS.get(acc, DEFAULT_ESMEADDRS.get(acc, ""))
-    esme_val = creds.rcs_esmeaddr.strip() if creds.rcs_esmeaddr and creds.rcs_esmeaddr.strip() else default_esme
-    default_entity = DEFAULT_ENTITY_IDS.get(acc, "110100001654" if acc == "bajaj" else "1001490234791338781")
-    entity_val = creds.entity_id.strip() if creds.entity_id and creds.entity_id.strip() else default_entity
-
-    raw_token = creds.rcs_auth_token or creds.bearer_token or creds.lounge_cookie
-    token_val = re.sub(r"^(?:Authorization\s*:\s*)?Bearer(?:\s+|$)", "", (raw_token or "").strip(), flags=re.IGNORECASE).strip() if raw_token else None
-
-    fields = [
-        (bot_val, f"{prefix}_RCS_BOT_ID"),
-        (token_val, f"{prefix}_RCS_AUTH_TOKEN"),
-        (token_val, f"{prefix}_KARIX_BEARER_TOKEN"),
-        (esme_val, f"{prefix}_RCS_ESMEADDR"),
-        (entity_val, f"{prefix}_ENTITY_ID"),
-    ]
-    for val, key in fields:
-        if val is not None and str(val).strip():
-            v = str(val).strip()
-            mapping[key] = v
-            os.environ[key] = v
-    return mapping
+def _build_rcs_credentials_mapping(creds: CredentialUpdate, prefix: str) -> dict:
+    fields = {
+        "RCS_BOT_ID": creds.rcs_bot_id, "RCS_ESMEADDR": creds.rcs_esmeaddr,
+        "RCS_ENTITY_ID": creds.entity_id,
+    }
+    return {f"{prefix}_{key}": value.strip() for key, value in fields.items() if value and value.strip()}
 
 
 @app.put("/api/credentials")
@@ -2935,156 +2913,48 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     require_tenant_access(creds.account, current_user)
     if creds.gemini_api_key is not None and current_user["role"] != "superadmin":
         raise HTTPException(status_code=403, detail="Only platform administrators may change shared Gemini credentials.")
-    env_path = Path(".env")
-    acc = creds.account.lower().strip()
-    chan = creds.channel.lower().strip()
+    from portal_sessions import save_session, save_settings
+    from karix_extension import SessionRequest, validate_session
+
+    acc, chan = creds.account.lower().strip(), creds.channel.lower().strip()
     prefix = _account_prefix(acc)
-    is_tata = acc == "tata"
-    is_bajaj = acc == "bajaj"
-    if is_bajaj and chan == "whatsapp" and any((creds.bearer_token, creds.session, creds.user)):
-        if not all((creds.bearer_token, creds.session, creds.user)):
-            raise HTTPException(status_code=422, detail="Manual override requires Bearer Token, Session ID and User from one Bajaj session.")
-        from karix_extension import SessionRequest, validate_session
-        from portal_sessions import save_session
+    if chan not in {"whatsapp", "rcs", "sms"}:
+        raise HTTPException(status_code=422, detail="Unsupported credential integration.")
+    raw_bearer = creds.bearer_token if chan == "whatsapp" else creds.rcs_auth_token or creds.bearer_token
+    snapshot = None
+    if raw_bearer or creds.session or creds.user:
         try:
-            snapshot = SessionRequest(
-                bearer_token=creds.bearer_token, session=creds.session, user=creds.user,
-                waba_id=BAJAJ_WABA_ID, esmeaddr="72148300000000",
+            body = SessionRequest(
+                account=acc, integration=chan, bearer_token=raw_bearer or "",
+                session=creds.session, user=creds.user,
+                waba_id=creds.waba_id if chan == "whatsapp" else None,
+                esmeaddr=creds.rcs_esmeaddr if chan == "rcs" else creds.esmeaddr,
+                bot_id=creds.rcs_bot_id if chan == "rcs" else None,
             )
         except ValidationError:
-            raise HTTPException(status_code=422, detail="Invalid Bajaj portal credential snapshot.") from None
-        save_session(validate_session(snapshot))
-
-    if chan == "sms":
-        mapping = _build_sms_credentials_mapping(creds, prefix)
-    elif chan == "whatsapp":
-        mapping = _build_wa_credentials_mapping(creds, prefix, is_tata, is_bajaj, acc)
+            raise HTTPException(status_code=422, detail="Invalid or incomplete portal credential snapshot.") from None
+        snapshot = validate_session(body)
+    if chan == "whatsapp":
+        mapping = _build_wa_credentials_mapping(creds, prefix)
     elif chan == "rcs":
-        mapping = _build_rcs_credentials_mapping(creds, prefix, acc)
+        mapping = _build_rcs_credentials_mapping(creds, prefix)
     else:
-        mapping = {}
-
-    runtime_mapping = {}
-    if creds.gemini_api_key is not None and creds.gemini_api_key.strip():
-        v = creds.gemini_api_key.strip()
-        runtime_mapping["GEMINI_API_KEY"] = v
-        runtime_mapping["GOOGLE_API_KEY"] = v
-        os.environ["GEMINI_API_KEY"] = v
-        os.environ["GOOGLE_API_KEY"] = v
-
-    all_mapping = {**mapping, **runtime_mapping}
-    if not all_mapping:
-        return {"ok": True}
-    # 1. Update .env file
-    try:
-        lines: list[str] = []
-        seen: set[str] = set()
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                stripped = line.strip()
-                if stripped and not stripped.startswith("#") and "=" in stripped:
-                    k = stripped.split("=", 1)[0].strip()
-                    if k in all_mapping:
-                        lines.append(f"{k}={all_mapping[k]}")
-                        seen.add(k)
-                    else:
-                        lines.append(line)
-                else:
-                    lines.append(line)
-
-        for k, v in all_mapping.items():
-            if k not in seen:
-                lines.append(f"{k}={v}")
-
-        env_path.write_text("\n".join(lines) + "\n")
-    except Exception:
-        pass
-
-    # 2. Update persistent credentials.json only for non-Gemini credentials.
-    # Gemini keys stay in the runtime environment and are never committed.
+        mapping = _build_sms_credentials_mapping(creds, prefix)
+    if snapshot is not None:
+        save_session(snapshot, acc, chan)
     if mapping:
-        try:
-            cred_json_path = Path("credentials.json")
-            saved_creds = {}
-            if cred_json_path.exists():
-                try:
-                    saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
-                except Exception:
-                    saved_creds = {}
-            saved_creds.update(mapping)
-            cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
-        except Exception as ex:
-            logger.warning("Could not write config store: %s", ex)
-    # 3. Persist non-secret credentials to GitHub so they survive Render's
-    # ephemeral filesystem. Gemini keys are intentionally excluded.
-    gh_status = _commit_credentials_to_github() if mapping else None
-
+        save_settings(acc, chan, mapping)
+    if creds.gemini_api_key and creds.gemini_api_key.strip():
+        key = creds.gemini_api_key.strip()
+        save_settings("platform", "gemini", {"GEMINI_API_KEY": key, "GOOGLE_API_KEY": key})
     log_activity(
-        user=current_user["name"],
-        action="CREDENTIALS_UPDATE",
-        account=acc,
-        channel=chan,
-        details={"keys_updated": list(all_mapping.keys()), "github_persisted": gh_status},
-        status="success",
+        user=current_user["name"], action="CREDENTIALS_UPDATE", account=acc, channel=chan,
+        details={"keys_updated": list(mapping), "storage": "encrypted_database"}, status="success",
     )
-    try:
-        QUEUE_MANAGER.notify_credentials_updated(acc)
-    except Exception as exc:
-        logger.debug("Auto-resume notice: %s", exc)
-    return {"ok": True, "github_persisted": gh_status}
+    QUEUE_MANAGER.notify_credentials_updated(acc)
+    return {"ok": True, "storage": "encrypted_database"}
 
 
-def _commit_credentials_to_github() -> str | None:
-    """Commit credentials.json to the configured GitHub repo. Returns status string or None."""
-    import base64
-
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPO")  # e.g. "dugadnaman/whitelisting-agent"
-    if not token or not repo:
-        return None
-    try:
-        import requests as _rq
-
-        api = f"https://api.github.com/repos/{repo}/contents/credentials.json"
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
-        r = _rq.get(api, headers=headers, timeout=10)
-        if not r.ok and r.status_code in (401, 403):
-            reason = (
-                r.json().get("message", r.text[:120]) if "json" in r.headers.get("content-type", "") else r.text[:120]
-            )
-            logger.warning("GitHub remote config access denied: HTTP %s: %s", r.status_code, reason)
-        sha = r.json().get("sha") if r.ok else None
-        local_path = Path("credentials.json")
-        local_data = json.loads(local_path.read_text(encoding="utf-8")) if local_path.exists() else {}
-        if r.ok:
-            try:
-                remote_raw = base64.b64decode(r.json().get("content", "")).decode("utf-8")
-                remote_data = json.loads(remote_raw)
-                if isinstance(remote_data, dict):
-                    remote_data.update(local_data)
-                    local_data = remote_data
-                    local_path.write_text(json.dumps(local_data, indent=2) + "\n", encoding="utf-8")
-            except Exception as e:
-                logger.debug("Remote config merge notice: %s", e)
-        content = base64.b64encode(local_path.read_bytes()).decode()
-        payload = {
-            "message": "chore: update saved credentials from Settings",
-            "content": content,
-        }
-        if sha:
-            payload["sha"] = sha
-        r = _rq.put(api, headers=headers, json=payload, timeout=15)
-        if r.status_code in (200, 201):
-            logger.info("Config store synced to GitHub (%s)", repo)
-            return "committed"
-        logger.warning("GitHub config sync failed: HTTP %s: %s", r.status_code, r.text[:200])
-        try:
-            gh_reason = r.json().get("message", r.text[:120])
-        except Exception:
-            gh_reason = r.text[:120]
-        return f"failed_http_{r.status_code}: {gh_reason}"
-    except Exception as exc:
-        logger.warning("GitHub config sync error: %s", exc)
 
 
 def _test_rcs_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -> dict:
@@ -3119,9 +2989,8 @@ def _test_whatsapp_channel(
     saved_portal_token = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN") or (
         os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else None
     )
-    if is_bajaj:
-        from portal_sessions import session_record
-        saved_portal_token = saved_portal_token or session_record() is not None
+    from portal_sessions import session_record
+    saved_portal_token = saved_portal_token or session_record(acc, "whatsapp") is not None
     portal_requested = (
         creds is not None and creds.bearer_token is not None
         or (creds is None or creds.waba_auth_token is None) and bool(saved_portal_token)
@@ -3146,8 +3015,7 @@ def _test_whatsapp_channel(
     try:
         waba_id = (
             (creds.waba_id.strip() if creds and creds.waba_id and creds.waba_id.strip() else None)
-            or os.environ.get(f"{prefix}_WABA_ID")
-            or (BAJAJ_WABA_ID if is_bajaj else "")
+            or get_waba_id(acc)
         )
         if not waba_id:
             return {
@@ -3155,16 +3023,10 @@ def _test_whatsapp_channel(
                 "message": f"{acc_name} WhatsApp: Please enter the WABA ID in the field above or set {w_id_key} in Settings.",
             }
 
-        token = (
-            (
-                creds.waba_auth_token.strip()
-                if creds and creds.waba_auth_token and creds.waba_auth_token.strip()
-                else None
-            )
-            or os.environ.get(f"{prefix}_WABA_AUTH_TOKEN")
-            or os.environ.get("TATA_WABA_AUTH_TOKEN" if acc in TATA_SUB_ACCOUNTS else "BAJAJ_WABA_AUTH_TOKEN")
-            or (os.environ.get("WABA_AUTH_TOKEN") if is_bajaj else os.environ.get("TATA_KARIX_BEARER_TOKEN"))
-        )
+        from config import get_official_auth_headers
+        token = creds.waba_auth_token.strip() if creds and creds.waba_auth_token and creds.waba_auth_token.strip() else None
+        if token is None:
+            token = get_official_auth_headers(acc)["Authentication"].removeprefix("Bearer ")
         if not token:
             return {
                 "ok": False,
@@ -4719,30 +4581,20 @@ class MoEngageCredentialUpdate(BaseModel):
     refresh_token: str | None = None
     cookie: str | None = None
     sender_id: str | None = None
+    workspace_id: str | None = None
 
 
 _TATA_MOENGAGE_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy", "all"}
 
 
 def _moengage_credential_keys(account: str) -> dict[str, str]:
-    """Map account to its MoEngage env keys. Tata sub-accounts share the global workspace."""
-    acc = account.lower().strip()
-    if acc in _TATA_MOENGAGE_ACCOUNTS:
-        return {
-            "base_url": "MOENGAGE_BASE_URL",
-            "bearer_token": "MOENGAGE_BEARER_TOKEN",  # nosec B105
-            "refresh_token": "MOENGAGE_REFRESH_TOKEN",
-            "cookie": "MOENGAGE_COOKIE",
-            "sender_id": "MOENGAGE_SENDER_ID",
-        }
-    prefix = _account_prefix(acc)
-    return {
-        "base_url": f"{prefix}_MOENGAGE_BASE_URL",
-        "bearer_token": f"{prefix}_MOENGAGE_BEARER_TOKEN",  # nosec B105
-        "refresh_token": f"{prefix}_MOENGAGE_REFRESH_TOKEN",
-        "cookie": f"{prefix}_MOENGAGE_COOKIE",
-        "sender_id": f"{prefix}_MOENGAGE_SENDER_ID",
-    }
+    """Each account has an independent configured MoEngage identity."""
+    prefix = _account_prefix(account.lower().strip())
+    return {field: f"{prefix}_MOENGAGE_{suffix}" for field, suffix in {
+        "base_url": "BASE_URL", "bearer_token": "BEARER_TOKEN",
+        "refresh_token": "REFRESH_TOKEN", "cookie": "COOKIE",
+        "sender_id": "SENDER_ID", "workspace_id": "WORKSPACE_ID",
+    }.items()}
 
 
 @app.get("/api/moengage/credentials")
@@ -4764,9 +4616,10 @@ def get_moengage_credentials_endpoint(
             "has_token": creds.get("has_token", False),
             "has_refresh_token": creds.get("has_refresh_token", False),
             "has_cookie": creds.get("has_cookie", False),
-            "bearer_token": creds.get("bearer_token", ""),
-            "refresh_token": creds.get("refresh_token", ""),
-            "cookie": creds.get("cookie", ""),
+            "bearer_token": "",
+            "refresh_token": "",
+            "cookie": "",
+            "workspace_id": creds.get("workspace_id", ""),
             "expired": creds.get("expired"),
             "expires_at": creds.get("expires_at"),
             "remaining_min": creds.get("remaining_min"),
@@ -4776,113 +4629,41 @@ def get_moengage_credentials_endpoint(
 
 @app.put("/api/moengage/credentials")
 def update_moengage_credentials_endpoint(
-    req: MoEngageCredentialUpdate,
-    current_user: dict = Depends(get_current_user),
+    req: MoEngageCredentialUpdate, current_user: dict = Depends(get_current_user),
 ):
-    """Persist an account's MoEngage workspace credentials to .env and credentials.json."""
+    """Save scoped settings once without plaintext files or Git persistence."""
     _require_moengage_account_access(req.account, current_user)
-    keys = _moengage_credential_keys(req.account)
-    mapping: dict[str, str] = {}
+    if req.base_url and not re.fullmatch(r"https://dashboard(?:-\d+)?\.moengage\.com/?", req.base_url.strip()):
+        raise HTTPException(status_code=422, detail="Use the exact HTTPS MoEngage dashboard origin.")
+    if req.workspace_id and not re.fullmatch(r"[a-fA-F0-9]{24}", req.workspace_id.strip()):
+        raise HTTPException(status_code=422, detail="Use the internal 24-hex MoEngage portal workspace ID, not the public API app key.")
+    from portal_sessions import save_settings, save_session
+    from karix_extension import SessionRequest, validate_session
     acc = req.account.lower().strip()
-    raw_token = (req.bearer_token or "").strip()
-    raw_refresh_token = (req.refresh_token or "").strip()
-    raw_cookie = (req.cookie or "").strip()
-
-    # Auto-detect if user swapped or pasted cookie in token field
-    if raw_token and ("cookieyes-" in raw_token or ";" in raw_token or "moe_uuid=" in raw_token):
-        if not raw_cookie:
-            raw_cookie = raw_token
-        raw_token = ""
-    if raw_cookie and (raw_cookie.startswith("eyJ") or raw_cookie.startswith("Bearer eyJ")):
-        if not raw_token:
-            raw_token = raw_cookie
-        raw_cookie = ""
-
-    if req.base_url and req.base_url.strip():
-        mapping[keys["base_url"]] = req.base_url.strip().rstrip("/")
-    if raw_token:
-        mapping[keys["bearer_token"]] = raw_token
-        if acc in _TATA_MOENGAGE_ACCOUNTS:
-            mapping["TATA_MOENGAGE_BEARER_TOKEN"] = raw_token
-            mapping["MOENGAGE_BEARER_TOKEN"] = raw_token
-    if req.refresh_token is not None:
-        mapping[keys["refresh_token"]] = raw_refresh_token
-        if acc in _TATA_MOENGAGE_ACCOUNTS:
-            mapping["TATA_MOENGAGE_REFRESH_TOKEN"] = raw_refresh_token
-            mapping["MOENGAGE_REFRESH_TOKEN"] = raw_refresh_token
-    if raw_cookie:
-        mapping[keys["cookie"]] = raw_cookie
-        if acc in _TATA_MOENGAGE_ACCOUNTS:
-            mapping["TATA_MOENGAGE_COOKIE"] = raw_cookie
-            mapping["MOENGAGE_COOKIE"] = raw_cookie
-    if req.sender_id and req.sender_id.strip():
-        mapping[keys["sender_id"]] = req.sender_id.strip()
-    if not mapping:
-        return {"ok": True, "updated_keys": []}
-
-    # 1. Update .env file
-    try:
-        env_path = Path(".env")
-        lines: list[str] = []
-        seen: set[str] = set()
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                stripped = line.strip()
-                if stripped and not stripped.startswith("#") and "=" in stripped:
-                    k = stripped.split("=", 1)[0].strip()
-                    if k in mapping:
-                        lines.append(f"{k}={mapping[k]}")
-                        seen.add(k)
-                    else:
-                        lines.append(line)
-                else:
-                    lines.append(line)
-        for k, v in mapping.items():
-            if k not in seen:
-                lines.append(f"{k}={v}")
-        env_path.write_text("\n".join(lines) + "\n")
-    except Exception as exc:
-        logger.warning("Could not update .env with MoEngage creds: %s", exc)
-
-    # 2. Update persistent credentials.json
-    try:
-        cred_json_path = Path("credentials.json")
-        saved_creds = {}
-        if cred_json_path.exists():
-            try:
-                saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
-            except Exception:
-                saved_creds = {}
-        saved_creds.update(mapping)
-        cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
-    except Exception as exc:
-        logger.warning("Could not write MoEngage creds to config store: %s", exc)
-    # Reflect into live environment immediately
-    for k, v in mapping.items():
-        os.environ[k] = v
-
-    from moengage_sync import decode_moengage_token_expiry
-
-    expiry = decode_moengage_token_expiry(mapping.get(keys["bearer_token"]))
-
-    log_activity(
-        user=current_user.get("name", "Operator"),
-        action="CREDENTIALS_UPDATE",
-        account=req.account,
-        channel="moengage",
-        details={"keys_updated": list(mapping.keys())},
-        status="success",
-    )
-
-    return _json_safe(
-        {
-            "ok": True,
-            "account": req.account,
-            "updated_keys": list(mapping.keys()),
-            "expired": expiry.get("expired"),
-            "remaining_min": expiry.get("remaining_min"),
-        }
-    )
+    keys = _moengage_credential_keys(acc)
+    snapshot = None
+    if any((req.bearer_token, req.refresh_token, req.cookie)):
+        if not all((req.bearer_token, req.refresh_token, req.cookie)):
+            raise HTTPException(status_code=422, detail="Manual MoEngage override requires bearer, refresh token and cookies from one session.")
+        try:
+            body = SessionRequest(
+                account=acc, integration="moengage", bearer_token=req.bearer_token,
+                refresh_token=req.refresh_token, cookie=req.cookie,
+                base_url=req.base_url, workspace_id=req.workspace_id,
+            )
+        except ValidationError:
+            raise HTTPException(status_code=422, detail="Invalid MoEngage credential snapshot.") from None
+        snapshot = validate_session(body)
+    mapping = {}
+    for field in ("base_url", "workspace_id", "sender_id"):
+        value = getattr(req, field)
+        if value and value.strip():
+            mapping[keys[field]] = value.strip().rstrip("/") if field == "base_url" else value.strip()
+    if mapping:
+        save_settings(acc, "moengage", mapping)
+    if snapshot is not None:
+        save_session(snapshot, acc, "moengage")
+    return {"ok": True, "account": acc, "updated_keys": list(mapping), "storage": "encrypted_database"}
 
 
 class MoEngageTestConnectionRequest(BaseModel):
@@ -4890,6 +4671,8 @@ class MoEngageTestConnectionRequest(BaseModel):
     cookie: str | None = None
     base_url: str | None = None
     sender_id: str | None = None
+    workspace_id: str | None = None
+    refresh_token: str | None = None
 
 
 @app.post("/api/moengage/test")
@@ -4900,6 +4683,20 @@ def test_moengage_connection_endpoint(
 ):
     """Test an account's MoEngage token validity by querying live templates."""
     _require_moengage_account_access(account, current_user)
+    if body and any((body.bearer_token, body.refresh_token, body.cookie)):
+        if not all((body.bearer_token, body.refresh_token, body.cookie)):
+            raise HTTPException(status_code=422, detail="Check a complete MoEngage bearer, refresh token and cookie snapshot.")
+        from karix_extension import SessionRequest, validate_session
+        try:
+            snapshot = SessionRequest(
+                account=account, integration="moengage", bearer_token=body.bearer_token,
+                refresh_token=body.refresh_token, cookie=body.cookie,
+                base_url=body.base_url, workspace_id=body.workspace_id,
+            )
+        except ValidationError:
+            raise HTTPException(status_code=422, detail="Invalid MoEngage session snapshot.") from None
+        validate_session(snapshot)
+        return {"ok": True, "message": "MoEngage session validated for the configured account and workspace."}
     from moengage_sync import test_moengage_connection
 
     token = (body.bearer_token or "").strip() if body and body.bearer_token else None

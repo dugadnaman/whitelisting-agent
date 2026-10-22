@@ -49,20 +49,39 @@ export default function SettingsPage() {
   const [bearerToken, setBearerToken] = useState('');
   const [session, setSession] = useState('');
   const [user, setUser] = useState('');
-  const [manualBajajSession, setManualBajajSession] = useState(false);
+  const [manualPortalSession, setManualPortalSession] = useState(false);
+  const [showMoEngage, setShowMoEngage] = useState(false);
   const [syncRevision, setSyncRevision] = useState(0);
-  const settingsScope = `${currentUser?.id}:${currentUser?.tenant_id}:${currentUser?.role}:${selectedAccount}:${selectedChannel}`;
+  const settingsScope = `${currentUser?.id}:${currentUser?.tenant_id}:${currentUser?.role}:${selectedAccount}:${showMoEngage ? 'moengage' : selectedChannel}`;
+  const [loadedScope, setLoadedScope] = useState('');
+  const savedFields = useRef<Record<string, string>>({});
   const currentSettingsScope = useRef(settingsScope);
   currentSettingsScope.current = settingsScope;
   useEffect(() => {
-    setManualBajajSession(false);
-    if (selectedAccount === 'bajaj' && selectedChannel === 'whatsapp') {
-      setBearerToken('');
-      setSession('');
-      setUser('');
-    }
-  }, [selectedAccount, selectedChannel, currentUser?.id]);
-  const [showPortalCreds, setShowPortalCreds] = useState(false);
+    setManualPortalSession(false);
+    setBearerToken('');
+    setSession('');
+    setUser('');
+    setRcsAuthToken('');
+    setLoungeCookie('');
+    setPortalPassword('');
+    setWabaAuthToken('');
+    setSmsKey('');
+    setSmsEncryptionKey('');
+    setSmsDlrAuthToken('');
+    setEditPermanent(false);
+    setGeminiApiKey('');
+    setLoadedScope('');
+    setWabaId('');
+    setPortalUsername('');
+    setTemplateNamespaceId('');
+    setEntityId('');
+    setRcsBotId('');
+    setEsmeaddr('');
+    setSmsUsername('');
+    setSmsSenderId('');
+    setBanner(null);
+  }, [settingsScope]);
   const [portalUsername, setPortalUsername] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
   const [templateNamespaceId, setTemplateNamespaceId] = useState('');
@@ -84,36 +103,47 @@ export default function SettingsPage() {
   const [editPermanent, setEditPermanent] = useState(false);
 
   // MoEngage form state
-  const [showMoEngage, setShowMoEngage] = useState(false);
   const [moeBearerToken, setMoeBearerToken] = useState('');
   const [moeRefreshToken, setMoeRefreshToken] = useState('');
   const [moeCookie, setMoeCookie] = useState('');
   const [moeBaseUrl, setMoeBaseUrl] = useState('');
   const [moeSenderId, setMoeSenderId] = useState('');
+  const [moeWorkspaceId, setMoeWorkspaceId] = useState('');
+  const [manualMoeSession, setManualMoeSession] = useState(false);
+  const savedMoeFields = useRef<Record<string, string>>({});
   const [moeExpiry, setMoeExpiry] = useState<{ expired?: boolean; remaining_min?: number | null }>({});
-  const [moeLoaded, setMoeLoaded] = useState(false);
+  const [moeLoadedScope, setMoeLoadedScope] = useState('');
   // Load MoEngage credentials for the selected account
   useEffect(() => {
+    setManualMoeSession(false);
+    setMoeBearerToken('');
+    setMoeRefreshToken('');
+    setMoeCookie('');
+    setMoeBaseUrl('');
+    setMoeWorkspaceId('');
+    setMoeSenderId('');
+    setMoeExpiry({});
+    setMoeLoadedScope('');
     if (!isAssigned) return;
     let ignore = false;
     async function loadMoEngage() {
       try {
         const creds = await fetchMoEngageCredentials(selectedAccount);
         if (ignore) return;
-        setMoeBearerToken(creds.bearer_token || '');
-        setMoeRefreshToken(creds.refresh_token || '');
-        setMoeCookie(creds.cookie || '');
+        // Renewable credentials remain server-side; only an explicit new snapshot may replace them.
         setMoeBaseUrl(creds.base_url || '');
         setMoeSenderId(creds.sender_id || '');
+        setMoeWorkspaceId(creds.workspace_id || '');
+        savedMoeFields.current = { base_url: creds.base_url || '', workspace_id: creds.workspace_id || '', sender_id: creds.sender_id || '' };
         setMoeExpiry({ expired: creds.expired, remaining_min: creds.remaining_min });
-        setMoeLoaded(true);
+        setMoeLoadedScope(settingsScope);
       } catch {
-        setMoeLoaded(true);
+        if (!ignore) setBanner({ type: 'error', message: 'Could not load MoEngage settings for this account. Retry after checking your access and connection.' });
       }
     }
     loadMoEngage();
     return () => { ignore = true; };
-  }, [selectedAccount, isAssigned]);
+  }, [selectedAccount, isAssigned, settingsScope]);
 
   // Team Directory state
   const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
@@ -177,34 +207,43 @@ export default function SettingsPage() {
       try {
         const creds = await fetchCredentials(selectedAccount, selectedChannel);
         if (ignore) return;
-        setGeminiApiKey(creds.gemini_api_key || '');
+        savedFields.current = {
+          waba_id: creds.waba_id || '', portal_username: creds.portal_username || '',
+          esmeaddr: creds.esmeaddr || '',
+          template_namespace_id: creds.template_namespace_id || '', entity_id: creds.entity_id || '',
+          sms_username: creds.sms_username || '', sms_sender_id: creds.sms_sender_id || '',
+          rcs_bot_id: creds.rcs_bot_id || '', rcs_esmeaddr: creds.rcs_esmeaddr || creds.esmeaddr || '',
+        };
+        setGeminiApiKey('');
         if (selectedChannel === 'whatsapp') {
-          setWabaAuthToken(creds.waba_auth_token || '');
+          setWabaAuthToken('');
           setWabaId(creds.waba_id || '');
-          // Bajaj sessions stay on the server; blank drafts are only for an explicit manual override.
-          setBearerToken(selectedAccount === 'bajaj' ? '' : creds.bearer_token || '');
-          setSession(selectedAccount === 'bajaj' ? '' : creds.session || '');
-          setUser(selectedAccount === 'bajaj' ? '' : creds.user || '');
+          setEsmeaddr(creds.esmeaddr || '');
+          setEntityId(creds.entity_id || '');
+          setBearerToken('');
+          setSession('');
+          setUser('');
           setPortalUsername(creds.portal_username || '');
-          setPortalPassword(creds.portal_password || '');
+          setPortalPassword('');
           setTemplateNamespaceId(creds.template_namespace_id || '');
         } else if (selectedChannel === 'sms') {
-          setSmsKey(creds.sms_key || '');
+          setSmsKey('');
           setSmsUsername(creds.sms_username || '');
-          setSmsEncryptionKey(creds.sms_encryption_key || '');
+          setSmsEncryptionKey('');
           setSmsSenderId(creds.sms_sender_id || '');
-          setSmsDlrAuthToken(creds.sms_dlr_auth_token || '');
+          setSmsDlrAuthToken('');
           setEntityId(creds.entity_id || '');
-          setLoungeCookie(creds.lounge_cookie || '');
+          setLoungeCookie('');
         } else {
           setEntityId(creds.entity_id || '');
-          setLoungeCookie(creds.lounge_cookie || '');
+          setLoungeCookie('');
           setPortalUsername(creds.portal_username || '');
-          setPortalPassword(creds.portal_password || '');
+          setPortalPassword('');
           setRcsBotId(creds.rcs_bot_id || '');
-          setRcsAuthToken(creds.rcs_auth_token || '');
+          setRcsAuthToken('');
           setEsmeaddr(creds.rcs_esmeaddr || creds.esmeaddr || '');
         }
+        setLoadedScope(settingsScope);
       } catch {
         if (ignore) return;
         setBanner({ type: 'error', message: 'Could not load organization credentials. Check your connection and company access.' });
@@ -228,21 +267,35 @@ export default function SettingsPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedAccount, selectedChannel, teamTenant, isAssigned, currentUser?.id]);
+  }, [selectedAccount, selectedChannel, teamTenant, isAssigned, settingsScope]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
-  const isBajajWhatsApp = selectedAccount === 'bajaj' && isWhatsApp;
+  function changedFields(values: Record<string, string>, saved = savedFields.current) {
+    return Object.fromEntries(Object.entries(values).filter(([key, value]) => value.trim() && value.trim() !== (saved[key] || '').trim()).map(([key, value]) => [key, value.trim()]));
+  }
   function portalCredentialsForRequest() {
-    if (isBajajWhatsApp && !manualBajajSession) return {};
-    if (isBajajWhatsApp && (!bearerToken.trim() || !session.trim() || !user.trim())) {
-      throw new Error('A manual Bajaj session override requires Bearer Token, Session ID, and User from the same request. Supply all three, or cancel the manual override to keep the saved session.');
+    if (!manualPortalSession || isSms) return {};
+    if (isWhatsApp && (!bearerToken.trim() || !session.trim() || !user.trim())) {
+      throw new Error('A manual WhatsApp override requires Bearer Token, Session ID, and User from one request. Supply all three or cancel the override.');
     }
-    return {
-      bearer_token: bearerToken.trim() || undefined,
-      session: session.trim() || undefined,
-      user: user.trim() || undefined,
-    };
+    if (isRcs && !rcsAuthToken.trim()) throw new Error('A manual RCS override requires its own RCS bearer token. WhatsApp credentials cannot be reused.');
+    return isWhatsApp ? { bearer_token: bearerToken.trim(), session: session.trim(), user: user.trim() }
+      : { rcs_auth_token: rcsAuthToken.trim(), session: session.trim() || undefined, user: user.trim() || undefined };
+  }
+  function credentialDraft() {
+    if (!isAssigned || loadedScope !== settingsScope) throw new Error('Wait for settings to load for the selected account and integration.');
+    const metadata: Record<string, string> = isWhatsApp
+      ? { waba_auth_token: wabaAuthToken, waba_id: wabaId, esmeaddr, portal_username: portalUsername, portal_password: portalPassword, template_namespace_id: templateNamespaceId, entity_id: entityId }
+      : isSms
+        ? { sms_key: smsKey, sms_username: smsUsername, sms_encryption_key: smsEncryptionKey, sms_sender_id: smsSenderId, sms_dlr_auth_token: smsDlrAuthToken, entity_id: entityId, lounge_cookie: manualPortalSession ? loungeCookie : '' }
+        : { rcs_bot_id: rcsBotId, rcs_esmeaddr: esmeaddr, entity_id: entityId };
+    const changed = changedFields(metadata);
+    if (manualPortalSession && !isSms && ['waba_id', 'esmeaddr', 'rcs_bot_id', 'rcs_esmeaddr'].some((key) => key in changed)) {
+      throw new Error('Save the account routing identifiers first with manual override off. Then pair or replace the complete session for that configured identity.');
+    }
+    return { ...changed, ...portalCredentialsForRequest(),
+      ...(currentUser?.role === 'superadmin' && geminiApiKey.trim() ? { gemini_api_key: geminiApiKey.trim() } : {}) };
   }
   const accountTitle = getAccountLabel(selectedAccount);
   const channelTitle = isWhatsApp ? 'WhatsApp' : isSms ? 'SMS' : 'RCS';
@@ -314,27 +367,17 @@ export default function SettingsPage() {
     setBanner(null);
     try {
       const res = await testCredentials(selectedAccount, selectedChannel, {
-        waba_auth_token: wabaAuthToken.trim() || undefined,
-        waba_id: wabaId.trim() || undefined,
-        ...portalCredentialsForRequest(),
-        entity_id: entityId.trim() || undefined,
-        lounge_cookie: loungeCookie.trim() || undefined,
-        sms_key: smsKey.trim() || undefined,
-        sms_username: smsUsername.trim() || undefined,
-        sms_encryption_key: smsEncryptionKey.trim() || undefined,
-        sms_sender_id: smsSenderId.trim() || undefined,
-        sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
-        rcs_bot_id: rcsBotId.trim() || undefined,
-        rcs_auth_token: (rcsAuthToken.trim() || (isRcs ? loungeCookie.trim() : '')) || undefined,
-        rcs_esmeaddr: esmeaddr.trim() || undefined,
+        ...credentialDraft(),
         user_name: currentOperator,
       });
+      if (currentSettingsScope.current !== settingsScope) return;
       if (res.ok) {
         setBanner({ type: 'success', message: res.message || 'Connection verified successfully!' });
       } else {
         setBanner({ type: 'error', message: res.message || 'Connection test failed.' });
       }
     } catch (err) {
+      if (currentSettingsScope.current !== settingsScope) return;
       setBanner({
         type: 'error',
         message: err instanceof Error ? err.message : 'Connection test failed',
@@ -358,12 +401,30 @@ export default function SettingsPage() {
         setBanner({ type: 'error', message: res.error || 'Gemini connectivity test failed.' });
       }
     } catch (err) {
+      if (currentSettingsScope.current !== settingsScope) return;
       setBanner({
         type: 'error',
         message: err instanceof Error ? err.message : 'Gemini connectivity test failed',
       });
     } finally {
       setGeminiTesting(false);
+    }
+  }
+
+  async function handleSaveGemini() {
+    if (currentUser?.role !== 'superadmin' || !isAssigned || !geminiApiKey.trim()) return;
+    setSaving(true);
+    setBanner(null);
+    try {
+      await updateCredentials({ account: selectedAccount, channel: selectedChannel, gemini_api_key: geminiApiKey.trim(), user_name: currentOperator });
+      if (currentSettingsScope.current !== settingsScope) return;
+      setGeminiApiKey('');
+      setBanner({ type: 'success', message: 'Gemini API key saved to encrypted server storage. No portal sessions were changed.' });
+    } catch (err) {
+      if (currentSettingsScope.current !== settingsScope) return;
+      setBanner({ type: 'error', message: err instanceof Error ? err.message : 'Could not save Gemini API key.' });
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -374,36 +435,34 @@ export default function SettingsPage() {
       const credsToSave = {
         account: selectedAccount,
         channel: selectedChannel,
-        waba_auth_token: wabaAuthToken.trim() || undefined,
-        waba_id: wabaId.trim() || undefined,
-        ...portalCredentialsForRequest(),
-        portal_username: portalUsername.trim() || undefined,
-        portal_password: portalPassword.trim() || undefined,
-        template_namespace_id: templateNamespaceId.trim() || undefined,
-        entity_id: entityId.trim() || undefined,
-        lounge_cookie: loungeCookie.trim() || undefined,
-        sms_key: smsKey.trim() || undefined,
-        sms_username: smsUsername.trim() || undefined,
-        sms_encryption_key: smsEncryptionKey.trim() || undefined,
-        sms_sender_id: smsSenderId.trim() || undefined,
-        sms_dlr_auth_token: smsDlrAuthToken.trim() || undefined,
-        rcs_bot_id: rcsBotId.trim() || undefined,
-        rcs_auth_token: (rcsAuthToken.trim() || (isRcs ? loungeCookie.trim() : '')) || undefined,
-        rcs_esmeaddr: esmeaddr.trim() || undefined,
-        gemini_api_key: currentUser?.role === 'superadmin' ? geminiApiKey.trim() || undefined : undefined,
+        ...credentialDraft(),
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
-      if (isBajajWhatsApp && currentSettingsScope.current === settingsScope) {
-        setManualBajajSession(false);
+      if (currentSettingsScope.current !== settingsScope) return;
+      {
+        for (const key of Object.keys(savedFields.current)) {
+          const value = Object.entries(credsToSave).find(([name]) => name === key)?.[1];
+          if (typeof value === 'string') savedFields.current[key] = value;
+        }
+        setManualPortalSession(false);
         setBearerToken('');
         setSession('');
         setUser('');
+        setRcsAuthToken('');
+        setLoungeCookie('');
+        setWabaAuthToken('');
+        setSmsKey('');
+        setSmsEncryptionKey('');
+        setSmsDlrAuthToken('');
+        setPortalPassword('');
+        setGeminiApiKey('');
         setSyncRevision((revision) => revision + 1);
       }
 
       // Run immediate test to verify
-      const testRes = await testCredentials(selectedAccount, selectedChannel, isBajajWhatsApp ? { user_name: currentOperator } : credsToSave);
+      const testRes = await testCredentials(selectedAccount, selectedChannel, { user_name: currentOperator });
+      if (currentSettingsScope.current !== settingsScope) return;
 
       if (testRes.ok) {
         setBanner({
@@ -417,6 +476,7 @@ export default function SettingsPage() {
         });
       }
     } catch (err) {
+      if (currentSettingsScope.current !== settingsScope) return;
       setBanner({
         type: 'error',
         message: err instanceof Error ? err.message : 'Failed to save credentials',
@@ -426,25 +486,38 @@ export default function SettingsPage() {
     }
   }
 
+  function moengageDraft() {
+    if (!isAssigned || moeLoadedScope !== settingsScope) throw new Error('Wait for MoEngage settings to load for this account.');
+    if (manualMoeSession && (!moeBearerToken.trim() || !moeRefreshToken.trim() || !moeCookie.trim())) {
+      throw new Error('A manual MoEngage override requires Bearer Token, Refresh Token, and Cookie from one request. Supply all three or cancel the override.');
+    }
+    const metadata = changedFields({ base_url: moeBaseUrl, workspace_id: moeWorkspaceId, sender_id: moeSenderId }, savedMoeFields.current);
+    if (manualMoeSession && Object.keys(metadata).length) {
+      throw new Error('Save workspace metadata first with manual override off. Then connect the extension or enter a new complete session for that configured workspace.');
+    }
+    return { ...metadata, ...(manualMoeSession ? { bearer_token: moeBearerToken.trim(), refresh_token: moeRefreshToken.trim(), cookie: moeCookie.trim() } : {}) };
+  }
+
   async function handleSaveMoEngage() {
     setSaving(true);
     setBanner(null);
     try {
-      const targetAcc = selectedAccount === 'all' ? 'tcl_promo' : selectedAccount;
-      const res = await saveMoEngageCredentials(
-        targetAcc,
-        moeBearerToken.trim(),
-        moeCookie.trim(),
-        moeBaseUrl.trim(),
-        moeSenderId.trim(),
-        moeRefreshToken.trim()
-      );
+      const draft = moengageDraft();
+      const res = await saveMoEngageCredentials(selectedAccount, draft);
+      if (currentSettingsScope.current !== settingsScope) return;
+      savedMoeFields.current = { base_url: moeBaseUrl.trim(), workspace_id: moeWorkspaceId.trim(), sender_id: moeSenderId.trim() };
+      setManualMoeSession(false);
+      setMoeBearerToken('');
+      setMoeRefreshToken('');
+      setMoeCookie('');
+      setSyncRevision((revision) => revision + 1);
       setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
       setBanner({
         type: 'success',
-        message: `MoEngage credentials saved for ${targetAcc}${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
+        message: `MoEngage settings saved for ${accountTitle}${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
       });
     } catch (err) {
+      if (currentSettingsScope.current !== settingsScope) return;
       setBanner({
         type: 'error',
         message: err instanceof Error ? err.message : 'Failed to save MoEngage credentials',
@@ -458,18 +531,13 @@ export default function SettingsPage() {
     setTesting(true);
     setBanner(null);
     try {
-      const targetAcc = selectedAccount === 'all' ? 'tcl_promo' : selectedAccount;
-      const res = await testMoEngageConnection(targetAcc, {
-        bearer_token: moeBearerToken.trim() || undefined,
-        cookie: moeCookie.trim() || undefined,
-        base_url: moeBaseUrl.trim() || undefined,
-        sender_id: moeSenderId.trim() || undefined,
-      });
+      const res = await testMoEngageConnection(selectedAccount, moengageDraft());
+      if (currentSettingsScope.current !== settingsScope) return;
       if (res.ok) {
         setMoeExpiry({ expired: res.expired, remaining_min: res.remaining_min });
         setBanner({
           type: 'success',
-          message: `MoEngage connection verified for ${targetAcc} — ${res.template_count ?? 0} templates accessible live in MoEngage.`,
+          message: `MoEngage connection verified for ${accountTitle} — ${res.template_count ?? 0} templates accessible live in MoEngage.`,
         });
       } else {
         setBanner({
@@ -478,6 +546,7 @@ export default function SettingsPage() {
         });
       }
     } catch (err) {
+      if (currentSettingsScope.current !== settingsScope) return;
       setBanner({
         type: 'error',
         message: err instanceof Error ? err.message : 'MoEngage connection test failed',
@@ -932,6 +1001,9 @@ export default function SettingsPage() {
 
       {/* Credential Form Card */}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-6 space-y-5">
+        {isAssigned && currentUser && (
+          <KarixAuthSync key={`${settingsScope}:${syncRevision}`} account={selectedAccount} integration={showMoEngage ? 'moengage' : selectedChannel} />
+        )}
         {showMoEngage ? (
           <>
             {moeExpiry.expired !== undefined && (
@@ -943,7 +1015,7 @@ export default function SettingsPage() {
                 <span>{moeExpiry.expired ? '⚠️' : '✅'}</span>
                 <span>
                   {moeExpiry.expired
-                    ? 'MoEngage token expired. Paste a fresh token below.'
+                    ? 'Saved MoEngage session expired. Connect Auth Sync and log in normally, or explicitly replace the complete snapshot.'
                     : moeExpiry.remaining_min != null
                     ? `MoEngage token valid for ~${moeExpiry.remaining_min} more minutes.`
                     : 'MoEngage token present.'}
@@ -984,7 +1056,23 @@ export default function SettingsPage() {
                   The <code>sender_ids</code> value from MoEngage → Settings → SMS & RCS → Sender configuration.
                 </p>
               </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="moe_workspace_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">MoEngage Internal Workspace ID</label>
+                <input id="moe_workspace_id" type="text" value={moeWorkspaceId} onChange={(event) => setMoeWorkspaceId(event.target.value)} placeholder="24-character hexadecimal ID from listApps / changeApp" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none" />
+                <p className="text-[11px] text-gray-500 mt-1">The portal’s internal 24-hex workspace ID from listApps or changeApp, not the public API app/workspace key. Confirm it belongs to this account; unknown workspaces are never adopted from browsing.</p>
+              </div>
             </div>
+            <p className="text-xs text-gray-600">For first-time setup, save Dashboard URL, Internal Workspace ID, and Sender Profile ID with manual override off. Then refresh Auth Sync and connect, or explicitly enter a complete session for that configured workspace. Editing metadata never resubmits saved tokens or cookies.</p>
+            <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+              <input type="checkbox" checked={manualMoeSession} onChange={(event) => {
+                setManualMoeSession(event.target.checked);
+                setMoeBearerToken('');
+                setMoeRefreshToken('');
+                setMoeCookie('');
+              }} />
+              Explicitly replace this account’s complete MoEngage session manually
+            </label>
+            {manualMoeSession && <>
 
             <div>
               <label htmlFor="moe_bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
@@ -994,23 +1082,13 @@ export default function SettingsPage() {
                 id="moe_bearer_token"
                 type="password"
                 value={moeBearerToken}
-                onChange={(e) => {
-                  const val = e.target.value.trim();
-                  if (val.includes('cookieyes-') || val.includes('moe_uuid=') || (val.includes(';') && !val.startsWith('eyJ'))) {
-                    setMoeCookie(val);
-                    setBanner({
-                      type: 'error',
-                      message: 'Notice: You pasted the Session Cookie into the Bearer Token box! It was moved to the Session Cookie box below. Please paste the JWT (starting with eyJ...) in this box.',
-                    });
-                  } else {
-                    setMoeBearerToken(e.target.value);
-                  }
-                }}
+                autoComplete="off"
+                onChange={(event) => setMoeBearerToken(event.target.value)}
                 placeholder="Paste the Authorization: Bearer <JWT> header from MoEngage DevTools..."
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
-                MoEngage dashboard JWT. <strong className="text-amber-600">Expires ~2 hours</strong> after login — refresh from DevTools → Network → any request → <code>authorization</code> header.
+                Copy the Authorization bearer header from a read-only request for the configured workspace. Copy Refresh Token and Cookie from that same request; do not mix sessions.
               </p>
             </div>
 
@@ -1028,7 +1106,7 @@ export default function SettingsPage() {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
-                Required for Tata Click Counts workspace selection. Copy <code>refreshtoken</code> from the same request as the bearer token; it is separate from the session cookie.
+                Copy <code>refreshtoken</code> from the same request as the bearer token and cookie.
               </p>
             </div>
 
@@ -1040,19 +1118,9 @@ export default function SettingsPage() {
                 id="moe_cookie"
                 type="password"
                 value={moeCookie}
-                onChange={(e) => {
-                  const val = e.target.value.trim();
-                  if (val.startsWith('eyJ') || val.startsWith('Bearer eyJ')) {
-                    setMoeBearerToken(val);
-                    setBanner({
-                      type: 'error',
-                      message: 'Notice: You pasted the Bearer Token (JWT) into the Cookie box! It was moved to the Bearer Token box above. Please paste the full cookie string in this box.',
-                    });
-                  } else {
-                    setMoeCookie(e.target.value);
-                  }
-                }}
-                placeholder="Copy the full cookie header from DevTools (optional but recommended)..."
+                autoComplete="off"
+                onChange={(event) => setMoeCookie(event.target.value)}
+                placeholder="Copy the complete Cookie header from the same request"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
               />
               <p className="text-[11px] text-gray-400 mt-1">
@@ -1062,17 +1130,17 @@ export default function SettingsPage() {
 
             <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
               <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                <span>🔑</span> How to grab a fresh token (60 seconds)
+                Manual snapshot instructions
               </div>
               <ol className="space-y-1 text-[11px] text-amber-800 list-decimal list-inside">
                 <li>Open MoEngage dashboard in Chrome (logged in)</li>
                 <li>Press F12 → Network tab → reload the page</li>
-                <li>Click any request to <code>dashboard-03.moengage.com</code></li>
-                <li>Headers → copy the full <code>authorization: Bearer …</code> value</li>
-                <li>For Tata Click Counts, also copy the <code>refreshtoken</code> header into Refresh Token</li>
-                <li>Paste it above and click Save</li>
+                <li>Open a read-only inventory request on this account’s configured dashboard host and confirm its internal workspace ID.</li>
+                <li>Copy <code>authorization</code>, <code>refreshtoken</code>, and <code>cookie</code> together from that one request.</li>
+                <li>Paste all three above and Save. Cancel the override to discard the draft and keep the latest saved session.</li>
               </ol>
             </div>
+            </>}
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
               <div className="text-[11px] text-gray-400">
@@ -1082,7 +1150,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={handleTestMoEngage}
-                  disabled={testing || saving}
+                  disabled={testing || saving || !isAssigned || moeLoadedScope !== settingsScope}
                   className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {testing ? 'Testing...' : 'Test Connection'}
@@ -1090,7 +1158,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={handleSaveMoEngage}
-                  disabled={saving || testing}
+                  disabled={saving || testing || !isAssigned || moeLoadedScope !== settingsScope}
                   className="flex-1 sm:flex-none px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {saving ? 'Saving...' : 'Save MoEngage Credentials'}
@@ -1102,57 +1170,41 @@ export default function SettingsPage() {
           <>
         {isWhatsApp ? (
           <>
-            {isBajajWhatsApp && isAssigned && currentUser && (
-              <KarixAuthSync key={`${settingsScope}:${syncRevision}`} />
-            )}
             {/* Active / Expiring Portal Session Section */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>{isBajajWhatsApp ? 'Manual Karix Portal Session Override' : '🔑 Active Karix Portal Session'}</span>
+                    <span>Manual Karix Portal Session Override</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                      {isBajajWhatsApp ? 'Optional — replaces saved session' : 'Session Credentials — Refresh When Expired'}
+                      Optional — replaces this scope’s session
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    {isBajajWhatsApp
-                      ? 'Leave manual override off to preserve the latest synced session. Saved portal credentials are never displayed or copied into this form.'
-                      : <>Browser session credentials from <code>rcsgui.karix.solutions</code> required for WhatsApp image/video media-header submissions.</>}
+                    Leave manual override off to preserve the latest synced session. Saved portal credentials are never copied into this form. Configure and save account identifiers before replacing the session.
                   </p>
                 </div>
-                {!isBajajWhatsApp && (bearerToken && session ? (
-                  <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
-                    ✓ Portal Session Set
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 shrink-0">
-                    Paste Session When Uploading Media
-                  </span>
-                ))}
               </div>
 
-              {isBajajWhatsApp && (
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
                     <input
                       type="checkbox"
-                      checked={manualBajajSession}
+                      checked={manualPortalSession}
                       onChange={(event) => {
-                        setManualBajajSession(event.target.checked);
+                        setManualPortalSession(event.target.checked);
                         setBearerToken('');
                         setSession('');
                         setUser('');
                       }}
                       className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                     />
-                    Explicitly replace the saved Bajaj portal session manually
+                    Explicitly replace this account’s WhatsApp portal session manually
                   </label>
-                  {manualBajajSession && <p className="text-xs text-amber-800">Paste all three headers from one request. Test Connection checks this draft; Save Credentials validates and replaces the shared session. A later extension capture can replace it again. Cancel this override to discard the draft and keep the saved session.</p>}
+                  {manualPortalSession && <p className="text-xs text-amber-800">Paste all three headers from one request. Test checks this draft; Save validates and replaces only this account’s WhatsApp session. A later extension capture can replace it again. Cancel to discard this draft.</p>}
                 </div>
-              )}
 
-              {(!isBajajWhatsApp || manualBajajSession) && (
+              {manualPortalSession && (
               <div className="space-y-4 p-4 bg-gray-50/70 rounded-xl border border-gray-200">
                 <div>
                   <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
@@ -1211,11 +1263,11 @@ export default function SettingsPage() {
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                     <span>🔒 Permanent Account Constants &amp; API Token</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                      Pre-configured
+                      One-time setup
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Permanent WABA API token and fixed account parameters. These never expire and do not need to be changed.
+                    Existing WABA service/API token and account identifiers require one-time provider setup. Auth Sync transfers only the separate renewable browser session; it cannot generate service keys.
                   </p>
                 </div>
                 <button
@@ -1232,24 +1284,29 @@ export default function SettingsPage() {
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Official WABA Token</div>
                     <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
-                      {wabaAuthToken ? '••••••••••••••••' : 'Pre-configured'}
+                      {wabaAuthToken ? 'New value entered' : 'Saved value not displayed'}
                     </div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Permanent Token</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-managed API token</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">WABA ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{wabaId || 'Pre-configured'}</div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Pre-configured</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{wabaId || 'Not configured'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured account identity</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Entity ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || '1001490234791338781'}</div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Namespace ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{templateNamespaceId || '42eec6e7_6287...'}</div>
-                    <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Account-wide</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{templateNamespaceId || 'Not configured'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Account namespace</div>
+                  </div>
+                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">WhatsApp ESME Address</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured WhatsApp routing identity</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Portal User</div>
@@ -1284,6 +1341,11 @@ export default function SettingsPage() {
                       placeholder="e.g. 286109054585247"
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                     />
+                  </div>
+                  <div>
+                    <label htmlFor="whatsapp_esmeaddr" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">WhatsApp ESME Address</label>
+                    <input id="whatsapp_esmeaddr" type="text" value={esmeaddr} onChange={(event) => setEsmeaddr(event.target.value)} placeholder="Provider-configured ESME address for this WhatsApp account" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
+                    <p className="text-[11px] text-gray-500 mt-1">Save this account’s ESME and WABA identifiers before pairing Auth Sync. This is separate from RCS routing.</p>
                   </div>
                   <div>
                     <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
@@ -1345,6 +1407,15 @@ export default function SettingsPage() {
                   </p>
                 </div>
               </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                <input type="checkbox" checked={manualPortalSession} onChange={(event) => {
+                  setManualPortalSession(event.target.checked);
+                  setLoungeCookie('');
+                }} />
+                Explicitly replace this account’s Lounge cookie manually
+              </label>
+              <p className="text-[11px] text-gray-500">Lounge cookies are not SMS API/encryption keys and are not captured by Auth Sync. Leave this off to preserve the saved cookie.</p>
+              {manualPortalSession && (
 
               <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
                 <label htmlFor="sms_lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
@@ -1362,6 +1433,7 @@ export default function SettingsPage() {
                   Session cookie from browser when logged in to <code>lounge.karix.solutions</code>.
                 </p>
               </div>
+              )}
             </div>
 
             {/* Permanent SMS Identifiers (Pre-Configured) */}
@@ -1371,11 +1443,11 @@ export default function SettingsPage() {
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                     <span>🔒 Permanent SMS Identifiers &amp; API Key</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                      Pre-configured
+                      One-time setup
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Permanent SMS Access Key, Sender ID header, telecom username, and DLT Entity ID for {accountTitle}.
+                    One-time provider setup: existing SMS Access Key, encryption key, Sender ID, telecom username, and DLT Entity ID for {accountTitle}. The extension cannot generate static keys. Blank secret fields preserve saved values.
                   </p>
                 </div>
                 <button
@@ -1392,24 +1464,24 @@ export default function SettingsPage() {
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">SMS Access Key</div>
                     <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
-                      {smsKey ? '••••••••••••••••' : 'Pre-configured'}
+                      {smsKey ? 'New value entered' : 'Saved value not displayed'}
                     </div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ Permanent Key</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-managed API key</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sender ID Header</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsSenderId || 'BAJAJF'}</div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ 6-char Header Approved</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsSenderId || 'Not configured'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured sender header</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">SMS Username</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsUsername || 'bajaj_sms_prod'}</div>
-                    <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Telecom Account</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsUsername || 'Not configured'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Telecom account</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                     <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{entityId || '1001492930000010179'}</div>
-                    <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
+                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{entityId || 'Not configured'}</div>
+                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
                   </div>
                 </div>
               ) : (
@@ -1510,7 +1582,7 @@ export default function SettingsPage() {
                     Karix RCS Authorization
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Copy the authorization header from a working RCS request for {accountTitle}.
+                    Leave manual override off to keep the latest saved RCS session. WhatsApp credentials are never used for RCS. Configure and save routing identifiers before replacing the session.
                   </p>
                 </div>
                 {rcsAuthToken && (
@@ -1519,6 +1591,16 @@ export default function SettingsPage() {
                   </span>
                 )}
               </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                <input type="checkbox" checked={manualPortalSession} onChange={(event) => {
+                  setManualPortalSession(event.target.checked);
+                  setRcsAuthToken('');
+                  setSession('');
+                  setUser('');
+                }} />
+                Explicitly replace this account’s RCS session manually
+              </label>
+              {manualPortalSession && (
               <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
                 <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
                   Current RCS Bearer Token ({envPrefix}_RCS_AUTH_TOKEN)
@@ -1536,7 +1618,16 @@ export default function SettingsPage() {
                   Test Connection checks this token against the RCS template API without saving it.
                   After a successful test, save it to use for whitelisting. A Lounge session cookie is not an RCS bearer token.
                 </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                  <label className="text-xs text-gray-700">Session header (if present on that request)
+                    <input type="password" autoComplete="off" value={session} onChange={(event) => setSession(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono" />
+                  </label>
+                  <label className="text-xs text-gray-700">User header (if present on that request)
+                    <input type="password" autoComplete="off" value={user} onChange={(event) => setUser(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono" />
+                  </label>
+                </div>
               </div>
+              )}
             </div>
 
             {/* RCS routing identifiers are separate from the editable bearer token. */}
@@ -1546,7 +1637,7 @@ export default function SettingsPage() {
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
                     <span>RCS Routing Identifiers</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                      Pre-configured
+                      Account routing
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
@@ -1569,20 +1660,18 @@ export default function SettingsPage() {
                       <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
                         {selectedAccount === 'apparel' ? 'RCS Bot IDs (10 Bots Active)' : 'RCS Bot ID'}
                       </div>
-                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Pre-configured'}</div>
-                      <div className="text-[10px] text-emerald-600 font-medium mt-0.5">
-                        {selectedAccount === 'apparel' ? '✓ 10 Brand Bots Configured' : '✓ Approved Brand Bot'}
-                      </div>
+                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Not configured'}</div>
+                      <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured brand bot</div>
                     </div>
                     <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                       <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Karix ESME Address</div>
-                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || '72434700000000'}</div>
-                      <div className="text-[10px] text-blue-600 font-medium mt-0.5">✓ Routing Configured</div>
+                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
+                      <div className="text-[10px] text-gray-500 font-medium mt-0.5">ESME routing address</div>
                     </div>
                     <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
                       <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
-                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || '1001490234791338781'}</div>
-                      <div className="text-[10px] text-emerald-600 font-medium mt-0.5">✓ TRAI Registered</div>
+                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
+                      <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
                     </div>
                   </div>
                   {selectedAccount === 'apparel' && (
@@ -1671,7 +1760,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={handleTest}
-              disabled={testing || saving}
+              disabled={testing || saving || !isAssigned || loadedScope !== settingsScope}
               className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {testing ? (
@@ -1690,7 +1779,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || testing}
+              disabled={saving || testing || !isAssigned || loadedScope !== settingsScope}
               className="flex-1 sm:flex-none px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {saving ? (
@@ -1748,11 +1837,14 @@ export default function SettingsPage() {
             >
               {geminiTesting ? 'Testing...' : 'Test Gemini'}
             </button>
+            <button type="button" onClick={handleSaveGemini} disabled={saving || geminiTesting || !isAssigned || !geminiApiKey.trim()} className="ml-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-xs font-semibold disabled:opacity-50">
+              {saving ? 'Saving...' : 'Save Gemini key'}
+            </button>
           </div>
         </div>
         <p className="text-[11px] text-gray-400">
-          For persistent Render deployments, also set <code>GEMINI_API_KEY</code> in the service environment.
-          The Settings value is applied to the current server process and local runtime environment.
+          One-time setup with an existing Google AI Studio API key; the browser cannot generate it.
+          Save the key to encrypted server storage. Leave it blank to preserve the saved key.
         </p>
       </div>}
 

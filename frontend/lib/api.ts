@@ -1580,6 +1580,7 @@ export type MoEngageCredentials = {
   account: string;
   base_url?: string;
   sender_id?: string;
+  workspace_id?: string;
   has_token: boolean;
   has_cookie: boolean;
   bearer_token: string;
@@ -1597,25 +1598,23 @@ export async function fetchMoEngageCredentials(account: string = "tata"): Promis
   return res.json();
 }
 
+export type MoEngageCredentialDraft = {
+  base_url?: string;
+  workspace_id?: string;
+  sender_id?: string;
+  bearer_token?: string;
+  refresh_token?: string;
+  cookie?: string;
+};
+
 export async function saveMoEngageCredentials(
   account: string,
-  bearerToken: string,
-  cookie: string,
-  baseUrl?: string,
-  senderId?: string,
-  refreshToken?: string
+  credentials: MoEngageCredentialDraft
 ): Promise<{ ok: boolean; account: string; updated_keys: string[]; expired?: boolean; remaining_min?: number | null }> {
   const res = await fetchWithRetry(getApiUrl("/api/moengage/credentials"), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      account,
-      base_url: baseUrl || null,
-      bearer_token: bearerToken,
-      refresh_token: refreshToken ?? null,
-      cookie,
-      sender_id: senderId || null,
-    }),
+    body: JSON.stringify({ account, ...credentials }),
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
@@ -1623,12 +1622,7 @@ export async function saveMoEngageCredentials(
 
 export async function testMoEngageConnection(
   account: string = "tata",
-  creds?: {
-    bearer_token?: string;
-    cookie?: string;
-    base_url?: string;
-    sender_id?: string;
-  }
+  creds?: MoEngageCredentialDraft
 ): Promise<{
   ok: boolean;
   error?: string;

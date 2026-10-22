@@ -5,10 +5,9 @@ https://dashboard-03.moengage.com/v4/settings-v2/channels/sms-and-rcs/rcs-templa
 Registers Karix approved RCS templates with provider='karix', sender, card title,
 body, media URL, and open URL suggestions.
 
-Supports multiple MoEngage workspaces per account (e.g. Tata Capital uses
-dashboard-03 while a separate apparel brand uses its own workspace). Credentials
-resolve per account via {PREFIX}_MOENGAGE_* env vars, falling back to the global
-MOENGAGE_* defaults (Tata Capital workspace).
+Supports multiple workspaces with credentials resolved per account from encrypted
+Auth Sync snapshots and settings, or exact account-specific environment defaults.
+There is no cross-account credential fallback.
 """
 
 import base64
@@ -27,70 +26,104 @@ logger = logging.getLogger(__name__)
 
 MOENGAGE_API_BASE = "https://dashboard-03.moengage.com"
 
-# Default sender ID for TCFSL Promotional in MoEngage
-DEFAULT_TCFSL_PROMO_SENDER_ID = "68888420892e852255fca466"
-
-_TATA_MOENGAGE_ACCOUNTS = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy", "all"}
 
 
 def get_moengage_config(account: str = "tata") -> dict[str, str]:
-    """Resolve MoEngage workspace config for an account (base URL, token, cookie, sender)."""
+    """Resolve only this account's configured workspace and complete session snapshot."""
+    from portal_sessions import load_session, load_settings
+
     _load_env_file()
-    acc = (account or "tata").lower().strip()
-    is_tata = acc in _TATA_MOENGAGE_ACCOUNTS or acc == ""
-    prefix = "TATA" if is_tata else _account_prefix(acc)
+    acc = account.strip().lower()
+    prefix = _account_prefix(acc)
+    settings = load_settings(acc, "moengage")
+    snapshot = load_session(acc, "moengage")
 
-    base_url = (
-        os.environ.get(f"{prefix}_MOENGAGE_BASE_URL") or os.environ.get("MOENGAGE_BASE_URL") or MOENGAGE_API_BASE
-    ).rstrip("/")
+    def value(suffix: str) -> str:
+        key = f"{prefix}_MOENGAGE_{suffix}"
+        return settings.get(key, os.environ.get(key, "")).strip()
 
-    token = (
-        os.environ.get(f"{prefix}_MOENGAGE_BEARER_TOKEN")
-        or os.environ.get(f"{prefix}_MOE_AUTH_TOKEN")
-        or os.environ.get("MOENGAGE_BEARER_TOKEN")
-        or os.environ.get("MOE_AUTH_TOKEN")
-        or ""
-    ).strip()
-
-    if not token or decode_moengage_token_expiry(token).get("expired") is True:
-        try:
-            from moengage_mcp import get_or_refresh_moe_bearer
-
-            mcp_bearer = get_or_refresh_moe_bearer(account)
-            if mcp_bearer:
-                token = mcp_bearer
-        except Exception:
-            pass
-    cookie = (
-        os.environ.get(f"{prefix}_MOENGAGE_COOKIE")
-        or os.environ.get("MOENGAGE_COOKIE")
-        or (os.environ.get("TATA_MOENGAGE_COOKIE") if is_tata else "")
-        or ""
-    )
-    refresh_token = (
-        os.environ.get(f"{prefix}_MOENGAGE_REFRESH_TOKEN")
-        or (os.environ.get("MOENGAGE_REFRESH_TOKEN") if is_tata else "")
-        or ""
-    ).strip()
-
-    from rcs_config import DEFAULT_RCS_BOT_IDS
-
-    sender_id = (
-        os.environ.get(f"{prefix}_MOENGAGE_SENDER_ID")
-        or ("RB RCS" if acc == "apparel" else None)
-        or os.environ.get(f"{prefix}_RCS_BOT_ID")
-        or os.environ.get("MOENGAGE_SENDER_ID")
-        or DEFAULT_RCS_BOT_IDS.get(acc, "")
-        or (DEFAULT_TCFSL_PROMO_SENDER_ID if is_tata else "")
-    )
+    base_url = value("BASE_URL").rstrip("/")
+    workspace_id = value("WORKSPACE_ID")
+    token, cookie, refresh = value("BEARER_TOKEN"), value("COOKIE"), value("REFRESH_TOKEN")
+    if snapshot:
+        token = snapshot["bearer_token"]
+        cookie = snapshot.get("cookie", "")
+        refresh = snapshot.get("refresh_token", "")
     return {
-        "base_url": base_url,
-        "bearer_token": token,
-        "cookie": cookie,
-        "refresh_token": refresh_token,
-        "sender_id": sender_id,
-        "prefix": prefix,
+        "base_url": base_url, "workspace_id": workspace_id,
+        "bearer_token": token, "cookie": cookie, "refresh_token": refresh,
+        "sender_id": value("SENDER_ID"), "prefix": prefix,
     }
+
+
+def check_moengage_session(
+    account: str, *, bearer_token: str, refresh_token: str, cookie: str,
+    base_url: str, workspace_id: str, bind_workspace: bool = True,
+) -> dict[str, str]:
+    """Authorize the configured workspace, then bind the saved bearer to that exact app."""
+    if not re.fullmatch(r"https://dashboard(?:-\d+)?\.moengage\.com", base_url):
+        raise ValueError("A configured MoEngage dashboard HTTPS origin is required.")
+    if not re.fullmatch(r"[a-fA-F0-9]{24}", workspace_id):
+        raise ValueError("Configure the MoEngage dashboard workspace's 24-character app ID, not its public API app key.")
+    headers = {
+        "authorization": f"Bearer {bearer_token}", "refreshtoken": refresh_token,
+        "cookie": cookie, "accept": "application/json", "origin": base_url,
+    }
+    try:
+        response = requests.get(
+            base_url + "/dash/auth/listApps", headers=headers, timeout=15, allow_redirects=False,
+        )
+        if not response.ok or 300 <= response.status_code < 400:
+            raise ValueError("MoEngage refused the captured session.")
+        data = response.json()
+        if not isinstance(data, dict) or data.get("success") is False or data.get("status") in ("failed", "failure", "error"):
+            raise ValueError("MoEngage rejected the captured session.")
+        code = data.get("code")
+        if code is not None and str(code) != "200":
+            raise ValueError("MoEngage rejected the captured session.")
+        if data.get("loggedIn") is False and not (str(code) == "200" and data.get("status") == "success"):
+            raise ValueError("MoEngage session is not logged in.")
+        apps = data.get("data")
+        if not isinstance(apps, list):
+            raise ValueError("MoEngage returned an unrecognized workspace inventory.")
+        matches = [app for app in apps if isinstance(app, dict) and app.get("id") == workspace_id
+                   and app.get("activated") is True and app.get("is_test") is False]
+        if len(matches) != 1:
+            raise ValueError("The configured workspace is not active and authorized by this MoEngage session.")
+        if not bind_workspace:
+            return {
+                "bearer_token": bearer_token, "refresh_token": refresh_token, "cookie": cookie,
+                "base_url": base_url, "workspace_id": workspace_id,
+            }
+        switched = requests.get(
+            base_url + "/dash/auth/changeApp", headers=headers,
+            params={"sls_enabled": "true", "app_id": workspace_id},
+            timeout=15, allow_redirects=False,
+        )
+        if not switched.ok or 300 <= switched.status_code < 400:
+            raise ValueError("MoEngage refused access to the configured workspace.")
+        result = switched.json()
+        if not isinstance(result, dict):
+            raise ValueError("MoEngage returned an invalid workspace authorization.")
+        selected = result.get("data") if isinstance(result, dict) else None
+        token = selected.get("bearer") if isinstance(selected, dict) else None
+        renewed = selected.get("refresh_token") if isinstance(selected, dict) else None
+        if (result.get("code") != 200 or result.get("status") != "success"
+                or not isinstance(token, str) or not token.strip()
+                or selected.get("app_access_details") != "ALLOWED"):
+            raise ValueError("MoEngage did not grant access to the configured workspace.")
+        token = re.sub(r"^Bearer\s+", "", token.strip(), flags=re.IGNORECASE)
+        if not token or any(ord(character) < 32 or ord(character) == 127 for character in token):
+            raise ValueError("MoEngage returned invalid workspace credentials.")
+        if renewed is not None and (not isinstance(renewed, str) or not renewed.strip()
+                or any(ord(character) < 32 or ord(character) == 127 for character in renewed)):
+            raise ValueError("MoEngage returned an invalid workspace refresh token.")
+        return {
+            "bearer_token": token, "refresh_token": renewed or refresh_token, "cookie": cookie,
+            "base_url": base_url, "workspace_id": workspace_id,
+        }
+    except requests.RequestException as exc:
+        raise ValueError("MoEngage session verification failed; reconnect this workspace.") from exc
 
 
 def decode_moengage_token_expiry(token: str | None) -> dict[str, Any]:
@@ -129,6 +162,7 @@ def get_moengage_credentials(account: str = "tata") -> dict[str, Any]:
         "account": account,
         "base_url": cfg["base_url"],
         "sender_id": cfg["sender_id"],
+        "workspace_id": cfg["workspace_id"],
         "bearer_token": token,
         "cookie": cfg["cookie"],
         "refresh_token": cfg["refresh_token"],
@@ -248,6 +282,8 @@ def get_moengage_auth_headers(account: str = "tata") -> dict[str, str]:
     }
     if cfg["cookie"]:
         headers["cookie"] = cfg["cookie"]
+    if cfg["refresh_token"]:
+        headers["refreshtoken"] = cfg["refresh_token"]
     return headers
 
 
@@ -261,6 +297,45 @@ def list_moengage_rcs_templates(account: str = "tata") -> list[dict[str, Any]]:
         raise RuntimeError(f"MoEngage template_metadata list failed ({resp.status_code}): {resp.text[:200]}")
     data = resp.json()
     return data.get("data", [])
+
+
+def _resolve_rcs_sender(
+    account: str, cfg: dict[str, str], headers: dict[str, str], sender_id: str | None,
+) -> str:
+    """Resolve a bot ID, sender name or record ID against this workspace's Karix senders."""
+    from rcs_config import get_rcs_bot_id
+
+    selected = (cfg["sender_id"] or sender_id or get_rcs_bot_id(account)).strip()
+    resp = requests.get(f"{cfg['base_url']}/v2/settings/sms?api=1", headers=headers, timeout=20)
+    if not resp.ok:
+        raise RuntimeError(f"MoEngage RCS sender lookup failed (HTTP {resp.status_code})")
+    senders = resp.json().get("rcs_sender_settings", {}).get("karix", {})
+    if not isinstance(senders, dict):
+        raise ValueError("MoEngage returned invalid Karix RCS sender settings")
+    if selected in senders:
+        return selected
+    matches = [
+        record_id for record_id, sender in senders.items()
+        if isinstance(sender, dict) and (
+            sender.get("sender_id") == selected
+            or str(sender.get("sender_name") or "").casefold() == selected.casefold()
+        )
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"MoEngage RCS sender '{selected}' is missing or ambiguous for '{account}'. "
+            "Configure this account's MOENGAGE_SENDER_ID with a sender name or record ID."
+        )
+    return matches[0]
+
+
+def _normalize_rcs_placeholders(text: str) -> str:
+    """Convert Karix [variables], preserving existing MoEngage tags and Markdown links."""
+    return re.sub(
+        r"\{\{[\s\S]*?\}\}|\[([^\[\]\r\n]+)\](?!\()",
+        lambda match: "{{" + match[1].strip() + "}}" if match[1] is not None else match[0],
+        text,
+    )
 
 
 def create_moengage_rcs_template(
@@ -287,15 +362,8 @@ def create_moengage_rcs_template(
     # In MoEngage, template ID and template name are always the exact same
     clean_id = clean_name
 
-    if account.lower() == "apparel":
-        from rcs_config import APPAREL_ALL_RCS_BOT_IDS
-        resolved_sender = (
-            sender_id if sender_id and sender_id not in APPAREL_ALL_RCS_BOT_IDS and sender_id not in ("Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID) else None
-        ) or cfg["sender_id"] or "RB RCS"
-        if resolved_sender in APPAREL_ALL_RCS_BOT_IDS or resolved_sender in ("Uv9tdd0KNADbq3pX", DEFAULT_TCFSL_PROMO_SENDER_ID):
-            resolved_sender = "RB RCS"
-    else:
-        resolved_sender = sender_id or cfg["sender_id"]
+    headers = get_moengage_auth_headers(account)
+    resolved_sender = _resolve_rcs_sender(account, cfg, headers, sender_id)
 
     resolved_cta_url = (cta_url or "").strip()
     if not resolved_cta_url or resolved_cta_url in ("https://u3.mnge.co/", "https://www.tatacapital.com"):
@@ -443,7 +511,16 @@ def create_moengage_rcs_template(
             },
         }
 
-    headers = get_moengage_auth_headers(account)
+    # All entrypoints (single, selected and inventory sync) share this conversion.
+    content = payload["meta_data"]["data"]
+    for card in content.get("cards", [content]):
+        for field in ("title", "card_title", "cardTitle", "description", "card_description", "cardDescription"):
+            if field in card:
+                card[field] = _normalize_rcs_placeholders(card[field])
+        for suggestion in card.get("suggestions", []):
+            for field in ("text", "postback_data", "url"):
+                if field in suggestion:
+                    suggestion[field] = _normalize_rcs_placeholders(suggestion[field])
     url = f"{cfg['base_url']}/template_metadata"
 
     logger.info("Registering RCS template '%s' (ID: %s) to MoEngage [%s]...", clean_name, clean_id, account)
