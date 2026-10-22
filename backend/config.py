@@ -1,18 +1,15 @@
 """
 Configuration for the Karix WhatsApp template submission pipeline.
 
-All secrets and account-specific constants are loaded from environment
-variables.  Never hardcode credentials in source files.
+Portal sessions are loaded from encrypted database storage for Bajaj, with
+legacy environment/file defaults for accounts not connected through Auth Sync.
+Never hardcode new credentials in source files.
 
 Auth model:
-    Text-only WhatsApp template submission and status checks use the official
-    static WABA token (`WABA_AUTH_TOKEN`) with the documented `Authentication`
-    header. This is the default and does not require a browser session.
-
-    Image-header media upload remains on the portal API until Karix documents
-    an equivalent official media-handle endpoint. Its `KARIX_BEARER_TOKEN`,
-    `KARIX_SESSION`, and `KARIX_USER` credentials are therefore retained only
-    for that temporary media-upload path.
+    Portal requests require Authorization, Session and User from one login.
+    Bajaj Karix Auth Sync captures these after a human completes mobile OTP.
+    Official API requests use WABA_AUTH_TOKEN with the Authentication header;
+    submission/listing currently prefer an available portal session.
 """
 
 import logging
@@ -101,6 +98,14 @@ def get_portal_auth_headers(
         bearer = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN")
         session = os.environ.get(f"{prefix}_KARIX_SESSION")
         user = os.environ.get(f"{prefix}_KARIX_USER") or os.environ.get(f"{prefix}_PORTAL_USER")
+    if c == "bajaj" and (bearer_token is None or session_id is None or portal_user is None):
+        from portal_sessions import load_session
+
+        saved_session = load_session()
+        if saved_session:
+            bearer = saved_session["bearer_token"]
+            session = saved_session["session"]
+            user = saved_session["user"]
     if bearer_token is not None:
         bearer = bearer_token
     if session_id is not None:
@@ -111,10 +116,8 @@ def get_portal_auth_headers(
     session = (session or "").strip()
     user = (user or "").strip()
 
-    # NOTE: no browser auto-login — the Karix portal requires an OTP only a
-    # human can receive. Tokens are entered manually in Settings and persist
-    # via credentials.json (committed back to the repo on save) until they
-    # naturally expire.
+    # Mobile OTP login remains human-operated. Karix Auth Sync captures the
+    # resulting session and stores it encrypted in the database.
 
     missing = []
     if not bearer:
@@ -126,8 +129,13 @@ def get_portal_auth_headers(
     if missing:
         raise OSError(
             f"Missing required Karix portal credentials for {client}: {', '.join(missing)}. "
-            "Open Settings → " + client + " and paste the Portal Bearer Token, Session ID, and User "
-            "from the Karix portal (logged-in browser → DevTools → Network → request headers)."
+            + (
+                "Open Settings → Bajaj → Connect extension, log in with your mobile OTP, "
+                "and open the WhatsApp template list; or use the explicit manual override."
+                if c == "bajaj" else
+                "Open Settings → " + client + " and paste the Portal Bearer Token, Session ID, and User "
+                "from the Karix portal (logged-in browser → DevTools → Network → request headers)."
+            )
         )
 
     return {
@@ -175,6 +183,9 @@ def get_waba_id(client: str = "bajaj") -> str:
     prefix = _account_prefix(c)
 
     if c == "bajaj":
+        from portal_sessions import session_record
+        if session_record():
+            return BAJAJ_WABA_ID
         return os.environ.get("BAJAJ_WABA_ID") or os.environ.get("WABA_ID") or BAJAJ_WABA_ID
     else:
         waba = os.environ.get(f"{prefix}_WABA_ID") or DEFAULT_WABA_IDS.get(c)
@@ -225,6 +236,9 @@ def get_esmeaddr(client: str = "bajaj") -> str:
     c = (client or "bajaj").lower().strip()
     prefix = _account_prefix(c)
     if c == "bajaj":
+        from portal_sessions import session_record
+        if session_record():
+            return BAJAJ_ESMEADDR
         token = os.environ.get("BAJAJ_KARIX_BEARER_TOKEN") or os.environ.get("KARIX_BEARER_TOKEN")
         return (
             _esmeaddr_from_session_token(token)

@@ -25,7 +25,7 @@ import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, StrictBool
+from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
 
 from db_queue import (
     create_job_with_tasks,
@@ -137,6 +137,7 @@ from tracker import load_log, log_result, pending_entries
 from apparel_attribution import router as apparel_attribution_router
 from moengage_click_count import router as moengage_click_count_router
 
+from karix_extension import router as karix_extension_router
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
 cors_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
@@ -169,6 +170,8 @@ async def authenticate_api_requests(request: Request, call_next):
         or method == "POST" and path in ("/api/sms/dlr", "/api/sms/click", "/api/whatsapp-gateway/session/backup", "/api/cron/sla-dispatch")
         or method == "GET" and path in ("/api/moengage/mcp/oauth/callback", "/api/whatsapp-gateway/qr.html", "/api/whatsapp-gateway/status", "/api/whatsapp-gateway/qr", "/api/whatsapp-gateway/session/restore")
         or method == "POST" and path == "/api/whatsapp-gateway/session/backup"
+        or method == "POST" and path in ("/api/karix-extension/redeem", "/api/karix-extension/sync")
+        or method == "DELETE" and path == "/api/karix-extension/device"
     )
     if (path == "/api" or path.startswith("/api/")) and not public:
         try:
@@ -190,6 +193,7 @@ async def authenticate_api_requests(request: Request, call_next):
     return response
 app.include_router(apparel_attribution_router)
 app.include_router(moengage_click_count_router)
+app.include_router(karix_extension_router)
 
 LOG_PATH = "submission_log.jsonl"
 RCS_LOG_PATH = "rcs_submission_log.jsonl"
@@ -2779,11 +2783,16 @@ def get_credentials(
         or get_esmeaddr(acc)
         or ""
     )
+    from portal_sessions import session_record
+    extension_session = is_bajaj and session_record() is not None
+    if extension_session:
+        # Synced portal secrets stay server-side, not in browser form state.
+        bearer_token = session = user = ""
 
     if chan == "sms":
         is_configured = bool(sms_key or sms_username)
     elif chan == "whatsapp":
-        is_configured = bool(waba_id and (waba_auth_token or bearer_token))
+        is_configured = bool(waba_id and (waba_auth_token or bearer_token or extension_session))
     elif chan == "rcs":
         is_configured = bool(rcs_bot_id and rcs_auth_token)
     else:
@@ -2792,6 +2801,7 @@ def get_credentials(
     return {
         "account": acc,
         "channel": chan,
+        "extension_session": extension_session,
         "waba_id": waba_id or "",
         "waba_auth_token": waba_auth_token or "",
         "bearer_token": bearer_token or "",
@@ -2867,6 +2877,8 @@ def _build_wa_credentials_mapping(creds: CredentialUpdate, prefix: str, is_tata:
         ),
     ]
     for val, key in fields:
+        if is_bajaj and key in {"BAJAJ_KARIX_BEARER_TOKEN", "BAJAJ_KARIX_SESSION", "BAJAJ_KARIX_USER"}:
+            continue
         if val is not None and str(val).strip():
             v = str(val).strip()
             mapping[key] = v
@@ -2929,6 +2941,19 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     prefix = _account_prefix(acc)
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
+    if is_bajaj and chan == "whatsapp" and any((creds.bearer_token, creds.session, creds.user)):
+        if not all((creds.bearer_token, creds.session, creds.user)):
+            raise HTTPException(status_code=422, detail="Manual override requires Bearer Token, Session ID and User from one Bajaj session.")
+        from karix_extension import SessionRequest, validate_session
+        from portal_sessions import save_session
+        try:
+            snapshot = SessionRequest(
+                bearer_token=creds.bearer_token, session=creds.session, user=creds.user,
+                waba_id=BAJAJ_WABA_ID, esmeaddr="72148300000000",
+            )
+        except ValidationError:
+            raise HTTPException(status_code=422, detail="Invalid Bajaj portal credential snapshot.") from None
+        save_session(validate_session(snapshot))
 
     if chan == "sms":
         mapping = _build_sms_credentials_mapping(creds, prefix)
@@ -3094,6 +3119,9 @@ def _test_whatsapp_channel(
     saved_portal_token = os.environ.get(f"{prefix}_KARIX_BEARER_TOKEN") or (
         os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else None
     )
+    if is_bajaj:
+        from portal_sessions import session_record
+        saved_portal_token = saved_portal_token or session_record() is not None
     portal_requested = (
         creds is not None and creds.bearer_token is not None
         or (creds is None or creds.waba_auth_token is None) and bool(saved_portal_token)

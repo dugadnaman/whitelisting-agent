@@ -680,6 +680,27 @@ POSTGRES_SCHEMA_DDL = [
     );
     """,
 ]
+
+# Identical SQL types work on both adapters; timestamps need double precision.
+_KARIX_EXTENSION_DDL = [
+    """CREATE TABLE IF NOT EXISTS karix_extension_links (
+        credential_hash TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        agent_origin TEXT NOT NULL,
+        expires_at DOUBLE PRECISION NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_karix_extension_owner ON karix_extension_links(user_id, kind)",
+    """CREATE TABLE IF NOT EXISTS karix_portal_sessions (
+        account TEXT PRIMARY KEY,
+        encrypted_credentials TEXT NOT NULL,
+        updated_at DOUBLE PRECISION NOT NULL,
+        validated_at DOUBLE PRECISION NOT NULL,
+        validation_state TEXT NOT NULL
+    )""",
+]
+SQLITE_SCHEMA_DDL.extend(_KARIX_EXTENSION_DDL)
+POSTGRES_SCHEMA_DDL.extend(_KARIX_EXTENSION_DDL)
 _INIT_LOCK = threading.Lock()
 _INITIALIZED_TARGETS: set[tuple[Any, ...]] = set()
 

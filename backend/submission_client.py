@@ -965,6 +965,9 @@ def _evaluate_portal_create_response(
             template_name=payload.template_name,
             status=SubmissionStatus.FAILED,
             error=(
+                "Session expired (401). Log into Bajaj Karix with your mobile OTP "
+                "and open the WhatsApp template list to sync through Karix Auth Sync in Settings."
+                if c == "bajaj" else
                 "Session expired (401). Open Settings → "
                 f"{c} and paste fresh Portal Bearer Token / Session ID from "
                 "the Karix portal (DevTools → Network headers)."
@@ -1519,6 +1522,7 @@ def check_portal_credentials(
     session_id: str | None = None,
     portal_user: str | None = None,
     waba_id: str | None = None,
+    esmeaddr: str | None = None,
 ) -> tuple[bool, str]:
     """Validate the exact portal credentials without saving or falling back to WABA auth."""
     try:
@@ -1529,7 +1533,7 @@ def check_portal_credentials(
         response = get_http_session().post(
             f"{KARIX_BASE_URL}/getAllTemplates",
             headers=headers,
-            json={"wabaId": waba_id or get_waba_id(client), "esmeaddr": get_esmeaddr(client), "start": 0, "limit": 1},
+            json={"wabaId": waba_id or get_waba_id(client), "esmeaddr": esmeaddr or get_esmeaddr(client), "start": 0, "limit": 1},
             timeout=REQUEST_TIMEOUT,
             allow_redirects=False,
         )

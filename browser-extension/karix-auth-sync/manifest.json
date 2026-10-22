@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Bajaj Karix Auth Sync",
+  "version": "1.0.0",
+  "description": "Sync a manually authenticated Bajaj WhatsApp Karix session to the whitelisting agent.",
+  "minimum_chrome_version": "124",
+  "permissions": ["storage", "webRequest"],
+  "host_permissions": [
+    "https://whitelisting-agent.onrender.com/*",
+    "https://rcsgui.karix.solutions/*"
+  ],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html", "default_title": "Bajaj Karix Auth Sync"},
+  "content_scripts": [
+    {
+      "matches": ["https://whitelisting-agent.onrender.com/*"],
+      "js": ["config.js", "content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}

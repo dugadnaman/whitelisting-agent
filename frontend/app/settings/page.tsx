@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection, canAccessAccount, authorizedAccount, accountOrganization, fetchAccessRequests, approveAccessRequest } from '@/lib/api';
 import type { Account, Channel, AccountItem, AuthUser, RequestedTenant } from '@/lib/api';
 import { useApp } from '@/lib/context';
+import KarixAuthSync from '@/components/KarixAuthSync';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
 
@@ -48,6 +49,19 @@ export default function SettingsPage() {
   const [bearerToken, setBearerToken] = useState('');
   const [session, setSession] = useState('');
   const [user, setUser] = useState('');
+  const [manualBajajSession, setManualBajajSession] = useState(false);
+  const [syncRevision, setSyncRevision] = useState(0);
+  const settingsScope = `${currentUser?.id}:${currentUser?.tenant_id}:${currentUser?.role}:${selectedAccount}:${selectedChannel}`;
+  const currentSettingsScope = useRef(settingsScope);
+  currentSettingsScope.current = settingsScope;
+  useEffect(() => {
+    setManualBajajSession(false);
+    if (selectedAccount === 'bajaj' && selectedChannel === 'whatsapp') {
+      setBearerToken('');
+      setSession('');
+      setUser('');
+    }
+  }, [selectedAccount, selectedChannel, currentUser?.id]);
   const [showPortalCreds, setShowPortalCreds] = useState(false);
   const [portalUsername, setPortalUsername] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
@@ -167,9 +181,10 @@ export default function SettingsPage() {
         if (selectedChannel === 'whatsapp') {
           setWabaAuthToken(creds.waba_auth_token || '');
           setWabaId(creds.waba_id || '');
-          setBearerToken(creds.bearer_token || '');
-          setSession(creds.session || '');
-          setUser(creds.user || '');
+          // Bajaj sessions stay on the server; blank drafts are only for an explicit manual override.
+          setBearerToken(selectedAccount === 'bajaj' ? '' : creds.bearer_token || '');
+          setSession(selectedAccount === 'bajaj' ? '' : creds.session || '');
+          setUser(selectedAccount === 'bajaj' ? '' : creds.user || '');
           setPortalUsername(creds.portal_username || '');
           setPortalPassword(creds.portal_password || '');
           setTemplateNamespaceId(creds.template_namespace_id || '');
@@ -213,10 +228,22 @@ export default function SettingsPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedAccount, selectedChannel, teamTenant, isAssigned]);
+  }, [selectedAccount, selectedChannel, teamTenant, isAssigned, currentUser?.id]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
+  const isBajajWhatsApp = selectedAccount === 'bajaj' && isWhatsApp;
+  function portalCredentialsForRequest() {
+    if (isBajajWhatsApp && !manualBajajSession) return {};
+    if (isBajajWhatsApp && (!bearerToken.trim() || !session.trim() || !user.trim())) {
+      throw new Error('A manual Bajaj session override requires Bearer Token, Session ID, and User from the same request. Supply all three, or cancel the manual override to keep the saved session.');
+    }
+    return {
+      bearer_token: bearerToken.trim() || undefined,
+      session: session.trim() || undefined,
+      user: user.trim() || undefined,
+    };
+  }
   const accountTitle = getAccountLabel(selectedAccount);
   const channelTitle = isWhatsApp ? 'WhatsApp' : isSms ? 'SMS' : 'RCS';
   const envPrefix = selectedAccount.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
@@ -289,9 +316,7 @@ export default function SettingsPage() {
       const res = await testCredentials(selectedAccount, selectedChannel, {
         waba_auth_token: wabaAuthToken.trim() || undefined,
         waba_id: wabaId.trim() || undefined,
-        bearer_token: bearerToken.trim() || undefined,
-        session: session.trim() || undefined,
-        user: user.trim() || undefined,
+        ...portalCredentialsForRequest(),
         entity_id: entityId.trim() || undefined,
         lounge_cookie: loungeCookie.trim() || undefined,
         sms_key: smsKey.trim() || undefined,
@@ -351,9 +376,7 @@ export default function SettingsPage() {
         channel: selectedChannel,
         waba_auth_token: wabaAuthToken.trim() || undefined,
         waba_id: wabaId.trim() || undefined,
-        bearer_token: bearerToken.trim() || undefined,
-        session: session.trim() || undefined,
-        user: user.trim() || undefined,
+        ...portalCredentialsForRequest(),
         portal_username: portalUsername.trim() || undefined,
         portal_password: portalPassword.trim() || undefined,
         template_namespace_id: templateNamespaceId.trim() || undefined,
@@ -371,9 +394,16 @@ export default function SettingsPage() {
         user_name: currentOperator,
       };
       await updateCredentials(credsToSave);
+      if (isBajajWhatsApp && currentSettingsScope.current === settingsScope) {
+        setManualBajajSession(false);
+        setBearerToken('');
+        setSession('');
+        setUser('');
+        setSyncRevision((revision) => revision + 1);
+      }
 
       // Run immediate test to verify
-      const testRes = await testCredentials(selectedAccount, selectedChannel, credsToSave);
+      const testRes = await testCredentials(selectedAccount, selectedChannel, isBajajWhatsApp ? { user_name: currentOperator } : credsToSave);
 
       if (testRes.ok) {
         setBanner({
@@ -1072,21 +1102,26 @@ export default function SettingsPage() {
           <>
         {isWhatsApp ? (
           <>
+            {isBajajWhatsApp && isAssigned && currentUser && (
+              <KarixAuthSync key={`${settingsScope}:${syncRevision}`} />
+            )}
             {/* Active / Expiring Portal Session Section */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔑 Active Karix Portal Session</span>
+                    <span>{isBajajWhatsApp ? 'Manual Karix Portal Session Override' : '🔑 Active Karix Portal Session'}</span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                      Session Credentials — Refresh When Expired
+                      {isBajajWhatsApp ? 'Optional — replaces saved session' : 'Session Credentials — Refresh When Expired'}
                     </span>
                   </h4>
                   <p className="text-[11px] text-gray-500">
-                    Browser session credentials from <code>rcsgui.karix.solutions</code> required for WhatsApp image/video media-header submissions.
+                    {isBajajWhatsApp
+                      ? 'Leave manual override off to preserve the latest synced session. Saved portal credentials are never displayed or copied into this form.'
+                      : <>Browser session credentials from <code>rcsgui.karix.solutions</code> required for WhatsApp image/video media-header submissions.</>}
                   </p>
                 </div>
-                {bearerToken && session ? (
+                {!isBajajWhatsApp && (bearerToken && session ? (
                   <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 shrink-0">
                     ✓ Portal Session Set
                   </span>
@@ -1094,9 +1129,30 @@ export default function SettingsPage() {
                   <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 shrink-0">
                     Paste Session When Uploading Media
                   </span>
-                )}
+                ))}
               </div>
 
+              {isBajajWhatsApp && (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={manualBajajSession}
+                      onChange={(event) => {
+                        setManualBajajSession(event.target.checked);
+                        setBearerToken('');
+                        setSession('');
+                        setUser('');
+                      }}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Explicitly replace the saved Bajaj portal session manually
+                  </label>
+                  {manualBajajSession && <p className="text-xs text-amber-800">Paste all three headers from one request. Test Connection checks this draft; Save Credentials validates and replaces the shared session. A later extension capture can replace it again. Cancel this override to discard the draft and keep the saved session.</p>}
+                </div>
+              )}
+
+              {(!isBajajWhatsApp || manualBajajSession) && (
               <div className="space-y-4 p-4 bg-gray-50/70 rounded-xl border border-gray-200">
                 <div>
                   <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
@@ -1145,6 +1201,7 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
+              )}
             </div>
 
             {/* Permanent Account Identifiers & Static API Token (Pre-Configured) */}

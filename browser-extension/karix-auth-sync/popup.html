@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bajaj Karix Auth Sync</title>
+    <link rel="stylesheet" href="popup.css">
+    <script src="config.js" defer></script>
+    <script src="popup.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>Bajaj Karix Auth Sync</h1>
+      <p class="scope">Bajaj WhatsApp only</p>
+      <p id="state" role="status" aria-live="polite">Loading extension status…</p>
+      <dl>
+        <dt>Last backend-validated sync</dt>
+        <dd id="last-sync">Never</dd>
+      </dl>
+      <p id="next-step"></p>
+      <p id="error" class="error" role="alert" hidden></p>
+      <p id="result" role="status" aria-live="polite" hidden></p>
+      <div class="actions">
+        <button id="retry" type="button" disabled>Retry sync</button>
+        <button id="disconnect" type="button" class="secondary" disabled>Disconnect locally</button>
+      </div>
+      <nav aria-label="Connection steps">
+        <a id="settings" target="_blank" rel="noopener noreferrer">Open agent Settings</a>
+      </nav>
+      <p class="note">Log into Karix yourself using the mobile OTP, then open the Bajaj WhatsApp template list. This extension never performs login or OTP entry. It sends only the complete matching request credentials to the configured agent for validation.</p>
+    </main>
+  </body>
+</html>

@@ -51,6 +51,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copy Python backend code and static assets. Runtime secrets, SQLite, and JSONL
 # logs are supplied through environment variables/volumes at deployment time.
 COPY backend/ ./backend/
+COPY browser-extension/ ./browser-extension/
 COPY media_cache/ ./media_cache/
 COPY samples/ ./samples/
 COPY tests/ ./tests/
