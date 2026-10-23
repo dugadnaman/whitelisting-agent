@@ -1559,7 +1559,7 @@ def check_portal_credentials(
                 observed_esme = row.get("esmeaddr")
                 if observed_waba is not None and str(observed_waba) != expected_waba:
                     return False, "Portal returned another configured account's WABA inventory."
-                if observed_esme is not None and str(observed_esme) != expected_esme:
+                if observed_esme is not None and str(observed_esme) not in ("0", expected_esme):
                     return False, "Portal returned another configured account's ESME inventory."
         if isinstance(data, list):
             return True, "Portal credentials valid."
@@ -1570,9 +1570,14 @@ def check_portal_credentials(
                 return False, "Portal rejected the credentials. Check Bearer Token, Session ID and User from the same Karix session."
             success = data.get("Success")
             response_data = data.get("response")
-            if isinstance(success, dict) or isinstance(data.get("templates"), list) or (
-                isinstance(response_data, dict) and isinstance(response_data.get("templates"), list)
-            ):
+            templates = (
+                (success.get("templates") if isinstance(success, dict) else None)
+                or (response_data.get("templates") if isinstance(response_data, dict) else None)
+                or data.get("templates")
+            )
+            if isinstance(templates, list):
+                return True, f"Portal credentials valid ({len(templates)} templates on WABA {expected_waba})."
+            if isinstance(success, dict) or isinstance(response_data, dict):
                 return True, "Portal credentials valid."
         return False, "Portal validation returned an unrecognized response; credentials could not be verified."
     except requests.RequestException as exc:

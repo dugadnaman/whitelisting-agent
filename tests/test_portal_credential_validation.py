@@ -148,3 +148,10 @@ def test_no_records_is_a_valid_portal_session_not_an_authentication_failure(port
     state["payload"] = {"Failed": "No Records Found"}
     result = client.post("/api/test-credentials", json=payload).json()
     assert result["ok"] is True, result["message"]
+
+def test_portal_templates_with_zero_esmeaddr_are_valid(portal_validation):
+    client, payload, state = portal_validation
+    state["payload"] = {"Success": {"templates": [{"template_name": "test_tpl", "waba_id": config.BAJAJ_WABA_ID, "esmeaddr": 0}]}}
+    result = client.post("/api/test-credentials", json=payload).json()
+    assert result["ok"] is True, result["message"]
+    assert "1 templates" in result["message"]

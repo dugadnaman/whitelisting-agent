@@ -2990,7 +2990,11 @@ def _test_whatsapp_channel(
         os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else None
     )
     from portal_sessions import session_record
-    saved_portal_token = saved_portal_token or session_record(acc, "whatsapp") is not None
+    saved_portal_token = (
+        saved_portal_token
+        or (session_record(acc, "whatsapp") is not None)
+        or bool(DEFAULT_PORTAL_BEARER_TOKENS.get(acc))
+    )
     portal_requested = (
         creds is not None and creds.bearer_token is not None
         or (creds is None or creds.waba_auth_token is None) and bool(saved_portal_token)
