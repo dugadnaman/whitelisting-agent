@@ -1323,11 +1323,12 @@ export default function SettingsPage() {
                     </label>
                     <input
                       id="waba_auth_token"
+                      name="waba_auth_token_field"
                       type="password"
+                      autoComplete="new-password"
                       value={wabaAuthToken}
                       onChange={(e) => setWabaAuthToken(e.target.value)}
-                      placeholder="Static Bearer token from Karix Lounge..."
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="Leave blank to preserve saved token..."
                     />
                   </div>
                   <div>

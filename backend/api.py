@@ -3029,9 +3029,18 @@ def _test_whatsapp_channel(
 
         from config import get_official_auth_headers
         token = creds.waba_auth_token.strip() if creds and creds.waba_auth_token and creds.waba_auth_token.strip() else None
+        if token and (token.startswith("eyJ") or len(token) > 200):
+            valid, portal_msg = check_portal_credentials(acc, bearer_token=token, waba_id=waba_id)
+            if valid:
+                log_activity(
+                    user=(creds.user_name if creds and creds.user_name else "Anonymous Operator"),
+                    action="CREDENTIALS_TEST", account=acc, channel="whatsapp",
+                    details={"message": f"{acc_name} WhatsApp: {portal_msg}", "valid": True},
+                    status="success",
+                )
+                return {"ok": True, "message": f"{acc_name} WhatsApp: {portal_msg}"}
         if token is None:
             token = get_official_auth_headers(acc)["Authentication"].removeprefix("Bearer ")
-        if not token:
             return {
                 "ok": False,
                 "message": f"{acc_name} WhatsApp: Please enter the WABA API Token in the field above or set {w_tok_key} in Settings.",
@@ -3053,9 +3062,13 @@ def _test_whatsapp_channel(
             count = len(data.get("response", {}).get("templates", []))
             results.append(f"{acc_name} WhatsApp: Valid ({count} templates on WABA {waba_id})")
         elif resp.status_code == 401:
-            results.append(
-                f"{acc_name} WhatsApp: 401 Unauthorized — The API token or WABA ID ({waba_id}) is incorrect."
-            )
+            valid, portal_msg = check_portal_credentials(acc, waba_id=waba_id)
+            if valid:
+                results.append(f"{acc_name} WhatsApp: {portal_msg}")
+            else:
+                results.append(
+                    f"{acc_name} WhatsApp: 401 Unauthorized — The API token or WABA ID ({waba_id}) is incorrect. Leave the field blank to use the saved token."
+                )
         else:
             results.append(f"{acc_name} WhatsApp: HTTP {resp.status_code} ({resp.text[:200]})")
     except Exception as exc:
