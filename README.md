@@ -214,6 +214,10 @@ the popup already has an RCS target. No saved MoEngage session is shown as **not
 Health responses expose counts and state, never saved bearer tokens, refresh tokens, cookies, or raw
 provider error bodies.
 
+If the initial agent session check fails while the API is starting, protected pages retain the
+existing sign-in but keep workspace data hidden. Use **Retry session verification**; an actual
+401/403 authentication rejection still clears the session.
+
 **Static vs Browser Credentials**:
 - **Renewable browser sessions** (Karix WhatsApp, Karix RCS, MoEngage) sync automatically from real browser requests.
 - **Static credentials** (Karix SMS key/encryption key/DLT ID, Gemini platform key) are configured once in Settings

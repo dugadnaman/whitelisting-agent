@@ -1583,6 +1583,7 @@ export type MoEngageCredentials = {
   workspace_id?: string;
   has_token: boolean;
   has_cookie: boolean;
+  has_refresh_token?: boolean;
   bearer_token: string;
   refresh_token: string;
   cookie: string;

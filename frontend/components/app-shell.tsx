@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useApp } from '@/lib/context';
-import { isPendingUser } from '@/lib/api';
+import { getAuthToken, isPendingUser } from '@/lib/api';
 import { useTabState, clearTabState } from '@/lib/tab-state';
 import Nav from '@/components/nav';
 import ChatWidget from '@/components/chat-widget';
@@ -24,15 +24,30 @@ const TAB_META: Record<string, { label: string; icon: string }> = {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { account, currentUser, authLoading } = useApp();
+  const { account, currentUser, authLoading, refreshSession } = useApp();
   const isAuthPage = pathname === '/login' || pathname === '/signup';
   const hasWorkspace = !authLoading && Boolean(currentUser) && !isPendingUser(currentUser);
+  const [retryingSession, setRetryingSession] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  const retrySession = async () => {
+    if (retryingSession) return;
+    setRetryingSession(true);
+    setSessionError(null);
+    try {
+      await refreshSession();
+    } catch {
+      setSessionError('Session verification is still unavailable. Your sign-in is retained; retry when the service is ready.');
+    } finally {
+      setRetryingSession(false);
+    }
+  };
 
   const [openTabs, setOpenTabs] = useTabState<string[]>('workspace_open_tabs', ['/']);
   const prevAccountRef = useRef(account);
   useEffect(() => {
     if (authLoading || isAuthPage) return;
-    if (!currentUser) router.replace('/login');
+    if (!currentUser && !getAuthToken()) router.replace('/login');
     else if (isPendingUser(currentUser)) router.replace('/signup');
   }, [authLoading, currentUser, isAuthPage, router]);
 
@@ -70,6 +85,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
   if (!isAuthPage && !hasWorkspace) {
+    if (!authLoading && getAuthToken()) {
+      return (
+        <main className="min-h-screen flex items-center justify-center p-6">
+          <div className="max-w-md space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-gray-800">
+            <h1 className="font-semibold">Session verification unavailable</h1>
+            <p role="alert">{sessionError || 'The service could not verify your session. Your sign-in is retained, and protected workspace data stays hidden until verification succeeds.'}</p>
+            <button type="button" onClick={() => { void retrySession(); }} disabled={retryingSession} className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">
+              {retryingSession ? 'Checking your session...' : 'Retry session verification'}
+            </button>
+          </div>
+        </main>
+      );
+    }
     return <div className="min-h-screen flex items-center justify-center text-sm text-gray-500" role="status">{authLoading ? 'Checking your session...' : 'Redirecting to your account...'}</div>;
   }
 
