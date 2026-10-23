@@ -159,9 +159,12 @@ async function snapshotHash(snapshot) {
 }
 function nextStep(device) {
   if (device.integration === 'moengage') {
-    return 'Select this target in the extension popup, log into MoEngage normally and open its configured workspace inventory. The backend independently verifies workspace authorization and binds the captured session before saving.';
+    return 'Select this target in the extension popup and open its configured MoEngage workspace. If already logged in, reload that dashboard; repeat login only if the session has expired. The backend verifies workspace authorization before saving.';
   }
-  return `Log into Karix normally with your mobile OTP, select the configured ${device.integration === 'rcs' ? 'RCS bot' : 'WhatsApp account'} and open its template list.`;
+  const destination = device.integration === 'rcs'
+    ? (device.identity.bot_ids.length === 1 ? `RCS template list and select Sender ID ${device.identity.bot_ids[0]}` : 'RCS template list and select one of this target’s configured bot IDs')
+    : `WhatsApp template list for WABA ${device.identity.waba_id}`;
+  return `Open Karix’s ${destination}. If already logged in, reload that list; repeat login and mobile OTP only if the session has expired.`;
 }
 async function syncPending(key) {
   const device = devices[key];
@@ -407,23 +410,28 @@ chrome.webRequest.onBeforeRequest.addListener(details => {
   for (const [id, record] of requests) if (now - record.startedAt > 120000) requests.delete(id);
   // Read only known inventory bodies, never login, OTP, create/update, or arbitrary portal traffic.
   const body = requestBody(details.requestBody);
-  const candidates = [];
-  for (const [key, device] of Object.entries(devices)) {
-    if (!paired(device) || device.integration !== request.integration) continue;
-    const identity = matchingIdentity(request, body, device);
-    if (identity) candidates.push({key, device, identity, snapshot: null, error: '',
-      activeOnly: device.integration === 'moengage' &&
-        !observedValues(request.url, body, ['workspace_id', 'workspaceId', 'app_id', 'appId', 'account_id', 'accountId']).length});
-  }
-  if (candidates.length > 1) {
-    // Shared bot/workspace identifiers are ambiguous; never fan credentials out.
-    const selected = candidates.find(candidate => candidate.key === activeTarget);
-    if (!selected) return;
-    selected.activeOnly = true;
-    requests.set(details.requestId, {startedAt: now, url: details.url, candidates: [selected]});
-  } else if (candidates.length) {
-    requests.set(details.requestId, {startedAt: now, url: details.url, candidates});
-  }
+  const record = {startedAt: now, url: details.url, candidates: []};
+  requests.set(details.requestId, record);
+  // MV3 can wake on this request before storage has restored the paired targets.
+  // Retain this request's body/headers now; resolve its scope only after restoration.
+  record.ready = ready.then(() => {
+    const candidates = [];
+    for (const [key, device] of Object.entries(devices)) {
+      if (!paired(device) || device.integration !== request.integration) continue;
+      const identity = matchingIdentity(request, body, device);
+      if (identity) candidates.push({key, device, identity, snapshot: null, error: '',
+        activeOnly: device.integration === 'moengage' &&
+          !observedValues(request.url, body, ['workspace_id', 'workspaceId', 'app_id', 'appId', 'account_id', 'accountId']).length});
+    }
+    if (candidates.length > 1) {
+      // Shared bot/workspace identifiers are ambiguous; never fan credentials out.
+      const selected = candidates.find(candidate => candidate.key === activeTarget);
+      if (!selected) return;
+      selected.activeOnly = true;
+      record.candidates = [selected];
+    } else record.candidates = candidates;
+  });
+  void record.ready.catch(() => {});
 }, REQUEST_FILTER, ['requestBody']);
 chrome.webRequest.onBeforeSendHeaders.addListener(details => {
   const record = requests.get(details.requestId);
@@ -436,30 +444,34 @@ chrome.webRequest.onBeforeSendHeaders.addListener(details => {
     if (headers.has(name)) ambiguous = true;
     headers.set(name, header.value);
   }
-  const bearer = /^Bearer[\t ]+(\S+)$/i.exec((headers.get('authorization') || '').trim());
-  for (const candidate of record.candidates) {
-    const device = candidate.device;
-    const snapshot = {account: device.account, integration: device.integration,
-      ...candidate.identity, bearer_token: bearer?.[1] || ''};
-    if (device.integration === 'moengage') {
-      snapshot.refresh_token = (headers.get('refreshtoken') || '').trim();
-      snapshot.cookie = (headers.get('cookie') || '').trim();
-    } else {
-      for (const name of ['session', 'user']) {
-        if (headers.has(name)) snapshot[name] = (headers.get(name) || '').trim();
+  record.ready = record.ready.then(() => {
+    const bearer = /^Bearer[\t ]+(\S+)$/i.exec((headers.get('authorization') || '').trim());
+    for (const candidate of record.candidates) {
+      const device = candidate.device;
+      const snapshot = {account: device.account, integration: device.integration,
+        ...candidate.identity, bearer_token: bearer?.[1] || ''};
+      if (device.integration === 'moengage') {
+        snapshot.refresh_token = (headers.get('refreshtoken') || '').trim();
+        snapshot.cookie = (headers.get('cookie') || '').trim();
+      } else {
+        for (const name of ['session', 'user']) {
+          if (headers.has(name)) snapshot[name] = (headers.get(name) || '').trim();
+        }
       }
+      if (ambiguous || !isSnapshot(snapshot, device) || !tokenIdentityMatches(snapshot.bearer_token, device, snapshot)) {
+        candidate.error = 'The matching inventory request had incomplete or conflicting authentication. Log into this target normally and reload its inventory.';
+        candidate.snapshot = null;
+      } else candidate.snapshot = snapshot;
     }
-    if (ambiguous || !isSnapshot(snapshot, device) || !tokenIdentityMatches(snapshot.bearer_token, device, snapshot)) {
-      candidate.error = 'The matching inventory request had incomplete or conflicting authentication. Log into this target normally and reload its inventory.';
-      candidate.snapshot = null;
-    } else candidate.snapshot = snapshot;
-  }
+  });
+  void record.ready.catch(() => {});
 }, REQUEST_FILTER, ['requestHeaders', 'extraHeaders']);
 function finishRequest(details, failure = '') {
   const record = requests.get(details.requestId);
   requests.delete(details.requestId);
   if (!record) return;
   void mutate(async () => {
+    await record.ready;
     for (const candidate of record.candidates) {
       // A disconnect/re-pair makes every in-flight snapshot for that old device unusable.
       if (devices[candidate.key] !== candidate.device || (candidate.activeOnly && candidate.key !== activeTarget)) continue;

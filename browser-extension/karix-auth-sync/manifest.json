@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Karix & MoEngage Auth Sync",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Sync manually authenticated Karix and MoEngage sessions to their individually paired account integrations.",
   "minimum_chrome_version": "124",
   "permissions": ["storage", "webRequest"],
   "host_permissions": [
     "https://whitelisting-agent.onrender.com/*",
     "https://rcsgui.karix.solutions/*",
+    "https://rcmui.instaalerts.zone/*",
     "https://*.moengage.com/*"
   ],
   "background": {"service_worker": "background.js"},

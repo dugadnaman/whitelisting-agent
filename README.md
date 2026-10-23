@@ -184,16 +184,25 @@ Deploy/restart the updated backend and frontend together. In **Settings**, choos
    **Load unpacked**, and select the folder containing `manifest.json`.
 3. Reload Settings, click **Detect extension**, then **Connect extension** for the selected account and integration.
    Each account/integration is paired separately with a five-minute single-use code.
-4. Log into the provider portal normally:
-   - **WhatsApp (Karix)**: Log in with mobile OTP, open the matching template list (`/getAllTemplates`).
+4. Use your existing logged-in provider tab. Login/OTP is needed only if that session has expired;
+   installing or pairing the extension does not replay requests made earlier.
+   - **WhatsApp (Karix)**: Open or reload the matching template list (`/getAllTemplates`).
      The extension matches exact WABA and ESME identity and captures Authorization, Session, and User.
-   - **RCS (Karix)**: Log in with mobile OTP, open the matching RCS bot inventory (`/getTemplatesWithFilter`).
-     The extension matches the configured bot ID and ESME address and captures the RCS Bearer token.
-   - **MoEngage**: Log in to the dashboard, select the target in the extension popup if ambiguous,
-     and open workspace inventory (`/dash/auth/listApps`). The backend validates workspace authorization
-     and binds the session via `/changeApp` before saving.
+   - **RCS (Karix)**: Open **Template Management**, select the configured **Sender ID**,
+     then reload that inventory (`/api/rcstemplate/fetchTemplates` or `/getTemplatesWithFilter`).
+     The campaign screen and a different bot's inventory do not match the paired target.
+   - **MoEngage**: Configure the account's exact dashboard origin and internal 24-hex workspace app ID
+     once, then connect that account's MoEngage target. Select it in the extension popup and reload the
+     configured workspace dashboard. The backend verifies `/dash/auth/listApps` and binds via `/changeApp`;
+     it never guesses account-to-workspace mappings from a login.
 5. Return to Settings and **Refresh status**. **Check saved session** performs a fresh
    provider validation check.
+
+**Updating an unpacked extension:** replace its files in the same folder, then click its reload icon in
+`chrome://extensions` and reload Settings and the provider inventory. Version **2.0.1** adds the exact
+`https://rcmui.instaalerts.zone/*` frontend permission: Chrome requires access to both the API host and
+the request initiator. It also preserves the first matching request when the MV3 worker is waking and
+restoring stored pairings. Keeping the same unpacked folder preserves existing device pairings.
 
 **Static vs Browser Credentials**:
 - **Renewable browser sessions** (Karix WhatsApp, Karix RCS, MoEngage) sync automatically from real browser requests.
