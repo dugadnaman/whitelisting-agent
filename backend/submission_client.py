@@ -1363,7 +1363,7 @@ def _submit_official_template(
                 retry_count=attempt,
             )
 
-        if response.status_code != 201:
+        if response.status_code not in (200, 201):
             resp_text = response.text[:2000]
             if _is_duplicate_or_exists_error(resp_text) or _is_duplicate_or_exists_error(data):
                 return _resolve_existing_template_result(payload, c, attempt, resp_text or data, data)
@@ -1378,7 +1378,16 @@ def _submit_official_template(
                 channel="whatsapp",
                 retry_count=attempt,
             )
-        template_id = str(data.get("templateId", "")).strip()
+        resp_obj = data.get("response") if isinstance(data.get("response"), dict) else {}
+        template_id = str(
+            data.get("templateId")
+            or data.get("id")
+            or data.get("template_id")
+            or resp_obj.get("templateId")
+            or resp_obj.get("id")
+            or resp_obj.get("template_id")
+            or ""
+        ).strip()
         if not template_id:
             return SubmissionResult(
                 source_ref=payload.source_ref,
