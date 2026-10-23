@@ -254,7 +254,13 @@ def _try_portal_media_upload(path: Path, mime: str, client: str, errors: list[st
             )
         if resp.ok:
             data = resp.json()
-            handle_str = data.get("Success") or data.get("handle") or data.get("header_handle")
+            handle_str = (
+                data.get("Success")
+                or data.get("handle")
+                or data.get("header_handle")
+                or data.get("fileHandle")
+                or data.get("file_handle")
+            )
             if handle_str:
                 first_handle = handle_str.strip().split("\n")[0].strip()
                 if first_handle.startswith("4::"):
@@ -292,19 +298,26 @@ def _try_official_media_upload(path: Path, mime: str, client: str, errors: list[
             data = _parse_karix_json(resp)
             h = None
             if isinstance(data, dict):
-                if data.get("header_handle"):
-                    val = data["header_handle"]
-                    h = val[0] if isinstance(val, list) else str(val)
-                elif data.get("Success"):
-                    h = data["Success"].strip().split("\n")[0].strip()
-                elif data.get("handle"):
-                    h = data["handle"]
-                elif data.get("response") and isinstance(data["response"], dict):
-                    resp_obj = data["response"]
-                    h = resp_obj.get("header_handle") or resp_obj.get("handle") or resp_obj.get("Success")
-                    if isinstance(h, list):
-                        h = h[0]
-            if h and str(h).startswith("4::"):
+                resp_obj = data.get("response") if isinstance(data.get("response"), dict) else {}
+                candidates = [
+                    data.get("fileHandle"),
+                    data.get("file_handle"),
+                    data.get("header_handle"),
+                    data.get("handle"),
+                    data.get("Success"),
+                    resp_obj.get("fileHandle"),
+                    resp_obj.get("file_handle"),
+                    resp_obj.get("header_handle"),
+                    resp_obj.get("handle"),
+                    resp_obj.get("Success"),
+                ]
+                for val in candidates:
+                    if not val:
+                        continue
+                    candidate = val[0] if isinstance(val, list) else str(val).strip().split("\n")[0].strip()
+                    if candidate.startswith("4::"):
+                        h = candidate
+                        break
                 logger.info(
                     "Media uploaded via Karix Official API (%s): handle=%s...",
                     client,

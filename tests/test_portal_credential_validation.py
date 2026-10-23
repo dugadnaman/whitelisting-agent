@@ -155,3 +155,24 @@ def test_portal_templates_with_zero_esmeaddr_are_valid(portal_validation):
     result = client.post("/api/test-credentials", json=payload).json()
     assert result["ok"] is True, result["message"]
     assert "1 templates" in result["message"]
+
+def test_official_media_upload_extracts_file_handle(tmp_path, monkeypatch):
+    sample_file = tmp_path / "sample.png"
+    sample_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4")
+    handle = "4::aW1hZ2UvcG5n:ARYsB6BSeoJqEK71CYmtyu-fixture-test"
+
+    class MockResponse:
+        ok = True
+        status_code = 200
+        def json(self):
+            return {"response": {"fileHandle": handle}}
+        @property
+        def text(self):
+            return json.dumps(self.json())
+
+    monkeypatch.setattr(submission_client, "get_official_auth_headers", lambda c: {"Authentication": "Bearer test"})
+    monkeypatch.setattr(submission_client.get_http_session(), "post", lambda *a, **kw: MockResponse())
+    errors = []
+    result = submission_client._try_official_media_upload(sample_file, "image/png", "tchfl", errors)
+    assert result == handle
+    assert errors == []
