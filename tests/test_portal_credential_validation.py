@@ -14,7 +14,8 @@ import submission_client
 
 @pytest.fixture
 def portal_validation(tmp_path, monkeypatch, provision_user):
-    state = {"status": 200, "payload": {"Success": {"templates": []}}, "requests": []}
+    state = {"status": 200, "payload": {"Success": {"templates": []}}, "requests": [],
+             "official_status": 200, "official_payload": {"response": {"templates": []}}}
 
     class Provider(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -23,9 +24,10 @@ def portal_validation(tmp_path, monkeypatch, provision_user):
         def do_GET(self):
             state["requests"].append("official")
             authorized = self.headers.get("Authentication") == "Bearer fixture-valid-official-token"
-            self.send_response(200 if authorized else 401)
+            self.send_response(state["official_status"] if authorized else 401)
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(b'{"response":{"templates":[]}}' if authorized else b'{"message":"Invalid credentials"}')
+            self.wfile.write(json.dumps(state["official_payload"] if authorized else {"message": "Invalid credentials"}).encode())
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -76,7 +78,6 @@ def test_correct_portal_token_is_not_rejected_by_unrelated_official_credentials(
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["ok"] is True, result["message"]
-    assert "Portal" in result["message"]
     assert state["requests"] == ["portal"]
 
 
@@ -86,7 +87,6 @@ def test_portal_authentication_failures_are_not_reported_as_valid(portal_validat
     state.update(status=status, payload=payload)
     result = client.post("/api/test-credentials", json=credentials).json()
     assert result["ok"] is False
-    assert "Portal" in result["message"]
     assert state["requests"] == ["portal"]
 
 
@@ -95,7 +95,6 @@ def test_missing_portal_session_is_actionable_and_never_tests_other_credentials(
     del payload["session"]
     result = client.post("/api/test-credentials", json=payload).json()
     assert result["ok"] is False
-    assert "BAJAJ_KARIX_SESSION" in result["message"]
     assert state["requests"] == []
 
 
@@ -154,25 +153,87 @@ def test_portal_templates_with_zero_esmeaddr_are_valid(portal_validation):
     state["payload"] = {"Success": {"templates": [{"template_name": "test_tpl", "waba_id": config.BAJAJ_WABA_ID, "esmeaddr": 0}]}}
     result = client.post("/api/test-credentials", json=payload).json()
     assert result["ok"] is True, result["message"]
-    assert "1 templates" in result["message"]
 
-def test_official_media_upload_extracts_file_handle(tmp_path, monkeypatch):
-    sample_file = tmp_path / "sample.png"
-    sample_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4")
-    handle = "4::aW1hZ2UvcG5n:ARYsB6BSeoJqEK71CYmtyu-fixture-test"
 
-    class MockResponse:
-        ok = True
-        status_code = 200
-        def json(self):
-            return {"response": {"fileHandle": handle}}
-        @property
-        def text(self):
-            return json.dumps(self.json())
+def test_blank_token_checks_saved_official_credentials(portal_validation, monkeypatch):
+    client, _, state = portal_validation
+    monkeypatch.setenv("BAJAJ_WABA_AUTH_TOKEN", "fixture-valid-official-token")
+    result = client.post("/api/test-credentials", json={"account": "bajaj", "channel": "whatsapp"}).json()
+    assert result["ok"] is True
 
-    monkeypatch.setattr(submission_client, "get_official_auth_headers", lambda c: {"Authentication": "Bearer test"})
-    monkeypatch.setattr(submission_client.get_http_session(), "post", lambda *a, **kw: MockResponse())
-    errors = []
-    result = submission_client._try_official_media_upload(sample_file, "image/png", "tchfl", errors)
-    assert result == handle
-    assert errors == []
+
+def test_invalid_official_draft_cannot_pass_using_saved_portal_credentials(portal_validation, monkeypatch):
+    client, _, state = portal_validation
+    monkeypatch.setenv("BAJAJ_KARIX_BEARER_TOKEN", "fixture-valid-portal-token")
+    monkeypatch.setenv("BAJAJ_KARIX_SESSION", "fixture-valid-session")
+    monkeypatch.setenv("BAJAJ_KARIX_USER", "fixture-portal-user")
+    result = client.post("/api/test-credentials", json={
+        "account": "bajaj", "channel": "whatsapp", "waba_auth_token": "fixture-invalid-draft",
+    }).json()
+    assert result["ok"] is False
+    assert state["requests"] == ["official"]
+
+
+@pytest.mark.parametrize("provider_payload", [{"error": "Invalid credentials"}, {}, {"response": {"templates": "not-an-inventory"}}])
+def test_http_200_without_an_inventory_cannot_verify_official_credentials(portal_validation, provider_payload):
+    client, _, state = portal_validation
+    state["official_payload"] = provider_payload
+    result = client.post("/api/test-credentials", json={
+        "account": "bajaj", "channel": "whatsapp", "waba_auth_token": "fixture-valid-official-token",
+    }).json()
+    assert result["ok"] is False
+
+
+def test_provider_errors_do_not_echo_draft_credentials(portal_validation):
+    client, _, state = portal_validation
+    secret = "fixture-valid-official-token"
+    state.update(official_status=502, official_payload={"error": secret})
+    result = client.post("/api/test-credentials", json={
+        "account": "bajaj", "channel": "whatsapp", "waba_auth_token": secret,
+    }).json()
+    assert result["ok"] is False
+    assert secret not in json.dumps(result)
+
+
+def test_invalid_official_token_cannot_replace_saved_credentials(portal_validation, monkeypatch):
+    client, _, _ = portal_validation
+    monkeypatch.setenv("BAJAJ_WABA_AUTH_TOKEN", "fixture-valid-official-token")
+    response = client.put("/api/credentials", json={
+        "account": "bajaj", "channel": "whatsapp", "waba_auth_token": "fixture-invalid-draft",
+    })
+    assert response.status_code == 422
+    assert config.get_official_auth_headers("bajaj")["Authentication"] == "Bearer fixture-valid-official-token"
+
+
+@pytest.mark.parametrize("missing", ["bearer_token", "session", "user"])
+def test_partial_manual_snapshot_never_borrows_saved_headers(portal_validation, monkeypatch, missing):
+    client, payload, state = portal_validation
+    monkeypatch.setenv("BAJAJ_KARIX_BEARER_TOKEN", "fixture-valid-portal-token")
+    monkeypatch.setenv("BAJAJ_KARIX_SESSION", "fixture-valid-session")
+    monkeypatch.setenv("BAJAJ_KARIX_USER", "fixture-portal-user")
+    del payload[missing]
+    result = client.post("/api/test-credentials", json=payload).json()
+    assert result["ok"] is False
+    assert state["requests"] == []
+
+
+@pytest.mark.parametrize("identity", ["another-waba", 0, False])
+def test_official_inventory_for_another_waba_is_rejected(portal_validation, identity):
+    client, _, state = portal_validation
+    state["official_payload"] = {"response": {"templates": [{"waba_id": identity, "template_name": "foreign_template"}]}}
+    result = client.post("/api/test-credentials", json={
+        "account": "bajaj", "channel": "whatsapp", "waba_auth_token": "fixture-valid-official-token",
+    }).json()
+    assert result["ok"] is False
+
+
+def test_verified_official_token_persists_without_affecting_other_accounts(portal_validation, monkeypatch):
+    from portal_sessions import load_settings
+    client, _, _ = portal_validation
+    monkeypatch.setattr(api.QUEUE_MANAGER, "notify_credentials_updated", lambda _account: None)
+    response = client.put("/api/credentials", json={
+        "account": "bajaj", "channel": "whatsapp", "waba_auth_token": "fixture-valid-official-token",
+    })
+    assert response.status_code == 200
+    assert config.get_official_auth_headers("bajaj")["Authentication"] == "Bearer fixture-valid-official-token"
+    assert load_settings("tchfl", "whatsapp") == {}

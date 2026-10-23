@@ -281,6 +281,21 @@ def test_revocation_during_provider_validation_prevents_publish(extension_flow, 
     assert portal_sessions.load_session("bajaj", "whatsapp") is None
 
 
+def test_identity_change_during_provider_validation_does_not_restore_invalidated_session(extension_flow, monkeypatch):
+    client, headers, payload, _, _ = extension_flow
+    device, _ = pair(client, headers)
+    assert client.post(PREFIX + "/sync", headers=device, json=payload).status_code == 200
+
+    def change_identity(*args, **kwargs):
+        portal_sessions.save_settings("bajaj", "whatsapp", {"BAJAJ_WABA_ID": "999999999999999"})
+        return True, "Valid for the old identity"
+
+    monkeypatch.setattr(submission_client, "check_portal_credentials", change_identity)
+    response = client.post(PREFIX + "/sync", headers=device, json=payload)
+    assert response.status_code == 409
+    assert portal_sessions.load_session("bajaj", "whatsapp") is None
+
+
 def test_static_settings_survive_reload_and_identity_change_forces_reconnect(extension_flow):
     client, headers, payload, _, _ = extension_flow
     portal_sessions.save_settings("bajaj", "whatsapp", {

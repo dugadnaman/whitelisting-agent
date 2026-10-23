@@ -81,7 +81,7 @@ export default function SettingsPage() {
     setSmsUsername('');
     setSmsSenderId('');
     setBanner(null);
-  }, [settingsScope]);
+  }, [settingsScope, syncRevision]);
   const [portalUsername, setPortalUsername] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
   const [templateNamespaceId, setTemplateNamespaceId] = useState('');
@@ -143,7 +143,7 @@ export default function SettingsPage() {
     }
     loadMoEngage();
     return () => { ignore = true; };
-  }, [selectedAccount, isAssigned, settingsScope]);
+  }, [selectedAccount, isAssigned, settingsScope, syncRevision]);
 
   // Team Directory state
   const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
@@ -267,7 +267,7 @@ export default function SettingsPage() {
     return () => {
       ignore = true;
     };
-  }, [selectedAccount, selectedChannel, teamTenant, isAssigned, settingsScope]);
+  }, [selectedAccount, selectedChannel, teamTenant, isAssigned, settingsScope, syncRevision]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
@@ -1329,7 +1329,9 @@ export default function SettingsPage() {
                       value={wabaAuthToken}
                       onChange={(e) => setWabaAuthToken(e.target.value)}
                       placeholder="Leave blank to preserve saved token..."
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
                     />
+                    <p className="text-[11px] text-gray-500 mt-1">Leave blank to keep the saved key. A value entered here is tested exactly as an official API token, not as a portal session. Save rejects invalid replacements and preserves the previous key.</p>
                   </div>
                   <div>
                     <label htmlFor="waba_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
@@ -1757,8 +1759,10 @@ export default function SettingsPage() {
           <div className="text-[11px] text-gray-400">
             Current operator: <span className="font-semibold text-gray-600">{currentOperator}</span>
           </div>
+          <p className="text-[11px] text-gray-500">Test Connection checks unsaved edits when present; otherwise it checks the saved connection. Testing does not save credentials.</p>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" onClick={() => { setLoadedScope(''); setSyncRevision((revision) => revision + 1); }} disabled={testing || saving || !isAssigned || loadedScope !== settingsScope} className="px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Discard unsaved edits</button>
             <button
               type="button"
               onClick={handleTest}

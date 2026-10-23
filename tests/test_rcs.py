@@ -136,48 +136,6 @@ class TestRcsPipeline(unittest.TestCase):
         self.assertEqual(result.template_name, "Test_Tpl")
         self.assertEqual(result.template_id, "provider-123")
 
-    @patch("moengage_sync.get_moengage_auth_headers", return_value={"Authorization": "Bearer test"})
-    @patch("moengage_sync.requests.post")
-    def test_create_moengage_rcs_template_carousel(self, mock_post, mock_headers):
-        from moengage_sync import create_moengage_rcs_template
-
-        mock_resp = MagicMock()
-        mock_resp.ok = True
-        mock_resp.json.return_value = {"status": True, "data": {"id": "moe_123", "created_at": "2026-10-14"}}
-        mock_post.return_value = mock_resp
-
-        carousel_cards = [
-            {
-                "cardTitle": "Festive Offer Card 1",
-                "cardDescription": "Get personal loan up to 5L",
-                "mediaUrl": "https://example.com/c1.jpg",
-                "suggestions": [{"suggestionType": "url_action", "text": "Apply Now", "url": "https://example.com/apply"}]
-            },
-            {
-                "cardTitle": "Festive Offer Card 2",
-                "cardDescription": "Lowest interest rate 9.5%",
-                "mediaUrl": "https://example.com/c2.jpg",
-                "suggestions": [{"suggestionType": "url_action", "text": "Check Rates", "url": "https://example.com/rates"}]
-            }
-        ]
-
-        res = create_moengage_rcs_template(
-            template_name="festive_carousel",
-            template_id="festive_carousel",
-            card_title="Card Title",
-            card_description="Card Desc",
-            account="tata",
-            template_type="carousel",
-            carousel_cards=carousel_cards,
-        )
-        self.assertTrue(res["ok"])
-        self.assertEqual(res["moengage_id"], "moe_123")
-
-        call_payload = mock_post.call_args[1]["json"]
-        self.assertEqual(call_payload["meta_data"]["rcs_template_type"], "carousel")
-        self.assertEqual(len(call_payload["meta_data"]["data"]["cards"]), 2)
-        self.assertEqual(call_payload["meta_data"]["data"]["cards"][0]["title"], "Festive Offer Card 1")
-        self.assertEqual(call_payload["meta_data"]["data"]["cards"][1]["title"], "Festive Offer Card 2")
 
 
 

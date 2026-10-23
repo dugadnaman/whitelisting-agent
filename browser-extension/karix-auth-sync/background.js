@@ -21,7 +21,7 @@ const ERROR_MESSAGES = {
   identity_conflict: 'The captured identity does not match this target’s configured identity. Select its exact configured bot, WABA, or MoEngage workspace and reload its inventory.',
   provider_validation_failed: 'The provider did not validate the captured session. Reload the matching inventory in your already logged-in portal and retry. If that inventory works but sync still fails, ask your administrator to check provider validation; do not re-pair or repeat OTP just to retry.',
   incomplete_session: 'The captured session is incomplete. Reload this exact target’s inventory in the already logged-in portal to capture all required headers together.',
-  schema_rejected: 'The agent rejected the captured session format or size. Use extension 2.0.2 and reload this target’s inventory. Credentials are never truncated; ask your administrator if this repeats.',
+  schema_rejected: 'The agent rejected the captured session format or size. Use extension 2.0.3 and reload this target’s inventory. Credentials are never truncated; ask your administrator if this repeats.',
   capture_invalid: 'The matching request had incomplete, conflicting, or oversized authentication. Reload this exact target’s inventory in the already logged-in portal. Limits: bearer/refresh 16000, session 1000, user 300, cookie 32000, bot 200 characters.',
   inventory_failed: 'The inventory request did not complete with a fresh successful response. Check the portal connection and reload this exact target’s inventory; sign in only if the portal session itself has expired.',
   network_error: 'Could not reach the agent. Check your connection and retry the captured session.',
@@ -104,7 +104,6 @@ const ready = (async () => {
       devices[key] = {
         account: device.account, integration: device.integration, deviceToken: device.deviceToken,
         deviceExpiresAt: device.deviceExpiresAt, identity: normalizedIdentity(device.integration, device.identity),
-        lastSuccessHash: typeof device.lastSuccessHash === 'string' ? device.lastSuccessHash : null,
         lastSyncedAt: Number.isFinite(device.lastSyncedAt) ? device.lastSyncedAt : null,
       };
     }
@@ -115,7 +114,7 @@ const ready = (async () => {
       account: 'bajaj', integration: 'whatsapp', deviceToken: saved.deviceToken,
       deviceExpiresAt: Number.isFinite(saved.deviceExpiresAt) ? saved.deviceExpiresAt : 0,
       identity: {waba_id: '286109054585247', esmeaddr: '72148300000000'},
-      lastSuccessHash: null, lastSyncedAt: saved.lastSyncedAt || null,
+      lastSyncedAt: saved.lastSyncedAt || null,
     };
   }
   activeTarget = typeof saved.activeTarget === 'string' && devices[saved.activeTarget] ? saved.activeTarget : '';
@@ -177,11 +176,6 @@ async function api(path, {method = 'POST', body, device} = {}) {
     throw new Error('The agent returned an unreadable response. Retry.');
   }
 }
-async function snapshotHash(snapshot) {
-  const bytes = new TextEncoder().encode(JSON.stringify(Object.keys(snapshot).sort().map(key => [key, snapshot[key]])));
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
-}
 function nextStep(device) {
   if (device.integration === 'moengage') {
     return 'Select this target in the extension popup and open its configured MoEngage workspace. If already logged in, reload that dashboard; repeat login only if the session has expired. The backend verifies workspace authorization before saving.';
@@ -204,17 +198,15 @@ async function syncPending(key) {
   if (!state.pendingSnapshot) return {ok: false, message: `No complete matching request is available. ${nextStep(device)}`};
   state.syncing = true;
   try {
-    const hash = await snapshotHash(state.pendingSnapshot);
-    if (hash !== device.lastSuccessHash) {
-      const result = await api('sync', {body: state.pendingSnapshot, device});
-      if (result?.ok !== true || result.account !== device.account || result.integration !== device.integration ||
-          !Number.isFinite(result.last_synced_at) || result.last_synced_at <= 0) {
-        throw new Error('The agent did not confirm validation for this exact account and integration. Retry.');
-      }
-      device.lastSuccessHash = hash;
-      device.lastSyncedAt = result.last_synced_at;
-      await persistLocal();
+    await persistSession();
+    // A historical success is not proof of current authorization or a still-saved session.
+    const result = await api('sync', {body: state.pendingSnapshot, device});
+    if (result?.ok !== true || result.account !== device.account || result.integration !== device.integration ||
+        !Number.isFinite(result.last_synced_at) || result.last_synced_at <= 0) {
+      throw new Error('The agent did not confirm validation for this exact account and integration. Retry.');
     }
+    device.lastSyncedAt = result.last_synced_at;
+    await persistLocal();
     state.pendingSnapshot = null;
     state.lastError = '';
     state.lastErrorCode = '';
@@ -255,7 +247,7 @@ function status() {
       last_synced_at: device.lastSyncedAt || null, pending: Boolean(state.pendingSnapshot), syncing: state.syncing,
       error: state.lastError || (!paired(device) ? 'Pairing expired. Reconnect this target from Settings.' : ''),
       next_step: nextStep(device),
-      capture_active: key === activeTarget,
+      capture_active: paired(device) && key === activeTarget,
     };
   })};
 }
@@ -265,7 +257,7 @@ function scopedStatus(scope) {
   const state = device ? stateFor(key) : null;
   return {ok: true, message: 'Current browser capture status.', account: scope.account, integration: scope.integration,
     paired: paired(device), pending: Boolean(state?.pendingSnapshot), syncing: Boolean(state?.syncing),
-    last_synced_at: device?.lastSyncedAt || null, capture_active: key === activeTarget,
+    last_synced_at: device?.lastSyncedAt || null, capture_active: paired(device) && key === activeTarget,
     error: state?.lastErrorCode || (device && !paired(device) ? 'device_expired' : null)};
 }
 async function pair(message) {
@@ -280,7 +272,7 @@ async function pair(message) {
     const key = scopeKey(result);
     devices[key] = {
       account: result.account, integration: result.integration, identity, deviceToken: result.device_token,
-      deviceExpiresAt: result.expires_at, lastSuccessHash: null, lastSyncedAt: null,
+      deviceExpiresAt: result.expires_at, lastSyncedAt: null,
     };
     // Never reuse a snapshot captured with an older pairing's configured identity.
     transient[key] = {pendingSnapshot: null, lastError: '', lastErrorCode: '', syncing: false};
@@ -301,7 +293,11 @@ async function disconnect(key) {
   if (!device) return {ok: false, message: 'Choose a connected target first.'};
   try {
     const query = new URLSearchParams({account: device.account, integration: device.integration});
-    const result = await api(`device?${query}`, {method: 'DELETE', device});
+    const result = await api(`device?${query}`, {method: 'DELETE', device}).catch(error => {
+      // An expired/revoked capability cannot be used again; it is safe to forget locally.
+      if (error.code === 'device_expired') return {ok: true};
+      throw error;
+    });
     if (result?.ok !== true || (result.account !== undefined && result.account !== device.account) ||
         (result.integration !== undefined && result.integration !== device.integration)) {
       throw new Error('The agent did not confirm revocation for this target. Retry.');
@@ -320,9 +316,11 @@ async function disconnect(key) {
 }
 async function selectTarget(key) {
   if (!devices[key]) return {ok: false, message: 'Choose a connected target first.'};
+  if (!paired(devices[key])) return {ok: false, message: ERROR_MESSAGES.device_expired, error_code: 'device_expired'};
   activeTarget = key;
   await persistLocal();
-  return {ok: true, message: 'Active capture target selected.'};
+  return {ok: true, account: devices[key].account, integration: devices[key].integration,
+    message: 'Active capture target selected. Reload this exact target’s inventory in its already logged-in portal.'};
 }
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return false;
@@ -334,6 +332,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.type === 'KARIX_EXTENSION_SCOPED_STATUS' && validScope(message)) {
       work = ready.then(() => scopedStatus(message));
+    } else if (message.type === 'KARIX_EXTENSION_SELECT' && validScope(message)) {
+      work = mutate(() => selectTarget(scopeKey(message)));
     } else if (message.type === 'KARIX_EXTENSION_RETRY' && validScope(message)) {
       work = mutate(async () => ({...await syncPending(scopeKey(message)),
         account: message.account, integration: message.integration}));
@@ -403,8 +403,11 @@ function matchingIdentity(request, body, device) {
   const {url} = request;
   const expected = device.identity;
   if (device.integration === 'whatsapp') {
+    const esmes = observedValues(url, body, ['esmeaddr']);
+    // The WhatsApp list uses 0 for an unfiltered ESME. The exact WABA must still match,
+    // and the backend independently validates this snapshot against the configured ESME.
     return body && exactObserved(observedValues(url, body, ['wabaId', 'waba_id']), expected.waba_id) &&
-      exactObserved(observedValues(url, body, ['esmeaddr']), expected.esmeaddr)
+      (exactObserved(esmes, expected.esmeaddr) || exactObserved(esmes, '0'))
       ? {waba_id: expected.waba_id, esmeaddr: expected.esmeaddr} : null;
   }
   if (device.integration === 'rcs') {

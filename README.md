@@ -408,6 +408,16 @@ These launch isolated Chromium with the downloaded MV3 extension, loopback TLS p
 provider simulators. They cover capture/pairing/selection/retry/revocation/isolation and template/media
 success, failure and duplicate reconciliation without creating production templates or sending messages.
 
+Reliability verification (23 October 2026): the complete default backend suite passed **1,405 tests**
+plus four subtests; three opt-in live checks were deselected. **58 frontend behavioral tests** and the
+production Next.js build/type check passed. Real isolated Chrome exercised scoped capture activation,
+credential rejection/discard recovery, automatic sync-status refresh, and desktop/mobile layouts;
+the 390px layout had no horizontal overflow and mobile navigation supported Escape/focus restoration.
+Separate authorized TCHFL uploads returned valid handles for PNG, JPEG, MP4 and PDF. The actual
+frontend proxy → API → loader → media upload → creation → persisted batch-result flow completed for
+CSV text, CSV image and Excel image inputs against a loopback provider. These checks did not create
+production templates, send customer messages, prove Meta approval, or deploy the working-tree changes.
+
 
 Focused RCS and shared-queue regressions:
 ```bash

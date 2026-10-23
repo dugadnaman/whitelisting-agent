@@ -9,7 +9,7 @@
         window.location.origin !== origin || window.location.pathname !== '/settings') return;
     const message = event.data;
     if (!message || typeof message !== 'object' ||
-        !['KARIX_EXTENSION_PING', 'KARIX_EXTENSION_PAIR', 'KARIX_EXTENSION_SCOPED_STATUS', 'KARIX_EXTENSION_RETRY'].includes(message.type) ||
+        !['KARIX_EXTENSION_PING', 'KARIX_EXTENSION_PAIR', 'KARIX_EXTENSION_SCOPED_STATUS', 'KARIX_EXTENSION_RETRY', 'KARIX_EXTENSION_SELECT'].includes(message.type) ||
         typeof message.requestId !== 'string' ||
         !/^[A-Za-z0-9_-]{1,128}$/.test(message.requestId)) return;
     const scoped = message.type !== 'KARIX_EXTENSION_PING';

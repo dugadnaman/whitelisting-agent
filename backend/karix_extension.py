@@ -316,8 +316,11 @@ def sync_session(body: SessionRequest, response: Response, authorization: str | 
     _, link = _device_user(authorization)
     if (body.account, body.integration) != (link["account"], link["integration"]):
         raise HTTPException(status_code=403, detail="This device cannot publish outside its paired account/integration.")
+    identity = _browser_identity(body.account, body.integration)
     credentials = validate_session(body)
     _device_user(authorization)  # Revocation during provider validation cannot publish.
+    if _browser_identity(body.account, body.integration) != identity:
+        raise HTTPException(status_code=409, detail="Configured identity changed during validation. Reconnect this exact target.")
     synced_at = save_session(credentials, body.account, body.integration)
     from queue_manager import QUEUE_MANAGER
     QUEUE_MANAGER.notify_credentials_updated(body.account)

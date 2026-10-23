@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/lib/context';
@@ -124,6 +124,8 @@ const links = [
 
 export default function Nav() {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
   const {
     account,
     setAccount,
@@ -150,7 +152,14 @@ export default function Nav() {
   }
 
   return (
-    <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-gray-200 flex flex-col z-30">
+    <>
+    <header className="md:hidden sticky top-0 z-40 h-14 flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4">
+      <span className="font-semibold text-gray-900 truncate">Karix · {getAccountLabel(account)}</span>
+      <button id="workspace-menu-toggle" type="button" aria-controls="workspace-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)} className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500">Menu</button>
+    </header>
+    {mobileOpen && <button type="button" aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="md:hidden fixed inset-0 z-40 bg-black/30" />}
+    <aside id="workspace-navigation" aria-label="Workspace navigation" onKeyDown={(event) => { if (event.key === 'Escape') { setMobileOpen(false); document.getElementById('workspace-menu-toggle')?.focus(); } }} className={`fixed top-0 left-0 w-64 h-screen overflow-y-auto bg-white border-r border-gray-200 flex-col z-50 md:z-30 ${mobileOpen ? 'flex' : 'hidden md:flex'}`}>
+      <button type="button" onClick={() => setMobileOpen(false)} className="md:hidden self-end rounded border border-gray-200 m-3 px-3 py-1 text-xs font-semibold">Close navigation</button>
       <div className="p-5 border-b border-gray-100">
         <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
@@ -254,7 +263,7 @@ export default function Nav() {
       </div>
 
       {/* Navigation Links */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      <nav onClick={() => setMobileOpen(false)} className="flex-1 px-3 py-4 space-y-1">
         {links.map((link) => {
           if (link.href === '/apparel/attribution' && !canUseApparelAttribution(currentUser, account)) return null;
           if (link.href === '/tata/click-count' && !canViewTataClickCounts) return null;
@@ -337,4 +346,5 @@ export default function Nav() {
       </div>
     </aside>
   );
+    </>
 }

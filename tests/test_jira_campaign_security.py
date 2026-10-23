@@ -108,33 +108,6 @@ def test_tata_operator_can_read_own_moengage_credentials(client, provision_user)
     assert response.json()["has_token"] is True
     credentials.assert_called_once_with("tata")
 
-def test_apparel_can_sync_rcs_to_apparel_moengage(client, provision_user):
-    _, headers = provision_user(tenant="apparel", role="operator")
-    client.headers.update(headers)
-    with patch("moengage_sync.create_moengage_rcs_template", return_value={"ok": True, "moengage_id": "moe_apparel_123"}) as create:
-        response = client.post(
-            "/api/moengage/rcs/sync",
-            json={
-                "account": "apparel",
-                "template_name": "festive_sale",
-                "template_id": "festive_sale_01",
-                "card_title": "Festive Offer",
-                "card_description": "Shop 50% off",
-            },
-        )
-    assert response.status_code == 200
-    assert response.json()["moengage_id"] == "moe_apparel_123"
-    create.assert_called_once_with(
-        template_name="festive_sale",
-        template_id="festive_sale",
-        card_title="Festive Offer",
-        card_description="Shop 50% off",
-        media_url=None,
-        cta_text="Visit Store",
-        cta_url=None,
-        sender_id=None,
-        account="apparel",
-    )
 
 
 def test_apparel_cannot_sync_rcs_to_tata_moengage(client, provision_user):

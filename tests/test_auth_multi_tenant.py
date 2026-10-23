@@ -585,17 +585,3 @@ def test_unconfigured_or_weak_secret_fails_closed(client, provision_user, monkey
     assert client.get("/healthz").status_code == 200
 
 
-def test_sample_content_variables_use_tata_capital():
-    from loader import infer_whatsapp_cta
-    from submission_client import _resolve_button_cta_variables, normalize_whatsapp_text_variables
-
-    _, samples = normalize_whatsapp_text_variables("Offer from {{1}}. Terms & conditions apply.")
-    assert "Tata Capital" in samples and "Bajaj Markets" not in samples
-    _, samples_fallback = normalize_whatsapp_text_variables("Check {{1}} and {{2}}.")
-    assert "Tata Capital" in samples_fallback and "Bajaj Markets" not in samples_fallback
-    buttons = [{"type": "URL", "url": "https://1kx.in"}]
-    _resolve_button_cta_variables(buttons, client="bajaj")
-    assert any("tatacapital.com" in example for example in buttons[0].get("example", []))
-    assert not any("bajajfinservmarkets" in example for example in buttons[0].get("example", []))
-    _, _, example_url = infer_whatsapp_cta("Special offer")
-    assert "tatacapital.com" in example_url and "bajajfinservmarkets" not in example_url

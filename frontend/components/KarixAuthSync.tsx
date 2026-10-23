@@ -17,7 +17,7 @@ type SyncStatus = Scope & {
   validation_state: 'never' | 'valid' | 'invalid';
   message: string;
 };
-type Action = 'refresh' | 'detect' | 'download' | 'connect' | 'check' | 'disconnect' | 'retry';
+type Action = 'refresh' | 'detect' | 'download' | 'connect' | 'select' | 'check' | 'disconnect' | 'retry';
 type Feedback = { type: 'success' | 'error'; message: string } | null;
 type BrowserStatus = Scope & {
   paired: boolean;
@@ -33,7 +33,7 @@ const SYNC_ERRORS: Record<string, string> = {
   identity_conflict: 'The captured identity conflicts with this configured target. Select its exact bot, WABA, or MoEngage workspace and reload its inventory.',
   provider_validation_failed: 'The provider did not validate the captured session. Reload this exact target’s inventory in the already logged-in portal, then retry. If the inventory works but sync still fails, ask your administrator to check provider validation. Re-pairing or repeating OTP is not required just to retry.',
   incomplete_session: 'The captured session is incomplete. Reload this exact target’s inventory in the already logged-in portal to capture all required headers together.',
-  schema_rejected: 'The agent rejected the captured session format or size. Update to extension 2.0.2 and reload this exact target’s inventory. Credentials are never truncated; contact your administrator if this repeats.',
+  schema_rejected: 'The agent rejected the captured session format or size. Update to extension 2.0.3 and reload this exact target’s inventory. Credentials are never truncated; contact your administrator if this repeats.',
   capture_invalid: 'The matching request had incomplete, conflicting, or oversized authentication. Reload this exact target’s inventory in the already logged-in portal. Supported lengths: bearer/refresh 16000, session 1000, user 300, cookie 32000, bot 200 characters.',
   inventory_failed: 'The inventory request was not a fresh successful response. Check the portal connection and reload this exact target’s inventory. Sign in only if the portal session itself has expired.',
   network_error: 'Could not reach the agent. Check your connection and retry the captured session.',
@@ -103,7 +103,7 @@ async function request(path: string, signal: AbortSignal, method = 'GET', body?:
   return response;
 }
 
-function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' | 'KARIX_EXTENSION_SCOPED_STATUS' | 'KARIX_EXTENSION_RETRY', signal: AbortSignal, scope?: Scope & { code?: string }): Promise<unknown> {
+function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' | 'KARIX_EXTENSION_SELECT' | 'KARIX_EXTENSION_SCOPED_STATUS' | 'KARIX_EXTENSION_RETRY', signal: AbortSignal, scope?: Scope & { code?: string }): Promise<unknown> {
   signal.throwIfAborted();
   const { promise, resolve, reject } = Promise.withResolvers<unknown>();
   const requestId = crypto.randomUUID();
@@ -138,7 +138,7 @@ function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' 
       ? 'Pairing was not confirmed in time. Refresh status before trying Connect again.'
       : type === 'KARIX_EXTENSION_RETRY'
         ? 'Retry was not confirmed in time. Refresh browser capture status before retrying; the existing device was preserved.'
-        : 'Auth Sync 2.0.2 did not respond. Install or reload this site’s extension and reload Settings.'));
+        : 'Auth Sync 2.0.3 did not respond. Install or reload this site’s extension and reload Settings.'));
   }, type === 'KARIX_EXTENSION_PAIR' || type === 'KARIX_EXTENSION_RETRY' ? 45000 : 2500);
   window.addEventListener('message', onMessage);
   signal.addEventListener('abort', onAbort, { once: true });
@@ -158,6 +158,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const [feedback, setFeedback] = useState<Feedback>(null);
   const lifecycle = useRef<AbortController | null>(null);
   const busy = useRef(false);
+  const observedSync = useRef<number | null>(null);
   const download = useRef<{ url?: string; timer?: number }>({});
   const scopeQuery = new URLSearchParams({ account, integration }).toString();
 
@@ -165,10 +166,11 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     if (integration === 'sms') return;
     try {
       const next = await extensionMessage('KARIX_EXTENSION_SCOPED_STATUS', signal, { account, integration });
-      if (!isBrowserStatus(next, { account, integration })) throw new Error('Reload Auth Sync 2.0.2 and Settings to read current browser capture status.');
+      if (!isBrowserStatus(next, { account, integration })) throw new Error('Reload Auth Sync 2.0.3 and Settings to read current browser capture status.');
       signal.throwIfAborted();
       setBrowserStatus(next);
       setInstalled(true);
+      return next;
     } catch (error) {
       if (!signal.aborted) { setBrowserStatus(null); setInstalled(false); }
       throw error;
@@ -229,6 +231,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     const controller = new AbortController();
     lifecycle.current = controller;
     busy.current = false;
+    observedSync.current = null;
     setTarget(null);
     setStatus(null);
     setStatusError(null);
@@ -241,7 +244,13 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     const pollBrowser = async () => {
       if (readingBrowser || controller.signal.aborted) return;
       readingBrowser = true;
-      try { await readBrowserStatus(controller.signal); } catch { /* Detection state is shown separately. */ }
+      try {
+        const next = await readBrowserStatus(controller.signal);
+        if (next?.last_synced_at && next.last_synced_at !== observedSync.current && !busy.current) {
+          await readStatus(controller.signal);
+          observedSync.current = next.last_synced_at;
+        }
+      } catch { /* Detection and backend status failures are shown separately. */ }
       finally { readingBrowser = false; }
     };
     void pollBrowser();
@@ -255,7 +264,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       if (download.current.url) URL.revokeObjectURL(download.current.url);
       download.current = {};
     };
-  }, [perform, refresh, readBrowserStatus]);
+  }, [perform, refresh, readBrowserStatus, readStatus]);
 
   function downloadExtension() {
     void perform('download', async (signal) => {
@@ -308,7 +317,16 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       if (!next.paired) throw new Error('No active scoped device was confirmed. Refresh status before connecting again.');
       return next.validation_state === 'valid'
         ? 'Connected for this account and integration. The saved session passed backend validation.'
-        : 'Connected for this exact target. Select it in the extension popup, then reload its inventory in your already logged-in portal. Sign in only if the portal session has expired.';
+        : 'Connected for this exact target. Reload its inventory in your already logged-in portal. Sign in only if the portal session has expired; no credential copying is needed.';
+    });
+  }
+
+  function selectTarget() {
+    if (!browserStatus?.paired) return;
+    void perform('select', async (signal) => {
+      await extensionMessage('KARIX_EXTENSION_SELECT', signal, { account, integration });
+      await readBrowserStatus(signal);
+      return `This browser is now capturing ${account} · ${integration.toUpperCase()}. Reload its matching portal inventory to sync. Other accounts’ saved sessions were not changed.`;
     });
   }
 
@@ -347,15 +365,20 @@ export default function KarixAuthSync({ account, integration }: Scope) {
 
   const disabled = action !== null;
   const browser = target?.mode === 'browser';
-  const validated = browser && !statusError && status?.paired && status.validation_state === 'valid';
+  const validated = browser && !statusError && status?.validation_state === 'valid';
   const invalid = !statusError && status?.validation_state === 'invalid';
   const statusLabel = statusError ? 'Status unavailable' : !target ? 'Loading capabilities'
     : target.mode === 'static' ? 'One-time setup' : target.mode === 'setup_required' ? 'Setup required'
-      : !status ? 'Loading status' : !status.paired ? 'Disconnected / revoked'
+      : !status ? 'Loading status' : !status.paired
+        ? status.validation_state === 'valid' ? 'Saved check passed · browser not connected' : 'Browser not connected'
         : status.validation_state === 'valid' ? 'Connected · last check passed'
           : status.validation_state === 'invalid' ? 'Paired · session invalid' : 'Paired · awaiting valid session';
   const buttonClass = 'px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
   const portal = integration === 'moengage' ? 'MoEngage' : 'Karix';
+  const moeOrigin = typeof target?.identity.base_url === 'string' && /^https:\/\/dashboard(?:-\d{2})?\.moengage\.com\/?$/.test(target.identity.base_url)
+    ? target.identity.base_url.replace(/\/$/, '') : null;
+  const portalUrl = integration === 'moengage' ? moeOrigin && `${moeOrigin}/v4/campaigns/all?view=all`
+    : 'https://www.karix.solutions/lounge/LoungePage/index.php';
 
   return (
     <section aria-labelledby={titleId} aria-busy={disabled} className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-4">
@@ -372,16 +395,20 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       {target?.mode === 'setup_required' && status?.paired && <p className="text-xs text-amber-800">You still have paired devices for this scope. You can revoke them below even while identity setup is incomplete.</p>}
       {target?.mode === 'static' && <p className="text-xs text-gray-600">Enter the existing SMS service/API key, encryption key, and routing details below once, then Save Credentials. No extension pairing or mobile OTP bypass is available for static keys.</p>}
       {browser && <>
-        <ol className="list-decimal pl-5 text-xs text-gray-600 space-y-2">
+        <details open={installed !== true} className="rounded-lg border border-blue-100 bg-white/70 p-3">
+          <summary className="cursor-pointer text-xs font-semibold text-blue-800">Installation, login and account-switching steps</summary>
+        <ol className="mt-3 list-decimal pl-5 text-xs text-gray-600 space-y-2">
           <li>Download this site’s extension ZIP and unzip it. In <code>chrome://extensions</code>, enable Developer mode, choose Load unpacked, and select the folder containing <code>manifest.json</code>.</li>
           <li>Reload Settings, detect the extension, then connect this account and integration. Pairing sends a single-use code, never your app login token.</li>
-          <li>Select this exact account and integration in the extension popup. Open {portal}’s configured {integration === 'rcs' ? 'RCS bot' : integration === 'whatsapp' ? 'WhatsApp WABA' : 'MoEngage workspace'} and reload its inventory using the already logged-in session.</li>
+          <li>Open the configured {integration === 'rcs' ? 'RCS bot' : integration === 'whatsapp' ? 'WhatsApp WABA' : 'MoEngage workspace'} in {portal} and reload its inventory. If already paired, use “Use this target in browser” below to switch capture without reconnecting.</li>
         </ol>
-        <p className="text-xs text-gray-600">Sign in manually only if the provider portal session has expired; mobile OTP is not repeated just to sync. Only same-request credentials matching this configured target are transferred. Each account/channel is paired separately; an RCS popup target does not connect MoEngage.</p>
+        <p className="mt-3 text-xs text-gray-600">Sign in manually only if the provider portal session has expired; mobile OTP is not repeated just to sync. Only same-request credentials matching this configured target are transferred. Each account/channel is paired separately; an RCS popup target does not connect MoEngage.</p>
+        </details>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={downloadExtension} disabled={disabled} className={buttonClass}>{action === 'download' ? 'Downloading...' : 'Download extension ZIP'}</button>
           <button type="button" onClick={detectExtension} disabled={disabled} className={buttonClass}>{action === 'detect' ? 'Detecting...' : 'Detect extension'}</button>
           <button type="button" onClick={connect} disabled={disabled || installed !== true || Boolean(statusError)} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">{action === 'connect' ? 'Connecting...' : 'Connect extension'}</button>
+          {portalUrl && <a href={portalUrl} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open {portal} portal</a>}
         </div>
         <p className="text-[11px] text-gray-500" role="status">{installed === null ? 'Detect the extension after installing this site’s download.' : installed ? 'Extension detected. Pairing and session validation are shown separately below.' : 'Extension not detected. Install this site’s download, reload Settings, then detect again.'}</p>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-white p-3 text-xs">
@@ -392,11 +419,12 @@ export default function KarixAuthSync({ account, integration }: Scope) {
         </dl>
         <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2" role="status" aria-live="polite">
           <p className="font-semibold text-gray-700">Current browser · {account} · {integration.toUpperCase()}</p>
-          <p>{!browserStatus ? 'Current browser capture unavailable. Reload Auth Sync 2.0.2 and this Settings page.' : !browserStatus.paired ? 'This browser is not paired for this account and integration.' : browserStatus.syncing ? 'Captured session is being validated by the backend.' : browserStatus.pending ? 'Matching session captured and pending sync. Retry below without reconnecting.' : 'This browser is paired; no captured session is waiting to sync.'}</p>
+          <p>{!browserStatus ? 'Current browser capture unavailable. Reload Auth Sync 2.0.3 and this Settings page.' : !browserStatus.paired ? 'This browser is not paired for this account and integration.' : browserStatus.syncing ? 'Captured session is being validated by the backend.' : browserStatus.pending ? 'Matching session captured and pending sync. Retry below without reconnecting.' : 'This browser is paired; no captured session is waiting to sync.'}</p>
           {!statusError && status?.paired && browserStatus && !browserStatus.paired && <p className="text-amber-800">The server has an active device registration, but this browser has no active pairing for this scope. Connect this browser separately; another device’s session is not adopted.</p>}
-          {browserStatus && !browserStatus.capture_active && <p className="text-amber-800">The extension popup is not targeting this selected {integration.toUpperCase()} integration. {browserStatus.paired ? 'Select' : 'After connecting this browser, select'} {account} · {integration.toUpperCase()} in the popup{integration === 'moengage' ? '; an RCS selection does not pair or capture this MoEngage workspace' : ''}. Other targets are not changed from Settings.</p>}
+          {browserStatus && !browserStatus.capture_active && <p className="text-amber-800">Capture is currently targeting another account or integration. {browserStatus.paired ? 'Use this target below, then reload its matching portal inventory.' : 'Connect this browser for the selected target first.'} Saved credentials for other targets stay separate.</p>}
           {browserStatus?.last_synced_at && <p className="text-gray-500">This browser’s last validated sync: {new Date(browserStatus.last_synced_at * 1000).toLocaleString()} (historical).</p>}
           {browserStatus?.error && <p className="text-red-700" role="alert">{syncError(browserStatus.error)}</p>}
+          {browserStatus?.paired && !browserStatus.capture_active && <button type="button" onClick={selectTarget} disabled={disabled || browserStatus.syncing} className={buttonClass}>{action === 'select' ? 'Switching capture...' : 'Use this target in browser'}</button>}
           {browserStatus?.pending && browserStatus.paired && <button type="button" onClick={retryCapturedSession} disabled={disabled || browserStatus.syncing} className={buttonClass}>{action === 'retry' ? 'Retrying captured session...' : 'Retry captured session'}</button>}
         </div>
         {!statusError && status?.message && <p className="text-xs text-gray-600">{status.message}</p>}

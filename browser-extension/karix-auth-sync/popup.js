@@ -25,11 +25,15 @@
     error.hidden = !error.textContent;
     lastSync.textContent = target?.last_synced_at
       ? new Date(target.last_synced_at * 1000).toLocaleString() : 'Never';
-    captureMode.textContent = target?.integration === 'moengage'
-      ? (target.capture_active
-        ? 'Active MoEngage capture target: unscoped dashboard inventory requests go only to this target for backend workspace binding.'
-        : 'Select this target to enable its unscoped MoEngage inventory capture.')
-      : 'Karix capture always requires the exact configured WhatsApp identity or RCS bot. No credentials are copied between integrations.';
+    captureMode.textContent = !target
+      ? 'Choose a paired target to see its capture instructions.'
+      : !target.paired
+        ? 'Capture is off until this target is reconnected in agent Settings.'
+        : target.integration === 'moengage'
+          ? (target.capture_active
+            ? 'Active MoEngage capture target: unscoped dashboard inventory requests go only to this target for backend workspace binding.'
+            : 'Select this target to enable its unscoped MoEngage inventory capture.')
+          : 'Karix capture always requires the exact configured WhatsApp identity or RCS bot. No credentials are copied between integrations.';
     if (!target) {
       state.textContent = targets.length ? 'Choose a paired target' : 'No paired targets';
       nextStep.textContent = targets.length
@@ -104,7 +108,7 @@
     actionError = '';
     result.hidden = true;
     render();
-    if (current()) void action('KARIX_EXTENSION_SELECT');
+    if (current()?.paired) void action('KARIX_EXTENSION_SELECT');
   });
   retry.addEventListener('click', () => { void action('KARIX_EXTENSION_RETRY'); });
   disconnect.addEventListener('click', () => { void action('KARIX_EXTENSION_DISCONNECT'); });

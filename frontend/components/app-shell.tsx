@@ -104,13 +104,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       {!isAuthPage && <Nav />}
-      <main className={isAuthPage ? 'min-h-screen' : 'ml-64'}>
+      <main className={isAuthPage ? 'min-h-screen' : 'min-w-0 md:ml-64'}>
         {isAuthPage ? (
           children
         ) : (
           <div className="flex flex-col min-h-screen">
             {/* Workspace Tab Bar */}
-            <div className="sticky top-0 z-20 bg-gray-50/95 backdrop-blur-xs border-b border-gray-200 px-6 pt-2 flex items-center gap-1.5 overflow-x-auto shadow-2xs">
+            <div className="sticky top-14 md:top-0 z-20 bg-gray-50/95 backdrop-blur-xs border-b border-gray-200 px-4 sm:px-6 pt-2 flex items-center gap-1.5 overflow-x-auto shadow-2xs">
               {openTabs.map((path) => {
                 const meta = TAB_META[path] || { label: path.replace(/^\//, ''), icon: '📌' };
                 const isActive = pathname === path;
@@ -147,7 +147,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Page Content */}
-            <div className="p-8 flex-1">{children}</div>
+            <div className="p-4 sm:p-8 flex-1 min-w-0">{children}</div>
           </div>
         )}
       </main>
