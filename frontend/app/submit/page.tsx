@@ -30,22 +30,25 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function mergeJobResults(results: Template[], tasks: JobTask[]): Template[] {
-  const byId = new Map<string, JobTask>();
-  const bySource = new Map<string, JobTask | null>();
-  for (const task of tasks) {
-    byId.set(task.id, task);
-    const key = `${task.source_ref ?? ''}\0${task.template_name.toLowerCase()}`;
-    bySource.set(key, bySource.has(key) ? null : task);
+  const byId = new Map<string, Template>();
+  const bySource = new Map<string, Template | null>();
+  for (const result of results) {
+    if (result.task_id) byId.set(result.task_id, result);
+    const key = `${result.source_ref ?? ''}\0${result.template_name.toLowerCase()}`;
+    bySource.set(key, bySource.has(key) ? null : result);
   }
-  return results.map((result) => {
-    const task = result.task_id ? byId.get(result.task_id)
-      : bySource.get(`${result.source_ref ?? ''}\0${result.template_name.toLowerCase()}`);
-    if (!task) return result;
+  return tasks.map((task) => {
+    const result = byId.get(task.id)
+      ?? bySource.get(`${task.source_ref ?? ''}\0${task.template_name.toLowerCase()}`);
     return {
-      ...result, status: task.status.toLowerCase() as Template['status'],
+      ...result,
+      task_id: task.id, source_ref: task.source_ref || task.template_name, template_name: task.template_name,
+      status: task.status.toLowerCase() as Template['status'],
       approval_status: task.approval_status.toLowerCase() as Template['approval_status'],
-      provider_ref_id: task.provider_ref_id ?? result.provider_ref_id,
-      error: task.error ?? null,
+      provider_ref_id: task.provider_ref_id ?? result?.provider_ref_id,
+      error: task.error ?? null, approval_reason: task.approval_reason ?? null,
+      retry_count: task.retry_count, submitted_at: result?.submitted_at || task.created_at,
+      client: task.tenant_id, channel: task.channel,
     };
   });
 }
@@ -183,17 +186,15 @@ export default function SubmitPage() {
       try {
         const data = await fetchJob(jobId);
         if (pollTimerRef.current !== interval) return;
-        if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.job.status)) {
+        const terminal = ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.job.status);
+        if (terminal) {
           clearInterval(interval);
           pollTimerRef.current = null;
-          setState((prev) => {
-            if (prev.step !== 'submitted' || prev.jobId !== jobId) return prev;
-            const nextResults = mergeJobResults(prev.results, data.tasks);
-            return { ...prev, results: nextResults, isStreaming: false, authPaused: false };
-          });
-        } else if (data.job.status === 'PAUSED_FOR_AUTH') {
-          setState((prev) => (prev.step === 'submitted' && prev.jobId === jobId ? { ...prev, authPaused: true, authPausedMessage: data.job.error_message } : prev));
         }
+        setState((prev) => prev.step === 'submitted' && prev.jobId === jobId ? {
+          ...prev, results: mergeJobResults(prev.results, data.tasks), isStreaming: !terminal,
+          authPaused: data.job.status === 'PAUSED_FOR_AUTH', authPausedMessage: data.job.error_message,
+        } : prev);
       } catch {
         if (pollTimerRef.current !== interval) return;
         clearInterval(interval);
@@ -241,17 +242,14 @@ export default function SubmitPage() {
             setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
               ? { ...prev, authPaused: false, authPausedMessage: undefined } : prev);
           } else if (message.event === 'job_status') {
-            if (['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.status)) {
-              const snapshot = await fetchJob(jobId);
-              if (controller.signal.aborted) return;
-              setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
-                ? { ...prev, results: mergeJobResults(prev.results, snapshot.tasks), isStreaming: false, authPaused: false } : prev);
-              return;
-            }
-            if (data.status === 'PAUSED_FOR_AUTH') {
-              setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
-                ? { ...prev, authPaused: true, authPausedMessage: data.error_message } : prev);
-            }
+            const snapshot = await fetchJob(jobId);
+            if (controller.signal.aborted) return;
+            const terminal = ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(snapshot.job.status);
+            setState((prev) => prev.step === 'submitted' && prev.jobId === jobId ? {
+              ...prev, results: mergeJobResults(prev.results, snapshot.tasks), isStreaming: !terminal,
+              authPaused: snapshot.job.status === 'PAUSED_FOR_AUTH', authPausedMessage: snapshot.job.error_message,
+            } : prev);
+            if (terminal) return;
           }
         }
         // An EOF before a terminal status is a lost stream, not job completion.
@@ -1141,15 +1139,18 @@ export default function SubmitPage() {
                   className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${
                     state.isStreaming
                       ? 'bg-blue-100 text-blue-600 animate-pulse'
-                      : 'bg-emerald-100 text-emerald-600'
+                      : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio')
+                        ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'
                   }`}
                 >
-                  {state.isStreaming ? '⋯' : '✓'}
+                  {state.isStreaming ? '⋯' : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio') ? '!' : '✓'}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-bold text-gray-900">
-                      {state.isStreaming ? 'Processing Batch Submissions...' : 'Submission Complete!'}
+                      {state.isStreaming ? 'Processing Batch Submissions...'
+                        : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio')
+                          ? 'Submission Finished With Errors' : 'Submission Complete!'}
                     </h3>
                     {state.isStreaming && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
@@ -1159,7 +1160,7 @@ export default function SubmitPage() {
                     )}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Processed {state.results.length} templates for {accountLabel} on {channelLabel}.
+                    Processed {state.results.filter(r => r.status !== 'pending' && r.status !== 'processing').length} of {state.results.length} templates for {accountLabel} on {channelLabel}.
                     {state.jobId && <span className="font-mono text-[10px] ml-1.5 text-gray-400">({state.jobId})</span>}
                   </p>
                 </div>

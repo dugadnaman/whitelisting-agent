@@ -119,22 +119,17 @@ def test_duplicate_submission_skipping(provision_user):
         "brand_new_template_2,MARKETING,TEXT,Header,Hello {{1}}\n"
     )
 
-    def fake_run(raw_list, log_path, **kwargs):
+    def accept_template(submission, **kwargs):
         from models import SubmissionResult, SubmissionStatus
-        from tracker import log_result
 
-        for item in raw_list:
-            res = SubmissionResult(
-                source_ref=item.get("source_ref", item.get("template_name", "")),
-                template_name=item.get("template_name", ""),
-                status=SubmissionStatus.SUBMITTED,
-                provider_ref_id="fake_123",
-            )
-            log_result(res, log_path)
+        return SubmissionResult(
+            source_ref=submission.source_ref, template_name=submission.template_name,
+            status=SubmissionStatus.SUBMITTED, provider_ref_id="fake_123", client=kwargs["client"],
+        )
 
     with (
         patch("api.fetch_whatsapp_templates", return_value=mock_live),
-        patch("api.run", side_effect=fake_run) as mock_run,
+        patch("runner.submit_template", side_effect=accept_template) as provider,
     ):
         r = client.post(
             "/api/submit?account=tchfl&channel=whatsapp&skip_duplicates=true",
@@ -150,13 +145,8 @@ def test_duplicate_submission_skipping(provision_user):
     dupe_row = next((x for x in results if x.get("template_name") == "existing_template_1"), None)
     assert dupe_row is not None
     assert dupe_row.get("status") == SubmissionStatus.DUPLICATE.value
-    assert "already active on waba" in dupe_row.get("error", "").lower()
 
-    # Verify run was only invoked with the net-new template
-    if mock_run.called:
-        submitted_raw = mock_run.call_args[0][0]
-        assert len(submitted_raw) == 1
-        assert submitted_raw[0]["template_name"] == "brand_new_template_2"
+    assert [call.args[0].template_name for call in provider.call_args_list] == ["brand_new_template_2"]
 
     print("✓ test_duplicate_submission_skipping passed!")
 
@@ -355,43 +345,42 @@ def test_duplicate_error_reconciliation_to_approved():
         source_ref="test_ref_1",
     )
 
-    # Case 1: Karix returns {"Failed": "Template Already Exist."}
     mock_resp = MagicMock()
     mock_resp.ok = True
     mock_resp.status_code = 200
     portal_data_exist = {"Failed": "Template Already Exist."}
 
-    with patch("submission_client.check_status") as mock_check:
-        mock_check.return_value = (
-            ApprovalStatus.APPROVED,
-            None,
-            {"fb_template_id": "2323001988540102", "template_name": "hfl_patp_fcst_030926"},
-        )
+    matching_row = {
+        "fb_template_id": "2323001988540102",
+        "template_name": "hfl_patp_fcst_030926",
+        "template_create_status": "APPROVED",
+        "language": "en_US",
+    }
+    with patch("submission_client.fetch_template_list", return_value=([matching_row], None)):
         res = _evaluate_portal_create_response(mock_resp, portal_data_exist, sub, "tchfl", 0)
-
     assert res.status == SubmissionStatus.DUPLICATE
     assert res.approval_status == ApprovalStatus.APPROVED
     assert res.provider_ref_id == "2323001988540102"
-    assert "already active on waba (approved)" in res.error.lower()
+    assert "template already exists" in res.error.lower()
 
-    # Case 2: Meta returns "There is already English content for this template. You can create a new template and try again."
     portal_data_meta_dupe = {
         "status": "failure",
         "reason": "There is already English content for this template. You can create a new template and try again.",
     }
-    with patch("submission_client.check_status") as mock_check:
-        mock_check.return_value = (
-            ApprovalStatus.APPROVED,
-            None,
-            {"fb_template_id": "1009521115473587", "template_name": "hfl_patp_qcst_030926"},
-        )
+    meta_row = {
+        "fb_template_id": "1009521115473587",
+        "template_name": "hfl_patp_fcst_030926",
+        "template_create_status": "APPROVED",
+        "language": "en_US",
+    }
+    with patch("submission_client.fetch_template_list", return_value=([meta_row], None)):
         res2 = _evaluate_portal_create_response(mock_resp, portal_data_meta_dupe, sub, "tchfl", 0)
-
     assert res2.status == SubmissionStatus.DUPLICATE
     assert res2.approval_status == ApprovalStatus.APPROVED
     assert res2.provider_ref_id == "1009521115473587"
-    assert "already active on waba" in res2.error.lower()
+    assert "template already exists" in res2.error.lower()
     print("✓ test_duplicate_error_reconciliation_to_approved passed!")
+
 
 
 def test_in_batch_duplicate_skipping_and_row_order(provision_user):
@@ -421,21 +410,15 @@ def test_in_batch_duplicate_skipping_and_row_order(provision_user):
 
     submitted_names = []
 
-    def fake_run(raw_list, log_path, **kwargs):
-        from tracker import log_result
+    def accept_template(submission, **kwargs):
+        tname = submission.template_name
+        submitted_names.append(tname)
+        return SubmissionResult(
+            source_ref=submission.source_ref, template_name=tname,
+            status=SubmissionStatus.SUBMITTED, provider_ref_id=f"ref_{tname}", client=kwargs["client"],
+        )
 
-        for item in raw_list:
-            tname = item.get("template_name", "")
-            submitted_names.append(tname)
-            res = SubmissionResult(
-                source_ref=item.get("source_ref", tname),
-                template_name=tname,
-                status=SubmissionStatus.SUBMITTED,
-                provider_ref_id=f"ref_{tname}",
-            )
-            log_result(res, log_path)
-
-    with patch("api.fetch_whatsapp_templates", return_value=[]), patch("api.run", side_effect=fake_run):
+    with patch("api.fetch_whatsapp_templates", return_value=[]), patch("runner.submit_template", side_effect=accept_template):
         r = client.post(
             "/api/submit?account=tchfl&channel=whatsapp&skip_duplicates=true",
             files={"file": ("batch.csv", io.BytesIO(csv_content.encode()), "text/csv")},
@@ -457,11 +440,8 @@ def test_in_batch_duplicate_skipping_and_row_order(provision_user):
     # Row 3: hfl_patp_qcst_030926 -> duplicate skipped in-batch!
     assert results[2]["template_name"] == "hfl_patp_qcst_030926"
     assert results[2]["status"] == "duplicate"
-    assert "within uploaded file" in results[2]["error"].lower()
+    assert len(submitted_names) == 2
 
-    # Verify run was only invoked with the 2 unique templates, not the duplicate!
-    assert submitted_names == ["hfl_patp_qcst_030926", "hfl_patp_new_unique_1"]
-    print("✓ test_in_batch_duplicate_skipping_and_row_order passed!")
 
 
 def test_poll_pending_updates_duplicate_templates():

@@ -1827,7 +1827,6 @@ async def _submit_wa_batch(
                 submitted_by=user,
                 source_file=filename,
             )
-            log_result(block_res, LOG_PATH)
             entry_dict = asdict(block_res)
             results_by_index[idx] = entry_dict
             continue
@@ -1857,7 +1856,6 @@ async def _submit_wa_batch(
                 submitted_by=user,
                 source_file=filename,
             )
-            log_result(dupe_res, LOG_PATH)
             entry_dict = asdict(dupe_res)
             duplicate_entries.append(entry_dict)
             results_by_index[idx] = entry_dict
@@ -1876,7 +1874,6 @@ async def _submit_wa_batch(
                 submitted_by=user,
                 source_file=filename,
             )
-            log_result(dupe_res, LOG_PATH)
             entry_dict = asdict(dupe_res)
             duplicate_entries.append(entry_dict)
             results_by_index[idx] = entry_dict
@@ -1884,22 +1881,20 @@ async def _submit_wa_batch(
             seen_in_batch.add(name_key)
             to_submit.append((idx, s))
 
-    new_entries = []
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     task_payloads = []
     for idx, s in enumerate(subs):
         existing_res = results_by_index[idx]
         task_payloads.append(
             {
-                "source_ref": s.source_ref,
-                "template_name": s.template_name,
-                "language": s.language,
-                "category": s.category,
-                "components": [asdict(c) for c in s.components],
+                **asdict(s),
+                **(existing_res or {}),
+                "client": acc,
+                "channel": "whatsapp",
+                "submitted_by": user,
+                "source_file": filename,
                 "status": existing_res["status"].upper() if existing_res else "PENDING",
                 "approval_status": existing_res.get("approval_status", "pending") if existing_res else "pending",
-                "provider_ref_id": existing_res.get("provider_ref_id") if existing_res else None,
-                "error": existing_res.get("error") if existing_res else None,
             }
         )
 
@@ -1912,61 +1907,47 @@ async def _submit_wa_batch(
         job_id=job_id,
     )
 
-    new_entries = []
-    if to_submit:
-        before_count = len(load_log(LOG_PATH))
-        await asyncio.to_thread(
-            run,
-            [asdict(s) for _, s in to_submit],
-            LOG_PATH,
-            client=acc,
-            user=user,
-            source_file=filename,
-            fix_aspect_ratio=fix_aspect_ratio,
-            fix_grammar=fix_grammar,
-        )
-        all_entries = load_log(LOG_PATH)
-        new_entries = all_entries[before_count:]
-
-        by_ref: dict[str, list[dict]] = collections.defaultdict(list)
-        for e in new_entries:
-            key = str(e.get("source_ref") or e.get("template_name") or "").strip().lower()
-            by_ref[key].append(e)
-
-        for idx, s in to_submit:
-            s_key = str(s.source_ref or s.template_name or "").strip().lower()
-            matched_pool = by_ref.get(s_key) or by_ref.get(str(s.template_name or "").strip().lower())
-            if matched_pool:
-                res_item = matched_pool.pop(0)
-                results_by_index[idx] = res_item
-                tid = f"task_{job_id}_{idx:04d}"
-                record_task_result(
-                    task_id=tid,
-                    status=res_item.get("status", "FAILED"),
-                    approval_status=res_item.get("approval_status") or "pending",
-                    provider_ref_id=res_item.get("provider_ref_id"),
-                    error=_clean_error_message(res_item.get("error")),
-                    approval_reason=_clean_error_message(res_item.get("approval_reason")),
-                )
-                QUEUE_MANAGER.broadcast_event(
-                    job_id, "task_update", {"task_id": tid, "template_name": s.template_name, **res_item}
-                )
+    try:
+        if to_submit:
+            submission_task = asyncio.create_task(asyncio.to_thread(
+                run, [asdict(s) for _, s in to_submit], LOG_PATH,
+                client=acc, user=user, source_file=filename,
+                fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar,
+                task_ids=[f"task_{job_id}_{idx:04d}" for idx, _ in to_submit],
+            ))
+            cancelled = False
+            while True:
+                try:
+                    entries = await asyncio.shield(submission_task)
+                    break
+                except asyncio.CancelledError:
+                    cancelled = True
+                    if submission_task.cancelled():
+                        raise RuntimeError("WhatsApp worker cancelled; reconcile provider outcomes before retrying.") from None
+            if len(entries) != len(to_submit):
+                raise RuntimeError("WhatsApp runner did not return one result for each submitted row")
+            if cancelled:
+                raise asyncio.CancelledError
+        from tracker import _row_to_entry_dict
+        cleaned_entries = []
+        for task in get_job_tasks(job_id):
+            entry = _row_to_entry_dict(task)
+            entry["error"] = _clean_error_message(entry.get("error"))
+            cleaned_entries.append(entry)
+            QUEUE_MANAGER.broadcast_event(job_id, "task_update", {"id": task["id"], **entry})
+    except (Exception, asyncio.CancelledError) as exc:
+        from db_queue import fail_unfinished_job
+        fail_unfinished_job(job_id, str(exc) or "WhatsApp batch caller cancelled before further dispatch.")
+        snapshot = get_job(job_id)
+        if snapshot:
+            QUEUE_MANAGER.broadcast_event(job_id, "job_status", snapshot)
+        raise
 
     final_job = get_job(job_id)
     if final_job:
         QUEUE_MANAGER.broadcast_event(job_id, "job_status", final_job)
-    all_combined = [e for e in results_by_index if e is not None]
-    if len(all_combined) < (len(duplicate_entries) + len(new_entries)):
-        used_ids = {id(e) for e in all_combined}
-        for e in duplicate_entries + new_entries:
-            if id(e) not in used_ids:
-                all_combined.append(e)
-    cleaned_entries = []
-    for e in all_combined:
-        entry = dict(e)
-        if "error" in entry:
-            entry["error"] = _clean_error_message(entry["error"])
-        cleaned_entries.append(entry)
+    if final_job and final_job["status"] not in ("COMPLETED", "PARTIALLY_COMPLETED", "FAILED"):
+        raise RuntimeError("WhatsApp batch has unsettled rows; reconcile provider outcomes before retrying.")
 
     log_activity(
         user=user,
@@ -2920,6 +2901,17 @@ def update_credentials(creds: CredentialUpdate, current_user: dict = Depends(get
     prefix = _account_prefix(acc)
     if chan not in {"whatsapp", "rcs", "sms"}:
         raise HTTPException(status_code=422, detail="Unsupported credential integration.")
+    if chan == "whatsapp" and creds.waba_auth_token and creds.waba_auth_token.strip():
+        official_draft = CredentialUpdate(
+            account=acc, channel=chan, waba_auth_token=creds.waba_auth_token,
+            waba_id=creds.waba_id,
+        )
+        checked = _test_whatsapp_channel(
+            acc, acc, prefix, False, acc == "bajaj", official_draft,
+            f"{prefix}_WABA_ID", f"{prefix}_WABA_AUTH_TOKEN",
+        )
+        if not checked["ok"]:
+            raise HTTPException(status_code=422, detail=checked["message"])
     raw_bearer = creds.bearer_token if chan == "whatsapp" else creds.rcs_auth_token or creds.bearer_token
     snapshot = None
     if raw_bearer or creds.session or creds.user:
@@ -2990,15 +2982,12 @@ def _test_whatsapp_channel(
         os.environ.get("KARIX_BEARER_TOKEN") if is_bajaj else None
     )
     from portal_sessions import session_record
-    saved_portal_token = (
-        saved_portal_token
-        or (session_record(acc, "whatsapp") is not None)
-        or bool(DEFAULT_PORTAL_BEARER_TOKENS.get(acc))
-    )
-    portal_requested = (
-        creds is not None and creds.bearer_token is not None
-        or (creds is None or creds.waba_auth_token is None) and bool(saved_portal_token)
-    )
+    saved_portal_token = saved_portal_token or session_record(acc, "whatsapp") is not None
+    official_draft = creds.waba_auth_token.strip() if creds and creds.waba_auth_token else None
+    manual_portal = creds is not None and any(value is not None for value in (creds.bearer_token, creds.session, creds.user))
+    if manual_portal and not all(value and value.strip() for value in (creds.bearer_token, creds.session, creds.user)):
+        return {"ok": False, "message": "A manual portal override requires Bearer Token, Session ID, and User from one request. Otherwise leave manual override off and use Connect extension."}
+    portal_requested = manual_portal or (not official_draft and bool(saved_portal_token))
     if portal_requested:
         valid, message = check_portal_credentials(
             acc,
@@ -3015,74 +3004,50 @@ def _test_whatsapp_channel(
             status="success" if valid else "failed",
         )
         return {"ok": valid, "message": message}
-    results = []
+    is_ok = False
     try:
-        waba_id = (
-            (creds.waba_id.strip() if creds and creds.waba_id and creds.waba_id.strip() else None)
-            or get_waba_id(acc)
-        )
-        if not waba_id:
-            return {
-                "ok": False,
-                "message": f"{acc_name} WhatsApp: Please enter the WABA ID in the field above or set {w_id_key} in Settings.",
-            }
-
+        waba_id = (creds.waba_id.strip() if creds and creds.waba_id and creds.waba_id.strip() else None) or get_waba_id(acc)
         from config import get_official_auth_headers
-        token = creds.waba_auth_token.strip() if creds and creds.waba_auth_token and creds.waba_auth_token.strip() else None
-        if token and (token.startswith("eyJ") or len(token) > 200):
-            valid, portal_msg = check_portal_credentials(acc, bearer_token=token, waba_id=waba_id)
-            if valid:
-                log_activity(
-                    user=(creds.user_name if creds and creds.user_name else "Anonymous Operator"),
-                    action="CREDENTIALS_TEST", account=acc, channel="whatsapp",
-                    details={"message": f"{acc_name} WhatsApp: {portal_msg}", "valid": True},
-                    status="success",
-                )
-                return {"ok": True, "message": f"{acc_name} WhatsApp: {portal_msg}"}
-        if token is None:
-            token = get_official_auth_headers(acc)["Authentication"].removeprefix("Bearer ")
-            return {
-                "ok": False,
-                "message": f"{acc_name} WhatsApp: Please enter the WABA API Token in the field above or set {w_tok_key} in Settings.",
-            }
-        headers = {"Authentication": f"Bearer {token}"}
+        token = official_draft or get_official_auth_headers(acc)["Authentication"].removeprefix("Bearer ")
         resp = http_client.get(
             f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}",
-            headers=headers,
+            headers={"Authentication": f"Bearer {token}"},
             timeout=15,
         )
         if resp.status_code == 200:
             try:
                 data = resp.json()
-            except Exception:
-                try:
-                    data = json.loads(resp.text)
-                except Exception:
-                    data = {}
-            count = len(data.get("response", {}).get("templates", []))
-            results.append(f"{acc_name} WhatsApp: Valid ({count} templates on WABA {waba_id})")
-        elif resp.status_code == 401:
-            valid, portal_msg = check_portal_credentials(acc, waba_id=waba_id)
-            if valid:
-                results.append(f"{acc_name} WhatsApp: {portal_msg}")
+            except ValueError:
+                data = None
+            envelope = data.get("response", data) if isinstance(data, dict) else data
+            templates = envelope.get("templates") if isinstance(envelope, dict) else envelope
+            rejected = any(isinstance(value, dict) and (value.get("error") or value.get("Failed") or value.get("success") is False) for value in (data, envelope))
+            valid_inventory = isinstance(templates, list) and all(
+                isinstance(row, dict) and all(row.get(key) is None or str(row[key]) == str(waba_id) for key in ("wabaId", "waba_id"))
+                for row in templates
+            )
+            if valid_inventory and not rejected:
+                is_ok = True
+                message = f"{acc_name} WhatsApp: Valid ({len(templates)} templates on WABA {waba_id})"
             else:
-                results.append(
-                    f"{acc_name} WhatsApp: 401 Unauthorized — The API token or WABA ID ({waba_id}) is incorrect. Leave the field blank to use the saved token."
-                )
+                message = f"{acc_name} WhatsApp: The provider did not return this WABA's template inventory; credentials could not be verified."
+        elif resp.status_code in (401, 403):
+            message = f"{acc_name} WhatsApp: API access refused (HTTP {resp.status_code}). Check the official API token for this WABA. Leave the token field blank to test the saved connection; portal sessions are connected separately through Auth Sync."
         else:
-            results.append(f"{acc_name} WhatsApp: HTTP {resp.status_code} ({resp.text[:200]})")
+            message = f"{acc_name} WhatsApp: Provider returned HTTP {resp.status_code}. Retry the connection check; saved credentials were not changed."
+    except http_client.RequestException as exc:
+        message = f"{acc_name} WhatsApp: Provider connection failed ({type(exc).__name__}). Retry the check; saved credentials were not changed."
+    except OSError:
+        message = f"{acc_name} WhatsApp: No usable saved API token or portal session. Connect Auth Sync and open this WABA's template inventory, or configure the provider-issued official API token once."
     except Exception as exc:
-        results.append(f"{acc_name} WhatsApp: {exc}")
-    is_ok = any("Valid" in r for r in results)
+        message = f"{acc_name} WhatsApp: Connection check failed ({type(exc).__name__}). Retry after checking the provider connection."
     log_activity(
         user=(creds.user_name if creds and creds.user_name else "Anonymous Operator"),
-        action="CREDENTIALS_TEST",
-        account=acc,
-        channel="whatsapp",
-        details={"message": " | ".join(results), "valid": is_ok},
+        action="CREDENTIALS_TEST", account=acc, channel="whatsapp",
+        details={"message": message, "valid": is_ok},
         status="success" if is_ok else "failed",
     )
-    return {"ok": is_ok, "message": " | ".join(results)}
+    return {"ok": is_ok, "message": message}
 
 
 def _test_sms_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -> dict:

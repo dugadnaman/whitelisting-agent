@@ -55,12 +55,24 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - Jira Briefs CTA previews support WhatsApp API buttons with `text` and legacy fallback buttons with `label`/`text`. Both shapes are type-checked by the production frontend build.
    - Jira Briefs has **Add template content** in WhatsApp, RCS, and SMS panels, including empty channels. Use it to separate two messages incorrectly parsed into one template, then edit the original. New drafts have unique names, open in edit mode, and remain unchecked for whitelisting. Changes are local to the loaded brief until WhatsApp/RCS submission; reloading reparses Jira and discards unsent edits. SMS remains review/edit-only.
    - Jira WhatsApp/RCS drafts use the same pre-submission inspection as Excel uploads: image dimensions/ratios, grammar, compliance and duplicate warnings are visible before whitelisting. Copy, CTA, channel and creative changes trigger fresh validation; unavailable validation or invalid media cannot be bypassed by submitting stale browser flags. Carousel images are checked individually.
+   - Jira draft warnings belong only to the current validated copy and creative. Editing a template name or other field clears the previous inspection's warnings while a fresh preview runs; failed preview shows **Retry validation**, not errors from the old draft. Whitelisting remains disabled until current validation succeeds. RCS names still require letters or numbers and at most 25 normalized characters.
+   - Automatically generated RCS names reserve room within the 25-character limit for the channel and numeric suffix, including carousels, manual additions and moves from WhatsApp/SMS. Truncation preserves distinct draft names; explicit spreadsheet names and operator edits are never silently shortened and remain subject to provider validation.
+   - Jira brief loading parses each byte-identical spreadsheet/document attachment once and reuses its extracted creatives. Parsing is deterministic by default; remote semantic enrichment is available to parser callers with `use_ai=True`, rather than blocking the browser on one AI call per copy. Required creative, grammar and technical checks remain enabled. WhatsApp/RCS inventory lookups run concurrently; unavailable inventory is reported separately from an attachment download failure.
    - Jira Briefs RCS carousels have per-card whitelisting checkboxes, initially checked. Unchecked cards remain available for editing but are excluded from validation and submission; selected cards keep their original order. The panel and confirmation show the selected count and original card numbers. A carousel requires 2–10 selected cards; empty or one-card selections cannot be whitelisted. Rechecking a card triggers fresh validation. Reloading the brief resets card choices along with unsent edits.
    - Jira creative galleries, template thumbnails, carousel cards, full-size previews and downloads use authenticated binary requests, not JWTs in image URLs. Failed previews stay visible with **Retry preview**; replacing a creative refreshes its image and warnings.
    - **Report validation errors to Jira** prepares a ticket-scoped comment for human review. Only **Yes, post comment** posts it; Cancel and ordinary whitelisting never post comments. The server rechecks current errors and rejects an approval if the reviewed comment has changed.
    - Jira Briefs counts Push / App only when the parsed brief identifies a Push campaign (`channel_counts.push`). MoEngage staging metadata may exist for SMS or Email tickets and does not imply a Push campaign; Push title/body are empty when no Push campaign was identified.
    - Jira brief-status filters (including the chat prompt "Show pending Jira briefs") scan successive Jira search pages until the requested number of matching briefs is found or Jira has no more pages. Results remain newest-first; unfiltered listings use a single page.
    - MoEngage attribute resolver and automated template catalog sync.
+   - **MoEngage RCS sync** resolves the Karix bot ID or configured sender name against the selected workspace's Karix RCS sender settings, then submits the MoEngage sender-record ID. Missing or ambiguous matches stop registration. An explicit `<ACCOUNT>_MOENGAGE_SENDER_ID` override takes precedence; Tata's shared override remains supported, but is never inherited by Bajaj or Apparel.
+   - Single-template, selected-template and inventory RCS sync convert `[1]` → `{{1}}` and `[name]` → `{{name}}` in standalone/carousel titles, descriptions and suggestion text, postbacks and URLs. Repeated variable identifiers, existing MoEngage personalization tags and Markdown links are preserved.
+   - **MoEngage Ops** (`/moengage-ops`) is Tata-only: company Operators/Admins can report and manage workspaces; Bajaj, Apparel and unassigned identities cannot access its data or keys. Workspace responses mask API keys and omit report keys; blank or masked edits retain existing credentials.
+   - Ops reads and imports use the local cache without contacting MoEngage. **Sync from MoEngage** is the explicit provider-read action; failed or truncated provider fetches do not replace the last good cache. Atomic, serialized merges preserve concurrent imports and update existing report metadata without duplicating campaigns or collapsing different flows' action nodes.
+   - On direct Ops page loads, the authenticated dashboard read starts alongside session verification rather than afterward. Concurrent session checks share only their in-flight request; completed profiles are never cached, and a token change rejects an older session response. The initial dashboard handoff is token/filter scoped, single-use, expires five seconds after completion, and is discarded on failure, logout or successful import/sync. Data remains hidden until the session is verified.
+   - Imports display the metrics already returned by the API without another dashboard GET when filters are unchanged. Default last-week/all-workspace sync does the same; changed filters trigger a fresh read for the current selection.
+   - Import CSV, TSV, XLSX or ZIP reports up to **20 MiB**. XLSX worksheets and report preambles, quoted CSV newlines, and nested ZIP reports are supported; filenames retain vertical/type context. Convert legacy XLS to XLSX or CSV first. Invalid reports fail before cache mutation; archive expansion is limited to 1,000 members, 100 MiB total, and three nested ZIP levels. Unknown dates/channels are not invented.
+   - Custom Ops dates require both endpoints in order. Filter changes discard obsolete responses and hide stale metrics; date controls wrap on narrower screens. Import feedback distinguishes parsed, added and updated records. **Manage Workspaces** opens a keyboard-accessible dialog with saved-key preservation and inline save feedback.
+   - **Export to Excel** sends authenticated requests and honors the selected date/workspace filters, using a request-private workbook that is deleted after download. Master Data contains real Excel dates; the numeric **Ops Summary** is immediately readable without formula recalculation. Combined totals include TCL, Services, Wealth and Moneyfy; TCHFL/Collections remain separately reported, and Collections flows retain their active-snapshot rule.
    - **Tata Click Counts** (`/tata/click-count`): choose an authorized MoEngage workspace and any number of imported bases. The UI fetches each base's creation date as its default reporting start; operators can edit each start independently or reset it to automatic, and select one inclusive end date valid for every base. Manual starts may precede import creation, but must be valid calendar dates no later than the end date; end dates cannot exceed today in the workspace timezone. All selected queries start together. Each base keeps an independent result because the same user may belong to multiple bases; counts are never summed. Every result counts unique users matching **WhatsApp OR Email OR SMS OR Android push OR iOS push clicks, AND that base's membership**. Users are deduplicated across channels within each base; reachable users remain a separate metric. Workspace/base/date changes clear stale results without automatically submitting another query. The date limit refreshes at workspace midnight, and double-clicking cannot submit a second batch.
    - Click counts use Tata's portal session, not the public MoEngage API workspace IDs. In Tata **Settings → MoEngage**, supply the Bearer token, `refreshtoken` request header, and session cookies from the logged-in dashboard, or configure the `TATA_MOENGAGE_*` variables in `.env.example`. Workspace switching uses request-local credentials and never saves a different workspace's tokens. Expired sessions require manual credential replacement. Counting adds one MoEngage query-history entry per selected base; it does not save a segment, export users, or send a campaign. Bajaj and Apparel users cannot access these endpoints.
    - Base lists supply optional creation timestamps for instant date display without one metadata request per selected base. Inline `created_at`/`start_date` pairs are trusted only when both are valid and match the selected workspace timezone; missing or invalid pairs use sequential `/meta` lookups. Every submission still verifies workspace membership and authoritative `cs_details` before using its creation date; invalid timestamps/ranges are rejected before fetching database metadata. MoEngage may omit `cs_meta` when no cached base-count metadata exists. Naive creation timestamps are UTC before conversion to the workspace calendar date. Query bounds preserve the portal's literal `00:00:00.000Z`–`23:59:59.999Z` calendar-date convention rather than converting them to UTC instants. Signed query tickets expire after 24 hours and bind the workspace and its `/getLoggedInUserData` database identity, with Tata account validation on status checks. Request-local base caches are cleared before workspace switches, including failed switches. Metadata errors are distinct from session-expiry errors.
@@ -162,6 +174,10 @@ py -3.12 scripts/apparel_local.py start
 
 Local state lives under `%LOCALAPPDATA%/Karix/Apparel/<checkout-id>`; secrets remain in the checkout's private `.env`. Use a local filesystem supporting Windows ACLs, such as NTFS, not FAT/exFAT. This is a per-device setup, not a public hosted service. Do not process the same shared-sheet rows from multiple laptops simultaneously. Browser sessions may require renewed human login.
 
+PowerShell uses `cd "C:\path\to\checkout"` (not Command Prompt's `cd /d`). Keep each Python invocation on one logical line, including the path after `--data-dir` and the final `setup` or `start`. If using a custom `--data-dir`, reuse it for both commands to retain the same accounts, secrets and browser profile.
+
+The launcher accepts its exact state marker with LF or Windows CRLF line endings and writes it as LF bytes, so Windows-created state can be reopened. Missing or unrecognized markers in nonempty state folders are still refused; do not create a marker for an unknown folder or delete existing state to bypass that protection.
+
 Verification: isolated native startup, hidden-password onboarding, SSO start and real operator UI exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
 
 ### 1. Environment Configuration
@@ -184,21 +200,27 @@ Deploy/restart the updated backend and frontend together. In **Settings**, choos
    **Load unpacked**, and select the folder containing `manifest.json`.
 3. Reload Settings, click **Detect extension**, then **Connect extension** for the selected account and integration.
    Each account/integration is paired separately with a five-minute single-use code.
-4. Use your existing logged-in provider tab. Login/OTP is needed only if that session has expired;
+4. For a previously paired scope, click **Use this target in browser** to switch capture without
+   reconnecting or opening the popup. Use **Open Karix/MoEngage portal** if needed, or reload the
+   existing logged-in provider tab. Login/OTP is needed only if that session has expired;
    installing or pairing the extension does not replay requests made earlier.
    - **WhatsApp (Karix)**: Open or reload the matching template list (`/getAllTemplates`).
-     The extension matches exact WABA and ESME identity and captures Authorization, Session, and User.
+     The extension requires the exact WABA; Karix's WhatsApp-only `esmeaddr: 0` inventory sentinel is
+     accepted, while conflicting real ESME identities are rejected. Authorization, Session and User
+     must come from one successful inventory request, then the backend validates the configured identity.
    - **RCS (Karix)**: Open **Template Management**, select the configured **Sender ID**,
      then reload that inventory (`/api/rcstemplate/fetchTemplates` or `/getTemplatesWithFilter`).
      The campaign screen and a different bot's inventory do not match the paired target.
    - **MoEngage**: Configure the account's exact dashboard origin and internal 24-hex workspace app ID
-     once, then connect that account's MoEngage target. Select it in the extension popup and reload the
-     configured workspace dashboard. The backend verifies `/dash/auth/listApps` and binds via `/changeApp`;
+     once, then connect or activate that account's MoEngage target and reload the configured workspace
+     dashboard. The backend verifies `/dash/auth/listApps` and binds via `/changeApp`;
      it never guesses account-to-workspace mappings from a login.
-5. Return to Settings and **Refresh status**. **Check saved session** performs a fresh
-   provider validation check.
+5. Settings automatically refreshes backend status after a newly validated browser sync.
+   **Refresh capabilities / status** also refreshes it manually; **Check saved session** performs
+   a fresh provider validation check. Historical backend validation and this browser's pairing
+   are shown separately.
 
-**Updating an unpacked extension:** use version **2.0.2**, replace its files in the same folder, then click
+**Updating an unpacked extension:** use version **2.0.3**, replace its files in the same folder, then click
 its reload icon in `chrome://extensions` and reload Settings and the provider inventory. Keeping the
 same unpacked folder preserves device pairings. The downloaded ZIP retains the exact Karix frontend
 permission (`https://rcmui.instaalerts.zone/*`) as well as the API host: Chrome requires both.
@@ -213,6 +235,10 @@ checks; it does not try the incompatible GET surface. MoEngage must be paired se
 the popup already has an RCS target. No saved MoEngage session is shown as **not connected**, not expired.
 Health responses expose counts and state, never saved bearer tokens, refresh tokens, cookies, or raw
 provider error bodies.
+Identical recaptures are revalidated rather than permanently suppressed, so an expired/revoked
+capability or deleted saved session is detected. Switching targets while a request is in flight
+never reassigns that request's credentials to the newly selected target.
+
 
 If the initial agent session check fails while the API is starting, protected pages retain the
 existing sign-in but keep workspace data hidden. Use **Retry session verification**; an actual
@@ -220,8 +246,8 @@ existing sign-in but keep workspace data hidden. Use **Retry session verificatio
 
 **Static vs Browser Credentials**:
 - **Renewable browser sessions** (Karix WhatsApp, Karix RCS, MoEngage) sync automatically from real browser requests.
-- **Static credentials** (Karix SMS key/encryption key/DLT ID, Gemini platform key) are configured once in Settings
-  and stored in encrypted database storage. The browser extension does not generate or infer static keys.
+- **Static credentials** (official WABA API token, Karix SMS key/encryption key/DLT ID, Gemini platform key)
+  are configured once and stored in encrypted database storage. Auth Sync cannot create service keys.
 - **Jira Cloud credentials** and **Google service-account JSON** remain deployment-level configurations.
 
 **Security & Isolation**:
@@ -232,6 +258,33 @@ existing sign-in but keep workspace data hidden. Use **Retry session verificatio
   and a complete valid snapshot.
 - Device tokens expire in 90 days and are strictly scoped to extension synchronization. **Disconnect my devices** revokes
   all devices for that account/integration without affecting other accounts or operators.
+
+**Connection checks and media creation:**
+- An entered official API token is tested only against the official API, never reinterpreted as a
+  portal JWT or silently replaced by a different saved session. Blank fields test saved credentials.
+  Invalid official-key replacements are rejected before persistence; **Discard unsaved edits**
+  reloads this scope's settings without changing stored credentials or another account's pairing.
+- The Settings layout keeps the sidebar off the content area on small screens. **Menu** opens mobile
+  navigation; closing it or pressing Escape restores access to the page. Installation instructions
+  collapse after detecting the extension, while connection and recovery controls remain visible.
+- WhatsApp PNG/JPEG, video and PDF headers retain their original creative and MIME type. Official
+  media upload accepts valid `fileHandle`/`file_handle` handles, including nested `response` envelopes.
+  Missing/corrupt uploads or rejected handles do not silently substitute sample media.
+- Creation requires an actual provider ID. A timeout, upstream failure or malformed success is not
+  automatically replayed or switched to another create transport: inspect the account's live
+  inventory before retrying. Duplicate replies are reconciled only to a matching live
+  name/language/WABA/provider ID; unavailable or conflicting inventory leaves approval unknown.
+- Text, media and buttons use the existing supported WhatsApp creation contract. WhatsApp carousel
+  creation is explicitly rejected rather than silently discarding cards; it requires a verified
+  Karix WhatsApp carousel contract. RCS carousel support is unchanged.
+
+
+### WhatsApp batch results and stalled submissions
+
+- Each uploaded row has a durable task ID. Provider outcomes update that row and its batch counters directly; results are never inferred by slicing shared submission history.
+- A completed HTTP request returns the batch's own task snapshot, including failures, blocked rows and skipped duplicates. The results screen also rebuilds an initially empty response from the authenticated job snapshot, so a finished batch does not remain on “Processing”.
+- WhatsApp template definitions require a sample media handle during Meta whitelisting. When a spreadsheet specifies an `IMAGE`, `VIDEO` or `DOCUMENT` header without an attached file or URL, the submission automatically uploads the Meta-required sample placeholder to obtain the review handle. Specific creatives can still be provided via `header_media_url`, `header_media_file`, or embedded Excel images.
+- Before retrying an older zero-result batch, reconcile its names with that account's Karix inventory. A missing local result does not prove the provider rejected the original request.
 
 ### RCS submission safety and recovery
 
@@ -245,7 +298,17 @@ existing sign-in but keep workspace data hidden. Use **Retry session verificatio
 - Existing SQLite queues upgrade their task-state checks while preserving rows and custom columns/indexes/triggers. Initialization is cached by the actual database/schema; PostgreSQL cold starts take a cross-process migration lock before DDL. A configured PostgreSQL outage fails closed by default instead of silently creating a separate local queue.
 
 
+### Independent Attributics leave deployment
+
+The Attributics leave app has moved to its own private GitHub repository, [dugadnaman/attributics-leave-management](https://github.com/dugadnaman/attributics-leave-management), with local checkout `/Users/naman/Desktop/Projects/attributics-leave-management`. Source, tests and deployment configuration are no longer maintained inside Karix. Its standalone README/HANDOFF describe independent releases, permanent-domain HTTPS and production setup.
+
+Only private leave runtime state remains under the former `agents/leave-management/data/` location, with a relocation handoff and exclusion rules. The root Docker build context excludes that directory. Do not delete it: the running standalone trial uses its existing database, keys, Google grants and references through explicit external paths. No leave secrets/state were copied into the new Git repository, and Karix credentials/databases remain separate. Live private-state relocation and public production deployment are separate controlled operations, not completed by extracting source.
+
 ### Production authentication on Render
+
+**Current Karix frontend:** https://whitelisting-agent.onrender.com. Google sign-in release **`8170c3d`** is live on Render service `srv-da1e05ojo6nc738fig60`, deployment `dep-dbcgodm7bikc7398b82g`. The separate Google Web client in project `karix-whitlelisting` has this exact Authorized JavaScript origin saved. All three `KARIX_GOOGLE_*` variables were saved and read back in Render; only those new variables were added, with the 25 existing environment rows retained. Local private `.env` is configured too and was not committed. The release contains only Google-specific code/config/docs/tests; unrelated local changes remain unstaged.
+
+Live verification: `/api/auth/google/start` returns 200 with Google enabled and the supplied client ID; its cookie is Secure/HttpOnly/SameSite=Lax and the response is no-store. Unauthenticated profile and malformed Google credentials return 401. A separate unauthenticated Chrome profile displayed the official Google button with the correct client ID alongside password login. The owner's existing authenticated Karix session survived deployment and was not cleared to force a test. First real Google-account selection/consent and successful account exchange remain a human check; use the same work email as an existing active Karix account. No employee was provisioned, promoted or impersonated. Google audience remains External/Testing, unchanged; this identity-only flow requests basic scopes, not Gmail/Calendar access.
 
 Configure these service environment variables before deploying:
 
@@ -296,7 +359,7 @@ The backend binds each attempt to a short-lived HttpOnly nonce cookie and checks
 
 Verification (22 October 2026): **157 backend authentication/security tests** and **20 frontend authentication tests** passed. A real localhost HTTP/JWKS/RSA issuer smoke exercised Google exchange, normal app JWTs, cross-company denial, pending-account restrictions, hostile-Origin rejection, missing post-success challenge rejection and retained password login. Isolated Chromium loaded the official GIS button on desktop and 390px mobile without page overflow; signed fixture callbacks through the actual Next proxy proved organization-mismatch session clearing, fresh-challenge retry and routing to Awaiting company approval. A disabled-config browser fixture hid Google without disabling password sign-in. No real Google identity, Karix provider request, live account, leave credential or production configuration was used.
 
-The production Next build and TypeScript check passed using the exact frontend source in a disposable checkout with clean `npm ci` dependencies. The existing workspace dependency installation blocked reads of `next/headers.d.ts`, causing its initial build/type-check attempts to time out; it was not replaced or modified. Browser/API issuer keys, identities and disposable build/state were removed afterward. Enabling real Google login still requires the Karix-specific Web client and authorized origin configuration above; fixture success is not proof of a real Google login or deployed configuration.
+The production Next build and TypeScript check passed using the exact frontend source in a disposable checkout with clean `npm ci` dependencies. The existing workspace dependency installation blocked reads of `next/headers.d.ts`, causing its initial build/type-check attempts to time out; it was not replaced or modified. Browser/API issuer keys, identities and disposable build/state were removed afterward. These fixture checks preceded the live Render release recorded above and do not establish a real Google-account login. The required Karix client/origin environment configuration has now been saved on Render.
 
 ### 2. Local Development
 
@@ -337,10 +400,25 @@ Run the default isolated suites (temporary databases; external network blocked):
 pytest tests/ -v
 ```
 
+Focused Auth Sync and WhatsApp HTTP/browser regressions:
+```bash
+pytest tests/test_extension_browser_capture.py tests/test_karix_extension.py tests/test_portal_credential_validation.py tests/test_whatsapp_media_transport.py -q
+```
+These launch isolated Chromium with the downloaded MV3 extension, loopback TLS portals and real HTTP
+provider simulators. They cover capture/pairing/selection/retry/revocation/isolation and template/media
+success, failure and duplicate reconciliation without creating production templates or sending messages.
+
+
 Focused RCS and shared-queue regressions:
 ```bash
 pytest tests/test_rcs*.py tests/test_enterprise_queue.py tests/test_database_schema_lifecycle.py -v
 ```
+
+Focused offline MoEngage Ops, MCP and company-access regressions:
+```bash
+pytest tests/test_moengage_ops.py tests/test_moengage_ops_engine.py tests/test_moengage_ops_api.py tests/test_moengage_mcp.py tests/test_auth_multi_tenant.py -q
+```
+The default selection excludes live MoEngage checks; these suites do not prove current provider credentials or live campaign counts.
 
 Two read-only live Karix inventory/status checks are excluded by default. Run them only with authorized account credentials and explicit opt-in:
 ```bash

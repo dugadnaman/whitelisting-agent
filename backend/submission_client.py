@@ -8,10 +8,8 @@ module through `submit_template()` / `check_status()` and doesn't care
 what's inside it.
 
 Auth model:
-    Text-only templates use Karix's official static-token API. Media-header
-    templates temporarily retain the portal path because the official collection
-    does not document a media-handle upload endpoint, and the portal upload
-    endpoint rejects the static official token.
+    Use the selected account's portal session when available, otherwise its
+    official token. Never replay a creation through another transport.
 """
 
 import collections
@@ -29,7 +27,6 @@ from pathlib import Path
 import requests
 
 from config import (
-    BAJAJ_WABA_ID,
     KARIX_BASE_URL,
     OFFICIAL_TEMPLATE_BASE_URL,
     _account_prefix,
@@ -48,13 +45,10 @@ from models import (
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
 BACKOFF_SECONDS = 1  # 1 s → 2 s → 4 s
 REQUEST_TIMEOUT = 15  # seconds
 MEDIA_UPLOAD_TIMEOUT = 30  # seconds — generous for Render free-tier cold starts
 
-# HTTP status codes worth retrying (transport-level, not validation errors)
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 # All Tata Capital sub-accounts share Tata sample content (URLs, company name).
 _TATA_GROUP = {"tata", "tcl_promo", "tcl_trans", "tchfl", "wealth", "moneyfy"}
 
@@ -72,37 +66,20 @@ def get_http_session() -> requests.Session:
     global _session
     if _session is None:
         from requests.adapters import HTTPAdapter
-        from urllib3.util import Retry
 
         _session = requests.Session()
-        retry_strategy = Retry(
-            total=3,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            raise_on_status=False,
-        )
         adapter = HTTPAdapter(
             pool_connections=25,
             pool_maxsize=100,
-            max_retries=retry_strategy,
+            max_retries=0,
         )
         _session.mount("https://", adapter)
         _session.mount("http://", adapter)
     return _session
 
 
-def _is_retryable(exc: Exception | None, response: requests.Response | None) -> bool:
-    """Return True only for transport-level failures we should retry."""
-    if exc is not None:
-        # Connection error, timeout, etc. — always retry
-        return True
-    return bool(response is not None and response.status_code in _RETRYABLE_STATUS_CODES)
 
 
-FALLBACK_PLACEHOLDER_IMAGE_HANDLE = "4::aW1hZ2UvcG5n:ARbniR2Mjs3AjmbXj_PT2co-Htm_UrVCspAqcYZ374tOY9ynPsS1fHzg3GhFomqWBiQjj6eUUZ3pNEkRraYDm90jI4H8yj21diMGmjLjCg0_zg:e:1787385539:379138877290302:100066839164237:ARYkaBy8mnS0GiuXUz0"
-FALLBACK_PLACEHOLDER_VIDEO_HANDLE = "4::dmlkZW8vbXA0:ARZtyVaCTL6vxhfjdYm26r3hB7nQ5zecCIxRCNIAtbBpeHODRi8Q4OwMLv_BeADs92ugK330J5mHHEBEHZskpiUSKDPonPEFm6fj6__WL_KDFw:e:1787465291:204883164914271:100066839164237:ARYZ_1MJHg5wBQY8JPA"
-FALLBACK_PLACEHOLDER_DOCUMENT_HANDLE = "4::YXBwbGljYXRpb24vcGRm:ARagUnYcCe-_Jwa2bxH7KdPu3w9f-CMLaBRiHDj67GJ_71h7lWlu1kP0SujG4rIolI8cKNOzvm0q73cl7iIjykI0VY64qGMHRsWPRW1_QMEHXg:e:1787465292:379138877290302:100066839164237:ARabH-vpch9ACwHceRc"
-FALLBACK_PLACEHOLDER_HEADER_HANDLE = FALLBACK_PLACEHOLDER_IMAGE_HANDLE
 
 # Karix portal drops/throttles concurrent media uploads (observed: 4/18 fail at
 # 10 workers). Throttle uploads globally and retry transient failures.
@@ -226,6 +203,53 @@ def upload_media(file_path: str | None = None, file_type: str = "image/png", cli
     raise last_err  # type: ignore[misc]
 
 
+def _media_handle(value: object) -> str | None:
+    """Accept provider handles, not truthy objects or the string 'None'."""
+    if isinstance(value, list):
+        value = value[0] if len(value) == 1 else None
+    if not isinstance(value, str):
+        return None
+    value = value.strip().split("\n")[0].strip()
+    return value if re.fullmatch(r"4::[^\s]+", value) else None
+
+
+def _provider_failure(data: object) -> bool:
+    if not isinstance(data, dict):
+        return True
+    for obj in (data, data.get("response"), data.get("Success")):
+        if not isinstance(obj, dict):
+            continue
+        if any(obj.get(key) for key in ("Failed", "error", "errors", "errorCode")):
+            return True
+        if obj.get("success") is False or obj.get("Success") is False or str(obj.get("status", "")).lower() in {
+            "failure", "failed", "error", "false", "rejected", "unauthorized", "unauthorised", "denied",
+        }:
+            return True
+    return False
+
+
+def _provider_template_id(data: object) -> str | None:
+    if _provider_failure(data):
+        return None
+    references = set()
+    for obj in (data, data.get("response")):
+        if not isinstance(obj, dict):
+            continue
+        for key in ("templateId", "template_id", "id", "fb_template_id"):
+            value = obj.get(key)
+            if value is None:
+                continue
+            if type(value) is int and value > 0:
+                references.add(str(value))
+            elif isinstance(value, str) and value.strip().lower() not in {
+                "", "none", "null", "true", "false", "0",
+            } and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]*", value.strip()):
+                references.add(value.strip())
+            else:
+                return None
+    return references.pop() if len(references) == 1 else None
+
+
 def _try_portal_media_upload(path: Path, mime: str, client: str, errors: list[str]) -> str | None:
     try:
         headers = get_portal_auth_headers(client)
@@ -251,32 +275,24 @@ def _try_portal_media_upload(path: Path, mime: str, client: str, errors: list[st
                     "file_type": mime,
                 },
                 timeout=MEDIA_UPLOAD_TIMEOUT,
+                allow_redirects=False,
             )
-        if resp.ok:
-            data = resp.json()
-            handle_str = (
-                data.get("Success")
-                or data.get("handle")
-                or data.get("header_handle")
-                or data.get("fileHandle")
-                or data.get("file_handle")
-            )
-            if handle_str:
-                first_handle = handle_str.strip().split("\n")[0].strip()
-                if first_handle.startswith("4::"):
-                    logger.info(
-                        "Media uploaded via Karix portal for %s: handle=%s...",
-                        client,
-                        first_handle[:60],
-                    )
-                    return first_handle
-            errors.append(f"Portal API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}")
+        if resp.status_code in (200, 201):
+            data = _parse_karix_json(resp)
+            if isinstance(data, dict) and not _provider_failure(data):
+                for key in ("Success", "handle", "header_handle", "fileHandle", "file_handle"):
+                    handle = _media_handle(data.get(key))
+                    if handle:
+                        return handle
+            errors.append("Portal media API returned no valid media handle")
         else:
-            errors.append(f"Portal API: HTTP {resp.status_code}: {resp.text[:300]}")
-    except OSError as e:
-        errors.append(f"Portal API: {e}")
-    except Exception as e:
-        errors.append(f"Portal API: {type(e).__name__}: {e}")
+            errors.append(f"Portal media API: HTTP {resp.status_code}")
+    except OSError:
+        errors.append("Portal media API credentials or local file unavailable")
+    except requests.RequestException:
+        errors.append("Portal media API transport failed")
+    except (ValueError, TypeError):
+        errors.append("Portal media API returned a malformed response")
     return None
 
 
@@ -293,46 +309,27 @@ def _try_official_media_upload(path: Path, mime: str, client: str, errors: list[
                 files={"file": (path.name, f, mime)},
                 data={"file_type": mime},
                 timeout=MEDIA_UPLOAD_TIMEOUT,
+                allow_redirects=False,
             )
-        if resp.ok:
+        if resp.status_code in (200, 201):
             data = _parse_karix_json(resp)
-            h = None
-            if isinstance(data, dict):
-                resp_obj = data.get("response") if isinstance(data.get("response"), dict) else {}
-                candidates = [
-                    data.get("fileHandle"),
-                    data.get("file_handle"),
-                    data.get("header_handle"),
-                    data.get("handle"),
-                    data.get("Success"),
-                    resp_obj.get("fileHandle"),
-                    resp_obj.get("file_handle"),
-                    resp_obj.get("header_handle"),
-                    resp_obj.get("handle"),
-                    resp_obj.get("Success"),
-                ]
-                for val in candidates:
-                    if not val:
+            if isinstance(data, dict) and not _provider_failure(data):
+                for obj in (data, data.get("response")):
+                    if not isinstance(obj, dict):
                         continue
-                    candidate = val[0] if isinstance(val, list) else str(val).strip().split("\n")[0].strip()
-                    if candidate.startswith("4::"):
-                        h = candidate
-                        break
-                logger.info(
-                    "Media uploaded via Karix Official API (%s): handle=%s...",
-                    client,
-                    str(h)[:60],
-                )
-                return str(h)
-            errors.append(
-                f"Official API: HTTP {resp.status_code} OK but no valid handle in response: {str(data)[:300]}"
-            )
+                    for key in ("fileHandle", "file_handle", "header_handle", "handle", "Success"):
+                        handle = _media_handle(obj.get(key))
+                        if handle:
+                            return handle
+            errors.append("Official media API returned no valid media handle")
         else:
-            errors.append(f"Official API: HTTP {resp.status_code}: {resp.text[:300]}")
-    except OSError as e:
-        errors.append(f"Official API: {e}")
-    except Exception as e:
-        errors.append(f"Official API: {type(e).__name__}: {e}")
+            errors.append(f"Official media API: HTTP {resp.status_code}")
+    except OSError:
+        errors.append("Official media API credentials or local file unavailable")
+    except requests.RequestException:
+        errors.append("Official media API transport failed")
+    except (ValueError, TypeError):
+        errors.append("Official media API returned a malformed response")
     return None
 
 
@@ -345,7 +342,7 @@ def _upload_media_once(file_path: str | None = None, file_type: str = "image/png
     if not file_path or not str(file_path).strip():
         file_path = _ensure_default_sample_image()
     path = Path(file_path)
-    if not path.exists():
+    if not path.is_file() or path.stat().st_size == 0:
         path = Path(_ensure_default_sample_image())
 
     errors: list[str] = []
@@ -419,14 +416,7 @@ def _ensure_default_sample_video() -> str:
     """Ensure a default sample MP4 video exists for VIDEO headers."""
     default_path = _resolve_default_media_path("default_sample_header.mp4")
     if not default_path.exists():
-        import base64
-
-        # Valid minimal MP4 container
-        minimal_mp4_b64 = "AAAAHGZ0eXBpc29tAAAAAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAAhtZGF0AAAAIG1vb3YAAABsbXZoZAAAAABAAAAAAAEAAAEAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAA=="
-        try:
-            default_path.write_bytes(base64.b64decode(minimal_mp4_b64))
-        except Exception:
-            default_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom\x00\x00\x00\x08free")
+        default_path.write_bytes(b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom\x00\x00\x00\x08free")
         logger.info("Created default sample video at %s", default_path.resolve())
     return str(default_path.resolve())
 
@@ -436,8 +426,7 @@ def _ensure_default_sample_pdf() -> str:
     default_path = _resolve_default_media_path("default_sample_header.pdf")
     if not default_path.exists():
         pdf_content = (
-            b"%PDF-1.4\n"
-            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
             b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
             b"3 0 obj<</Type/Page/MediaBox[0 0 300 144]/Parent 2 0 R/Resources<<>>>>endobj\n"
             b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n"
@@ -446,6 +435,8 @@ def _ensure_default_sample_pdf() -> str:
         default_path.write_bytes(pdf_content)
         logger.info("Created default sample document at %s", default_path.resolve())
     return str(default_path.resolve())
+
+
 
 
 def check_whatsapp_image_aspect_ratio(
@@ -488,64 +479,37 @@ def check_whatsapp_image_aspect_ratio(
         return True, "", (0, 0), 1.0
 
 
-def normalize_image_16_9(
-    input_path_or_bytes: str | bytes | None,
-    target_width: int = 1280,
-    target_height: int = 720,
-) -> tuple[str, str]:
-    """
-    Preserve raw image bytes without any auto-resizing, auto-cropping, or canvas padding.
-    Returns (raw_file_path, mime_type).
-    """
-    if not input_path_or_bytes:
-        return _ensure_default_sample_image(), "image/png"
-    import tempfile
-
-    if isinstance(input_path_or_bytes, bytes):
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-            tmp.write(input_path_or_bytes)
-            return tmp.name, "image/png"
-    return str(input_path_or_bytes), "image/png"
-
-
 def _prepare_local_media_bytes(
     cformat: str, image_bytes: bytes | None, media_file: str | None, media_url: str | None, fix_aspect_ratio: bool
 ) -> tuple[str | None, str]:
+    import mimetypes
     import tempfile
 
-    if cformat == "IMAGE":
-        if fix_aspect_ratio:
-            if image_bytes:
-                return normalize_image_16_9(image_bytes)
-            elif media_file:
-                return normalize_image_16_9(media_file)
-            elif not media_url:
-                return _ensure_default_sample_image(), "image/png"
-        else:
-            if image_bytes:
-                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
-                    tmp.write(image_bytes)
-                    return tmp.name, "image/png"
-            elif not media_file and not media_url:
-                return _ensure_default_sample_image(), "image/png"
-        return media_file, "image/png"
-    elif cformat == "VIDEO":
-        if image_bytes:
-            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-                tmp.write(image_bytes)
-                return tmp.name, "video/mp4"
-        if not media_file and not media_url:
-            return _ensure_default_sample_video(), "video/mp4"
-        return media_file, "video/mp4"
-    elif cformat == "DOCUMENT":
-        if image_bytes:
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(image_bytes)
-                return tmp.name, "application/pdf"
-        if not media_file and not media_url:
-            return _ensure_default_sample_pdf(), "application/pdf"
-        return media_file, "application/pdf"
-    return media_file, "application/octet-stream"
+    mime = {"IMAGE": "image/png", "VIDEO": "video/mp4", "DOCUMENT": "application/pdf"}[cformat]
+    if image_bytes is not None:
+        if not isinstance(image_bytes, bytes) or not image_bytes:
+            raise ValueError("Media creative is empty or invalid. Reattach the intended file.")
+        if cformat == "IMAGE" and image_bytes.startswith(b"\xff\xd8\xff"):
+            mime = "image/jpeg"
+        suffix = mimetypes.guess_extension(mime) or ".bin"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(image_bytes)
+            return tmp.name, mime
+    if media_file:
+        if not Path(media_file).is_file() or Path(media_file).stat().st_size == 0:
+            raise ValueError("Media creative is missing or empty. Reattach the intended file.")
+        if cformat == "IMAGE":
+            with open(media_file, "rb") as stream:
+                if stream.read(3) == b"\xff\xd8\xff":
+                    mime = "image/jpeg"
+        return media_file, mime
+    if not media_url:
+        if cformat == "VIDEO":
+            return _ensure_default_sample_video(), mime
+        if cformat == "DOCUMENT":
+            return _ensure_default_sample_pdf(), mime
+        return _ensure_default_sample_image(), mime
+    return None, mime
 
 
 def _download_remote_media(cformat: str, media_url: str) -> tuple[str, str]:
@@ -553,35 +517,22 @@ def _download_remote_media(cformat: str, media_url: str) -> tuple[str, str]:
 
     clean_url = (media_url or "").strip()
     if not clean_url.lower().startswith(("http://", "https://")):
-        raise ValueError(f"Invalid media URL: only http:// and https:// schemes are permitted, got '{clean_url}'")
-
-    suffix = Path(clean_url.split("?")[0]).suffix if clean_url else ""
-    if not suffix:
-        suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        media_file = tmp.name
-    file_type = "video/mp4" if cformat == "VIDEO" else ("application/pdf" if cformat == "DOCUMENT" else "image/png")
-
-    logger.info("Downloading header %s from %s", cformat.lower(), clean_url)
+        raise ValueError("Invalid media URL: only http:// and https:// are permitted.")
+    suffix = ".mp4" if cformat == "VIDEO" else (".pdf" if cformat == "DOCUMENT" else ".png")
+    media_file = None
     try:
-        resp = requests.get(clean_url, stream=True, timeout=20)
-        resp.raise_for_status()
-        with open(media_file, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=65536):
-                if chunk:
-                    f.write(chunk)
-
-        if cformat == "IMAGE":
-            media_file, file_type = normalize_image_16_9(media_file)
-    except Exception as e:
-        logger.warning("Could not download media_url %s: %s; using default sample", clean_url, e)
-        if cformat == "VIDEO":
-            media_file = _ensure_default_sample_video()
-        elif cformat == "DOCUMENT":
-            media_file = _ensure_default_sample_pdf()
-        else:
-            media_file = _ensure_default_sample_image()
-    return media_file, file_type
+        with requests.get(clean_url, stream=True, timeout=20) as resp:
+            resp.raise_for_status()
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                media_file = tmp.name
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        tmp.write(chunk)
+        return _prepare_local_media_bytes(cformat, None, media_file, None, False)
+    except (requests.RequestException, OSError, ValueError) as exc:
+        if media_file:
+            Path(media_file).unlink(missing_ok=True)
+        raise ValueError("Could not download media creative. Check access to the media URL or attach the file directly.") from exc
 
 
 def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ratio: bool = True) -> list:
@@ -592,66 +543,42 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
     for comp in components:
         if not isinstance(comp, dict):
             continue
-        ctype = comp.get("type")
+        ctype = str(comp.get("type", "")).upper()
+        if ctype == "CAROUSEL":
+            raise ValueError("WhatsApp carousel submission is not supported by the verified Karix contract.")
         cformat = str(comp.get("format", "")).upper()
         if ctype != "HEADER" or cformat not in ("IMAGE", "VIDEO", "DOCUMENT"):
             continue
 
-        example = comp.get("example", {})
-        if example.get("header_handle") and example["header_handle"] != []:
-            continue
-
         media_file = comp.pop("media_file", None)
         media_url = comp.pop("media_url", None)
-        file_type = comp.pop("file_type", None)
+        comp.pop("file_type", None)
         image_bytes = comp.pop("image_bytes", None)
+        example = comp.get("example") or {}
+        if not isinstance(example, dict):
+            raise ValueError("Media header example must contain a valid uploaded media handle.")
+        if example.get("header_handle"):
+            handle = _media_handle(example["header_handle"])
+            if not handle:
+                raise ValueError("Media header has an invalid uploaded media handle. Reattach the intended creative.")
+            comp["example"] = {**example, "header_handle": [handle]}
+            continue
 
-        media_file, file_type = _prepare_local_media_bytes(
-            cformat, image_bytes, media_file, media_url, fix_aspect_ratio
-        )
-
-        if media_url and not media_file:
-            media_file, file_type = _download_remote_media(cformat, media_url)
-
-        if not media_file or not os.path.exists(str(media_file)):
-            if cformat == "VIDEO":
-                media_file, file_type = _ensure_default_sample_video(), "video/mp4"
-            elif cformat == "DOCUMENT":
-                media_file, file_type = _ensure_default_sample_pdf(), "application/pdf"
-            else:
-                media_file, file_type = _ensure_default_sample_image(), "image/png"
-
-        # Cache media to persistent public directory and generate public URL
-        import hashlib
-
-        MEDIA_CACHE_DIR = Path("media_cache")
-        MEDIA_CACHE_DIR.mkdir(exist_ok=True)
-        public_url = None
+        temporary = image_bytes is not None or bool(media_url and not media_file)
+        resolved_file = None
         try:
-            raw_bytes = Path(media_file).read_bytes()
-            media_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
-            ext = (
-                ".jpg"
-                if "jpeg" in file_type
-                else (".png" if "png" in file_type else (".mp4" if cformat == "VIDEO" else ".pdf"))
+            resolved_file, file_type = _prepare_local_media_bytes(
+                cformat, image_bytes, media_file, media_url, fix_aspect_ratio
             )
-            cache_file = MEDIA_CACHE_DIR / f"{media_hash}{ext}"
-            cache_file.write_bytes(raw_bytes)
-            public_base = (
-                os.environ.get("RENDER_EXTERNAL_URL")
-                or os.environ.get("PUBLIC_APP_URL")
-                or "https://whitelisting-agent.onrender.com"
-            )
-            public_url = f"{public_base}/api/media/{media_hash}{ext}"
-        except Exception as e:
-            logger.debug("Media caching notice: %s", e)
-
-        handle = upload_media(media_file, file_type, client=client)
-        if handle:
-            comp["example"] = {"header_handle": [handle]}
-        elif public_url:
-            comp["example"] = {"header_url": [public_url]}
-
+            if media_url and not resolved_file:
+                resolved_file, file_type = _download_remote_media(cformat, media_url)
+            handle = upload_media(resolved_file, file_type, client=client)
+            if not _media_handle(handle):
+                raise ValueError("Media upload returned no valid handle. Reattach the intended creative.")
+            comp["example"] = {**example, "header_handle": [handle]}
+        finally:
+            if temporary and resolved_file:
+                Path(resolved_file).unlink(missing_ok=True)
     return components
 
 
@@ -677,11 +604,15 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
 
     matches = list(re.finditer(pattern, text))
     samples = []
-    company_name = "Tata Capital"
+    company_name = "Tata Capital" if _is_tata_group(client) else "Bajaj Finance"
 
     last_end = 0
+    seen_tags = set()
     for idx, match in enumerate(matches, 1):
         raw_tag = match.group(0)
+        if raw_tag in seen_tags:
+            continue
+        seen_tags.add(raw_tag)
         start, end = match.span()
 
         next_start = matches[idx].start() if idx < len(matches) else len(text)
@@ -759,12 +690,13 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
         else:
             samples.append("5,00,000" if idx == 1 else company_name)
 
-    placeholders = []
+    placeholders = {}
 
     def repl(m):
-        idx = len(placeholders) + 1
-        placeholders.append(m.group(0))
-        return f"{{{{{idx}}}}}"
+        raw_tag = m.group(0)
+        if raw_tag not in placeholders:
+            placeholders[raw_tag] = len(placeholders) + 1
+        return f"{{{{{placeholders[raw_tag]}}}}}"
 
     normalized = re.sub(pattern, repl, text)
     return normalized, samples
@@ -825,21 +757,16 @@ def _resolve_button_cta_variables(btns: list, client: str) -> None:
     for b in btns:
         if isinstance(b, dict) and b.get("type") == "URL":
             url = b.get("url", "")
-            # Force every CTA to dynamic: append /{{1}} if no variable present
-            if "{{1}}" not in url and "{{0}}" not in url and "<" not in url:
-                url = url.rstrip("/") + "/{{1}}"
+            # Static CTA destinations must remain static; do not change user intent.
+            if re.search(r"\{\{[^{}]+\}\}|<[^>]+>", url):
+                url = re.sub(r"\{\{[^{}]+\}\}|<[^>]+>", "{{1}}", url)
                 b["url"] = url
-                logger.info("Forced static CTA to dynamic: %s", url)
-            # Always ensure a sample example for the dynamic variable
-            if not b.get("example") or not b["example"]:
-                b["example"] = ["https://www.tatacapital.com/personal-loan.html"]
-                logger.info("Auto-generated URL variable sample for button")
+                if not b.get("example"):
+                    b["example"] = [url.replace("{{1}}", "sample")]
 
 
-def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj") -> dict:
-    """
-    Build the legacy portal create body used only for media headers.
-    """
+def _template_components(payload: TemplateSubmission) -> list[dict]:
+    """Copy supported components without requiring portal account fields."""
     components_raw = []
     extra_footer_texts: list[str] = []
     for comp in payload.components:
@@ -849,6 +776,8 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
             comp_d = asdict(comp)
 
         comp_type = str(comp_d.get("type") or "").upper()
+        if comp_type == "CAROUSEL":
+            raise ValueError("WhatsApp carousel submission is not supported by the verified Karix contract.")
         # Strictly never emit a FOOTER component — merge any footer text into BODY
         if comp_type == "FOOTER":
             if comp_d.get("text"):
@@ -866,7 +795,9 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
             d["example"] = comp_d["example"]
         if comp_d.get("media_file"):
             d["media_file"] = comp_d["media_file"]
-        if comp_d.get("image_bytes"):
+        if comp_d.get("media_url"):
+            d["media_url"] = comp_d["media_url"]
+        if comp_d.get("image_bytes") is not None:
             d["image_bytes"] = comp_d["image_bytes"]
         if comp_d.get("file_type"):
             d["file_type"] = comp_d["file_type"]
@@ -881,6 +812,11 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
                         body_txt = f"{body_txt}\n\n{ft}".strip()
                 d["text"] = body_txt
                 break
+    return components_raw
+
+
+def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj") -> dict:
+    """Build the verified portal multipart request."""
     return {
         "requestType": "createTemplate",
         "esmeaddr": get_esmeaddr(client),
@@ -892,7 +828,7 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         "template_namespace_id": get_template_namespace_id(client),
         "language": payload.language,
         "category": payload.category,
-        "components": components_raw,
+        "components": _template_components(payload),
     }
 
 
@@ -921,174 +857,93 @@ def _resolve_existing_template_result(
     err_msg: object,
     provider_resp: dict,
 ) -> SubmissionResult:
-    """
-    When Karix or Meta indicates that a template already exists on the WABA,
-    self-heal by reconciling against Karix's live template list.
-    Extracts the actual live approval status (e.g. APPROVED or PENDING) and provider ref ID
-    instead of wrongly reporting the submission as FAILED with UNKNOWN status.
-    """
-    c = client.lower().strip()
+    """Resolve duplicates only from this account's matching live inventory."""
+    reference = None
+    approval = ApprovalStatus.UNKNOWN
     try:
-        live_status, live_reason, matched = check_status(payload.template_name, client=c)
-        if matched and not matched.get("_not_found") and not matched.get("_transport_error"):
-            ref_id = str(matched.get("fb_template_id") or matched.get("sno") or payload.template_name)
-            approval = (
-                live_status
-                if live_status in (ApprovalStatus.APPROVED, ApprovalStatus.PENDING, ApprovalStatus.REJECTED)
-                else ApprovalStatus.APPROVED
-            )
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.DUPLICATE,
-                provider_ref_id=ref_id,
-                error=f"Template already active on WABA ({approval.value.upper()}) — automatically synced from Karix.",
-                provider_response=matched,
-                approval_status=approval,
-                approval_reason=live_reason,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-    except Exception as exc:
-        logger.debug("Failed to reconcile existing template %s against Karix: %s", payload.template_name, exc)
-
-    clean_err = str(err_msg).strip()
+        rows, inventory_error = fetch_template_list(client)
+        if not inventory_error:
+            expected_waba = get_waba_id(client)
+            expected_esme = get_esmeaddr(client)
+            for row in rows:
+                if not isinstance(row, dict) or str(row.get("template_name", "")).lower() != payload.template_name.lower():
+                    continue
+                if row.get("language") and row["language"] != payload.language:
+                    continue
+                if any(row.get(key) is not None and str(row[key]) != str(expected_waba) for key in ("wabaId", "waba_id")):
+                    continue
+                if row.get("esmeaddr") is not None and str(row["esmeaddr"]) not in ("0", str(expected_esme)):
+                    continue
+                reference = _provider_template_id(row)
+                if reference:
+                    approval = _STATUS_MAP.get(str(row.get("template_create_status", "")).upper(), ApprovalStatus.UNKNOWN)
+                    break
+    except (requests.RequestException, OSError, ValueError, TypeError):
+        pass
     return SubmissionResult(
         source_ref=payload.source_ref,
         template_name=payload.template_name,
         status=SubmissionStatus.DUPLICATE,
-        provider_ref_id=payload.template_name,
-        error=f"Template already active on WABA — {clean_err}",
+        provider_ref_id=reference,
+        error="Template already exists; verified its live provider record." if reference else "Template already exists. Refresh the selected account's template list to inspect its provider ID and approval status.",
         provider_response=provider_resp,
-        approval_status=ApprovalStatus.PENDING,
-        approval_reason=None,
-        client=c,
+        approval_status=approval,
+        client=client,
         channel="whatsapp",
         retry_count=attempt,
     )
 
 
 def _evaluate_portal_create_response(
-    resp: requests.Response, data: dict, payload: TemplateSubmission, c: str, attempt: int
+    resp: requests.Response, data: object, payload: TemplateSubmission, c: str, attempt: int
 ) -> SubmissionResult:
-    if resp.status_code == 401:
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.FAILED,
-            error=(
-                "Session expired (401). Log into Bajaj Karix with your mobile OTP "
-                "and open the WhatsApp template list to sync through Karix Auth Sync in Settings."
-                if c == "bajaj" else
-                "Session expired (401). Open Settings → "
-                f"{c} and paste fresh Portal Bearer Token / Session ID from "
-                "the Karix portal (DevTools → Network headers)."
-            ),
-            provider_response=data,
-            approval_status=ApprovalStatus.UNKNOWN,
-            client=c,
-            channel="whatsapp",
-            retry_count=attempt,
+    template_id = None
+    if resp.status_code in (401, 403):
+        error = (
+            f"Karix credentials refused (HTTP {resp.status_code}). Open Settings → {c}; "
+            "reconnect Karix Auth Sync after mobile OTP login for portal sessions, "
+            "or update this account's Official WABA API Token."
         )
-
-    if not resp.ok:
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.FAILED,
-            error=f"HTTP {resp.status_code}: {resp.text[:2000]}",
-            provider_response=data,
-            approval_status=ApprovalStatus.UNKNOWN,
-            client=c,
-            channel="whatsapp",
-            retry_count=attempt,
-        )
-
-    if "Failed" in data:
-        failed_val = data["Failed"]
-        if _is_duplicate_or_exists_error(failed_val):
-            return _resolve_existing_template_result(payload, c, attempt, failed_val, data)
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.FAILED,
-            error=data["Failed"],
-            provider_response=data,
-            approval_status=ApprovalStatus.UNKNOWN,
-            client=c,
-            channel="whatsapp",
-            retry_count=attempt,
-        )
-
-    resp_status = str(data.get("status", "")).lower()
-    if resp_status in ("failure", "error", "failed"):
-        reason_data = data.get("reason", {})
-        reason_str = str(reason_data)
-        if _is_duplicate_or_exists_error(reason_str) or _is_duplicate_or_exists_error(data):
-            return _resolve_existing_template_result(payload, c, attempt, reason_data or data, data)
-        recovered = _handle_portal_media_auto_recovery(payload, c, reason_str)
-        if recovered is not None:
-            return recovered
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.FAILED,
-            error=data.get("reason", str(data)),
-            provider_response=data,
-            approval_status=ApprovalStatus.UNKNOWN,
-            client=c,
-            channel="whatsapp",
-            retry_count=attempt,
-        )
-
+    elif resp.status_code in (400, 409) and isinstance(data, dict) and _is_duplicate_or_exists_error(data):
+        return _resolve_existing_template_result(payload, c, attempt, data, data)
+    elif resp.status_code not in (200, 201):
+        error = f"Karix creation returned HTTP {resp.status_code}. Check the template list before trying again."
+    elif isinstance(data, dict) and _is_duplicate_or_exists_error(data):
+        return _resolve_existing_template_result(payload, c, attempt, data, data)
+    elif _provider_failure(data):
+        if any(marker in str(data).lower() for marker in ("uploaded media handle is invalid", "check the handle provided", "2494102")):
+            error = "Karix rejected the media handle for this account. Reattach the original creative and verify the selected account's Karix session; no replacement media was submitted."
+        else:
+            error = "Karix rejected the template or returned a malformed response. Review its components and the selected account's template list."
+    else:
+        template_id = _provider_template_id(data)
+        error = None if template_id else "No valid provider template ID returned. Check the template list before trying again."
     return SubmissionResult(
         source_ref=payload.source_ref,
         template_name=payload.template_name,
-        status=SubmissionStatus.SUBMITTED,
-        provider_ref_id=payload.template_name,
-        provider_response=data,
-        approval_status=ApprovalStatus.PENDING,
+        status=SubmissionStatus.SUBMITTED if template_id else SubmissionStatus.FAILED,
+        provider_ref_id=template_id,
+        error=error,
+        provider_response=data if isinstance(data, dict) else {},
+        approval_status=ApprovalStatus.PENDING if template_id else ApprovalStatus.UNKNOWN,
         client=c,
         channel="whatsapp",
         retry_count=attempt,
     )
 
 
-def _handle_portal_media_auto_recovery(payload: TemplateSubmission, c: str, reason_str: str) -> SubmissionResult | None:
-    is_handle_err = (
-        "Uploaded media handle is invalid" in reason_str
-        or "Check the handle provided" in reason_str
-        or "2494102" in reason_str
+def _failed_submission(payload: TemplateSubmission, client: str, error: str) -> SubmissionResult:
+    return SubmissionResult(
+        source_ref=payload.source_ref,
+        template_name=payload.template_name,
+        status=SubmissionStatus.FAILED,
+        error=error,
+        approval_status=ApprovalStatus.UNKNOWN,
+        client=client,
+        channel="whatsapp",
     )
-    if not is_handle_err or getattr(payload, "_tried_media_reupload", False):
-        return None
 
-    logger.warning(
-        "Media handle invalid on WABA %s for %s (%s). Re-uploading media with fresh credentials...",
-        get_waba_id(c),
-        payload.template_name,
-        c,
-    )
-    payload._tried_media_reupload = True
 
-    new_comps = []
-    for comp in payload.components:
-        comp_d = asdict(comp) if not isinstance(comp, dict) else dict(comp)
-        if comp_d.get("type") == "HEADER" and comp_d.get("format", "").upper() in ("IMAGE", "VIDEO", "DOCUMENT"):
-            comp_d.pop("example", None)
-            if not comp_d.get("media_file") and not comp_d.get("media_url") and not comp_d.get("image_bytes"):
-                fmt = comp_d.get("format", "IMAGE").upper()
-                if fmt == "VIDEO":
-                    comp_d["media_file"] = _ensure_default_sample_video()
-                elif fmt == "DOCUMENT":
-                    comp_d["media_file"] = _ensure_default_sample_pdf()
-                else:
-                    comp_d["media_file"] = _ensure_default_sample_image()
-        new_comps.append(comp_d)
-
-    payload.components = new_comps
-    return _submit_portal_template(payload, client=c)
 
 
 # Status mapping
@@ -1106,138 +961,33 @@ _STATUS_MAP = {
 # ---------------------------------------------------------------------------
 
 
-def _submit_portal_template(payload: TemplateSubmission, client: str = "bajaj") -> SubmissionResult:
-    """
-    Submit one template with media headers via the portal API.
-    """
-    c = (client or getattr(payload, "client", None) or "bajaj").lower()
-    url = f"{KARIX_BASE_URL}/create"
-    body = _build_portal_create_body(payload, client=c)
-
-    # Pre-process: upload media for HEADER IMAGE components and auto-fill variable samples
+def _submit_portal_template(
+    payload: TemplateSubmission, client: str = "bajaj",
+    fix_aspect_ratio: bool = True, fix_grammar: bool = True,
+) -> SubmissionResult:
+    """Issue exactly one create; a lost response must never replay a side effect."""
+    c = (client or payload.client or "bajaj").lower().strip()
     try:
-        body["components"] = _resolve_header_media(body["components"], client=c)
-        body["components"] = _resolve_body_variables(body["components"], client=c)
-
-        for comp in body.get("components", []):
-            if isinstance(comp, dict):
-                comp.pop("media_file", None)
-                comp.pop("image_bytes", None)
-                comp.pop("file_type", None)
-                comp.pop("variables", None)
-    except (OSError, RuntimeError, FileNotFoundError) as e:
-        logger.error("Media upload failed for %s (%s): %s", payload.template_name, c, e)
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.FAILED,
-            error=f"Media upload failed: {e}",
-            approval_status=ApprovalStatus.UNKNOWN,
-            client=c,
-            channel="whatsapp",
+        headers = get_portal_auth_headers(c)
+        body = _build_portal_create_body(payload, client=c)
+        body["components"] = _resolve_header_media(body["components"], client=c, fix_aspect_ratio=fix_aspect_ratio)
+        body["components"] = _resolve_body_variables(body["components"], client=c, fix_grammar=fix_grammar)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return _failed_submission(payload, c, f"Template/media preparation failed: {exc}")
+    try:
+        t0 = time.time()
+        resp = get_http_session().post(
+            f"{KARIX_BASE_URL}/create", headers=headers,
+            files={"request": (None, json.dumps(body), "application/json")},
+            timeout=REQUEST_TIMEOUT, allow_redirects=False,
         )
-    last_result: SubmissionResult | None = None
-    for attempt in range(MAX_RETRIES):
-        exc: Exception | None = None
-        resp: requests.Response | None = None
-        try:
-            headers = get_portal_auth_headers(c)
-            waba_resolved = get_waba_id(c)
-            esme_resolved = get_esmeaddr(c)
-            logger.info(
-                "🔒 CONFIRMATION CHECKPOINT [Portal Create]: client=%s, waba_id=%s, esmeaddr=%s, template=%s, auth_env_prefix=%s",
-                c,
-                waba_resolved,
-                esme_resolved,
-                payload.template_name,
-                _account_prefix(c),
-            )
-            t0 = time.time()
-            resp = get_http_session().post(
-                url,
-                headers=headers,
-                files={"request": (None, json.dumps(body), "application/json")},
-                timeout=REQUEST_TIMEOUT,
-            )
-            _GOVERNOR.record_request(time.time() - t0, status_code=resp.status_code if resp else 500)
-        except (requests.ConnectionError, requests.Timeout) as e:
-            exc = e
-            _GOVERNOR.record_request(REQUEST_TIMEOUT, status_code=500, is_error=True)
-            logger.warning("Attempt %d/%d transport error: %s", attempt + 1, MAX_RETRIES, e)
-        except OSError as e:
-            _GOVERNOR.record_request(0.1, status_code=500, is_error=True)
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=str(e),
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-        # ---- Handle transport errors (retry) ----
-        if exc is not None:
-            last_result = SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=f"Transport error: {exc}",
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2**attempt))
-            continue
-
-        # ---- We got a response — parse it ----
-        try:
-            data = resp.json()
-        except (json.JSONDecodeError, ValueError):
-            data = {"_raw_text": resp.text}
-
-        # Retryable HTTP status (429, 5xx)
-        if resp.status_code in _RETRYABLE_STATUS_CODES:
-            logger.warning(
-                "Attempt %d/%d retryable HTTP %d: %s",
-                attempt + 1,
-                MAX_RETRIES,
-                resp.status_code,
-                resp.text[:500],
-            )
-            last_result = SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=f"HTTP {resp.status_code}",
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2**attempt))
-            continue
-
-        return _evaluate_portal_create_response(resp, data, payload, c, attempt)
-    return last_result
+        _GOVERNOR.record_request(time.time() - t0, status_code=resp.status_code)
+    except requests.RequestException:
+        _GOVERNOR.record_request(REQUEST_TIMEOUT, status_code=500, is_error=True)
+        return _failed_submission(payload, c, "Karix creation response was not received. Check the template list before trying again; the request was not replayed.")
+    return _evaluate_portal_create_response(resp, _parse_karix_json(resp), payload, c, 0)
 
 
-def _requires_portal_media(payload: TemplateSubmission) -> bool:
-    """Return whether the template needs an unverified official media handle."""
-    for component in payload.components:
-        ctype = component.get("type") if isinstance(component, dict) else getattr(component, "type", "")
-        cformat = component.get("format") if isinstance(component, dict) else getattr(component, "format", "")
-        if str(ctype).upper() == "HEADER" and str(cformat).upper() in {
-            "IMAGE",
-            "DOCUMENT",
-            "VIDEO",
-        }:
-            return True
-    return False
 
 
 def _build_official_create_body(
@@ -1251,7 +1001,7 @@ def _build_official_create_body(
 
     Portal-only account fields and the literal sessionId are deliberately absent.
     """
-    components = copy.deepcopy(_build_portal_create_body(payload, client=client)["components"])
+    components = _template_components(payload)
     components = _resolve_header_media(components, client=client, fix_aspect_ratio=fix_aspect_ratio)
     components = _resolve_body_variables(components, client=client, fix_grammar=fix_grammar)
 
@@ -1269,151 +1019,26 @@ def _submit_official_template(
     fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
 ) -> SubmissionResult:
-    """Submit a text-only template through the verified official Karix API."""
-    c = (client or getattr(payload, "client", None) or "bajaj").lower()
+    """Submit to the selected account through the official Karix API once."""
+    c = (client or payload.client or "bajaj").lower().strip()
     try:
-        waba_id = (
-            payload.waba_id
-            if getattr(payload, "waba_id", None) and payload.waba_id not in ("", BAJAJ_WABA_ID) and c != "bajaj"
-            else None
-        ) or get_waba_id(c)
+        waba_id = get_waba_id(c)
         headers = get_official_auth_headers(c)
-    except OSError as exc:
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.FAILED,
-            error=str(exc),
-            approval_status=ApprovalStatus.UNKNOWN,
-            client=c,
-            channel="whatsapp",
-            retry_count=0,
+        headers["Content-Type"] = "application/json"
+        body = _build_official_create_body(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return _failed_submission(payload, c, f"Template/media preparation failed: {exc}")
+    try:
+        t0 = time.time()
+        response = get_http_session().post(
+            f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}", headers=headers, json=body,
+            timeout=REQUEST_TIMEOUT, allow_redirects=False,
         )
-
-    url = f"{OFFICIAL_TEMPLATE_BASE_URL}/{waba_id}"
-    body = _build_official_create_body(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
-    last_result: SubmissionResult | None = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            headers = get_official_auth_headers(c)
-            headers["Content-Type"] = "application/json"
-            logger.info(
-                "🔒 CONFIRMATION CHECKPOINT [Official Create]: client=%s, waba_id=%s, template=%s, auth_env_prefix=%s",
-                c,
-                waba_id,
-                payload.template_name,
-                _account_prefix(c),
-            )
-            t0 = time.time()
-            response = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
-            _GOVERNOR.record_request(time.time() - t0, status_code=response.status_code if response else 500)
-        except (requests.ConnectionError, requests.Timeout) as exc:
-            _GOVERNOR.record_request(REQUEST_TIMEOUT, status_code=500, is_error=True)
-            last_result = SubmissionResult(
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=f"Transport error: {exc}",
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2**attempt))
-            continue
-        try:
-            data = response.json()
-        except (json.JSONDecodeError, ValueError):
-            data = {"_raw_text": response.text}
-
-        if response.status_code in _RETRYABLE_STATUS_CODES:
-            err_detail = f"HTTP {response.status_code}"
-            if response.text and response.text.strip():
-                err_detail = f"HTTP {response.status_code}: {response.text[:2000].strip()}"
-            last_result = SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=err_detail,
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(BACKOFF_SECONDS * (2**attempt))
-            continue
-        # 401 Unauthorized = expired/invalid WABA API token. No browser
-        # auto-login (Karix portal requires OTP) — surface an actionable error.
-        if response.status_code == 401:
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=(
-                    "WABA API Token invalid or expired (401). Open Settings → "
-                    f"{c} and paste a fresh Official WABA API Token from the "
-                    "Karix Lounge."
-                ),
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-
-        if response.status_code not in (200, 201):
-            resp_text = response.text[:2000]
-            if _is_duplicate_or_exists_error(resp_text) or _is_duplicate_or_exists_error(data):
-                return _resolve_existing_template_result(payload, c, attempt, resp_text or data, data)
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error=f"HTTP {response.status_code}: {resp_text}",
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-        resp_obj = data.get("response") if isinstance(data.get("response"), dict) else {}
-        template_id = str(
-            data.get("templateId")
-            or data.get("id")
-            or data.get("template_id")
-            or resp_obj.get("templateId")
-            or resp_obj.get("id")
-            or resp_obj.get("template_id")
-            or ""
-        ).strip()
-        if not template_id:
-            return SubmissionResult(
-                source_ref=payload.source_ref,
-                template_name=payload.template_name,
-                status=SubmissionStatus.FAILED,
-                error="No templateId returned in official API response",
-                provider_response=data,
-                approval_status=ApprovalStatus.UNKNOWN,
-                client=c,
-                channel="whatsapp",
-                retry_count=attempt,
-            )
-
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.SUBMITTED,
-            provider_ref_id=template_id,
-            provider_response=data,
-            approval_status=ApprovalStatus.PENDING,
-            client=c,
-            channel="whatsapp",
-            retry_count=attempt,
-        )
-
-    return last_result
+        _GOVERNOR.record_request(time.time() - t0, status_code=response.status_code)
+    except requests.RequestException:
+        _GOVERNOR.record_request(REQUEST_TIMEOUT, status_code=500, is_error=True)
+        return _failed_submission(payload, c, "Karix creation response was not received. Check the template list before trying again; the request was not replayed.")
+    return _evaluate_portal_create_response(response, _parse_karix_json(response), payload, c, 0)
 
 
 def submit_template(
@@ -1482,45 +1107,24 @@ def submit_template(
                         )
         except Exception as ex:
             logger.debug("AI pre-flight inspection bypassed due to exception: %s", ex)
-    # 1. Primary for accounts with Portal Session: Portal API
+    # Select a transport before side effects. Never retry/fall back after create.
     try:
-        get_portal_auth_headers(c)
-        portal_res = _submit_portal_template(payload, client=c)
-        if portal_res.status == SubmissionStatus.SUBMITTED:
-            return portal_res
-        if (
-            portal_res.error
-            and "Unauthorised" not in str(portal_res.error)
-            and "Missing required" not in str(portal_res.error)
-        ):
-            return portal_res
-    except OSError:
-        pass
-
-    # 2. Try Official WABA API if official token is configured
-    try:
-        get_official_auth_headers(c)
-        official_res = _submit_official_template(
-            payload,
-            client=c,
-            fix_aspect_ratio=fix_aspect_ratio,
-            fix_grammar=fix_grammar,
+        selected_waba = str(get_waba_id(c))
+        if payload.client.lower().strip() != c:
+            raise ValueError("Template client does not match the selected account.")
+        if payload.waba_id and str(payload.waba_id) != selected_waba:
+            raise ValueError("Template WABA does not match the selected account.")
+        try:
+            get_portal_auth_headers(c)
+        except OSError:
+            return _submit_official_template(
+                payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar,
+            )
+        return _submit_portal_template(
+            payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar,
         )
-        if official_res.status == SubmissionStatus.SUBMITTED:
-            return official_res
-    except OSError:
-        pass
-
-    # 3. Final fallback
-    try:
-        return _submit_portal_template(payload, client=c)
-    except Exception:
-        return _submit_official_template(
-            payload,
-            client=c,
-            fix_aspect_ratio=fix_aspect_ratio,
-            fix_grammar=fix_grammar,
-        )
+    except (OSError, ValueError) as exc:
+        return _failed_submission(payload, c, str(exc))
 
 
 def _parse_karix_json(resp) -> dict | list:
@@ -1560,47 +1164,42 @@ def check_portal_credentials(
             allow_redirects=False,
         )
         if response.status_code in (401, 403):
-            return False, f"Portal session refused (HTTP {response.status_code}). Paste Bearer Token, Session ID and User from the same logged-in Karix request."
-        if not response.ok:
+            return False, f"Portal session refused (HTTP {response.status_code}). Reconnect this account through Karix Auth Sync after mobile OTP login."
+        if response.status_code != 200:
             return False, f"Portal connection returned HTTP {response.status_code}."
         data = _parse_karix_json(response)
         # Provider signatures authorize the request; reject any contradictory returned identity.
         expected_waba = str(waba_id or get_waba_id(client))
         expected_esme = str(esmeaddr or get_esmeaddr(client))
-        inventories = [data] if isinstance(data, list) else []
-        if isinstance(data, dict):
-            inventories.append([data])
-            for envelope in (data, data.get("Success"), data.get("response")):
-                if isinstance(envelope, dict) and isinstance(envelope.get("templates"), list):
-                    inventories.append(envelope["templates"])
-        for rows in inventories:
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                observed_waba = row.get("wabaId") or row.get("waba_id")
-                observed_esme = row.get("esmeaddr")
-                if observed_waba is not None and str(observed_waba) != expected_waba:
-                    return False, "Portal returned another configured account's WABA inventory."
-                if observed_esme is not None and str(observed_esme) not in ("0", expected_esme):
-                    return False, "Portal returned another configured account's ESME inventory."
+        inventories = []
+        identities = []
         if isinstance(data, list):
+            inventories.append(data)
+        elif isinstance(data, dict):
+            identities.append(data)
+            failure_data = {key: value for key, value in data.items() if key != "Failed"} if data.get("Failed") == "No Records Found" else data
+            if _provider_failure(failure_data):
+                return False, "Portal rejected the credentials. Reconnect this account through Karix Auth Sync."
+            for envelope in (data, data.get("Success"), data.get("response")):
+                if isinstance(envelope, dict):
+                    identities.append(envelope)
+                    if isinstance(envelope.get("templates"), list):
+                        inventories.append(envelope["templates"])
+                elif isinstance(envelope, list):
+                    inventories.append(envelope)
+        for rows in inventories:
+            if not all(isinstance(row, dict) for row in rows):
+                return False, "Portal validation returned malformed template inventory."
+            identities.extend(rows)
+        for row in identities:
+            observed_waba = row.get("wabaId") if row.get("wabaId") is not None else row.get("waba_id")
+            observed_esme = row.get("esmeaddr")
+            if observed_waba is not None and str(observed_waba) != expected_waba:
+                return False, "Portal returned another configured account's WABA inventory."
+            if observed_esme is not None and str(observed_esme) not in ("0", expected_esme):
+                return False, "Portal returned another configured account's ESME inventory."
+        if inventories or (isinstance(data, dict) and data.get("Failed") == "No Records Found"):
             return True, "Portal credentials valid."
-        if isinstance(data, dict):
-            if data.get("Failed") == "No Records Found":
-                return True, "Portal credentials valid (no templates found)."
-            if data.get("Failed") or data.get("error") or data.get("success") is False:
-                return False, "Portal rejected the credentials. Check Bearer Token, Session ID and User from the same Karix session."
-            success = data.get("Success")
-            response_data = data.get("response")
-            templates = (
-                (success.get("templates") if isinstance(success, dict) else None)
-                or (response_data.get("templates") if isinstance(response_data, dict) else None)
-                or data.get("templates")
-            )
-            if isinstance(templates, list):
-                return True, f"Portal credentials valid ({len(templates)} templates on WABA {expected_waba})."
-            if isinstance(success, dict) or isinstance(response_data, dict):
-                return True, "Portal credentials valid."
         return False, "Portal validation returned an unrecognized response; credentials could not be verified."
     except requests.RequestException as exc:
         return False, f"Portal connection failed ({type(exc).__name__}). Check network access and try again."

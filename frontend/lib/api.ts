@@ -506,6 +506,8 @@ export type JobTask = {
   source_ref?: string;
   template_name: string;
   category?: string;
+  created_at: string;
+  retry_count: number;
   language?: string;
   status: "PENDING" | "PROCESSING" | "SUBMITTED" | "DUPLICATE" | "FAILED" | "BLOCKED_ASPECT_RATIO";
   approval_status: "pending" | "approved" | "rejected" | "unknown" | "blocked_aspect_ratio";

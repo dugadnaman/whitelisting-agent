@@ -16,6 +16,7 @@ Efficiency notes (post-audit):
 """
 
 import collections
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from submission_client import (
     fetch_template_list,
     submit_template,
 )
-from tracker import log_result, pending_entries, update_results
+from tracker import _row_to_entry_dict, log_result, pending_entries, update_results
 
 # Approval outcomes worth persisting. Anything else (transport errors,
 # not-yet-listed templates, unknown provider states) keeps the entry pending.
@@ -167,14 +168,18 @@ def run(
     source_file: str | None = None,
     fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
-) -> None:
-    """Phase 2, step 1: submit each template, log the attempt."""
+    *,
+    task_ids: list[str] | None = None,
+) -> list[dict]:
+    """Submit each template and return persisted outcomes in input order."""
     import concurrent.futures
     import time
 
     from submission_client import _GOVERNOR
 
     submissions = load_from_list(templates_raw, client=client)
+    if task_ids is not None and len(task_ids) != len(submissions):
+        raise ValueError("WhatsApp task IDs must correspond one-to-one with input rows")
     optimal_workers = _GOVERNOR.get_optimal_concurrency(base_workers=min(8, max(1, len(submissions))))
     workers = min(optimal_workers, max(1, len(submissions)))
     pacing = _GOVERNOR.get_pacing_delay()
@@ -185,7 +190,22 @@ def run(
         f"[Concurrency: {workers} workers, Pacing: {pacing}s, Karix API: {health['status']} ({health['avg_latency_sec']}s)]..."
     )
 
-    def _submit_single(submission):
+    def _submit_single(item):
+        index, submission = item
+        task_id = task_ids[index] if task_ids is not None else None
+        if task_id is not None:
+            from db_queue import claim_task, get_job_task, validate_task_scope
+
+            task = get_job_task(task_id)
+            if not task:
+                raise ValueError("WhatsApp task not found")
+            validate_task_scope(task, json.loads(task["payload_json"]), client, "whatsapp")
+            if submission.client != client or submission.channel != "whatsapp":
+                raise ValueError("WhatsApp submission does not belong to the selected tenant/channel")
+            if submission.source_ref != task["source_ref"] or submission.template_name != task["template_name"]:
+                raise ValueError("WhatsApp submission does not match its owning row")
+            if claim_task(task_id, client, "whatsapp") is None:
+                return _row_to_entry_dict(get_job_task(task_id))
         submission.client = client
         submission.waba_id = get_waba_id(client)
         if getattr(submission, "aspect_ratio_blocked", False):
@@ -202,31 +222,40 @@ def run(
                 submitted_by=user,
                 source_file=source_file,
             )
-            log_result(result, log_path)
-            print(f"  {result.template_name}: BLOCKED (Invalid Aspect Ratio)")
-            return result
+            return log_result(result, log_path, task_id=task_id)
 
         if pacing > 0:
             time.sleep(pacing)
-        result = submit_template(
-            submission,
-            client=client,
-            fix_aspect_ratio=fix_aspect_ratio,
-            fix_grammar=fix_grammar,
-        )
+        try:
+            result = submit_template(
+                submission,
+                client=client,
+                fix_aspect_ratio=fix_aspect_ratio,
+                fix_grammar=fix_grammar,
+            )
+        except Exception as exc:
+            result = SubmissionResult(
+                source_ref=submission.source_ref, template_name=submission.template_name,
+                status=SubmissionStatus.FAILED, approval_status=ApprovalStatus.UNKNOWN,
+                error=f"Submission interrupted; reconcile provider outcome before retrying: {exc}",
+                client=client,
+            )
+        result.source_ref = submission.source_ref
+        result.template_name = submission.template_name
         result.client = client
         result.channel = "whatsapp"
         result.submitted_by = user
         result.source_file = source_file or result.source_file
-        log_result(result, log_path)
+        entry = log_result(result, log_path, task_id=task_id)
         note = f" ({result.retry_count} retries)" if result.retry_count else ""
         print(f"  {result.template_name}: {result.status.value}{note}")
-        return result
+        return entry
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        list(executor.map(_submit_single, submissions))
+        results = list(executor.map(_submit_single, enumerate(submissions)))
 
     print(f"Done. Results appended to {log_path}")
+    return results
 
 
 def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") -> dict:

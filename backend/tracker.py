@@ -44,6 +44,10 @@ def _row_to_entry_dict(row: dict) -> dict:
             pass
 
     entry = dict(payload)
+    entry["task_id"] = row["id"]
+    entry["job_id"] = row["job_id"]
+    entry["client"] = row["tenant_id"]
+    entry["channel"] = row["channel"]
     entry["source_ref"] = row.get("source_ref") or entry.get("source_ref") or row.get("template_name")
     entry["template_name"] = row.get("template_name") or entry.get("template_name")
     entry["status"] = (row.get("status") or entry.get("status") or "submitted").lower()
@@ -57,8 +61,10 @@ def _row_to_entry_dict(row: dict) -> dict:
     return entry
 
 
-def log_result(result: SubmissionResult, log_path: str = "submission_log.jsonl") -> None:
-    """Store submission result directly into database (job_tasks) as single source of truth."""
+def log_result(
+    result: SubmissionResult, log_path: str = "submission_log.jsonl", *, task_id: str | None = None,
+) -> dict:
+    """Persist an outcome on its owning batch row, or record a direct submission."""
     db.init_database()
     res_dict = asdict(result) if hasattr(result, "__dataclass_fields__") else dict(result)
     tpl_name = res_dict.get("template_name") or ""
@@ -74,6 +80,21 @@ def log_result(result: SubmissionResult, log_path: str = "submission_log.jsonl")
     submitted_at = res_dict.get("submitted_at") or datetime.now(UTC).isoformat()
     updated_at = res_dict.get("updated_at") or submitted_at
     payload_json = json.dumps(res_dict, default=str)
+    if task_id is not None:
+        from db_queue import get_job_task, record_task_result
+
+        task = get_job_task(task_id)
+        if not task or task["tenant_id"] != res_dict.get("client") or task["channel"] != "whatsapp":
+            raise ValueError("WhatsApp result does not belong to the selected task/tenant/channel")
+        if task["source_ref"] != source_ref or task["template_name"] != tpl_name:
+            raise ValueError("WhatsApp result does not match its owning row")
+        stored = record_task_result(
+            task_id, status_val, approval_val, provider_ref_id=provider_ref_id,
+            error=error, approval_reason=approval_reason, result_payload=res_dict, retry_count=retry_count,
+        )
+        if stored is None:
+            raise RuntimeError("WhatsApp result could not be persisted")
+        return _row_to_entry_dict(stored)
     task_id = f"task_{uuid.uuid4().hex[:12]}"
     job_id = "job_direct_submissions"
     tenant_id = res_dict.get("client") or "all"
@@ -117,6 +138,7 @@ def log_result(result: SubmissionResult, log_path: str = "submission_log.jsonl")
             conn.commit()
     except Exception as exc:
         logger.error("Failed to store submission result in database: %s", exc)
+        raise
 
     # 2. File fallback only if a non-default custom file path was explicitly passed in unit tests
     if log_path != "submission_log.jsonl" and not log_path.endswith("submission_log.jsonl"):
@@ -131,6 +153,7 @@ def log_result(result: SubmissionResult, log_path: str = "submission_log.jsonl")
         except Exception:
             pass
 
+    return {**res_dict, "task_id": task_id, "job_id": job_id}
 
 def load_log(log_path: str = "submission_log.jsonl") -> list[dict]:
     """Read back all WhatsApp submission results from the database."""
