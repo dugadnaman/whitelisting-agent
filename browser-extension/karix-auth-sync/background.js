@@ -15,6 +15,19 @@ const REQUEST_FILTER = {
   types: ['xmlhttprequest'],
 };
 const INTEGRATIONS = ['whatsapp', 'rcs', 'moengage'];
+const ERROR_MESSAGES = {
+  device_expired: 'This browser’s device pairing expired or was revoked. Reconnect only this account and integration in Settings; your portal login is separate.',
+  scope_denied: 'This device is not authorized for the selected account and integration. Check this exact target in Settings; do not copy a session from another account.',
+  identity_conflict: 'The captured identity does not match this target’s configured identity. Select its exact configured bot, WABA, or MoEngage workspace and reload its inventory.',
+  provider_validation_failed: 'The provider did not validate the captured session. Reload the matching inventory in your already logged-in portal and retry. If that inventory works but sync still fails, ask your administrator to check provider validation; do not re-pair or repeat OTP just to retry.',
+  incomplete_session: 'The captured session is incomplete. Reload this exact target’s inventory in the already logged-in portal to capture all required headers together.',
+  schema_rejected: 'The agent rejected the captured session format or size. Use extension 2.0.2 and reload this target’s inventory. Credentials are never truncated; ask your administrator if this repeats.',
+  capture_invalid: 'The matching request had incomplete, conflicting, or oversized authentication. Reload this exact target’s inventory in the already logged-in portal. Limits: bearer/refresh 16000, session 1000, user 300, cookie 32000, bot 200 characters.',
+  inventory_failed: 'The inventory request did not complete with a fresh successful response. Check the portal connection and reload this exact target’s inventory; sign in only if the portal session itself has expired.',
+  network_error: 'Could not reach the agent. Check your connection and retry the captured session.',
+  request_failed: 'The agent could not complete this request. Retry for this exact target or ask your administrator to check the service.',
+};
+function failure(code) { return Object.assign(new Error(ERROR_MESSAGES[code]), {code}); }
 const requests = new Map();
 let devices = {};
 let transient = {};
@@ -30,7 +43,7 @@ function scopeKey(value) { return `${value.account}/${value.integration}`; }
 function valueString(value) {
   return typeof value === 'string' || Number.isSafeInteger(value) ? String(value) : '';
 }
-function credential(value, limit = 16384) {
+function credential(value, limit = 16000) {
   return typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\r\n]/.test(value);
 }
 function dashboardOrigin(value) {
@@ -44,7 +57,7 @@ function normalizedIdentity(integration, value) {
   }
   if (integration === 'rcs') {
     if (!Array.isArray(value.bot_ids) || !value.bot_ids.length || value.bot_ids.length > 100 ||
-        !value.bot_ids.every(bot => typeof bot === 'string' && /^[A-Za-z0-9_.@-]{1,256}$/.test(bot)) ||
+        !value.bot_ids.every(bot => typeof bot === 'string' && /^[A-Za-z0-9_.@-]{1,200}$/.test(bot)) ||
         (value.esmeaddr !== undefined && !/^\d{1,64}$/.test(value.esmeaddr))) return null;
     return {bot_ids: [...new Set(value.bot_ids)], ...(value.esmeaddr ? {esmeaddr: value.esmeaddr} : {})};
   }
@@ -56,22 +69,22 @@ function normalizedIdentity(integration, value) {
 }
 function paired(device) { return Boolean(device?.deviceToken && device.deviceExpiresAt > Date.now() / 1000); }
 function stateFor(key) {
-  return transient[key] ||= {pendingSnapshot: null, lastError: '', syncing: false};
+  return transient[key] ||= {pendingSnapshot: null, lastError: '', lastErrorCode: '', syncing: false};
 }
 function isSnapshot(value, device) {
   if (!validScope(value) || scopeKey(value) !== scopeKey(device) || !credential(value.bearer_token)) return false;
   const expected = device.identity;
   if (device.integration === 'whatsapp') {
     return value.waba_id === expected.waba_id && value.esmeaddr === expected.esmeaddr &&
-      credential(value.session) && credential(value.user);
+      credential(value.session, 1000) && credential(value.user, 300);
   }
   if (device.integration === 'rcs') {
-    return expected.bot_ids.includes(value.bot_id) &&
+    return credential(value.bot_id, 200) && expected.bot_ids.includes(value.bot_id) &&
       (value.esmeaddr === undefined || value.esmeaddr === expected.esmeaddr) &&
-      ['session', 'user'].every(key => value[key] === undefined || credential(value[key]));
+      ['session', 'user'].every(key => value[key] === undefined || credential(value[key], key === 'session' ? 1000 : 300));
   }
   return value.base_url === expected.base_url && value.workspace_id === expected.workspace_id &&
-    credential(value.refresh_token) && credential(value.cookie, 65536);
+    credential(value.refresh_token) && credential(value.cookie, 32000);
 }
 function persistLocal() { return chrome.storage.local.set({[LOCAL_KEY]: {version: 2, devices, activeTarget}}); }
 function persistSession() { return chrome.storage.session.set({[SESSION_KEY]: {targets: transient, pairingError}}); }
@@ -113,9 +126,13 @@ const ready = (async () => {
     if (snapshot && !snapshot.account && key === 'bajaj/whatsapp') {
       snapshot = {...snapshot, account: 'bajaj', integration: 'whatsapp'};
     }
+    const snapshotAccepted = isSnapshot(snapshot, devices[key]);
     transient[key] = {
-      pendingSnapshot: isSnapshot(snapshot, devices[key]) ? snapshot : null,
-      lastError: typeof state.lastError === 'string' ? state.lastError : '', syncing: false,
+      pendingSnapshot: snapshotAccepted ? snapshot : null,
+      lastError: snapshot && !snapshotAccepted ? ERROR_MESSAGES.capture_invalid : (typeof state.lastError === 'string' ? state.lastError : ''),
+      lastErrorCode: snapshot && !snapshotAccepted ? 'capture_invalid' :
+        (Object.hasOwn(ERROR_MESSAGES, state.lastErrorCode) ? state.lastErrorCode : (state.lastError ? 'request_failed' : '')),
+      syncing: false,
     };
   }
   pairingError = typeof previous.pairingError === 'string' ? previous.pairingError : '';
@@ -141,12 +158,20 @@ async function api(path, {method = 'POST', body, device} = {}) {
       ...(body === undefined ? {} : {body: JSON.stringify(body)}),
       signal: AbortSignal.timeout(20000),
     });
-  } catch { throw new Error('Could not reach the agent. Check your connection and retry.'); }
-  // Do not forward upstream response bodies: they can contain portal secrets.
+  } catch { throw failure('network_error'); }
+  // Inspect only allowlisted codes; never forward provider bodies or Pydantic inputs.
   if (!response.ok) {
-    throw new Error(response.status === 401 || response.status === 403
-      ? 'The agent rejected authentication or this target identity. Reconnect this target in Settings, then log into the matching portal.'
-      : `The agent could not validate this request (HTTP ${response.status}). Retry or check this target in Settings.`);
+    if (response.status === 401) throw failure('device_expired');
+    if (response.status === 403) throw failure('scope_denied');
+    if (response.status === 409) throw failure('identity_conflict');
+    if (response.status === 422) {
+      let detail;
+      try { detail = (await response.json())?.detail; } catch { /* Untrusted or unreadable detail. */ }
+      if (detail && !Array.isArray(detail) && detail.integration === device?.integration &&
+          ['provider_validation_failed', 'incomplete_session'].includes(detail.code)) throw failure(detail.code);
+      throw failure('schema_rejected');
+    }
+    throw failure('request_failed');
   }
   try { return await response.json(); } catch {
     throw new Error('The agent returned an unreadable response. Retry.');
@@ -171,9 +196,10 @@ async function syncPending(key) {
   if (!device) return {ok: false, message: 'Choose a connected target first.'};
   const state = stateFor(key);
   if (!paired(device)) {
-    state.lastError = 'Pairing expired. Reconnect this target from agent Settings.';
+    state.lastErrorCode = 'device_expired';
+    state.lastError = ERROR_MESSAGES.device_expired;
     await persistSession();
-    return {ok: false, message: state.lastError};
+    return {ok: false, message: state.lastError, error_code: state.lastErrorCode};
   }
   if (!state.pendingSnapshot) return {ok: false, message: `No complete matching request is available. ${nextStep(device)}`};
   state.syncing = true;
@@ -191,11 +217,17 @@ async function syncPending(key) {
     }
     state.pendingSnapshot = null;
     state.lastError = '';
+    state.lastErrorCode = '';
     return {ok: true, account: device.account, integration: device.integration,
       message: 'Credentials for this target were validated by the backend and synced.'};
   } catch (error) {
-    state.lastError = error.message;
-    return {ok: false, message: state.lastError};
+    state.lastErrorCode = Object.hasOwn(ERROR_MESSAGES, error.code) ? error.code : 'request_failed';
+    state.lastError = ERROR_MESSAGES[state.lastErrorCode];
+    if (state.lastErrorCode === 'device_expired') {
+      device.deviceExpiresAt = 0;
+      await persistLocal();
+    }
+    return {ok: false, message: state.lastError, error_code: state.lastErrorCode};
   } finally {
     state.syncing = false;
     await persistSession();
@@ -227,6 +259,15 @@ function status() {
     };
   })};
 }
+function scopedStatus(scope) {
+  const key = scopeKey(scope);
+  const device = devices[key];
+  const state = device ? stateFor(key) : null;
+  return {ok: true, message: 'Current browser capture status.', account: scope.account, integration: scope.integration,
+    paired: paired(device), pending: Boolean(state?.pendingSnapshot), syncing: Boolean(state?.syncing),
+    last_synced_at: device?.lastSyncedAt || null, capture_active: key === activeTarget,
+    error: state?.lastErrorCode || (device && !paired(device) ? 'device_expired' : null)};
+}
 async function pair(message) {
   try {
     const result = await api('redeem', {body: {code: message.code, agent_origin: AGENT_ORIGIN}});
@@ -242,7 +283,7 @@ async function pair(message) {
       deviceExpiresAt: result.expires_at, lastSuccessHash: null, lastSyncedAt: null,
     };
     // Never reuse a snapshot captured with an older pairing's configured identity.
-    transient[key] = {pendingSnapshot: null, lastError: '', syncing: false};
+    transient[key] = {pendingSnapshot: null, lastError: '', lastErrorCode: '', syncing: false};
     activeTarget = key;
     pairingError = '';
     await persistLocal();
@@ -252,7 +293,7 @@ async function pair(message) {
   } catch (error) {
     pairingError = error.message;
     await persistSession();
-    return {ok: false, message: pairingError};
+    return {ok: false, message: pairingError, error_code: Object.hasOwn(ERROR_MESSAGES, error.code) ? error.code : 'request_failed'};
   }
 }
 async function disconnect(key) {
@@ -291,9 +332,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ok: true, message: 'Auth Sync is installed.'});
       return false;
     }
-    if (message.type !== 'KARIX_EXTENSION_PAIR' || !validScope(message) ||
-        typeof message.code !== 'string' || !message.code || message.code.length > 1024) return false;
-    work = mutate(() => pair(message));
+    if (message.type === 'KARIX_EXTENSION_SCOPED_STATUS' && validScope(message)) {
+      work = ready.then(() => scopedStatus(message));
+    } else if (message.type === 'KARIX_EXTENSION_RETRY' && validScope(message)) {
+      work = mutate(async () => ({...await syncPending(scopeKey(message)),
+        account: message.account, integration: message.integration}));
+    } else {
+      if (message.type !== 'KARIX_EXTENSION_PAIR' || !validScope(message) ||
+          typeof message.code !== 'string' || !message.code || message.code.length > 1024) return false;
+      work = mutate(() => pair(message));
+    }
   } else if (popupSender(sender)) {
     if (message.type === 'KARIX_EXTENSION_STATUS') work = ready.then(status);
     else if (validScope(message) && message.type === 'KARIX_EXTENSION_SELECT') work = mutate(() => selectTarget(scopeKey(message)));
@@ -459,7 +507,7 @@ chrome.webRequest.onBeforeSendHeaders.addListener(details => {
         }
       }
       if (ambiguous || !isSnapshot(snapshot, device) || !tokenIdentityMatches(snapshot.bearer_token, device, snapshot)) {
-        candidate.error = 'The matching inventory request had incomplete or conflicting authentication. Log into this target normally and reload its inventory.';
+        candidate.error = ERROR_MESSAGES.capture_invalid;
         candidate.snapshot = null;
       } else candidate.snapshot = snapshot;
     }
@@ -478,12 +526,14 @@ function finishRequest(details, failure = '') {
       const state = stateFor(candidate.key);
       const error = failure || candidate.error || (!candidate.snapshot ? 'No complete matching credentials were observed. Reload this target inventory.' : '');
       if (error) {
+        state.lastErrorCode = failure ? 'inventory_failed' : 'capture_invalid';
         state.lastError = error;
         await persistSession();
         continue;
       }
       state.pendingSnapshot = candidate.snapshot;
       state.lastError = '';
+      state.lastErrorCode = '';
       await persistSession();
       await syncPending(candidate.key);
     }
@@ -491,11 +541,11 @@ function finishRequest(details, failure = '') {
 }
 chrome.webRequest.onCompleted.addListener(details => {
   finishRequest(details, details.statusCode < 200 || details.statusCode >= 300 || details.fromCache
-    ? 'The inventory request was not a fresh successful response. Log into this target normally and reload its inventory.' : '');
+    ? ERROR_MESSAGES.inventory_failed : '');
 }, REQUEST_FILTER);
 chrome.webRequest.onErrorOccurred.addListener(details => {
-  finishRequest(details, 'The inventory request failed. Check your connection, log into this target normally and reload its inventory.');
+  finishRequest(details, ERROR_MESSAGES.inventory_failed);
 }, REQUEST_FILTER);
 chrome.webRequest.onBeforeRedirect.addListener(details => {
-  finishRequest(details, 'The inventory request redirected. Log into this target normally and reload its inventory.');
+  finishRequest(details, ERROR_MESSAGES.inventory_failed);
 }, REQUEST_FILTER);

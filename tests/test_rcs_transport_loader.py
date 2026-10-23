@@ -76,7 +76,6 @@ def provider(monkeypatch):
     monkeypatch.setattr(rcs_client, "KARIX_RCS_SAVE_URL", base + "/save")
     monkeypatch.setattr(rcs_client, "KARIX_RCS_MEDIA_UPLOAD_URL", base + "/upload")
     monkeypatch.setattr(rcs_client, "KARIX_RCS_FETCH_TEMPLATES_URL", base + "/inventory")
-    monkeypatch.setattr(rcs_client, "KARIX_RCS_FETCH_URL", base + "/inventory")
     try:
         yield Handler
     finally:

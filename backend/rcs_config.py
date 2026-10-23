@@ -18,7 +18,6 @@ KARIX_RCS_BASE_URL = "https://rcsgui.karix.solutions/api/rcstemplate"
 KARIX_RCS_SAVE_URL = "https://rcsgui.karix.solutions/api/rcstemplate/save"
 KARIX_RCS_UPDATE_URL = "https://rcsgui.karix.solutions/api/rcstemplate/update"
 KARIX_RCS_DELETE_URL = "https://rcsgui.karix.solutions/api/rcstemplate/delete"
-KARIX_RCS_FETCH_URL = "https://rcsgui.karix.solutions/api/v1.0/rcstemplate/getTemplatesWithFilter"
 KARIX_RCS_FETCH_TEMPLATES_URL = "https://rcsgui.karix.solutions/api/rcstemplate/fetchTemplates"
 KARIX_RCS_MEDIA_UPLOAD_URL = "https://rcsgui.karix.solutions/v1.0/templates/mediaUpload"
 

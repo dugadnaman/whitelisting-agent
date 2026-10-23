@@ -4711,7 +4711,19 @@ def test_moengage_connection_endpoint(
         base_url_override=base_url,
         sender_id_override=sender_id,
     )
-    return _json_safe(result)
+    public = {key: result[key] for key in (
+        "ok", "account", "base_url", "sender_id", "workspace_id", "has_token", "has_cookie",
+        "has_refresh_token", "present", "expired", "expires_at", "iat", "remaining_sec",
+        "remaining_min", "template_count",
+    ) if key in result}
+    if not result.get("ok"):
+        if not result.get("has_token"):
+            public["error"] = "No saved MoEngage session. Connect Auth Sync for this account and workspace."
+        elif result.get("expired"):
+            public["error"] = "Saved MoEngage session expired. Reload this workspace in your logged-in dashboard to sync a fresh session."
+        else:
+            public["error"] = "MoEngage could not read this workspace with the saved session. Check this account's Auth Sync status."
+    return _json_safe(public)
 
 @app.post("/api/moengage/rcs/sync-karix")
 def sync_karix_rcs_to_moengage_endpoint(

@@ -14,7 +14,6 @@ import requests
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
     KARIX_RCS_FETCH_TEMPLATES_URL,
-    KARIX_RCS_FETCH_URL,
     KARIX_RCS_MEDIA_UPLOAD_URL,
     _account_prefix,
     get_rcs_auth_headers,
@@ -45,17 +44,11 @@ def check_rcs_credentials(
         headers = get_rcs_auth_headers(
             client, auth_token=bearer_token, session_id=session_id, portal_user=portal_user,
         )
-        response = requests.get(
-            KARIX_RCS_FETCH_URL, headers=headers, params={"senderId": bot_id},
+        response = requests.post(
+            KARIX_RCS_FETCH_TEMPLATES_URL, headers=headers,
+            json={"senderId": bot_id, "esmeaddr": esmeaddr},
             timeout=REQUEST_TIMEOUT, allow_redirects=False,
         )
-        # Older deployments expose only the repository's documented read-only POST.
-        if response.status_code in (404, 405):
-            response = requests.post(
-                KARIX_RCS_FETCH_TEMPLATES_URL, headers=headers,
-                json={"senderId": bot_id, "esmeaddr": esmeaddr},
-                timeout=REQUEST_TIMEOUT, allow_redirects=False,
-            )
         if not response.ok or 300 <= response.status_code < 400:
             return False, "Karix RCS refused the captured session."
         data = response.json()

@@ -5,12 +5,11 @@ The Karix portal requires an OTP, so browser auto-login is gone. These tests
 verify the replacement contract:
 - 401 responses produce an actionable "session expired" failure (no retry loop)
 - missing credentials fail fast with the exact missing key named
-- saving credentials via the API persists to disk and reports GitHub status
+- saving one-time settings persists encrypted per account, without env/files/Git writes
 """
 
 import contextlib
 import tempfile
-import json
 import os
 import unittest
 from pathlib import Path
@@ -80,53 +79,41 @@ class TestCredentialContract(unittest.TestCase):
         self.assertIn("TCHFL_KARIX_BEARER_TOKEN", str(ctx.exception))
         self.assertIn("Settings", str(ctx.exception))
 
-    def test_update_credentials_persists_and_reports_github_status(self):
-        """PUT /api/credentials writes credentials.json and returns github_persisted status."""
+    def test_update_credentials_persists_encrypted_per_account(self):
+        """Static API credentials survive database reload without a plaintext export."""
         from fastapi.testclient import TestClient
+        from config import get_official_auth_headers
+        from portal_sessions import load_settings
+        import db
 
         directory = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(contextlib.chdir(directory))
         self.enterContext(patch("db.DEFAULT_SQLITE_PATH", Path(directory) / "auth.db"))
         self.enterContext(patch("db.get_database_url", return_value=""))
         self.enterContext(patch.dict(os.environ, {"JWT_SECRET": "0123456789abcdefFEDCBA9876543210" * 2}))
-        self.enterContext(patch("api._commit_credentials_to_github", return_value=None))
         self.enterContext(patch("api.QUEUE_MANAGER.notify_credentials_updated"))
         auth.init_auth_db()
         user = auth.register_user("cred-contract@example.com", "Credential-password-123", "Company Admin", "tata", "admin")
-        client = TestClient(api.app)
-        response = client.post("/api/auth/login", json={"email": user["email"], "password": "Credential-password-123"})
-        self.assertEqual(response.status_code, 200)
-        H = {"Authorization": f"Bearer {response.json()['token']}"}
-        creds_path = Path("credentials.json")
-
-        r = client.put(
-            "/api/credentials",
-            json={
-                "account": "tchfl",
-                "channel": "whatsapp",
-                "bearer_token": "cc_bearer_123",
-                "session": "cc_session_456",
-                "user": "CCUser",
-            },
-            headers=H,
-        )
-        self.assertEqual(r.status_code, 200)
-        body = r.json()
-        self.assertTrue(body["ok"])
-        # GITHUB_TOKEN not set in tests → skipped, not failed
-        self.assertIn(body.get("github_persisted"), (None, "committed"))
-
-        # Persisted to disk under the account's own prefix
-        creds = json.loads(creds_path.read_text(encoding="utf-8"))
-        self.assertEqual(creds.get("TCHFL_KARIX_BEARER_TOKEN"), "cc_bearer_123")
-        self.assertEqual(creds.get("TCHFL_KARIX_SESSION"), "cc_session_456")
-
-        # And readable back through the config layer (strict isolation)
-        from config import get_portal_auth_headers
-
-        h = get_portal_auth_headers("tchfl")
-        self.assertEqual(h["Authorization"], "Bearer cc_bearer_123")
-        self.assertEqual(h["Session"], "cc_session_456")
+        client = self.enterContext(TestClient(api.app))
+        login = client.post("/api/auth/login", json={"email": user["email"], "password": "Credential-password-123"})
+        self.assertEqual(login.status_code, 200)
+        headers = {"Authorization": f"Bearer {login.json()['token']}"}
+        response = client.put("/api/credentials", headers=headers, json={
+            "account": "tchfl", "channel": "whatsapp", "waba_auth_token": "one-time-tchfl-key",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["storage"], "encrypted_database")
+        self.assertEqual(load_settings("tchfl", "whatsapp")["TCHFL_WABA_AUTH_TOKEN"], "one-time-tchfl-key")
+        self.assertEqual(load_settings("tcl_promo", "whatsapp"), {})
+        self.assertEqual(get_official_auth_headers("tchfl"), {"Authentication": "Bearer one-time-tchfl-key"})
+        with db.get_db() as conn:
+            encrypted = conn.execute(
+                "SELECT encrypted_credentials FROM karix_scoped_credentials WHERE account = 'tchfl' AND kind = 'settings'"
+            ).fetchone()[0]
+        self.assertNotIn("one-time-tchfl-key", encrypted)
+        self.assertNotIn("TCHFL_WABA_AUTH_TOKEN", os.environ)
+        self.assertFalse(Path("credentials.json").exists())
+        self.assertFalse(Path(".env").exists())
 
 
 

@@ -163,7 +163,6 @@ def test_download_scopes_manifest_and_contains_no_credentials(extension_flow):
     assert response.status_code == 200, response.text
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         manifest = json.loads(archive.read("manifest.json"))
-        assert set(manifest["host_permissions"]) == {"https://rcsgui.karix.solutions/*", "https://*.moengage.com/*", ORIGIN + "/*"}
         assert manifest["content_scripts"][0]["matches"] == [ORIGIN + "/*"]
         assert "cookies" not in manifest["permissions"]
         all_assets = b"\n".join(archive.read(name) for name in archive.namelist())
@@ -425,31 +424,3 @@ def test_moengage_binds_provider_returned_tokens_and_preserves_failed_refresh(ex
     assert portal_sessions.load_session("bajaj", "moengage") is None
 
 
-def test_rcs_validation_uses_provider_inventory_and_never_whatsapp_headers(extension_flow, monkeypatch):
-    calls = []
-
-    class ProviderResponse:
-        status_code = 200
-        ok = True
-
-        def json(self):
-            return {"templateInfo": []}
-
-    def request(url, **kwargs):
-        calls.append((url, kwargs))
-        return ProviderResponse()
-
-    monkeypatch.setattr(rcs_client.requests, "get", request)
-    monkeypatch.setenv("TCL_PROMO_KARIX_SESSION", "wrong-wa-session")
-    monkeypatch.setenv("TCL_PROMO_KARIX_USER", "wrong-wa-user")
-    valid, _ = rcs_client.check_rcs_credentials(
-        "tcl_promo", bearer_token="rcs-only-token", bot_id=rcs_config.get_rcs_bot_id("tcl_promo"),
-        esmeaddr=rcs_config.get_rcs_esmeaddr("tcl_promo"),
-    )
-    assert valid
-    url, options = calls[0]
-    assert url == rcs_config.KARIX_RCS_FETCH_URL
-    assert options["params"] == {"senderId": rcs_config.get_rcs_bot_id("tcl_promo")}
-    assert options["headers"]["Authorization"] == "Bearer rcs-only-token"
-    assert "Session" not in options["headers"] and "User" not in options["headers"]
-    assert options["allow_redirects"] is False

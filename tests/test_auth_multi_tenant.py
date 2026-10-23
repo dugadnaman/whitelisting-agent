@@ -474,7 +474,7 @@ def test_operators_can_read_and_update_own_credentials_but_cannot_cross_tenants_
     colleague, colleague_headers = provision_user(tenant)
     (tmp_path / ".env").write_text("UNRELATED_SETTING=preserved\n")
     (tmp_path / "credentials.json").write_text(json.dumps({"UNRELATED_SETTING": "preserved"}))
-    with patch.dict(os.environ), patch("api._commit_credentials_to_github"), patch("api.QUEUE_MANAGER.notify_credentials_updated"):
+    with patch.dict(os.environ), patch("api.QUEUE_MANAGER.notify_credentials_updated"):
         os.environ["GEMINI_API_KEY"] = "private-platform-key"
         own = client.get(f"/api/credentials?account={account}", headers=headers)
         assert own.status_code == 200
@@ -484,16 +484,29 @@ def test_operators_can_read_and_update_own_credentials_but_cannot_cross_tenants_
         })
         assert saved.status_code == 200
         assert client.get(f"/api/credentials?account={account}&channel=rcs", headers=colleague_headers).json()["rcs_bot_id"] == "synthetic-bot"
-        saved = client.put("/api/moengage/credentials", headers=headers, json={
-            "account": account, "bearer_token": "synthetic-token",
-            "refresh_token": "synthetic-refresh", "cookie": "moe_uuid=synthetic",
+        workspace = "0123456789abcdef01234567"
+        metadata = client.put("/api/moengage/credentials", headers=headers, json={
+            "account": account, "base_url": "https://dashboard-03.moengage.com", "workspace_id": workspace,
         })
-        assert saved.status_code == 200
+        assert metadata.status_code == 200
+        bound = {
+            "bearer_token": "scoped-token", "refresh_token": "scoped-refresh", "cookie": "moe_uuid=synthetic",
+            "base_url": "https://dashboard-03.moengage.com", "workspace_id": workspace,
+        }
+        with patch("moengage_sync.check_moengage_session", return_value=bound):
+            saved = client.put("/api/moengage/credentials", headers=headers, json={
+                "account": account, "bearer_token": "synthetic-token",
+                "refresh_token": "synthetic-refresh", "cookie": "moe_uuid=synthetic",
+            })
+        assert saved.status_code == 200 and saved.json()["storage"] == "encrypted_database"
         shared = client.get(f"/api/moengage/credentials?account={account}", headers=colleague_headers)
         assert shared.status_code == 200
-        assert shared.json()["bearer_token"] == "synthetic-token"
-        assert shared.json()["refresh_token"] == "synthetic-refresh"
-        assert shared.json()["cookie"] == "moe_uuid=synthetic"
+        assert shared.json()["bearer_token"] == shared.json()["refresh_token"] == shared.json()["cookie"] == ""
+        assert shared.json()["has_token"] and shared.json()["has_refresh_token"] and shared.json()["has_cookie"]
+        from portal_sessions import load_session, load_settings
+        assert load_session(account, "moengage") == bound
+        assert load_session(other, "moengage") is None
+        assert load_settings(account, "rcs")[account.upper() + "_RCS_BOT_ID"] == "synthetic-bot"
         persisted = (tmp_path / "credentials.json").read_bytes()
         assert json.loads(persisted)["UNRELATED_SETTING"] == "preserved"
         assert "UNRELATED_SETTING=preserved" in (tmp_path / ".env").read_text()

@@ -198,11 +198,21 @@ Deploy/restart the updated backend and frontend together. In **Settings**, choos
 5. Return to Settings and **Refresh status**. **Check saved session** performs a fresh
    provider validation check.
 
-**Updating an unpacked extension:** replace its files in the same folder, then click its reload icon in
-`chrome://extensions` and reload Settings and the provider inventory. Version **2.0.1** adds the exact
-`https://rcmui.instaalerts.zone/*` frontend permission: Chrome requires access to both the API host and
-the request initiator. It also preserves the first matching request when the MV3 worker is waking and
-restoring stored pairings. Keeping the same unpacked folder preserves existing device pairings.
+**Updating an unpacked extension:** use version **2.0.2**, replace its files in the same folder, then click
+its reload icon in `chrome://extensions` and reload Settings and the provider inventory. Keeping the
+same unpacked folder preserves device pairings. The downloaded ZIP retains the exact Karix frontend
+permission (`https://rcmui.instaalerts.zone/*`) as well as the API host: Chrome requires both.
+The MV3 worker preserves the first matching request while restoring stored pairings.
+
+**Capture vs validation:** Settings shows the current browser's scoped pairing, pending capture and
+safe error category separately from server-side device registrations and saved-session history.
+**Retry captured session** resends only that target's pending snapshot without replacing its device
+pairing. Provider rejection does not mean the Chrome pairing or OTP expired. RCS validation uses the
+same portal POST `/api/rcstemplate/fetchTemplates` as normal inventory reads, with exact bot and ESME
+checks; it does not try the incompatible GET surface. MoEngage must be paired separately even when
+the popup already has an RCS target. No saved MoEngage session is shown as **not connected**, not expired.
+Health responses expose counts and state, never saved bearer tokens, refresh tokens, cookies, or raw
+provider error bodies.
 
 **Static vs Browser Credentials**:
 - **Renewable browser sessions** (Karix WhatsApp, Karix RCS, MoEngage) sync automatically from real browser requests.

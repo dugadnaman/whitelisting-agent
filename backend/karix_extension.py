@@ -173,11 +173,11 @@ def validate_session(body: SessionRequest, *, bind_workspace: bool = True) -> di
             snapshot["user"] = body.user
         if body.integration == "whatsapp":
             if not body.session or not body.user:
-                raise HTTPException(status_code=422, detail="WhatsApp requires Bearer, Session and User from one logged-in request.")
+                raise HTTPException(status_code=422, detail={"code": "incomplete_session", "integration": body.integration})
             if body.bot_id is not None:
                 raise HTTPException(status_code=409, detail="An RCS bot cannot identify a WhatsApp session.")
             from submission_client import check_portal_credentials
-            valid, message = check_portal_credentials(
+            valid, _ = check_portal_credentials(
                 body.account, bearer_token=bearer, session_id=body.session, portal_user=body.user,
                 waba_id=identity["waba_id"], esmeaddr=identity["esmeaddr"],
             )
@@ -186,14 +186,14 @@ def validate_session(body: SessionRequest, *, bind_workspace: bool = True) -> di
             if not bot or bot not in identity["bot_ids"]:
                 raise HTTPException(status_code=409, detail="Observed RCS bot is not configured for this account.")
             from rcs_client import check_rcs_credentials
-            valid, message = check_rcs_credentials(
+            valid, _ = check_rcs_credentials(
                 body.account, bearer_token=bearer, session_id=body.session, portal_user=body.user,
                 bot_id=bot, esmeaddr=identity["esmeaddr"],
             )
             snapshot["bot_id"] = bot
     else:
         if not body.refresh_token or not body.cookie:
-            raise HTTPException(status_code=422, detail="MoEngage requires Bearer, refresh token and Cookie from one dashboard request.")
+            raise HTTPException(status_code=422, detail={"code": "incomplete_session", "integration": body.integration})
         from moengage_sync import check_moengage_session
         try:
             snapshot = check_moengage_session(
@@ -201,11 +201,11 @@ def validate_session(body: SessionRequest, *, bind_workspace: bool = True) -> di
                 base_url=identity["base_url"], workspace_id=identity["workspace_id"],
                 bind_workspace=bind_workspace,
             )
-        except (ValueError, TypeError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from None
-        valid, message = True, "MoEngage session bound to the configured workspace."
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail={"code": "provider_validation_failed", "integration": body.integration}) from None
+        valid = True
     if not valid:
-        raise HTTPException(status_code=422, detail=message)
+        raise HTTPException(status_code=422, detail={"code": "provider_validation_failed", "integration": body.integration})
     snapshot.update({key: value for key, value in identity.items() if isinstance(value, str)})
     return snapshot
 
@@ -373,7 +373,10 @@ def download_extension(body: OriginRequest, user: dict = Depends(get_current_use
         raise HTTPException(status_code=403, detail="Organization access has not been approved.")
     origin = _approved_origin(body.agent_origin)
     manifest = json.loads((ASSET_DIR / "manifest.json").read_text())
-    manifest["host_permissions"] = ["https://rcsgui.karix.solutions/*", "https://*.moengage.com/*", origin + "/*"]
+    agent_matches = {match for script in manifest["content_scripts"] for match in script["matches"]}
+    manifest["host_permissions"] = [
+        permission for permission in manifest["host_permissions"] if permission not in agent_matches
+    ] + [origin + "/*"]
     manifest["content_scripts"][0]["matches"] = [origin + "/*"]
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w", zipfile.ZIP_DEFLATED) as archive:

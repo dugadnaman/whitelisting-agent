@@ -361,26 +361,24 @@ def test_malformed_reachability_does_not_replace_unique_user_count(reachable):
     assert error.value.status_code == 502
 
 
-def test_refresh_token_can_be_cleared_without_affecting_omitted_updates(monkeypatch, tmp_path):
-    import json
-    import os
+def test_incomplete_refresh_override_never_mutates_saved_snapshot(monkeypatch, tmp_path):
     import api
+    from portal_sessions import load_session, save_session
+
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(api, "log_activity", lambda **kwargs: None)
-    for key in ("TATA_MOENGAGE_REFRESH_TOKEN", "MOENGAGE_REFRESH_TOKEN"):
-        monkeypatch.setenv(key, "stored-refresh-token")
+    original = {"bearer_token": "stored-bearer", "refresh_token": "stored-refresh", "cookie": "session=stored"}
+    save_session(original, "tata", "moengage")
     user = {"sub": "tata-admin", "tenant_id": "tata", "role": "admin", "name": "Admin"}
     omitted = api.update_moengage_credentials_endpoint(api.MoEngageCredentialUpdate(account="tata"), user)
-    assert omitted["updated_keys"] == []
-    assert os.environ["TATA_MOENGAGE_REFRESH_TOKEN"] == "stored-refresh-token"
-    cleared = api.update_moengage_credentials_endpoint(
-        api.MoEngageCredentialUpdate(account="tata", refresh_token=""), user)
-    assert set(cleared["updated_keys"]) == {"MOENGAGE_REFRESH_TOKEN", "TATA_MOENGAGE_REFRESH_TOKEN"}
-    persisted = json.loads((tmp_path / "credentials.json").read_text())
-    for key in cleared["updated_keys"]:
-        assert os.environ[key] == ""
-        assert persisted[key] == ""
-        assert f"{key}=" in (tmp_path / ".env").read_text().splitlines()
+    assert omitted["updated_keys"] == [] and omitted["storage"] == "encrypted_database"
+    assert load_session("tata", "moengage") == original
+    with pytest.raises(HTTPException) as error:
+        api.update_moengage_credentials_endpoint(
+            api.MoEngageCredentialUpdate(account="tata", refresh_token="partial-new-refresh"), user)
+    assert error.value.status_code == 422
+    assert load_session("tata", "moengage") == original
+    assert not (tmp_path / "credentials.json").exists()
+    assert not (tmp_path / ".env").exists()
 
 
 def test_switch_cookies_are_used_for_selected_workspace_and_reset_for_next_switch(monkeypatch):

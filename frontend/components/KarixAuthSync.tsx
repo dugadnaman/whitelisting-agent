@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { fetchWithRetry, getApiUrl, getErrorMessage } from '@/lib/api';
+import { fetchWithRetry, getApiUrl } from '@/lib/api';
 
 type Integration = 'whatsapp' | 'rcs' | 'sms' | 'moengage';
 type Scope = { account: string; integration: Integration };
@@ -17,8 +17,43 @@ type SyncStatus = Scope & {
   validation_state: 'never' | 'valid' | 'invalid';
   message: string;
 };
-type Action = 'refresh' | 'detect' | 'download' | 'connect' | 'check' | 'disconnect';
+type Action = 'refresh' | 'detect' | 'download' | 'connect' | 'check' | 'disconnect' | 'retry';
 type Feedback = { type: 'success' | 'error'; message: string } | null;
+type BrowserStatus = Scope & {
+  paired: boolean;
+  pending: boolean;
+  syncing: boolean;
+  capture_active: boolean;
+  last_synced_at: number | null;
+  error: string | null;
+};
+const SYNC_ERRORS: Record<string, string> = {
+  device_expired: 'This browser’s device pairing expired or was revoked. Reconnect only this account and integration; your portal login is separate.',
+  scope_denied: 'This device is not authorized for this account and integration. Check the exact configured target in Settings; do not copy credentials from another account.',
+  identity_conflict: 'The captured identity conflicts with this configured target. Select its exact bot, WABA, or MoEngage workspace and reload its inventory.',
+  provider_validation_failed: 'The provider did not validate the captured session. Reload this exact target’s inventory in the already logged-in portal, then retry. If the inventory works but sync still fails, ask your administrator to check provider validation. Re-pairing or repeating OTP is not required just to retry.',
+  incomplete_session: 'The captured session is incomplete. Reload this exact target’s inventory in the already logged-in portal to capture all required headers together.',
+  schema_rejected: 'The agent rejected the captured session format or size. Update to extension 2.0.2 and reload this exact target’s inventory. Credentials are never truncated; contact your administrator if this repeats.',
+  capture_invalid: 'The matching request had incomplete, conflicting, or oversized authentication. Reload this exact target’s inventory in the already logged-in portal. Supported lengths: bearer/refresh 16000, session 1000, user 300, cookie 32000, bot 200 characters.',
+  inventory_failed: 'The inventory request was not a fresh successful response. Check the portal connection and reload this exact target’s inventory. Sign in only if the portal session itself has expired.',
+  network_error: 'Could not reach the agent. Check your connection and retry the captured session.',
+  request_failed: 'Auth Sync could not complete this request. Retry for this exact target or ask your administrator to check the service.',
+};
+function syncError(code: unknown): string {
+  return typeof code === 'string' && Object.hasOwn(SYNC_ERRORS, code) ? SYNC_ERRORS[code] : SYNC_ERRORS.request_failed;
+}
+
+function isBrowserStatus(value: unknown, scope: Scope): value is BrowserStatus {
+  return typeof value === 'object' && value !== null &&
+    'account' in value && value.account === scope.account &&
+    'integration' in value && value.integration === scope.integration &&
+    'paired' in value && typeof value.paired === 'boolean' &&
+    'pending' in value && typeof value.pending === 'boolean' &&
+    'syncing' in value && typeof value.syncing === 'boolean' &&
+    'capture_active' in value && typeof value.capture_active === 'boolean' &&
+    'last_synced_at' in value && isTimestamp(value.last_synced_at) &&
+    'error' in value && (value.error === null || (typeof value.error === 'string' && Object.hasOwn(SYNC_ERRORS, value.error)));
+}
 
 function isTimestamp(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value) && value > 0);
@@ -49,13 +84,28 @@ async function request(path: string, signal: AbortSignal, method = 'GET', body?:
     method, signal, redirect: 'error', credentials: 'omit', cache: 'no-store',
     ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
   }, 0, 800, 20000);
-  if (!response.ok) throw new Error(await getErrorMessage(response));
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('Your agent sign-in expired or is unavailable. Sign in to the agent again; this is separate from the provider portal and extension pairing.');
+    if (response.status === 403) throw new Error(syncError('scope_denied'));
+    if (response.status === 409) throw new Error(syncError('identity_conflict'));
+    if (response.status === 422) {
+      let detail: unknown;
+      try { detail = (await response.json())?.detail; } catch { /* Never display untrusted response text. */ }
+      const expected = body && 'integration' in body ? body.integration : new URLSearchParams(path.split('?')[1]).get('integration');
+      if (typeof detail === 'object' && detail !== null && 'integration' in detail && detail.integration === expected &&
+          'code' in detail && (detail.code === 'provider_validation_failed' || detail.code === 'incomplete_session')) {
+        throw new Error(syncError(detail.code));
+      }
+      throw new Error(syncError('schema_rejected'));
+    }
+    throw new Error(syncError('request_failed'));
+  }
   return response;
 }
 
-function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR', signal: AbortSignal, pairing?: Scope & { code: string }): Promise<void> {
+function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' | 'KARIX_EXTENSION_SCOPED_STATUS' | 'KARIX_EXTENSION_RETRY', signal: AbortSignal, scope?: Scope & { code?: string }): Promise<unknown> {
   signal.throwIfAborted();
-  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const { promise, resolve, reject } = Promise.withResolvers<unknown>();
   const requestId = crypto.randomUUID();
   const origin = window.location.origin;
   const cleanup = () => {
@@ -72,25 +122,27 @@ function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR',
         !('requestId' in data) || data.requestId !== requestId ||
         !('ok' in data) || typeof data.ok !== 'boolean' ||
         !('message' in data) || typeof data.message !== 'string') return;
-    if (data.ok && pairing && (!('account' in data) || data.account !== pairing.account ||
-        !('integration' in data) || data.integration !== pairing.integration)) {
+    if (data.ok && scope && (!('account' in data) || data.account !== scope.account ||
+        !('integration' in data) || data.integration !== scope.integration)) {
       cleanup();
       reject(new Error('The extension confirmed a different account or integration. Refresh scoped status before retrying.'));
       return;
     }
     cleanup();
-    if (data.ok) resolve();
-    else reject(new Error(data.message || 'The extension could not complete the request.'));
+    if (data.ok) resolve(data);
+    else reject(new Error(syncError('error_code' in data ? data.error_code : null)));
   };
   const timer = window.setTimeout(() => {
     cleanup();
     reject(new Error(type === 'KARIX_EXTENSION_PAIR'
       ? 'Pairing was not confirmed in time. Refresh status before trying Connect again.'
-      : 'Auth Sync did not respond. Install this site’s extension and reload Settings.'));
-  }, type === 'KARIX_EXTENSION_PAIR' ? 45000 : 2500);
+      : type === 'KARIX_EXTENSION_RETRY'
+        ? 'Retry was not confirmed in time. Refresh browser capture status before retrying; the existing device was preserved.'
+        : 'Auth Sync 2.0.2 did not respond. Install or reload this site’s extension and reload Settings.'));
+  }, type === 'KARIX_EXTENSION_PAIR' || type === 'KARIX_EXTENSION_RETRY' ? 45000 : 2500);
   window.addEventListener('message', onMessage);
   signal.addEventListener('abort', onAbort, { once: true });
-  try { window.postMessage({ type, requestId, ...pairing }, origin); }
+  try { window.postMessage({ type, requestId, ...scope }, origin); }
   catch (error) { cleanup(); reject(error); }
   return promise;
 }
@@ -101,6 +153,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<boolean | null>(null);
+  const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
   const [action, setAction] = useState<Action | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const lifecycle = useRef<AbortController | null>(null);
@@ -108,6 +161,19 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const download = useRef<{ url?: string; timer?: number }>({});
   const scopeQuery = new URLSearchParams({ account, integration }).toString();
 
+  const readBrowserStatus = useCallback(async (signal: AbortSignal) => {
+    if (integration === 'sms') return;
+    try {
+      const next = await extensionMessage('KARIX_EXTENSION_SCOPED_STATUS', signal, { account, integration });
+      if (!isBrowserStatus(next, { account, integration })) throw new Error('Reload Auth Sync 2.0.2 and Settings to read current browser capture status.');
+      signal.throwIfAborted();
+      setBrowserStatus(next);
+      setInstalled(true);
+    } catch (error) {
+      if (!signal.aborted) { setBrowserStatus(null); setInstalled(false); }
+      throw error;
+    }
+  }, [account, integration]);
   const readStatus = useCallback(async (signal: AbortSignal, path = 'status', method = 'GET') => {
     try {
       const response = await request(`${path}?${scopeQuery}`, signal, method);
@@ -167,18 +233,29 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     setStatus(null);
     setStatusError(null);
     setInstalled(null);
+    setBrowserStatus(null);
     setFeedback(null);
     const onFocus = () => { void perform('refresh', refresh, false); };
     void perform('refresh', refresh, false);
+    let readingBrowser = false;
+    const pollBrowser = async () => {
+      if (readingBrowser || controller.signal.aborted) return;
+      readingBrowser = true;
+      try { await readBrowserStatus(controller.signal); } catch { /* Detection state is shown separately. */ }
+      finally { readingBrowser = false; }
+    };
+    void pollBrowser();
+    const browserTimer = window.setInterval(() => { void pollBrowser(); }, 3000);
     window.addEventListener('focus', onFocus);
     return () => {
       controller.abort();
+      window.clearInterval(browserTimer);
       window.removeEventListener('focus', onFocus);
       window.clearTimeout(download.current.timer);
       if (download.current.url) URL.revokeObjectURL(download.current.url);
       download.current = {};
     };
-  }, [perform, refresh]);
+  }, [perform, refresh, readBrowserStatus]);
 
   function downloadExtension() {
     void perform('download', async (signal) => {
@@ -206,8 +283,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   function detectExtension() {
     void perform('detect', async (signal) => {
       try {
-        await extensionMessage('KARIX_EXTENSION_PING', signal);
-        if (!signal.aborted) setInstalled(true);
+        await readBrowserStatus(signal);
         return 'Auth Sync is installed for this site.';
       } catch (error) {
         if (!signal.aborted) setInstalled(false);
@@ -228,10 +304,11 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       signal.throwIfAborted();
       await extensionMessage('KARIX_EXTENSION_PAIR', signal, { code: pairing.code, account, integration });
       const next = await readStatus(signal);
+      await readBrowserStatus(signal);
       if (!next.paired) throw new Error('No active scoped device was confirmed. Refresh status before connecting again.');
       return next.validation_state === 'valid'
         ? 'Connected for this account and integration. The saved session passed backend validation.'
-        : 'Connected. Log in normally to the matching portal workspace and open its template list to transfer a validated session.';
+        : 'Connected for this exact target. Select it in the extension popup, then reload its inventory in your already logged-in portal. Sign in only if the portal session has expired.';
     });
   }
 
@@ -252,6 +329,19 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       setStatus((previous) => previous ? { ...previous, paired: false } : previous);
       await readStatus(signal);
       return 'Your devices and pending pairing codes for this account and integration were revoked. Other scopes and the saved session were not changed.';
+    });
+  }
+
+  function retryCapturedSession() {
+    if (!browserStatus?.paired || !browserStatus.pending || browserStatus.syncing) return;
+    void perform('retry', async (signal) => {
+      try {
+        await extensionMessage('KARIX_EXTENSION_RETRY', signal, { account, integration });
+        await readStatus(signal);
+        return 'The captured session for this account and integration was validated and synced. The existing device pairing was preserved.';
+      } finally {
+        await readBrowserStatus(signal).catch(() => {});
+      }
     });
   }
 
@@ -285,9 +375,9 @@ export default function KarixAuthSync({ account, integration }: Scope) {
         <ol className="list-decimal pl-5 text-xs text-gray-600 space-y-2">
           <li>Download this site’s extension ZIP and unzip it. In <code>chrome://extensions</code>, enable Developer mode, choose Load unpacked, and select the folder containing <code>manifest.json</code>.</li>
           <li>Reload Settings, detect the extension, then connect this account and integration. Pairing sends a single-use code, never your app login token.</li>
-          <li>Open {portal}, log in normally{integration !== 'moengage' ? ' with your mobile OTP' : ''}, select the configured workspace, and open its {integration === 'rcs' ? 'RCS' : integration === 'whatsapp' ? 'WhatsApp' : ''} template list.</li>
+          <li>Select this exact account and integration in the extension popup. Open {portal}’s configured {integration === 'rcs' ? 'RCS bot' : integration === 'whatsapp' ? 'WhatsApp WABA' : 'MoEngage workspace'} and reload its inventory using the already logged-in session.</li>
         </ol>
-        <p className="text-xs text-gray-600">Login and OTP remain manual. Only same-request session credentials matching the configured provider identity are transferred and validated. Pair each account/channel separately; WhatsApp and RCS tokens are not shared. For capture errors, use Retry sync for this target in the extension popup.</p>
+        <p className="text-xs text-gray-600">Sign in manually only if the provider portal session has expired; mobile OTP is not repeated just to sync. Only same-request credentials matching this configured target are transferred. Each account/channel is paired separately; an RCS popup target does not connect MoEngage.</p>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={downloadExtension} disabled={disabled} className={buttonClass}>{action === 'download' ? 'Downloading...' : 'Download extension ZIP'}</button>
           <button type="button" onClick={detectExtension} disabled={disabled} className={buttonClass}>{action === 'detect' ? 'Detecting...' : 'Detect extension'}</button>
@@ -295,11 +385,20 @@ export default function KarixAuthSync({ account, integration }: Scope) {
         </div>
         <p className="text-[11px] text-gray-500" role="status">{installed === null ? 'Detect the extension after installing this site’s download.' : installed ? 'Extension detected. Pairing and session validation are shown separately below.' : 'Extension not detected. Install this site’s download, reload Settings, then detect again.'}</p>
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-white p-3 text-xs">
-          <div><dt className="font-semibold text-gray-500">Your scoped devices</dt><dd className="mt-1 text-gray-800">{statusError ? 'Could not confirm pairing' : status?.paired ? 'At least one active device for this scope' : 'No confirmed active devices'}</dd></div>
-          <div><dt className="font-semibold text-gray-500">Saved scoped session</dt><dd className={`mt-1 ${invalid ? 'text-red-700' : 'text-gray-800'}`}>{statusError ? 'Could not confirm validation' : status?.validation_state === 'valid' ? 'Passed last backend check' : status?.validation_state === 'invalid' ? 'Invalid or expired — log in and sync again' : 'Not validated yet'}</dd></div>
+          <div><dt className="font-semibold text-gray-500">Backend device registrations</dt><dd className="mt-1 text-gray-800">{statusError ? 'Could not confirm pairing' : status?.paired ? 'At least one active device for this scope (not necessarily this browser)' : 'No confirmed active devices'}</dd></div>
+          <div><dt className="font-semibold text-gray-500">Saved backend session</dt><dd className={`mt-1 ${invalid ? 'text-red-700' : 'text-gray-800'}`}>{statusError ? 'Could not confirm validation' : status?.validation_state === 'valid' ? 'Passed last backend check' : status?.validation_state === 'invalid' ? 'Last validation failed — reload the matching logged-in inventory and sync again' : 'Not validated yet'}</dd></div>
           <div><dt className="font-semibold text-gray-500">Last successful sync</dt><dd className="mt-1 text-gray-800">{status?.last_synced_at ? new Date(status.last_synced_at * 1000).toLocaleString() : 'No successful sync yet'}</dd></div>
           <div><dt className="font-semibold text-gray-500">Last validation</dt><dd className="mt-1 text-gray-800">{status?.last_validated_at ? new Date(status.last_validated_at * 1000).toLocaleString() : 'Not checked yet'}</dd></div>
         </dl>
+        <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2" role="status" aria-live="polite">
+          <p className="font-semibold text-gray-700">Current browser · {account} · {integration.toUpperCase()}</p>
+          <p>{!browserStatus ? 'Current browser capture unavailable. Reload Auth Sync 2.0.2 and this Settings page.' : !browserStatus.paired ? 'This browser is not paired for this account and integration.' : browserStatus.syncing ? 'Captured session is being validated by the backend.' : browserStatus.pending ? 'Matching session captured and pending sync. Retry below without reconnecting.' : 'This browser is paired; no captured session is waiting to sync.'}</p>
+          {!statusError && status?.paired && browserStatus && !browserStatus.paired && <p className="text-amber-800">The server has an active device registration, but this browser has no active pairing for this scope. Connect this browser separately; another device’s session is not adopted.</p>}
+          {browserStatus && !browserStatus.capture_active && <p className="text-amber-800">The extension popup is not targeting this selected {integration.toUpperCase()} integration. {browserStatus.paired ? 'Select' : 'After connecting this browser, select'} {account} · {integration.toUpperCase()} in the popup{integration === 'moengage' ? '; an RCS selection does not pair or capture this MoEngage workspace' : ''}. Other targets are not changed from Settings.</p>}
+          {browserStatus?.last_synced_at && <p className="text-gray-500">This browser’s last validated sync: {new Date(browserStatus.last_synced_at * 1000).toLocaleString()} (historical).</p>}
+          {browserStatus?.error && <p className="text-red-700" role="alert">{syncError(browserStatus.error)}</p>}
+          {browserStatus?.pending && browserStatus.paired && <button type="button" onClick={retryCapturedSession} disabled={disabled || browserStatus.syncing} className={buttonClass}>{action === 'retry' ? 'Retrying captured session...' : 'Retry captured session'}</button>}
+        </div>
         {!statusError && status?.message && <p className="text-xs text-gray-600">{status.message}</p>}
       </>}
       {statusError && <p role="alert" className="text-xs text-red-700">{statusError} Any displayed timestamps are last known values.</p>}
