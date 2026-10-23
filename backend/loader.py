@@ -233,6 +233,13 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
     """Legacy image extractor helper."""
     return [(m["filename"], m["bytes"]) for m in _extract_media_from_xlsx(path) if m["kind"] == "IMAGE"]
 
+def normalize_whatsapp_template_name(name: str) -> str:
+    """Normalize template name to Meta guidelines: lowercase letters, numbers, underscores only."""
+    clean = re.sub(r"[^a-zA-Z0-9_]+", "_", str(name or "").strip()).lower().strip("_")
+    clean = re.sub(r"_+", "_", clean)
+    return clean or "template"
+
+
 
 def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
     _TC_FIELDS = {
@@ -258,7 +265,10 @@ def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
         else:
             components.append(c)
     c_client = row.get("client") or client
-    template_name = row.get("template_name") or row.get("name")
+    raw_name = str(row.get("template_name") or row.get("name") or "").strip()
+    source_ref = str(row.get("source_ref") or raw_name)
+    channel = str(row.get("channel", "whatsapp")).lower().strip()
+    template_name = normalize_whatsapp_template_name(raw_name) if channel == "whatsapp" else raw_name
     return TemplateSubmission(
         client=c_client,
         channel=row.get("channel", "whatsapp"),
@@ -267,7 +277,7 @@ def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
         category=row.get("category", "MARKETING"),
         waba_id=row.get("waba_id") or _resolve_row_waba(c_client, {}),
         components=components,
-        source_ref=row.get("source_ref") or template_name,
+        source_ref=source_ref,
     )
 
 

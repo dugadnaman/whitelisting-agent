@@ -228,6 +228,54 @@ def _provider_failure(data: object) -> bool:
     return False
 
 
+def normalize_whatsapp_template_name(name: str) -> str:
+    """Normalize template name to Meta guidelines: lowercase letters, numbers, underscores only."""
+    clean = re.sub(r"[^a-zA-Z0-9_]+", "_", str(name or "").strip()).lower().strip("_")
+    clean = re.sub(r"_+", "_", clean)
+    return clean or "template"
+
+
+def _extract_provider_error(data: object) -> str:
+    """Extract human-readable error from Karix / Meta response payloads."""
+    if not isinstance(data, dict):
+        return "Karix rejected the template or returned an unrecognized response format."
+    reason = data.get("reason")
+    if isinstance(reason, dict):
+        err = reason.get("error")
+        if isinstance(err, dict):
+            user_msg = err.get("error_user_msg")
+            title = err.get("error_user_title")
+            if user_msg and title:
+                return f"{title}: {user_msg}"
+            if user_msg:
+                return str(user_msg)
+            if err.get("message") and "invalid parameter" not in str(err.get("message")).lower():
+                return str(err.get("message"))
+        if reason.get("message"):
+            return str(reason["message"])
+    elif isinstance(reason, str) and reason.strip():
+        return reason.strip()
+
+    err = data.get("error")
+    if isinstance(err, dict):
+        user_msg = err.get("error_user_msg")
+        title = err.get("error_user_title")
+        if user_msg and title:
+            return f"{title}: {user_msg}"
+        if user_msg:
+            return str(user_msg)
+        if err.get("message"):
+            return str(err["message"])
+    elif isinstance(err, str) and err.strip():
+        return err.strip()
+
+    if data.get("Failed"):
+        return str(data["Failed"])
+    if data.get("errorMessage"):
+        return str(data["errorMessage"])
+    return "Karix rejected the template or returned a malformed response. Review its components and the selected account's template list."
+
+
 def _provider_template_id(data: object) -> str | None:
     if _provider_failure(data):
         return None
@@ -824,7 +872,7 @@ def _build_portal_create_body(payload: TemplateSubmission, client: str = "bajaj"
         "allow_category_change": True,
         "allow_marketing_recategorization": True,
         "sessionId": "12345",  # literal hardcoded placeholder from real traffic
-        "template_name": payload.template_name,
+        "template_name": normalize_whatsapp_template_name(payload.template_name),
         "template_namespace_id": get_template_namespace_id(client),
         "language": payload.language,
         "category": payload.category,
@@ -914,10 +962,30 @@ def _evaluate_portal_create_response(
         if any(marker in str(data).lower() for marker in ("uploaded media handle is invalid", "check the handle provided", "2494102")):
             error = "Karix rejected the media handle for this account. Reattach the original creative and verify the selected account's Karix session; no replacement media was submitted."
         else:
-            error = "Karix rejected the template or returned a malformed response. Review its components and the selected account's template list."
+            error = _extract_provider_error(data)
     else:
         template_id = _provider_template_id(data)
-        error = None if template_id else "No valid provider template ID returned. Check the template list before trying again."
+        if not template_id and isinstance(data, dict):
+            status_text = str(data.get("status", "")).lower()
+            reason_text = str(data.get("reason", "")).lower()
+            if status_text == "success" or "successfully" in reason_text or "created" in reason_text:
+                try:
+                    rows, _ = fetch_template_list(c)
+                    target_name = normalize_whatsapp_template_name(payload.template_name)
+                    for r in rows:
+                        if str(r.get("template_name", "")).lower().strip() == target_name:
+                            template_id = str(r.get("fb_template_id") or r.get("sno") or "")
+                            break
+                except Exception:
+                    pass
+                if template_id:
+                    error = None
+                else:
+                    error = "No valid provider template ID returned. Check the template list before trying again."
+            else:
+                error = "No valid provider template ID returned. Check the template list before trying again."
+        else:
+            error = None if template_id else "No valid provider template ID returned. Check the template list before trying again."
     return SubmissionResult(
         source_ref=payload.source_ref,
         template_name=payload.template_name,
@@ -1006,7 +1074,7 @@ def _build_official_create_body(
     components = _resolve_body_variables(components, client=client, fix_grammar=fix_grammar)
 
     return {
-        "template_name": payload.template_name,
+        "template_name": normalize_whatsapp_template_name(payload.template_name),
         "language": payload.language,
         "category": payload.category,
         "components": components,
