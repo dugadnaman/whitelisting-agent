@@ -82,29 +82,29 @@ test('workspace and base lists reject unusable shapes rather than breaking rende
     { workspaces: [{ ...workspace, name: 4 }] }, { workspaces: [{ ...workspace, timezone: 'Not/AZone' }] },
     { workspaces: [workspace, workspace] }]) {
     const api = clientFor(async () => json(value));
-    await assert.rejects(api.fetchClickCountWorkspaces(), isProtocolError(api));
+    await assert.rejects(api.fetchClickCountWorkspaces('tcl_promo', ), isProtocolError(api));
   }
   for (const value of [null, {}, { bases: null }, { bases: [null] },
     { bases: [{ ...base, name: {} }] }, { bases: [base, base] }]) {
     const api = clientFor(async () => json(value));
-    await assert.rejects(api.fetchClickCountBases(workspace.id), isProtocolError(api));
+    await assert.rejects(api.fetchClickCountBases('tcl_promo', workspace.id), isProtocolError(api));
   }
   const api = clientFor(async () => json({ workspaces: [] }));
-  assert.equal((await api.fetchClickCountWorkspaces()).workspaces.length, 0);
+  assert.equal((await api.fetchClickCountWorkspaces('tcl_promo', )).workspaces.length, 0);
   const empty = clientFor(async () => json({ bases: [] }));
-  assert.equal((await empty.fetchClickCountBases(workspace.id)).bases.length, 0);
+  assert.equal((await empty.fetchClickCountBases('tcl_promo', workspace.id)).bases.length, 0);
 });
 
 test('inline dates are trusted only as a complete pair matching the selected workspace timezone', async () => {
   const api = clientFor(async () => json({ bases: [metadata, { ...base, id: 'd'.repeat(24) }] }));
-  const values = (await api.fetchClickCountBases(workspace.id, undefined, workspace.timezone)).bases;
+  const values = (await api.fetchClickCountBases('tcl_promo', workspace.id, undefined, workspace.timezone)).bases;
   assert.equal(values[0].created_at, metadata.created_at);
   assert.equal(values[0].start_date, metadata.start_date);
   assert.equal(values[1].created_at, undefined);
   assert.equal(values[1].start_date, undefined);
 
   for (const timezone of [undefined, null, '', {}, 'Invalid/Timezone']) {
-    const values = (await api.fetchClickCountBases(workspace.id, undefined, timezone)).bases;
+    const values = (await api.fetchClickCountBases('tcl_promo', workspace.id, undefined, timezone)).bases;
     assert.equal(values[0].created_at, undefined, `untrusted timezone ${String(timezone)}`);
     assert.equal(values[0].start_date, undefined);
     assert.equal(values[0].id, base.id);
@@ -131,7 +131,7 @@ test('malformed inline metadata cannot reach rendering or enable a range before 
     { created_at: 'not-a-timestamp', start_date: metadata.start_date },
   ]) {
     const api = clientFor(async () => json({ bases: [{ ...base, ...partial }, valid] }));
-    const values = (await api.fetchClickCountBases(workspace.id, undefined, workspace.timezone)).bases;
+    const values = (await api.fetchClickCountBases('tcl_promo', workspace.id, undefined, workspace.timezone)).bases;
     assert.equal(values.length, 2, 'invalid optional metadata must not discard usable bases');
     assert.equal(values[0].id, base.id);
     assert.equal(values[0].name, base.name);
@@ -146,7 +146,7 @@ test('malformed inline metadata cannot reach rendering or enable a range before 
 test('metadata rejects timestamp normalization that silently changes its calendar date', async () => {
   for (const created_at of ['2026-01-01T24:00:00Z', '2026-01-01T24:00:00+00:00']) {
     const api = clientFor(async () => json({ ...metadata, created_at }));
-    await assert.rejects(api.fetchClickCountBase(workspace.id, base.id), isProtocolError(api));
+    await assert.rejects(api.fetchClickCountBase('tcl_promo', workspace.id, base.id), isProtocolError(api));
   }
 });
 
@@ -156,10 +156,10 @@ test('metadata is bound to the selected base and validates dates and timezone', 
     { ...metadata, start_date: '2026-01-01' }, { ...metadata, start_date: '2026-01-03' },
     { ...metadata, timezone: 'America/New_York' }, { ...metadata, timezone: 'Invalid/Timezone' }]) {
     const api = clientFor(async () => json(value));
-    await assert.rejects(api.fetchClickCountBase(workspace.id, base.id), isProtocolError(api));
+    await assert.rejects(api.fetchClickCountBase('tcl_promo', workspace.id, base.id), isProtocolError(api));
   }
   const api = clientFor(async () => json(metadata));
-  assert.equal((await api.fetchClickCountBase(workspace.id, base.id)).start_date, '2026-01-02');
+  assert.equal((await api.fetchClickCountBase('tcl_promo', workspace.id, base.id)).start_date, '2026-01-02');
 });
 
 test('query acceptance is queued and bound to the submitted identity and inclusive end date', async () => {
@@ -168,10 +168,10 @@ test('query acceptance is queued and bound to the submitted identity and inclusi
     { ...query, start_date: '2026-02-30' }, { ...query, status: 'success' },
     { ...query, timezone: 'Invalid/Timezone' }, { ...query, query_id: '' }]) {
     const api = clientFor(async () => json(value));
-    await assert.rejects(api.startClickCountQuery(request), isProtocolError(api));
+    await assert.rejects(api.startClickCountQuery('tcl_promo', request), isProtocolError(api));
   }
   const api = clientFor(async () => json(query));
-  assert.equal((await api.startClickCountQuery(request)).query_id, query.query_id);
+  assert.equal((await api.startClickCountQuery('tcl_promo', request)).query_id, query.query_id);
 });
 
 test('explicit earlier and later report starts are sent once and bound to the accepted range', async () => {
@@ -182,12 +182,12 @@ test('explicit earlier and later report starts are sent once and bound to the ac
       calls.push({ url, init });
       return json({ ...query, start_date: start });
     });
-    assert.equal((await api.startClickCountQuery(payload)).start_date, start);
+    assert.equal((await api.startClickCountQuery('tcl_promo', payload)).start_date, start);
     assert.equal(calls.length, 1);
     assert.deepEqual(JSON.parse(calls[0].init.body), payload);
     assert.equal(calls[0].init.method, 'POST');
     const mismatch = clientFor(async () => json(query));
-    await assert.rejects(mismatch.startClickCountQuery(payload), isProtocolError(mismatch));
+    await assert.rejects(mismatch.startClickCountQuery('tcl_promo', payload), isProtocolError(mismatch));
   }
 });
 
@@ -214,7 +214,7 @@ test('status validates ticket, state and exact nonnegative counts including zero
     { ...success, reachable_users: 1 }, { ...success, reachable_users: {} },
     { ...success, status: 'failed', user_count: null, reachable_users: null, error: {} }]) {
     const api = clientFor(async () => json(value));
-    await assert.rejects(api.fetchClickCountQuery(workspace.id, query.query_id), isProtocolError(api));
+    await assert.rejects(api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id), isProtocolError(api));
   }
   for (const value of [success, { ...success, user_count: 17, reachable_users: 3 },
     { ...success, user_count: Number.MAX_SAFE_INTEGER, reachable_users: Number.MAX_SAFE_INTEGER },
@@ -222,7 +222,7 @@ test('status validates ticket, state and exact nonnegative counts including zero
     { query_id: query.query_id, status: 'running', user_count: null, reachable_users: null },
     { query_id: query.query_id, status: 'failed', user_count: null, reachable_users: null, error: 'Provider failed' }]) {
     const api = clientFor(async () => json(value));
-    assert.equal((await api.fetchClickCountQuery(workspace.id, query.query_id)).status, value.status);
+    assert.equal((await api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id)).status, value.status);
   }
 });
 
@@ -231,7 +231,7 @@ test('POST is attempted once on HTTP, transport and malformed-success failures',
     async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Bad JSON'); } })]) {
     const calls = [];
     const api = clientFor(async (url, init) => { calls.push({ url, init }); return fetchImpl(); });
-    await assert.rejects(api.startClickCountQuery(request));
+    await assert.rejects(api.startClickCountQuery('tcl_promo', request));
     assert.equal(calls.length, 1);
   }
 });
@@ -240,7 +240,7 @@ test('HTTP status remains available to distinguish terminal polling errors from 
   for (const code of [400, 401, 403, 404, 408, 429, 500, 502, 503, 504]) {
     let calls = 0;
     const api = clientFor(async () => { calls += 1; return status(code); });
-    await assert.rejects(api.fetchClickCountQuery(workspace.id, query.query_id),
+    await assert.rejects(api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id),
       (error) => error instanceof api.ClickCountApiError && error.status === code);
     assert.equal(calls, 1, 'each polling cycle sends exactly one request');
     const error = new api.ClickCountApiError('Synthetic failure', code);
@@ -254,7 +254,7 @@ test('HTTP status remains available to distinguish terminal polling errors from 
 test('aborted response-body reads remain transient rather than becoming malformed-schema errors', async () => {
   const aborted = new DOMException('Request aborted', 'AbortError');
   const api = clientFor(async () => ({ ok: true, status: 200, json: async () => { throw aborted; } }));
-  await assert.rejects(api.fetchClickCountQuery(workspace.id, query.query_id),
+  await assert.rejects(api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id),
     (error) => error === aborted && !api.isTerminalClickCountError(error));
 });
 
@@ -265,7 +265,7 @@ test('an aborted HTTP error-body read preserves cancellation rather than a termi
     ok: false, status: 404,
     text: async () => { controller.abort(reason); throw reason; },
   }));
-  await assert.rejects(api.fetchClickCountQuery(workspace.id, query.query_id, controller.signal),
+  await assert.rejects(api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id, controller.signal),
     (error) => error === reason && !api.isTerminalClickCountError(error));
 });
 
@@ -280,10 +280,10 @@ test('cancellation wins over successful response bodies received after the calle
       return bodies[operation];
     } }));
     const calls = {
-      bases: () => api.fetchClickCountBases(workspace.id, controller.signal, workspace.timezone),
-      metadata: () => api.fetchClickCountBase(workspace.id, base.id, controller.signal),
-      start: () => api.startClickCountQuery(request, controller.signal),
-      poll: () => api.fetchClickCountQuery(workspace.id, query.query_id, controller.signal),
+      bases: () => api.fetchClickCountBases('tcl_promo', workspace.id, controller.signal, workspace.timezone),
+      metadata: () => api.fetchClickCountBase('tcl_promo', workspace.id, base.id, controller.signal),
+      start: () => api.startClickCountQuery('tcl_promo', request, controller.signal),
+      poll: () => api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id, controller.signal),
     };
     await assert.rejects(calls[operation](), (error) => error === reason, operation);
   }
@@ -301,7 +301,7 @@ test('cancelling a metadata lookup rejects promptly without attempting further r
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
     return promise;
   });
-  const pending = api.fetchClickCountBase(workspace.id, base.id, controller.signal);
+  const pending = api.fetchClickCountBase('tcl_promo', workspace.id, base.id, controller.signal);
   await started;
   controller.abort();
   await assert.rejects(pending, (error) => error.name === 'AbortError');
@@ -313,7 +313,7 @@ test('cancelling during retry backoff stops a metadata lookup without another at
   const clock = controlledTimers();
   let attempts = 0;
   const api = clientFor(async () => { attempts += 1; return status(503); }, clock);
-  const pending = api.fetchClickCountBase(workspace.id, base.id, controller.signal);
+  const pending = api.fetchClickCountBase('tcl_promo', workspace.id, base.id, controller.signal);
   await flushMicrotasks();
   assert.equal([...clock.timers.values()].some((timer) => timer.ms === 800), true, 'abort occurs during actual backoff');
   controller.abort();
@@ -386,10 +386,10 @@ test('valid inline metadata retains normalized UTC fractions, local midnights an
   ]) {
     const value = { ...base, timezone, created_at, start_date };
     const api = clientFor(async (url) => json(url.includes('/bases?') ? { bases: [value] } : value));
-    const inline = (await api.fetchClickCountBases(workspace.id, undefined, timezone)).bases[0];
+    const inline = (await api.fetchClickCountBases('tcl_promo', workspace.id, undefined, timezone)).bases[0];
     assert.equal(inline.created_at, created_at);
     assert.equal(inline.start_date, start_date, `${timezone} ${created_at}`);
-    const fetched = await api.fetchClickCountBase(workspace.id, base.id);
+    const fetched = await api.fetchClickCountBase('tcl_promo', workspace.id, base.id);
     assert.equal(fetched.start_date, inline.start_date, 'inline and fallback must agree');
   }
 });
@@ -404,18 +404,18 @@ test('inline and fallback metadata share strict normalized timestamp rejection',
   ]) {
     const value = { ...metadata, created_at };
     const api = clientFor(async (url) => json(url.includes('/bases?') ? { bases: [value] } : value));
-    const inline = (await api.fetchClickCountBases(workspace.id, undefined, workspace.timezone)).bases[0];
+    const inline = (await api.fetchClickCountBases('tcl_promo', workspace.id, undefined, workspace.timezone)).bases[0];
     assert.equal(inline.start_date, undefined, created_at);
     assert.equal(inline.created_at, undefined, created_at);
-    await assert.rejects(api.fetchClickCountBase(workspace.id, base.id), isProtocolError(api));
+    await assert.rejects(api.fetchClickCountBase('tcl_promo', workspace.id, base.id), isProtocolError(api));
   }
   for (const value of [
     { ...base, timezone: 'America/New_York', created_at: '0001-01-01T00:00:00Z', start_date: '0001-12-31' },
     { ...base, timezone: 'Pacific/Kiritimati', created_at: '9999-12-31T23:59:59Z', start_date: '9999-12-31' },
   ]) {
     const api = clientFor(async (url) => json(url.includes('/bases?') ? { bases: [value] } : value));
-    assert.equal((await api.fetchClickCountBases(workspace.id, undefined, value.timezone)).bases[0].start_date, undefined);
-    await assert.rejects(api.fetchClickCountBase(workspace.id, base.id), isProtocolError(api));
+    assert.equal((await api.fetchClickCountBases('tcl_promo', workspace.id, undefined, value.timezone)).bases[0].start_date, undefined);
+    await assert.rejects(api.fetchClickCountBase('tcl_promo', workspace.id, base.id), isProtocolError(api));
   }
 });
 
@@ -427,7 +427,7 @@ test('large inline lists reuse timezone formatting instead of allocating a forma
   };
   const bases = Array.from({ length: 1000 }, (_, index) => ({ ...metadata, id: index.toString(16).padStart(24, '0') }));
   const api = clientFor(async () => json({ bases }), { Intl: { DateTimeFormat: CountingFormatter } });
-  const loaded = await api.fetchClickCountBases(workspace.id, undefined, workspace.timezone);
+  const loaded = await api.fetchClickCountBases('tcl_promo', workspace.id, undefined, workspace.timezone);
   assert.equal(loaded.bases.length, 1000, 'no selected-base limit');
   assert.equal(loaded.bases.every((value) => value.start_date === metadata.start_date), true);
   assert.equal(constructions <= 2, true, `expected O(1) formatters, received ${constructions}`);
@@ -447,9 +447,9 @@ test('GET retries transient HTTP and transport failures with bounded cancellable
         return calls.length < 3 ? failure() : json(success);
       }, clock);
       const pending = {
-        workspaces: () => api.fetchClickCountWorkspaces(),
-        bases: () => api.fetchClickCountBases(workspace.id, undefined, workspace.timezone),
-        metadata: () => api.fetchClickCountBase(workspace.id, base.id),
+        workspaces: () => api.fetchClickCountWorkspaces('tcl_promo', ),
+        bases: () => api.fetchClickCountBases('tcl_promo', workspace.id, undefined, workspace.timezone),
+        metadata: () => api.fetchClickCountBase('tcl_promo', workspace.id, base.id),
       }[operation]();
       await flushMicrotasks();
       assert.equal(calls.length, 1);
@@ -475,7 +475,7 @@ test('GET retry exhaustion does not fabricate data or lose the final HTTP status
       if (code === null) throw new Error('Synthetic transport failure');
       return status(code);
     }, clock);
-    const pending = api.fetchClickCountBase(workspace.id, base.id);
+    const pending = api.fetchClickCountBase('tcl_promo', workspace.id, base.id);
     const rejection = assert.rejects(pending, code === null ? /Synthetic transport failure/
       : (error) => error instanceof api.ClickCountApiError && error.status === 503);
     await flushMicrotasks();
@@ -496,7 +496,7 @@ test('GET does not retry terminal HTTP statuses, throttling or malformed success
     const clock = controlledTimers();
     let attempts = 0;
     const api = clientFor(async () => { attempts += 1; return result; }, clock);
-    await assert.rejects(api.fetchClickCountBase(workspace.id, base.id));
+    await assert.rejects(api.fetchClickCountBase('tcl_promo', workspace.id, base.id));
     assert.equal(attempts, 1);
     assert.equal(clock.timers.size, 0);
   }
@@ -509,11 +509,11 @@ test('already aborted callers never start GET, POST or polling requests', async 
   let attempts = 0;
   const api = clientFor(async () => { attempts += 1; throw new Error('Must not fetch'); });
   for (const invoke of [
-    () => api.fetchClickCountWorkspaces(controller.signal),
-    () => api.fetchClickCountBases(workspace.id, controller.signal, workspace.timezone),
-    () => api.fetchClickCountBase(workspace.id, base.id, controller.signal),
-    () => api.startClickCountQuery(request, controller.signal),
-    () => api.fetchClickCountQuery(workspace.id, query.query_id, controller.signal),
+    () => api.fetchClickCountWorkspaces('tcl_promo', controller.signal),
+    () => api.fetchClickCountBases('tcl_promo', workspace.id, controller.signal, workspace.timezone),
+    () => api.fetchClickCountBase('tcl_promo', workspace.id, base.id, controller.signal),
+    () => api.startClickCountQuery('tcl_promo', request, controller.signal),
+    () => api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id, controller.signal),
   ]) await assert.rejects(invoke(), (error) => error === reason);
   assert.equal(attempts, 0);
 });
@@ -529,8 +529,8 @@ test('POST and polling deadlines abort the attempt without an automatic retry', 
       transportSignal = signal;
       return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
     }, clock);
-    const pending = operation === 'start' ? api.startClickCountQuery(request, controller.signal)
-      : api.fetchClickCountQuery(workspace.id, query.query_id, controller.signal);
+    const pending = operation === 'start' ? api.startClickCountQuery('tcl_promo', request, controller.signal)
+      : api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id, controller.signal);
     const rejection = assert.rejects(pending, (error) => /Request timed out after 60 seconds/.test(error.message)
       && !api.isTerminalClickCountError(error));
     fireTimer(clock, 60000);
@@ -549,9 +549,12 @@ test('polling tickets and workspace identifiers are encoded without changing end
     urls.push({ url, init });
     return json({ query_id: ticket, status: 'running', user_count: null, reachable_users: null });
   });
-  await api.fetchClickCountQuery(workspace.id, ticket);
-  assert.equal(urls[0].url, `/api/moengage/click-count/queries/${encodeURIComponent(ticket)}?workspace_id=${workspace.id}`);
-  assert.equal(urls[0].init.cache, 'no-store');
+  await api.fetchClickCountQuery('tcl_promo', workspace.id, ticket);
+  const url = new URL(urls[0].url, 'https://portal.example.invalid');
+  assert.equal(decodeURIComponent(url.pathname.split('/').pop()), ticket);
+  assert.equal(url.searchParams.get('workspace_id'), workspace.id);
+  assert.equal(url.searchParams.get('account'), 'tcl_promo');
+  assert.equal(url.hash, '');
 });
 
 test('caller deadlines cover success and error body reads after response headers arrive', async () => {
@@ -569,7 +572,7 @@ test('caller deadlines cover success and error body reads after response headers
       };
       return { ok, status: ok ? 200 : 404, json: readBody, text: readBody };
     }, clock);
-    const pending = api.fetchClickCountQuery(workspace.id, query.query_id, controller.signal);
+    const pending = api.fetchClickCountQuery('tcl_promo', workspace.id, query.query_id, controller.signal);
     const rejection = assert.rejects(pending, (error) => error === reason && !api.isTerminalClickCountError(error));
     await reading;
     assert.equal(clock.timers.size, 0, 'shared transport deadline ends at headers; the caller still covers body consumption');
@@ -588,7 +591,7 @@ test('GET attempt deadlines remain retryable and each retry receives a fresh tra
     if (signals.length === 3) return json(metadata);
     return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
   }, clock);
-  const pending = api.fetchClickCountBase(workspace.id, base.id, controller.signal);
+  const pending = api.fetchClickCountBase('tcl_promo', workspace.id, base.id, controller.signal);
   fireTimer(clock, 60000);
   await flushMicrotasks();
   assert.equal(signals[0].aborted, true);

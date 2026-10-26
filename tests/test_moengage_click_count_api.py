@@ -176,6 +176,61 @@ def test_workspace_access_uses_database_tenant_and_role(client, portal, provisio
         assert portal.requests == []
 
 
+def test_click_counter_uses_the_explicit_settings_account(client, portal, provision_user, monkeypatch):
+    import moengage_sync
+    from portal_sessions import save_session, save_settings
+
+    _, headers = provision_user(tenant="tata")
+    monkeypatch.setattr(moengage_sync, "_load_env_file", lambda: None)
+    monkeypatch.setattr(count, "get_moengage_config", moengage_sync.get_moengage_config)
+    monkeypatch.delenv("TATA_MOENGAGE_BEARER_TOKEN", raising=False)
+    save_settings("tcl_promo", "moengage", {
+        "TCL_PROMO_MOENGAGE_BASE_URL": "https://dashboard-03.moengage.com",
+        "TCL_PROMO_MOENGAGE_WORKSPACE_ID": WORKSPACE_ID,
+    })
+    token = jwt.encode({"exp": datetime.now(UTC) + timedelta(hours=2)},
+                       "test-portal-signing-key-0123456789abcdef", algorithm="HS256")
+    save_session({
+        "bearer_token": token, "refresh_token": "test-refresh", "cookie": "moe_uuid=test-browser",
+        "base_url": "https://dashboard-03.moengage.com", "workspace_id": WORKSPACE_ID,
+    }, "tcl_promo", "moengage")
+    settings = moengage_sync.get_moengage_credentials("tcl_promo")
+    assert settings["has_token"] and not settings["expired"]
+
+    response = client.get(PREFIX + "/workspaces", params={"account": "tcl_promo"}, headers=headers)
+    assert response.status_code == 200, response.text
+    assert {row["id"] for row in response.json()["workspaces"]} == {WORKSPACE_ID, OTHER_WORKSPACE_ID}
+    for path in ("/bases", f"/bases/{BASE_ID}"):
+        details = client.get(PREFIX + path, headers=headers,
+                             params={"account": "tcl_promo", "workspace_id": WORKSPACE_ID})
+        assert details.status_code == 200, details.text
+        if path == "/bases":
+            assert details.json()["bases"][0]["id"] == BASE_ID
+        else:
+            assert details.json()["start_date"] == portal.start
+
+    accepted = client.post(PREFIX + "/queries", params={"account": "tcl_promo"},
+                           json=submission(portal), headers=headers)
+    assert accepted.status_code == 200, accepted.text
+    query_id = accepted.json()["query_id"]
+    for _ in range(3):
+        result = client.get(PREFIX + "/queries/" + query_id,
+                            params={"account": "tcl_promo", "workspace_id": WORKSPACE_ID}, headers=headers)
+        assert result.status_code == 200, result.text
+    assert result.json()["user_count"] == 2
+
+    missing = client.get(PREFIX + "/workspaces", params={"account": "tcl_trans"}, headers=headers)
+    assert missing.status_code == 503
+
+
+@pytest.mark.parametrize("account", ["bajaj", "apparel", "all", "unknown"])
+def test_click_counter_rejects_non_tata_credential_sources(client, portal, provision_user, account):
+    _, headers = provision_user(tenant="all", role="superadmin")
+    response = client.get(PREFIX + "/workspaces", params={"account": account}, headers=headers)
+    assert response.status_code == 403
+    assert portal.requests == []
+
+
 @pytest.mark.parametrize("mutation,expected", [
     ("disabled", 401), ("deleted", 401), ("tenant", 403),
 ])

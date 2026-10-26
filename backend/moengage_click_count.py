@@ -11,7 +11,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
-from auth import configured_jwt_secret, get_current_user, require_tenant_access
+from auth import TATA_SUB_ACCOUNTS, configured_jwt_secret, get_current_user, require_tenant_access
 from moengage_sync import decode_moengage_token_expiry, get_moengage_config
 
 CLICK_EVENTS = (
@@ -144,8 +144,11 @@ TATA_PORTAL_ACCOUNT_ID = "6399ced48c5fa78ad1eb39ea"
 
 
 class ClickCountClient:
-    def __init__(self):
-        config = get_moengage_config("tata")
+    def __init__(self, account: str = "tata"):
+        account = account.strip().lower()
+        if account not in TATA_SUB_ACCOUNTS:
+            raise HTTPException(status_code=403, detail="Click counts require an explicit Tata credential account.")
+        config = get_moengage_config(account)
         token = config["bearer_token"].strip()
         if not token or decode_moengage_token_expiry(token).get("expired"):
             raise HTTPException(status_code=503, detail=SESSION_ERROR)
@@ -395,36 +398,36 @@ router = APIRouter(prefix="/api/moengage/click-count", dependencies=[Depends(req
 
 
 @router.get("/workspaces")
-def get_workspaces():
-    return {"workspaces": ClickCountClient().workspaces()}
+def get_workspaces(account: str = "tata"):
+    return {"workspaces": ClickCountClient(account).workspaces()}
 
 
 @router.get("/bases")
-def get_bases(workspace_id: str = Query(...)):
+def get_bases(workspace_id: str = Query(...), account: str = "tata"):
     validate_identifier(workspace_id, "workspace ID", object_id=True)
-    client = ClickCountClient()
+    client = ClickCountClient(account)
     workspace = client.select_workspace(workspace_id)
     return {"bases": client.bases(workspace)}
 
 
 @router.get("/bases/{base_id}")
-def get_base(base_id: str, workspace_id: str = Query(...)):
+def get_base(base_id: str, workspace_id: str = Query(...), account: str = "tata"):
     validate_identifier(workspace_id, "workspace ID", object_id=True)
     validate_identifier(base_id, "base ID", object_id=True)
-    client = ClickCountClient()
+    client = ClickCountClient(account)
     workspace = client.select_workspace(workspace_id)
     base, _ = client.base(base_id, include_db=False)
     return base_metadata(base, workspace)
 
 
 @router.post("/queries")
-def create_query(body: ClickCountQueryRequest):
+def create_query(body: ClickCountQueryRequest, account: str = "tata"):
     validate_identifier(body.workspace_id, "workspace ID", object_id=True)
     validate_identifier(body.base_id, "base ID", object_id=True)
     end = validate_end_date(body.end_date)
     if body.start_date is not None and validate_calendar_date(body.start_date, "Start date") > end:
         raise HTTPException(status_code=400, detail="End date cannot be before the report start date.")
-    client = ClickCountClient()
+    client = ClickCountClient(account)
     workspace = client.select_workspace(body.workspace_id)
     validate_end_date(body.end_date, workspace["timezone"])
     raw_base, _ = client.base(body.base_id, include_db=False)
@@ -447,10 +450,10 @@ def create_query(body: ClickCountQueryRequest):
 
 
 @router.get("/queries/{query_id}")
-def get_query(query_id: str, workspace_id: str = Query(...)):
+def get_query(query_id: str, workspace_id: str = Query(...), account: str = "tata"):
     validate_identifier(workspace_id, "workspace ID", object_id=True)
     ticket = read_query_ticket(query_id, workspace_id)
-    client = ClickCountClient()
+    client = ClickCountClient(account)
     client.select_workspace(workspace_id)
     if client.workspace_database() != ticket["db_name"]:
         raise HTTPException(status_code=404, detail="Query not found in the selected workspace.")

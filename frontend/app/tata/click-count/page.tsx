@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import Link from 'next/link';
-import { canAccessAccount } from '@/lib/api';
+import { accountOrganization, canAccessAccount } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import {
   fetchClickCountWorkspaces, fetchClickCountBases, fetchClickCountBase,
@@ -35,7 +35,7 @@ function ErrorNotice({ message, onRetry }: { message: string; onRetry?: () => vo
 
 
 export default function TataClickCountPage() {
-  const { currentUser, authLoading } = useApp();
+  const { currentUser, authLoading, account, getAccountLabel } = useApp();
   if (authLoading) return <div className="p-8 text-sm text-gray-500" role="status">Checking your access…</div>;
   if (!currentUser || !canAccessAccount(currentUser, 'tata')) {
     return (
@@ -48,10 +48,13 @@ export default function TataClickCountPage() {
       </div>
     );
   }
-  return <ClickCountWorkspacePicker key={`${currentUser.id}:${currentUser.tenant_id}:${currentUser.role}`} />;
+  if (accountOrganization(account) !== 'tata') {
+    return <div role="status" className={panel}>Select a Tata account to use its saved MoEngage session.</div>;
+  }
+  return <ClickCountWorkspacePicker key={`${currentUser.id}:${currentUser.tenant_id}:${currentUser.role}:${account}`} account={account} accountLabel={getAccountLabel(account)} />;
 }
 
-function ClickCountWorkspacePicker() {
+function ClickCountWorkspacePicker({ account, accountLabel }: { account: string; accountLabel: string }) {
   const [workspaces, setWorkspaces] = useState<ClickCountWorkspace[]>([]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -65,7 +68,7 @@ function ClickCountWorkspacePicker() {
     const controller = new AbortController();
     async function load() {
       try {
-        const data = await fetchClickCountWorkspaces(AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
+        const data = await fetchClickCountWorkspaces(account, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
         if (!controller.signal.aborted) setWorkspaces(data.workspaces);
       } catch (err) {
         if (!controller.signal.aborted) setError(errorMessage(err));
@@ -75,7 +78,7 @@ function ClickCountWorkspacePicker() {
     }
     void load();
     return () => controller.abort();
-  }, [reload]);
+  }, [account, reload]);
 
   const workspace = workspaces.find((item) => item.id === workspaceId);
   return (
@@ -85,6 +88,7 @@ function ClickCountWorkspacePicker() {
           <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-blue-700">Tata Capital · Audience analytics</p>
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Tata Click Counter</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">See how many unique users clicked across your channels. Select imported bases and count them in one run.</p>
+          <p className="mt-2 text-xs text-gray-500">MoEngage session: {accountLabel}. Manage this account&apos;s connection in <Link href="/settings" className="font-medium text-blue-600 underline">Settings → MoEngage</Link>.</p>
         </div>
         <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-600">Reporting only · No campaigns sent</span>
       </header>
@@ -126,7 +130,7 @@ function ClickCountWorkspacePicker() {
           </div>
         )}
       </section>
-      {workspace ? <ImportedBasePicker key={`${workspace.id}:${workspace.timezone}`} workspace={workspace} busy={busy} onBusyChange={setBusy} /> : (
+      {workspace ? <ImportedBasePicker key={`${workspace.id}:${workspace.timezone}`} account={account} workspace={workspace} busy={busy} onBusyChange={setBusy} /> : (
         <div className="rounded-xl border border-dashed border-gray-300 px-6 py-14 text-center">
           <h2 className="text-sm font-semibold text-gray-700">Start with a workspace</h2>
           <p className="mt-2 text-sm text-gray-500">Your imported bases and counting options will appear here.</p>
@@ -136,7 +140,7 @@ function ClickCountWorkspacePicker() {
   );
 }
 
-function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: ClickCountWorkspace; busy: boolean; onBusyChange: (value: boolean) => void }) {
+function ImportedBasePicker({ account, workspace, busy, onBusyChange }: { account: string; workspace: ClickCountWorkspace; busy: boolean; onBusyChange: (value: boolean) => void }) {
   const [bases, setBases] = useState<ClickCountBase[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
@@ -150,7 +154,7 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
     const controller = new AbortController();
     async function load() {
       try {
-        const data = await fetchClickCountBases(workspace.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]), workspace.timezone);
+        const data = await fetchClickCountBases(account, workspace.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]), workspace.timezone);
         if (!controller.signal.aborted) setBases(data.bases);
       } catch (err) {
         if (!controller.signal.aborted) setError(errorMessage(err));
@@ -160,7 +164,7 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
     }
     void load();
     return () => controller.abort();
-  }, [workspace.id, reload]);
+  }, [account, workspace.id, reload]);
 
   const selected = new Set(selectedIds);
   const searchTerm = search.trim().toLowerCase();
@@ -233,7 +237,7 @@ function ImportedBasePicker({ workspace, busy, onBusyChange }: { workspace: Clic
           </fieldset>
         )}
       </section>
-      {selectedBases.length > 0 ? <MultiBaseCountForm workspace={workspace} bases={selectedBases} onBusyChange={onBusyChange} /> : (
+      {selectedBases.length > 0 ? <MultiBaseCountForm account={account} workspace={workspace} bases={selectedBases} onBusyChange={onBusyChange} /> : (
         <aside className={`${panel} xl:col-span-5`}>
           <div className="flex items-start gap-3">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-sm font-bold text-gray-500" aria-hidden="true">3</span>
@@ -258,7 +262,7 @@ type BaseJob = {
   error: string;
 };
 
-function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: ClickCountWorkspace; bases: ClickCountBase[]; onBusyChange: (value: boolean) => void }) {
+function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { account: string; workspace: ClickCountWorkspace; bases: ClickCountBase[]; onBusyChange: (value: boolean) => void }) {
   const [metadata, setMetadata] = useState<Record<string, ClickCountBaseMetadata>>({});
   const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({});
   const [loadingIds, setLoadingIds] = useState<string[]>([]);
@@ -307,7 +311,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
       for (const base of missing) {
         if (controller.signal.aborted) break;
         try {
-          const value = await fetchClickCountBase(workspace.id, base.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
+          const value = await fetchClickCountBase(account, workspace.id, base.id, AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]));
           if (controller.signal.aborted) return;
           metadataCache.current.set(base.id, value);
           setMetadata((current) => ({ ...current, [base.id]: value }));
@@ -324,7 +328,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
       }
     })();
     return () => controller.abort();
-  }, [workspace.id, selectedKey, metadataReload]);
+  }, [account, workspace.id, selectedKey, metadataReload]);
 
   useEffect(() => {
     const updateToday = () => setToday(todayInTimezone(workspace.timezone));
@@ -382,7 +386,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
     pollers.current.set(baseId, poller);
     async function poll() {
       try {
-        const next = await fetchClickCountQuery(query.workspace_id, query.query_id, AbortSignal.any([poller.controller.signal, AbortSignal.timeout(60000)]));
+        const next = await fetchClickCountQuery(account, query.workspace_id, query.query_id, AbortSignal.any([poller.controller.signal, AbortSignal.timeout(60000)]));
         if (poller.controller.signal.aborted) return;
         updateJob(baseId, { status: next, error: '' });
         if (next.status === 'success' || next.status === 'failed') {
@@ -426,6 +430,7 @@ function MultiBaseCountForm({ workspace, bases, onBusyChange }: { workspace: Cli
     requestControllers.current.set(base.id, controller);
     try {
       const query = await startClickCountQuery(
+        account,
         { workspace_id: workspace.id, base_id: base.id, end_date: endDate, ...(startOverrides[base.id] === undefined ? {} : { start_date: startOverrides[base.id] }) },
         AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]),
       );

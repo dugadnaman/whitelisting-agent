@@ -143,8 +143,9 @@ async function readResponse<T>(res: Response, signal?: AbortSignal): Promise<T> 
   }
 }
 
-export async function fetchClickCountWorkspaces(signal?: AbortSignal): Promise<{ workspaces: ClickCountWorkspace[] }> {
-  const res = await fetchWithRetry(getApiUrl(`${PREFIX}/workspaces`), { signal, cache: 'no-store' });
+export async function fetchClickCountWorkspaces(account: string, signal?: AbortSignal): Promise<{ workspaces: ClickCountWorkspace[] }> {
+  const qs = new URLSearchParams({ account });
+  const res = await fetchWithRetry(getApiUrl(`${PREFIX}/workspaces?${qs}`), { signal, cache: 'no-store' });
   const data = await readResponse<{ workspaces: ClickCountWorkspace[] }>(res, signal);
   assertResponse(typeof data === 'object' && data !== null && Array.isArray(data.workspaces) && data.workspaces.every(
     (item) => isBase(item) && 'timezone' in item && isTimezone(item.timezone),
@@ -153,8 +154,8 @@ export async function fetchClickCountWorkspaces(signal?: AbortSignal): Promise<{
   return data;
 }
 
-export async function fetchClickCountBases(workspaceId: string, signal?: AbortSignal, timezone?: string): Promise<{ bases: ClickCountBase[] }> {
-  const qs = new URLSearchParams({ workspace_id: workspaceId });
+export async function fetchClickCountBases(account: string, workspaceId: string, signal?: AbortSignal, timezone?: string): Promise<{ bases: ClickCountBase[] }> {
+  const qs = new URLSearchParams({ account, workspace_id: workspaceId });
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/bases?${qs}`), { signal, cache: 'no-store' });
   const data = await readResponse<{ bases: ClickCountBase[] }>(res, signal);
   assertResponse(typeof data === 'object' && data !== null && Array.isArray(data.bases) && data.bases.every(isBase));
@@ -166,8 +167,8 @@ export async function fetchClickCountBases(workspaceId: string, signal?: AbortSi
     : { id: base.id, name: base.name }) };
 }
 
-export async function fetchClickCountBase(workspaceId: string, baseId: string, signal?: AbortSignal): Promise<ClickCountBaseMetadata> {
-  const qs = new URLSearchParams({ workspace_id: workspaceId });
+export async function fetchClickCountBase(account: string, workspaceId: string, baseId: string, signal?: AbortSignal): Promise<ClickCountBaseMetadata> {
+  const qs = new URLSearchParams({ account, workspace_id: workspaceId });
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/bases/${encodeURIComponent(baseId)}?${qs}`), { signal, cache: 'no-store' });
   const data = await readResponse<ClickCountBaseMetadata>(res, signal);
   assertResponse(isBase(data) && data.id === baseId && isTimezone(data.timezone));
@@ -175,8 +176,9 @@ export async function fetchClickCountBase(workspaceId: string, baseId: string, s
   return data;
 }
 
-export async function startClickCountQuery(payload: StartClickCountRequest, signal?: AbortSignal): Promise<ClickCountQuery> {
-  const res = await fetchWithRetry(getApiUrl(`${PREFIX}/queries`), {
+export async function startClickCountQuery(account: string, payload: StartClickCountRequest, signal?: AbortSignal): Promise<ClickCountQuery> {
+  const qs = new URLSearchParams({ account });
+  const res = await fetchWithRetry(getApiUrl(`${PREFIX}/queries?${qs}`), {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal,
   }, 0);
   const data = await readResponse<ClickCountQuery>(res, signal);
@@ -188,8 +190,8 @@ export async function startClickCountQuery(payload: StartClickCountRequest, sign
   return data;
 }
 
-export async function fetchClickCountQuery(workspaceId: string, queryId: string, signal?: AbortSignal): Promise<ClickCountQueryStatus> {
-  const qs = new URLSearchParams({ workspace_id: workspaceId });
+export async function fetchClickCountQuery(account: string, workspaceId: string, queryId: string, signal?: AbortSignal): Promise<ClickCountQueryStatus> {
+  const qs = new URLSearchParams({ account, workspace_id: workspaceId });
   // The serialized polling loop handles transient failures; do not multiply each poll with retries.
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/queries/${encodeURIComponent(queryId)}?${qs}`), { signal, cache: 'no-store' }, 0);
   const data = await readResponse<ClickCountQueryStatus>(res, signal);

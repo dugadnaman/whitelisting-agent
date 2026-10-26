@@ -111,7 +111,7 @@ def test_query_returns_effective_report_start_and_still_verifies_base_database(m
             assert all(action["primary_time_range"]["value"] == (start or "2026-09-25") + "T00:00:00.000Z"
                        for action in actions["filters"])
             return {"success": True, "rq_id": QUERY_ID}
-    monkeypatch.setattr(module, "ClickCountClient", Client)
+    monkeypatch.setattr(module, "ClickCountClient", lambda account: Client())
     monkeypatch.setattr(module, "sign_query", lambda query_id, workspace_id, db: "scoped-ticket")
     response = module.create_query(module.ClickCountQueryRequest(
         workspace_id=WORKSPACE["id"], base_id=BASE_ID, start_date=start, end_date="2026-10-01"))
@@ -152,7 +152,7 @@ def test_manual_start_never_bypasses_authoritative_base_timestamp(monkeypatch, f
             return {"id": BASE_ID, "name": "base", "created_time": created}, ""
         def workspace_database(self):
             pytest.fail("Invalid base metadata must not look up a database or submit counts.")
-    monkeypatch.setattr(module, "ClickCountClient", Client)
+    monkeypatch.setattr(module, "ClickCountClient", lambda account: Client())
     with pytest.raises(HTTPException) as error:
         module.create_query(module.ClickCountQueryRequest(
             workspace_id=WORKSPACE["id"], base_id=BASE_ID, start_date="2026-09-01", end_date="2026-10-01"))
@@ -924,7 +924,7 @@ def test_future_query_date_is_rejected_before_base_listing_or_count_submission(m
             return {**WORKSPACE, "timezone": "America/Los_Angeles"}
         def base(self, base_id):
             pytest.fail("Future workspace dates must not list bases or submit a count.")
-    monkeypatch.setattr(module, "ClickCountClient", Client)
+    monkeypatch.setattr(module, "ClickCountClient", lambda account: Client())
     with pytest.raises(HTTPException) as error:
         module.create_query(module.ClickCountQueryRequest(workspace_id=WORKSPACE["id"], base_id=BASE_ID, end_date="2026-10-09"))
     assert error.value.status_code == 400
