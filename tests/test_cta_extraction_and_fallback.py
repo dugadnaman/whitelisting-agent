@@ -422,3 +422,87 @@ def test_swcm_114_multi_cta_extraction_and_rcs_suggestions():
     assert len(rcs["suggestions"]) == 2
     assert rcs["suggestions"][0]["label"] == "Read Blog!"
     assert rcs["suggestions"][1]["label"] == "Learn More"
+
+
+def test_swcm_164_single_cta_and_direct_attachments_extraction():
+    """Verify SWCM-164 extracts exactly 1 CTA with cleaned label, maps direct image attachments, and derives card title."""
+    from briefing_parser import _parse_swcm_cta, parse_jira_brief
+
+    # 1. Verify single CTA with markdown asterisks and trailing colons does NOT duplicate
+    raw_cta = (
+        "*CTA: Explore Loan Solutions*\n"
+        "https://www.tatacapital.com/campaign/wealth/thank-you.html?sourceName=AssetFinance_WA_october&subsource=AssetFinance_WA_october&cid=whatsapp:wealth:oct26:AssetFinance_WA_october::"
+    )
+    cta_links = [
+        "https://www.tatacapital.com/campaign/wealth/thank-you.html?sourceName=RealEstate_WA_june&subsource=RealEstate_WA_june&cid=whatsapp:wealth:jun26:RealEstate_WA_june::"
+    ]
+
+    p_text, p_url, all_ctas = _parse_swcm_cta(raw_cta, cta_links)
+    assert len(all_ctas) == 1
+    assert p_text == "Explore Loan Solutions"
+    assert p_url == "https://www.tatacapital.com/campaign/wealth/thank-you.html?sourceName=AssetFinance_WA_october&subsource=AssetFinance_WA_october&cid=whatsapp:wealth:oct26:AssetFinance_WA_october"
+    assert all_ctas[0]["label"] == "Explore Loan Solutions"
+    assert all_ctas[0]["url"] == p_url
+
+    # 2. Test end-to-end brief parsing with direct issue attachments
+    desc_adf = {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "table",
+                "content": [
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Campaign Execution Format"}]}]},
+                            {"type": "tableHeader", "content": [{"type": "paragraph", "content": [{"type": "text", "text": ""}]}]},
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Campaign Name"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Asset finance"}]}]},
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "RCS Content"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Dear [Client Name],\nInvest in Their Future!\nFunding up to ₹85L without collateral.\nT&Cs Apply"}]}]},
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "CTA / LINK"}]}]},
+                            {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": raw_cta}]}]},
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+
+    issue_data = {
+        "key": "SWCM-164",
+        "summary": "Wealth_Asset Finance Email +WA +RCS - 28th Oct",
+        "description_raw": desc_adf,
+        "description_text": "Campaign Execution Format",
+        "attachments": [
+            {"id": "38473", "filename": "TCW_Asset finance_RCS SMs.jpg", "mimeType": "image/jpeg", "local_path": "media_cache/jira_38473_TCW_Asset_finance_RCS_SMs.jpg"},
+            {"id": "38472", "filename": "TCW_Asset finance_whatsapp.jpg", "mimeType": "image/jpeg", "local_path": "media_cache/jira_38472_TCW_Asset_finance_whatsapp.jpg"},
+        ],
+    }
+
+    parsed = parse_jira_brief(issue_data, download_creatives=False)
+    assert len(parsed.rcs_templates) == 1
+    rcs = parsed.rcs_templates[0]
+    assert rcs["card_title"] == "Invest in Their Future!"
+    assert rcs["action_label"] == "Explore Loan Solutions"
+    assert len(rcs["suggestions"]) == 1
+    assert rcs["suggestions"][0]["label"] == "Explore Loan Solutions"
+    assert rcs["media_filename"] == "TCW_Asset finance_RCS SMs.jpg"
+    assert rcs["media_file"] == "media_cache/jira_38473_TCW_Asset_finance_RCS_SMs.jpg"
+    assert rcs["template_type"] == "richcard"

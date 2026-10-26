@@ -56,6 +56,7 @@ class WhatsAppTemplateDraft:
     header_text: str | None = None
     media_file: str | None = None
     media_filename: str | None = None
+    media_attachment_id: str | None = None
     button_type: str = "NONE"
     button_text: str | None = None
     button_url: str | None = None
@@ -74,6 +75,7 @@ class RcsTemplateDraft:
     body: str
     media_file: str | None = None
     media_filename: str | None = None
+    media_attachment_id: str | None = None
     action_type: str = "URL"
     action_label: str = "Check Offer"
     action_url: str = "https://u3.mnge.co/"
@@ -918,12 +920,15 @@ def derive_clean_card_title(body_text: str, account: str | None = None) -> str:
     """
     if not body_text or not body_text.strip():
         return ""
-
     lines = [line.strip().strip("*_#~ ") for line in body_text.strip().splitlines() if line.strip()]
     if not lines:
         return ""
 
-    first_line = lines[0]
+    candidate_lines = lines
+    if len(lines) > 1 and re.match(r"^(?:dear|hi|hello|hey|namaste)\b.*[,:]\s*$", lines[0], re.IGNORECASE):
+        candidate_lines = lines[1:]
+
+    first_line = candidate_lines[0]
     # Trim to 60 chars maximum (RCS card title / WhatsApp header limit)
     if len(first_line) > 60:
         first_line = first_line[:57].rstrip() + "..."
@@ -2562,7 +2567,7 @@ def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[s
         return "", "", []
     # 1. Check for multi-CTA patterns like 'CTA 1:', 'CTA 2:', 'Button 1:', etc.
     cta_marker_pat = re.compile(
-        r"(?:^|\n)\s*(?:CTA\s*(\d*)|Button\s*(\d*)|Action\s*(\d*))\s*[:\-–]\s*([^\n\r]+)",
+        r"(?:^|\n)\s*[*_~]*\s*(?:CTA\s*(\d*)|Button\s*(\d*)|Action\s*(\d*))\s*[:\-–]\s*([^\n\r]+)",
         re.IGNORECASE,
     )
     matches = list(cta_marker_pat.finditer(cta_raw_clean))
@@ -2577,10 +2582,10 @@ def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[s
             block_text = cta_raw_clean[start_pos:end_pos]
 
             url_match = re.search(r"https?://[^\s]+", block_text)
-            url_val = url_match.group(0).rstrip(".,)") if url_match else None
+            url_val = re.sub(r"[:.,)>]+$", "", url_match.group(0)) if url_match else None
 
             if not url_val and cta_links and idx < len(cta_links):
-                url_val = cta_links[idx]
+                url_val = re.sub(r"[:.,)>]+$", "", cta_links[idx])
 
             all_ctas.append({
                 "type": "URL",
@@ -2593,36 +2598,32 @@ def _parse_swcm_cta(cta_raw: str, cta_links: list[str] | None = None) -> tuple[s
         button_url = DEFAULT_CTA_URL
 
         for line in lines:
-            if re.match(r"^cta\s*\d*\s*[:\-–]", line, re.IGNORECASE):
-                candidate = re.split(r"[:\-–]", line, 1)[1].strip()
+            line_clean = line.strip()
+            m_line = re.match(r"^[*_~]*\s*(?:cta|button|action)\s*\d*\s*[:\-–]\s*(.+)$", line_clean, re.IGNORECASE)
+            if m_line:
+                candidate = m_line.group(1).strip()
                 if candidate:
                     button_text = _clean_cta_label(candidate)
                     break
-            elif "->" in line or "|" in line:
-                parts = re.split(r"\s*(?:->|\|)\s*", line)
+            elif "->" in line_clean or "|" in line_clean:
+                parts = re.split(r"\s*(?:->|\|)\s*", line_clean)
                 if len(parts) >= 2:
                     button_text = _clean_cta_label(parts[0])
                     break
 
         raw_urls = re.findall(r"https?://[^\s]+", cta_raw_clean)
-        valid_links = [l.rstrip(".,)") for l in (cta_links or []) if l.startswith("http")] + [u.rstrip(".,)") for u in raw_urls]
-        if valid_links:
-            button_url = valid_links[0]
+        cleaned_raw = [re.sub(r"[:.,)>]+$", "", u) for u in raw_urls if u.startswith("http")]
+        cleaned_links = [re.sub(r"[:.,)>]+$", "", l) for l in (cta_links or []) if l.startswith("http")]
+        if cleaned_raw:
+            button_url = cleaned_raw[0]
+        elif cleaned_links:
+            button_url = cleaned_links[0]
 
         all_ctas.append({
             "type": "URL",
             "label": button_text,
             "url": button_url,
         })
-
-        if len(valid_links) > 1 and len(all_ctas) == 1:
-            for extra_url in valid_links[1:]:
-                all_ctas.append({
-                    "type": "URL",
-                    "label": "Learn More",
-                    "url": extra_url,
-                })
-
     primary_text = all_ctas[0]["label"] if all_ctas else "Explore Now"
     primary_url = all_ctas[0]["url"] if all_ctas else DEFAULT_CTA_URL
     return primary_text, primary_url, all_ctas
@@ -3006,9 +3007,16 @@ def parse_jira_brief(
         cat = detect_category(summary, clean_body)
 
         if c_chan in ("WA", "WHATSAPP"):
-            media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
-            if media is None and zip_creative_paths:
-                media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
+            wa_pool = [c["local_path"] for c in wa_creatives if c.get("local_path")]
+            all_wa_media = zip_creative_paths + wa_pool
+            media = _match_creative_to_campaign(campaign["campaign_name"], all_wa_media)
+            if media is None and wa_pool:
+                media = wa_pool[(wa_counter - 1) % len(wa_pool)]
+            elif media is None and zip_creative_paths:
+                media = zip_creative_paths[(wa_counter - 1) % len(zip_creative_paths)]
+            att_match = next((a for a in wa_creatives if a.get("local_path") and a.get("local_path") == media), None) if media else (wa_creatives[(wa_counter - 1) % len(wa_creatives)] if wa_creatives else None)
+            media_fn = att_match.get("filename") if att_match else (Path(media).name if media else None)
+            media_att_id = att_match.get("id") if att_match else None
             tname = _clean_template_name(base_name, f"wa_{lang}" if lang != "en" else "wa", wa_counter)
             wa_drafts.append(
                 WhatsAppTemplateDraft(
@@ -3016,11 +3024,12 @@ def parse_jira_brief(
                     category=cat,
                     language=lang,
                     body=clean_body,
-                    header_type="IMAGE" if media else "TEXT",
+                    header_type="IMAGE" if (media or media_fn) else "TEXT",
                     header_text=None,
                     footer_text=None,
                     media_file=media,
-                    media_filename=Path(media).name if media else None,
+                    media_filename=media_fn,
+                    media_attachment_id=media_att_id,
                     button_type="URL",
                     button_text=all_ctas[0]["label"] if all_ctas else swcm_btn_text,
                     button_url=all_ctas[0]["url"] if all_ctas else swcm_btn_url,
@@ -3032,35 +3041,47 @@ def parse_jira_brief(
             wa_counter += 1
 
         elif c_chan == "RCS":
-            media = _match_creative_to_campaign(campaign["campaign_name"], zip_creative_paths)
-            if media is None and zip_creative_paths:
-                media = zip_creative_paths[(idx - 1) % len(zip_creative_paths)]
+            rcs_pool = [c["local_path"] for c in rcs_creatives if c.get("local_path")]
+            all_rcs_media = zip_creative_paths + rcs_pool
+            media = _match_creative_to_campaign(campaign["campaign_name"], all_rcs_media)
+            if media is None and rcs_pool:
+                media = rcs_pool[(rcs_counter - 1) % len(rcs_pool)]
+            elif media is None and zip_creative_paths:
+                media = zip_creative_paths[(rcs_counter - 1) % len(zip_creative_paths)]
+            att_match = next((a for a in rcs_creatives if a.get("local_path") and a.get("local_path") == media), None) if media else (rcs_creatives[(rcs_counter - 1) % len(rcs_creatives)] if rcs_creatives else None)
+            media_fn = att_match.get("filename") if att_match else (Path(media).name if media else None)
+            media_att_id = att_match.get("id") if att_match else None
             tname = _clean_template_name(base_name, "rcs", rcs_counter)
             rcs_card_title = derive_clean_card_title(clean_body, account=issue_data.get("account"))
             if rcs_card_title and clean_body:
                 lines = clean_body.strip().splitlines()
-                if len(lines) > 1:
-                    first_clean = lines[0].strip().strip("*_#~ ")
-                    if first_clean.lower() == rcs_card_title.lower() or rcs_card_title.lower().startswith(first_clean.lower()[:30]):
-                        clean_body = "\n".join(lines[1:]).strip()
+                new_lines = []
+                for l in lines:
+                    l_clean = l.strip().strip("*_#~ ")
+                    if l_clean.lower() == rcs_card_title.lower() or rcs_card_title.lower().startswith(l_clean.lower()[:30]):
+                        continue
+                    new_lines.append(l)
+                clean_body = "\n".join(new_lines).strip()
             rcs_drafts.append(
                 RcsTemplateDraft(
                     template_name=tname,
                     card_title=rcs_card_title,
                     body=clean_body,
                     media_file=media,
-                    media_filename=Path(media).name if media else None,
+                    media_filename=media_fn,
+                    media_attachment_id=media_att_id,
                     action_type="URL",
                     action_label=all_ctas[0]["label"] if all_ctas else swcm_btn_text,
                     action_url=all_ctas[0]["url"] if all_ctas else swcm_btn_url,
                     suggestions=all_ctas,
+                    template_type="richcard" if (media or media_fn) else "text",
                     variables=var_tags,
                     sample_values=samples,
                     raw_source=campaign["body"],
                     source_origin=f"swcm_{campaign['wa_label'].replace(' ', '_').lower()}",
                 )
             )
-
+            rcs_counter += 1
         elif c_chan == "SMS":
             tname = _clean_template_name(base_name, "sms", sms_counter)
             sms_drafts.append(
@@ -3190,6 +3211,7 @@ def parse_jira_brief(
                     footer_text=None,
                     media_file=item.get("media_file") or (img.get("local_path") if img else None),
                     media_filename=item.get("media_filename") or (img.get("filename") if img else None),
+                    media_attachment_id=item.get("media_attachment_id") or (img.get("id") if img else None),
                     button_type=b_type,
                     button_text=b_text,
                     button_url=b_url,
@@ -3247,6 +3269,7 @@ def parse_jira_brief(
                     body=clean_body,
                     media_file=item.get("media_file") or (img.get("local_path") if img else None),
                     media_filename=item.get("media_filename") or (img.get("filename") if img else None),
+                    media_attachment_id=item.get("media_attachment_id") or (img.get("id") if img else None),
                     action_type=item.get("button_type") or "URL",
                     action_label=cta_btn_text,
                     action_url=cta_btn_url,

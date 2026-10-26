@@ -834,6 +834,169 @@ export default function JiraBriefsPage() {
       return next;
     });
   };
+  const removeWaButton = (waIdx: number, btnIdx: number) => {
+    setWaTemplates((prev) => {
+      const next = [...prev];
+      const draft = { ...next[waIdx] };
+      const currentButtons: NonNullable<JiraWhatsAppDraft['buttons']>[number][] = draft.buttons && draft.buttons.length > 0
+        ? [...draft.buttons]
+        : (draft.button_type && draft.button_type !== 'NONE'
+            ? [{ type: draft.button_type, text: draft.button_text || '', url: draft.button_url || undefined, phone_number: draft.button_phone || undefined }]
+            : []);
+      currentButtons.splice(btnIdx, 1);
+      draft.buttons = currentButtons;
+      if (currentButtons.length === 0) {
+        draft.button_type = 'NONE';
+        draft.button_text = '';
+        draft.button_url = '';
+        draft.button_phone = '';
+      } else {
+        const first = currentButtons[0];
+        draft.button_type = first.type || 'URL';
+        draft.button_text = first.text || ('label' in first && typeof first.label === 'string' ? first.label : '');
+        draft.button_url = first.url || '';
+        draft.button_phone = first.phone_number || '';
+      }
+      next[waIdx] = draft;
+      return next;
+    });
+  };
+
+  const updateWaButton = (
+    waIdx: number,
+    btnIdx: number,
+    patch: Partial<{ type: string; text: string; label: string; url: string; phone_number: string }>
+  ) => {
+    setWaTemplates((prev) => {
+      const next = [...prev];
+      const draft = { ...next[waIdx] };
+      const currentButtons: NonNullable<JiraWhatsAppDraft['buttons']>[number][] = draft.buttons && draft.buttons.length > 0
+        ? [...draft.buttons]
+        : (draft.button_type && draft.button_type !== 'NONE'
+            ? [{ type: draft.button_type, text: draft.button_text || '', url: draft.button_url || undefined, phone_number: draft.button_phone || undefined }]
+            : []);
+      if (!currentButtons[btnIdx]) {
+        currentButtons[btnIdx] = { type: 'URL', text: 'Explore Now', url: 'https://u3.mnge.co/' };
+      }
+      currentButtons[btnIdx] = { ...currentButtons[btnIdx], ...patch };
+      const waBtnText = patch.text ?? patch.label;
+      if (waBtnText !== undefined) currentButtons[btnIdx].text = waBtnText;
+      draft.buttons = currentButtons;
+      if (btnIdx === 0) {
+        if (patch.type) draft.button_type = patch.type;
+        if (patch.text || patch.label) draft.button_text = patch.text || patch.label || '';
+        if (patch.url !== undefined) draft.button_url = patch.url;
+        if (patch.phone_number !== undefined) draft.button_phone = patch.phone_number;
+      }
+      next[waIdx] = draft;
+      return next;
+    });
+  };
+
+  const addWaButton = (waIdx: number) => {
+    setWaTemplates((prev) => {
+      const next = [...prev];
+      const draft = { ...next[waIdx] };
+      const currentButtons: NonNullable<JiraWhatsAppDraft['buttons']>[number][] = draft.buttons && draft.buttons.length > 0
+        ? [...draft.buttons]
+        : (draft.button_type && draft.button_type !== 'NONE'
+            ? [{ type: draft.button_type, text: draft.button_text || '', url: draft.button_url || undefined, phone_number: draft.button_phone || undefined }]
+            : []);
+      if (currentButtons.length < 3) {
+        currentButtons.push({ type: 'URL', text: 'Explore Now', url: 'https://u3.mnge.co/' });
+      }
+      draft.buttons = currentButtons;
+      if (currentButtons.length === 1) {
+        draft.button_type = 'URL';
+        draft.button_text = 'Explore Now';
+        draft.button_url = 'https://u3.mnge.co/';
+      }
+      next[waIdx] = draft;
+      return next;
+    });
+  };
+
+  const removeRcsSuggestion = (rcsIdx: number, sIdx: number) => {
+    setRcsTemplates((prev) => {
+      const next = [...prev];
+      const draft = { ...next[rcsIdx] };
+      const currentSuggestions: NonNullable<JiraRcsDraft['suggestions']>[number][] = draft.suggestions && draft.suggestions.length > 0
+        ? [...draft.suggestions]
+        : ((draft.action_label || draft.action_url)
+            ? [{ type: draft.action_type || 'URL', label: draft.action_label || '', text: draft.action_label || '', url: draft.action_url || '' }]
+            : []);
+      currentSuggestions.splice(sIdx, 1);
+      draft.suggestions = currentSuggestions;
+      if (currentSuggestions.length === 0) {
+        draft.action_label = '';
+        draft.action_url = '';
+        draft.action_type = 'URL';
+      } else {
+        const first = currentSuggestions[0];
+        draft.action_label = first.label || first.text || '';
+        draft.action_url = first.url || '';
+        draft.action_type = first.type || 'URL';
+      }
+      next[rcsIdx] = draft;
+      return next;
+    });
+  };
+
+  const updateRcsSuggestion = (
+    rcsIdx: number,
+    sIdx: number,
+    patch: Partial<{ type: string; label: string; text: string; url: string; phone_number: string }>
+  ) => {
+    setRcsTemplates((prev) => {
+      const next = [...prev];
+      const draft = { ...next[rcsIdx] };
+      const currentSuggestions: NonNullable<JiraRcsDraft['suggestions']>[number][] = draft.suggestions && draft.suggestions.length > 0
+        ? [...draft.suggestions]
+        : ((draft.action_label || draft.action_url)
+            ? [{ type: draft.action_type || 'URL', label: draft.action_label || '', text: draft.action_label || '', url: draft.action_url || '' }]
+            : []);
+      if (!currentSuggestions[sIdx]) {
+        currentSuggestions[sIdx] = { type: 'URL', label: 'Explore Now', text: 'Explore Now', url: 'https://u3.mnge.co/' };
+      }
+      currentSuggestions[sIdx] = { ...currentSuggestions[sIdx], ...patch };
+      const rcsBtnLabel = patch.label ?? patch.text;
+      if (rcsBtnLabel !== undefined) {
+        currentSuggestions[sIdx].label = rcsBtnLabel;
+        currentSuggestions[sIdx].text = rcsBtnLabel;
+      }
+      draft.suggestions = currentSuggestions;
+      if (sIdx === 0) {
+        if (patch.label || patch.text) draft.action_label = patch.label || patch.text || '';
+        if (patch.url !== undefined) draft.action_url = patch.url;
+        if (patch.type) draft.action_type = patch.type;
+      }
+      next[rcsIdx] = draft;
+      return next;
+    });
+  };
+
+  const addRcsSuggestion = (rcsIdx: number) => {
+    setRcsTemplates((prev) => {
+      const next = [...prev];
+      const draft = { ...next[rcsIdx] };
+      const currentSuggestions: NonNullable<JiraRcsDraft['suggestions']>[number][] = draft.suggestions && draft.suggestions.length > 0
+        ? [...draft.suggestions]
+        : ((draft.action_label || draft.action_url)
+            ? [{ type: draft.action_type || 'URL', label: draft.action_label || '', text: draft.action_label || '', url: draft.action_url || '' }]
+            : []);
+      if (currentSuggestions.length < 4) {
+        currentSuggestions.push({ type: 'URL', label: 'Explore Now', text: 'Explore Now', url: 'https://u3.mnge.co/' });
+      }
+      draft.suggestions = currentSuggestions;
+      if (currentSuggestions.length === 1) {
+        draft.action_label = 'Explore Now';
+        draft.action_url = 'https://u3.mnge.co/';
+        draft.action_type = 'URL';
+      }
+      next[rcsIdx] = draft;
+      return next;
+    });
+  };
 
   const updateCarouselCardField = (
     rcsIdx: number,
@@ -2097,6 +2260,11 @@ export default function JiraBriefsPage() {
                           const isSelected = selectedWa.has(idx) && !blocked;
                           const source = creativeSource(wa.media_file, wa.media_filename, wa.media_attachment_id);
                           const isEditing = editingCard[`wa-${idx}`] || false;
+                          const waButtons = (wa.buttons && wa.buttons.length > 0)
+                            ? wa.buttons
+                            : (wa.button_type && wa.button_type !== 'NONE'
+                                ? [{ type: wa.button_type, text: wa.button_text || 'Check Offer', label: wa.button_text || 'Check Offer', url: wa.button_url || '', phone_number: wa.button_phone || '' }]
+                                : []);
 
                           return (
                             <div
@@ -2291,56 +2459,96 @@ export default function JiraBriefsPage() {
                                   />
 
                                   {/* Button controls */}
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Type:</label>
-                                      <select
-                                        value={wa.button_type || 'NONE'}
-                                        onChange={(e) => updateWaField(idx, 'button_type', e.target.value)}
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold cursor-pointer"
-                                      >
-                                        <option value="NONE">None</option>
-                                        <option value="URL">CTA URL Button</option>
-                                        <option value="QUICK_REPLY">Quick Reply Button</option>
-                                        <option value="PHONE_NUMBER">Call Phone Number</option>
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Text:</label>
-                                      <input
-                                        type="text"
-                                        value={wa.button_text || ''}
-                                        onChange={(e) => updateWaField(idx, 'button_text', e.target.value)}
-                                        placeholder="e.g. Check Offer"
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
-                                      />
-                                    </div>
-                                    <div>
-                                      {wa.button_type === 'PHONE_NUMBER' ? (
-                                        <>
-                                          <label className="block text-[11px] text-gray-500 mb-1">Phone (+91...):</label>
-                                          <input
-                                            type="text"
-                                            value={wa.button_phone || ''}
-                                            onChange={(e) => updateWaField(idx, 'button_phone', e.target.value)}
-                                            placeholder="+919876543210"
-                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
-                                          />
-                                        </>
-                                      ) : (
-                                        <>
-                                          <label className="block text-[11px] text-gray-500 mb-1">Destination URL:</label>
-                                          <input
-                                            type="text"
-                                            value={wa.button_url || ''}
-                                            onChange={(e) => updateWaField(idx, 'button_url', e.target.value)}
-                                            placeholder="https://u3.mnge.co/"
-                                            disabled={wa.button_type === 'QUICK_REPLY' || wa.button_type === 'NONE'}
-                                            className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100"
-                                          />
-                                        </>
+                                  <div className="space-y-2 pt-2 border-t border-gray-100">
+                                    <div className="flex items-center justify-between">
+                                      <label className="text-[11px] font-bold text-gray-700">CTA Buttons ({waButtons.length}/3):</label>
+                                      {waButtons.length < 3 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => addWaButton(idx)}
+                                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                                        >
+                                          + Add CTA Button
+                                        </button>
                                       )}
                                     </div>
+                                    {waButtons.length === 0 ? (
+                                      <div className="p-2.5 bg-gray-50 rounded-lg border border-dashed border-gray-300 flex items-center justify-between text-xs text-gray-500">
+                                        <span>No buttons configured.</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => addWaButton(idx)}
+                                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px] font-semibold text-blue-600 hover:bg-gray-50 cursor-pointer"
+                                        >
+                                          + Add CTA Button
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      waButtons.map((btn, bIdx) => (
+                                        <div key={bIdx} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-bold text-gray-700">Button {bIdx + 1}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => removeWaButton(idx, bIdx)}
+                                              className="text-[11px] font-semibold text-red-600 hover:text-red-800 cursor-pointer"
+                                            >
+                                              ✕ Remove CTA
+                                            </button>
+                                          </div>
+                                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                            <div>
+                                              <label className="block text-[10px] text-gray-500 mb-0.5">Type:</label>
+                                              <select
+                                                value={btn.type || 'URL'}
+                                                onChange={(e) => updateWaButton(idx, bIdx, { type: e.target.value })}
+                                                className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white font-medium cursor-pointer"
+                                              >
+                                                <option value="URL">CTA URL</option>
+                                                <option value="QUICK_REPLY">Quick Reply</option>
+                                                <option value="PHONE_NUMBER">Phone Call</option>
+                                              </select>
+                                            </div>
+                                            <div>
+                                              <label className="block text-[10px] text-gray-500 mb-0.5">Button Text:</label>
+                                              <input
+                                                type="text"
+                                                value={btn.text || ('label' in btn && typeof btn.label === 'string' ? btn.label : '')}
+                                                onChange={(e) => updateWaButton(idx, bIdx, { text: e.target.value, label: e.target.value })}
+                                                placeholder="e.g. Explore Now"
+                                                className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white"
+                                              />
+                                            </div>
+                                            <div>
+                                              {btn.type === 'PHONE_NUMBER' ? (
+                                                <>
+                                                  <label className="block text-[10px] text-gray-500 mb-0.5">Phone (+91...):</label>
+                                                  <input
+                                                    type="text"
+                                                    value={btn.phone_number || ''}
+                                                    onChange={(e) => updateWaButton(idx, bIdx, { phone_number: e.target.value })}
+                                                    placeholder="+919876543210"
+                                                    className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white font-mono"
+                                                  />
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <label className="block text-[10px] text-gray-500 mb-0.5">Destination URL:</label>
+                                                  <input
+                                                    type="text"
+                                                    value={btn.url || ''}
+                                                    onChange={(e) => updateWaButton(idx, bIdx, { url: e.target.value })}
+                                                    placeholder="https://u3.mnge.co/"
+                                                    disabled={btn.type === 'QUICK_REPLY'}
+                                                    className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100 font-mono text-[11px]"
+                                                  />
+                                                </>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
                                   </div>
                                 </div>
                               ) : (
@@ -2417,6 +2625,11 @@ export default function JiraBriefsPage() {
                           const isSelected = selectedRcs.has(idx) && !blocked && !selectionError;
                           const source = creativeSource(rcs.media_file, rcs.media_filename, rcs.media_attachment_id);
                           const isEditing = editingCard[`rcs-${idx}`] || false;
+                          const rcsSuggestions = (rcs.suggestions && rcs.suggestions.length > 0)
+                            ? rcs.suggestions
+                            : ((rcs.action_label || rcs.action_url)
+                                ? [{ type: rcs.action_type || 'URL', label: rcs.action_label || 'Explore Now', text: rcs.action_label || 'Explore Now', url: rcs.action_url || '' }]
+                                : []);
 
                           return (
                             <div
@@ -2572,27 +2785,69 @@ export default function JiraBriefsPage() {
                                       className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded bg-white"
                                     />
                                   </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Label (CTA):</label>
-                                      <input
-                                        type="text"
-                                        value={rcs.action_label || ''}
-                                        onChange={(e) => updateRcsField(idx, 'action_label', e.target.value)}
-                                        placeholder="e.g. Apply Now"
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-medium"
-                                      />
+                                  {/* RCS Suggestions / Button controls */}
+                                  <div className="space-y-2 pt-2 border-t border-gray-100">
+                                    <div className="flex items-center justify-between">
+                                      <label className="text-[11px] font-bold text-gray-700">CTA Buttons (Suggestions) ({rcsSuggestions.length}/4):</label>
+                                      {rcsSuggestions.length < 4 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => addRcsSuggestion(idx)}
+                                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                                        >
+                                          + Add CTA Button
+                                        </button>
+                                      )}
                                     </div>
-                                    <div>
-                                      <label className="block text-[11px] text-gray-500 mb-1">Button Destination URL:</label>
-                                      <input
-                                        type="text"
-                                        value={rcs.action_url || ''}
-                                        onChange={(e) => updateRcsField(idx, 'action_url', e.target.value)}
-                                        placeholder="https://u3.mnge.co/"
-                                        className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono"
-                                      />
-                                    </div>
+                                    {rcsSuggestions.length === 0 ? (
+                                      <div className="p-2.5 bg-gray-50 rounded-lg border border-dashed border-gray-300 flex items-center justify-between text-xs text-gray-500">
+                                        <span>No CTA buttons configured.</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => addRcsSuggestion(idx)}
+                                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px] font-semibold text-blue-600 hover:bg-gray-50 cursor-pointer"
+                                        >
+                                          + Add CTA Button
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      rcsSuggestions.map((sugg, sIdx) => (
+                                        <div key={sIdx} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                                          <div className="flex items-center justify-between">
+                                            <span className="text-[11px] font-bold text-gray-700">CTA {sIdx + 1}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => removeRcsSuggestion(idx, sIdx)}
+                                              className="text-[11px] font-semibold text-red-600 hover:text-red-800 cursor-pointer"
+                                            >
+                                              ✕ Remove CTA
+                                            </button>
+                                          </div>
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <div>
+                                              <label className="block text-[10px] text-gray-500 mb-0.5">Button Label:</label>
+                                              <input
+                                                type="text"
+                                                value={sugg.label || sugg.text || ''}
+                                                onChange={(e) => updateRcsSuggestion(idx, sIdx, { label: e.target.value, text: e.target.value })}
+                                                placeholder="e.g. Apply Now"
+                                                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-medium"
+                                              />
+                                            </div>
+                                            <div>
+                                              <label className="block text-[10px] text-gray-500 mb-0.5">Button Destination URL:</label>
+                                              <input
+                                                type="text"
+                                                value={sugg.url || ''}
+                                                onChange={(e) => updateRcsSuggestion(idx, sIdx, { url: e.target.value })}
+                                                placeholder="https://u3.mnge.co/"
+                                                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono text-[11px]"
+                                              />
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))
+                                    )}
                                   </div>
                                 </div>
                               ) : (
