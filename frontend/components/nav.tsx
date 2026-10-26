@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useApp } from '@/lib/context';
-import type { Account, Channel } from '@/lib/api';
 import { canUseApparelAttribution } from '@/lib/apparel-attribution';
 
 const links = [
@@ -128,14 +127,8 @@ export default function Nav() {
   useEffect(() => { setMobileOpen(false); }, [pathname]);
   const {
     account,
-    setAccount,
-    channel,
-    setChannel,
     user,
     currentUser,
-    accounts,
-    getAccountLabel,
-    isTenantLocked,
     logout,
   } = useApp();
   const canViewAll = currentUser?.role === 'superadmin';
@@ -143,9 +136,6 @@ export default function Nav() {
     currentUser.tenant_id === 'tata' ||
     (canViewAll && ['all', 'tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(account))
   ));
-  const accountOptions = canViewAll
-    ? [{ id: 'all', name: 'All Accounts', is_builtin: true }, ...accounts]
-    : accounts;
 
   if (pathname === '/login' || pathname === '/signup') {
     return null;
@@ -154,7 +144,7 @@ export default function Nav() {
   return (
     <>
     <header className="md:hidden sticky top-0 z-40 h-14 flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4">
-      <span className="font-semibold text-gray-900 truncate">Karix · {getAccountLabel(account)}</span>
+      <span className="font-semibold text-gray-900 truncate">Karix · Template Whitelisting</span>
       <button id="workspace-menu-toggle" type="button" aria-controls="workspace-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)} className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500">Menu</button>
     </header>
     {mobileOpen && <button type="button" aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="md:hidden fixed inset-0 z-40 bg-black/30" />}
@@ -172,95 +162,6 @@ export default function Nav() {
         </div>
       </div>
 
-      {/* Account & Channel Selectors */}
-      <div className="p-4 bg-gray-50/70 border-b border-gray-200/80 space-y-2.5">
-        {/* Account / Sub-Product Selector */}
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1 flex items-center justify-between">
-            <span>Account / Sub-Product</span>
-            {isTenantLocked && (
-              <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200">
-                {currentUser?.tenant_id.toUpperCase()}
-              </span>
-            )}
-          </label>
-          {accountOptions.length <= 1 ? (
-            <div className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-bold text-gray-900 shadow-2xs flex items-center justify-between">
-              <span className="truncate">{getAccountLabel(account)}</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-            </div>
-          ) : (
-            <div className="relative">
-              <select
-                value={account}
-                onChange={(e) => setAccount(e.target.value as Account)}
-                className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors"
-              >
-                {accountOptions.map((acc) => (
-                  <option key={acc.id} value={acc.id}>
-                    {acc.name}
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
-                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </div>
-            </div>
-          )}
-        </div>
-        {/* Channel Selector */}
-        <div>
-          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1">
-            Channel
-          </label>
-          <div className="relative">
-            <select
-              value={account === 'apparel' ? 'rcs' : channel}
-              onChange={(e) => setChannel(e.target.value as Channel)}
-              disabled={account === 'apparel'}
-              className="w-full appearance-none bg-white border border-gray-300 rounded-lg px-3 py-1.5 pr-8 text-xs font-semibold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer transition-colors disabled:bg-purple-50/60 disabled:text-purple-900 disabled:border-purple-200"
-            >
-              {account === 'apparel' ? (
-                <option value="rcs">RCS Only (Karix ➔ MoEngage)</option>
-              ) : (
-                <>
-                  <option value="whatsapp">WhatsApp</option>
-                  <option value="rcs">RCS (DLT)</option>
-                  <option value="sms">SMS (Karix)</option>
-                </>
-              )}
-            </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
-              <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        {/* Active Context Badge */}
-        <div className="flex items-center justify-between pt-1">
-          <span className="text-[11px] text-gray-500 font-medium">Active:</span>
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-              channel === 'whatsapp'
-                ? 'bg-emerald-100 text-emerald-800'
-                : channel === 'rcs'
-                ? 'bg-blue-100 text-blue-800'
-                : 'bg-purple-100 text-purple-800'
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                channel === 'whatsapp' ? 'bg-emerald-500' : channel === 'rcs' ? 'bg-blue-500' : 'bg-purple-500'
-              }`}
-            />
-            {getAccountLabel(account)} &bull; {channel === 'whatsapp' ? 'WhatsApp' : channel === 'rcs' ? 'RCS' : 'SMS'}
-          </span>
-        </div>
-      </div>
 
       {/* Navigation Links */}
       <nav onClick={() => setMobileOpen(false)} className="flex-1 px-3 py-4 space-y-1">

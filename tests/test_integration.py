@@ -132,7 +132,7 @@ def test_duplicate_submission_skipping(provision_user):
         patch("runner.submit_template", side_effect=accept_template) as provider,
     ):
         r = client.post(
-            "/api/submit?account=tchfl&channel=whatsapp&skip_duplicates=true",
+            "/api/submit?account=tchfl&channel=whatsapp&expected_account=tchfl&expected_channel=whatsapp&skip_duplicates=true",
             files={"file": ("test.csv", io.BytesIO(csv_content.encode()), "text/csv")},
             headers=H,
         )
@@ -420,7 +420,7 @@ def test_in_batch_duplicate_skipping_and_row_order(provision_user):
 
     with patch("api.fetch_whatsapp_templates", return_value=[]), patch("runner.submit_template", side_effect=accept_template):
         r = client.post(
-            "/api/submit?account=tchfl&channel=whatsapp&skip_duplicates=true",
+            "/api/submit?account=tchfl&channel=whatsapp&expected_account=tchfl&expected_channel=whatsapp&skip_duplicates=true",
             files={"file": ("batch.csv", io.BytesIO(csv_content.encode()), "text/csv")},
             headers=H,
         )

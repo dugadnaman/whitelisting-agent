@@ -4,6 +4,7 @@ import { useState, useCallback, useRef } from 'react';
 
 // In-memory cache for fast retrieval and storing live runtime objects
 const memoryCache = new Map<string, any>();
+let workspaceGeneration = 0;
 
 /**
  * Retrieve cached tab state. Checks memoryCache first, then sessionStorage.
@@ -60,6 +61,7 @@ export function setTabState<T>(key: string, value: T): void {
  */
 export function clearTabState(prefix?: string): void {
   if (!prefix) {
+    workspaceGeneration += 1;
     memoryCache.clear();
     if (typeof window !== 'undefined') {
       try {
@@ -96,6 +98,19 @@ export function clearTabState(prefix?: string): void {
   }
 }
 
+/** Only actual work, not filters or navigation, needs a destination-change warning. */
+export function hasWorkspaceDrafts(): boolean {
+  const submission = getTabState<{ step?: string } | null>('submit_state', null);
+  if (submission?.step && submission.step !== 'idle') return true;
+  if (getTabState('submit_identify_report', null)) return true;
+  for (const key of ['briefs_wa_templates', 'briefs_rcs_templates', 'briefs_sms_templates']) {
+    if (getTabState<unknown[]>(key, []).length > 0) return true;
+  }
+  return ['settings_unsaved', 'moe_unsaved_preview', 'moe_single_name', 'moe_single_subject',
+    'moe_single_html', 'moe_single_push_title', 'moe_single_push_message']
+    .some((key) => Boolean(getTabState<unknown>(key, null)));
+}
+
 /**
  * React hook that mirrors useState but persists values across tab/route switches
  * and browser tab reloads.
@@ -107,16 +122,20 @@ export function useTabState<T>(
   const [state, setStateInternal] = useState<T>(() => getTabState(key, defaultValue));
   const keyRef = useRef(key);
   keyRef.current = key;
+  const generation = workspaceGeneration;
 
   const setState = useCallback((action: T | ((prev: T) => T)) => {
+    if (generation !== workspaceGeneration) return;
     setStateInternal((current) => {
+      if (generation !== workspaceGeneration) return current;
       const next = typeof action === 'function' ? (action as (prev: T) => T)(current) : action;
       setTabState(keyRef.current, next);
       return next;
     });
-  }, []);
+  }, [generation]);
 
   const resetState = useCallback(() => {
+    if (generation !== workspaceGeneration) return;
     memoryCache.delete(keyRef.current);
     if (typeof window !== 'undefined') {
       try {
@@ -124,7 +143,7 @@ export function useTabState<T>(
       } catch {}
     }
     setStateInternal(defaultValue);
-  }, [defaultValue]);
+  }, [defaultValue, generation]);
 
   return [state, setState, resetState];
 }

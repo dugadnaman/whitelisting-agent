@@ -60,7 +60,7 @@ def test_jira_brief_exposes_sparse_copy_and_invalid_creative_warnings(preview_ca
 def test_jira_edited_preview_rechecks_replacement_image_and_copy(preview_case):
     client, brief, creative, _ = preview_case
     draft = brief.whatsapp_templates[0]
-    payload = {"account": "tcl_promo", "whatsapp_account": "tcl_promo",
+    payload = {"account": "tcl_promo",
                "whatsapp_templates": [draft], "rcs_templates": []}
     with patch("submission_client.fetch_template_list", return_value=([], None)):
         initial = client.post("/api/jira/preview", json=payload)

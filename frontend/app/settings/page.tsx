@@ -2,18 +2,19 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection, canAccessAccount, authorizedAccount, accountOrganization, fetchAccessRequests, approveAccessRequest } from '@/lib/api';
-import type { Account, Channel, AccountItem, AuthUser, RequestedTenant } from '@/lib/api';
+import type { AccountItem, AuthUser, RequestedTenant } from '@/lib/api';
 import { useApp } from '@/lib/context';
+import { destinationAccountLabel } from '@/lib/destination';
+import { clearTabState, setTabState } from '@/lib/tab-state';
 import KarixAuthSync from '@/components/KarixAuthSync';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
 
 export default function SettingsPage() {
   const {
-    account: activeAccount,
-    channel: activeChannel,
-    setAccount: setActiveAccount,
-    setChannel: setActiveChannel,
+    account: selectedAccount,
+    channel: selectedChannel,
+    setDestination,
     user: currentOperator,
     currentUser,
     accounts,
@@ -21,19 +22,12 @@ export default function SettingsPage() {
     getAccountLabel,
     isTenantLocked,
   } = useApp();
-  // Selected config tab
-  const [selectedAccount, setSelectedAccount] = useState<Account>(
-    activeAccount === 'all' ? 'tcl_promo' : activeAccount
-  );
-  const [selectedChannel, setSelectedChannel] = useState<Channel>(activeChannel);
-  const teamTenant = currentUser?.role === 'superadmin' ? selectedAccount : currentUser?.tenant_id;
-  const isAssigned = canAccessAccount(currentUser, selectedAccount);
+  const hasAccountAccess = canAccessAccount(currentUser, selectedAccount);
+  const isAssigned = selectedAccount !== 'all' && hasAccountAccess;
+  const teamTenant = currentUser?.role === 'superadmin'
+    ? (isAssigned ? selectedAccount : undefined)
+    : currentUser?.tenant_id;
   const canManageTeam = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'superadmin'));
-  useEffect(() => {
-    if (currentUser && !canAccessAccount(currentUser, selectedAccount)) {
-      setSelectedAccount(authorizedAccount(currentUser, activeAccount));
-    }
-  }, [currentUser, selectedAccount, activeAccount]);
 
   // New Account Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -52,12 +46,13 @@ export default function SettingsPage() {
   const [manualPortalSession, setManualPortalSession] = useState(false);
   const [showMoEngage, setShowMoEngage] = useState(false);
   const [syncRevision, setSyncRevision] = useState(0);
-  const settingsScope = `${currentUser?.id}:${currentUser?.tenant_id}:${currentUser?.role}:${selectedAccount}:${showMoEngage ? 'moengage' : selectedChannel}`;
+  const settingsScope = `${currentUser?.id}:${currentUser?.tenant_id}:${currentUser?.role}:${selectedAccount}:${selectedChannel}:${showMoEngage ? 'moengage' : 'karix'}`;
   const [loadedScope, setLoadedScope] = useState('');
   const savedFields = useRef<Record<string, string>>({});
   const currentSettingsScope = useRef(settingsScope);
   currentSettingsScope.current = settingsScope;
   useEffect(() => {
+    savedFields.current = {};
     setManualPortalSession(false);
     setBearerToken('');
     setSession('');
@@ -114,6 +109,7 @@ export default function SettingsPage() {
   const [moeLoadedScope, setMoeLoadedScope] = useState('');
   // Load MoEngage credentials for the selected account
   useEffect(() => {
+    savedMoeFields.current = {};
     setManualMoeSession(false);
     setMoeBearerToken('');
     setMoeRefreshToken('');
@@ -156,7 +152,7 @@ export default function SettingsPage() {
   const [requestError, setRequestError] = useState<string | null>(null);
   const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
   const [requestFilter, setRequestFilter] = useState<RequestedTenant | ''>(() => {
-    const organization = accountOrganization(activeAccount);
+    const organization = accountOrganization(selectedAccount);
     return organization === 'bajaj' || organization === 'tata' || organization === 'apparel' ? organization : '';
   });
   const canApprove = canManageTeam && Boolean(currentUser?.role === 'superadmin' || (
@@ -198,7 +194,7 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    if (!isAssigned) return;
+    if (!hasAccountAccess) return;
     let ignore = false;
     async function loadServerCreds() {
       try {
@@ -259,12 +255,12 @@ export default function SettingsPage() {
       }
     }
 
-    loadServerCreds();
+    if (isAssigned) loadServerCreds();
     loadTeam();
     return () => {
       ignore = true;
     };
-  }, [selectedAccount, selectedChannel, teamTenant, isAssigned, settingsScope, syncRevision]);
+  }, [selectedAccount, selectedChannel, teamTenant, isAssigned, hasAccountAccess, settingsScope, syncRevision]);
   const isWhatsApp = selectedChannel === 'whatsapp';
   const isSms = selectedChannel === 'sms';
   const isRcs = selectedChannel === 'rcs';
@@ -280,21 +276,43 @@ export default function SettingsPage() {
     return isWhatsApp ? { bearer_token: bearerToken.trim(), session: session.trim(), user: user.trim() }
       : { rcs_auth_token: rcsAuthToken.trim(), session: session.trim() || undefined, user: user.trim() || undefined };
   }
-  function credentialDraft() {
-    if (!isAssigned || loadedScope !== settingsScope) throw new Error('Wait for settings to load for the selected account and integration.');
-    const metadata: Record<string, string> = isWhatsApp
+  function credentialMetadata(): Record<string, string> {
+    return isWhatsApp
       ? { waba_auth_token: wabaAuthToken, waba_id: wabaId, esmeaddr, portal_username: portalUsername, portal_password: portalPassword, template_namespace_id: templateNamespaceId, entity_id: entityId }
       : isSms
         ? { sms_key: smsKey, sms_username: smsUsername, sms_encryption_key: smsEncryptionKey, sms_sender_id: smsSenderId, sms_dlr_auth_token: smsDlrAuthToken, entity_id: entityId, lounge_cookie: manualPortalSession ? loungeCookie : '' }
         : { rcs_bot_id: rcsBotId, rcs_esmeaddr: esmeaddr, entity_id: entityId };
-    const changed = changedFields(metadata);
+  }
+  const hasUnsavedSettings = isAssigned && (
+    Boolean(geminiApiKey.trim()) ||
+    (!showMoEngage && loadedScope === settingsScope && (
+      manualPortalSession || Object.entries(credentialMetadata()).some(([key, value]) => value.trim() !== (savedFields.current[key] || '').trim())
+    )) ||
+    (showMoEngage && moeLoadedScope === settingsScope && (
+      manualMoeSession || Object.entries({ base_url: moeBaseUrl, workspace_id: moeWorkspaceId, sender_id: moeSenderId }).some(([key, value]) => value.trim() !== (savedMoeFields.current[key] || '').trim())
+    ))
+  );
+  useEffect(() => {
+    setTabState('settings_unsaved', hasUnsavedSettings);
+  }, [hasUnsavedSettings]);
+  useEffect(() => () => clearTabState('settings_unsaved'), []);
+  function showConnection(moengage: boolean) {
+    if (moengage === showMoEngage) return;
+    if (hasUnsavedSettings && !window.confirm('Discard unsaved connection edits? Saved sessions and your whitelisting destination will not change.')) return;
+    setShowMoEngage(moengage);
+    setBanner(null);
+  }
+
+  function credentialDraft() {
+    if (!isAssigned || loadedScope !== settingsScope) throw new Error('Wait for settings to load for the selected account and integration.');
+    const changed = changedFields(credentialMetadata());
     if (manualPortalSession && !isSms && ['waba_id', 'esmeaddr', 'rcs_bot_id', 'rcs_esmeaddr'].some((key) => key in changed)) {
       throw new Error('Save the account routing identifiers first with manual override off. Then pair or replace the complete session for that configured identity.');
     }
     return { ...changed, ...portalCredentialsForRequest(),
       ...(currentUser?.role === 'superadmin' && geminiApiKey.trim() ? { gemini_api_key: geminiApiKey.trim() } : {}) };
   }
-  const accountTitle = getAccountLabel(selectedAccount);
+  const accountTitle = destinationAccountLabel(selectedAccount, getAccountLabel(selectedAccount));
   const channelTitle = isWhatsApp ? 'WhatsApp' : isSms ? 'SMS' : 'RCS';
   const envPrefix = selectedAccount.replace(/[^a-zA-Z0-9_]/g, '_').toUpperCase();
   const selectedAccountItem = accounts.find((a) => a.id === selectedAccount);
@@ -311,11 +329,11 @@ export default function SettingsPage() {
         currentOperator
       );
       await refreshAccounts();
-      setSelectedAccount(created.id);
+      const switched = setDestination(created.id, selectedChannel);
       setShowAddModal(false);
       setNewAccountName('');
       setNewAccountId('');
-      setBanner({ type: 'success', message: `Account "${created.name}" created! You can now configure its WABA credentials.` });
+      setBanner({ type: 'success', message: `Account "${created.name}" created.${switched ? ' Configure its connection below.' : ' Choose it in Whitelisting for when you are ready to configure its connection.'}` });
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Failed to create account');
     } finally {
@@ -329,9 +347,18 @@ export default function SettingsPage() {
     const accName = accountToDelete.name;
     setDeleting(true);
     try {
+      if (selectedAccount === accId && currentUser) {
+        const preferred = authorizedAccount(currentUser, null);
+        const fallback = preferred !== accId && canAccessAccount(currentUser, preferred)
+          ? preferred
+          : accounts.find((item) => item.id !== accId && canAccessAccount(currentUser, item.id))?.id;
+        if (!fallback) throw new Error('No authorized destination is available. This account cannot be deleted while it is selected.');
+        if (!setDestination(fallback, fallback === 'apparel' ? 'rcs' : selectedChannel)) return;
+      }
       try {
         localStorage.removeItem(`karix_creds_${accId}_whatsapp`);
         localStorage.removeItem(`karix_creds_${accId}_rcs`);
+        localStorage.removeItem(`karix_creds_${accId}_sms`);
         const stored = localStorage.getItem('karix_custom_accounts');
         if (stored) {
           const arr: AccountItem[] = JSON.parse(stored);
@@ -341,12 +368,6 @@ export default function SettingsPage() {
       } catch {}
       await deleteAccount(accId, currentOperator);
       await refreshAccounts();
-      if (selectedAccount === accId) {
-        setSelectedAccount('bajaj');
-      }
-      if (activeAccount === accId) {
-        setActiveAccount('bajaj');
-      }
       setAccountToDelete(null);
       setBanner({ type: 'success', message: `Account "${accName}" deleted.` });
     } catch (err) {
@@ -389,6 +410,7 @@ export default function SettingsPage() {
     setBanner(null);
     try {
       const res = await testGemini(geminiApiKey.trim());
+      if (currentSettingsScope.current !== settingsScope) return;
       if (res.ok) {
         setBanner({
           type: 'success',
@@ -553,7 +575,7 @@ export default function SettingsPage() {
     }
   }
 
-  if (!isAssigned) {
+  if (!hasAccountAccess) {
     return (
       <div className="space-y-4">
         <h1 className="text-2xl font-bold text-gray-900">Account settings</h1>
@@ -574,23 +596,9 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Settings &amp; Credentials</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Manage WABA IDs, API keys, and custom client accounts for WhatsApp &amp; RCS.
+            Manage connections for the destination selected in Whitelisting for above.
           </p>
         </div>
-        {!isTenantLocked && (
-          <button
-            onClick={() => {
-              setShowAddModal(true);
-              setCreateError(null);
-            }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Add New Account
-          </button>
-        )}
       </div>
 
       {/* Tenant Security Notice */}
@@ -609,353 +617,29 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Organization Team Directory */}
-      <div className="bg-white rounded-2xl border border-gray-200/80 shadow-xs p-6 space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-          <div>
-            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-              <span>👥 Organization Team Directory</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                {teamMembers.length} Members
-              </span>
-            </h3>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Team accounts registered for <strong>{getAccountLabel(teamTenant || selectedAccount)}</strong> workspace.
-            </p>
-          </div>
-          {(currentUser?.role === 'admin' || currentUser?.role === 'superadmin') && (
-            <button
-              type="button"
-              onClick={() => setShowInviteModal(true)}
-              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition flex items-center gap-1.5"
-            >
-              <span>➕ Add Colleague</span>
-            </button>
-          )}
-        </div>
 
-        {loadingTeam ? (
-          <div className="py-6 text-center text-xs text-gray-400">Loading team members...</div>
-        ) : teamMembers.length === 0 ? (
-          <div className="py-6 text-center text-xs text-gray-400">No team members registered yet for this organization.</div>
+      <section aria-labelledby="connections-heading" className="space-y-3">
+        <h2 id="connections-heading" className="text-lg font-bold text-gray-900">Connections</h2>
+        <p className="text-sm text-gray-500">
+          Connection management follows Whitelisting for. Opening an integration does not change your delivery destination or the extension’s active target.
+        </p>
+        {!isAssigned ? (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-sm text-blue-900">
+            Choose a specific account and channel in Whitelisting for above to manage its Karix connection or MoEngage integration. All accounts is an overview, not a connection destination.
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {teamMembers.map((member) => (
-              <div
-                key={member.id || member.email}
-                className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/50 flex items-start gap-3 hover:bg-white hover:border-blue-300 transition"
-              >
-                <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                  {(member.name || member.email || 'U').charAt(0).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <h4 className="text-xs font-bold text-gray-900 truncate">{member.name}</h4>
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase font-mono ${
-                        member.role === 'superadmin'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : member.role === 'admin'
-                          ? 'bg-purple-100 text-purple-800'
-                          : 'bg-blue-100 text-blue-800'
-                      }`}
-                    >
-                      {member.role || 'Operator'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-gray-500 font-mono truncate">{member.email}</p>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-gray-400">
-                    <span className="uppercase font-semibold text-gray-600">{member.tenant_id}</span>
-                    <span>Active 🟢</span>
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div className="flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2">
+            <button type="button" aria-pressed={!showMoEngage} onClick={() => showConnection(false)} className={`rounded-lg px-4 py-2 text-xs font-bold ${!showMoEngage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+              Karix · {channelTitle}
+            </button>
+            <button type="button" aria-pressed={showMoEngage} onClick={() => showConnection(true)} className={`rounded-lg px-4 py-2 text-xs font-bold ${showMoEngage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+              MoEngage integration
+            </button>
           </div>
         )}
+      </section>
 
-        {canApprove && (
-          <section className="border-t border-gray-100 pt-4 space-y-3" aria-labelledby="access-requests-heading">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h4 id="access-requests-heading" className="text-sm font-bold text-gray-900">Pending access requests</h4>
-                <p className="text-xs text-gray-500">Approval grants operator access only to the requested organization.</p>
-              </div>
-              {currentUser?.role === 'superadmin' && (
-                <div>
-                  <label htmlFor="access-request-filter" className="block text-xs font-semibold text-gray-600 mb-1">Requested organization</label>
-                  <select id="access-request-filter" value={requestFilter} disabled={Boolean(approvingUserId)} onChange={(e) => setRequestFilter(e.target.value as RequestedTenant | '')} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs">
-                    <option value="">All organizations</option>
-                    <option value="bajaj">Bajaj Finserv</option>
-                    <option value="tata">Tata Capital</option>
-                    <option value="apparel">Apparel</option>
-                  </select>
-                </div>
-              )}
-            </div>
-            {requestError && <p role="alert" className="text-xs text-red-700">{requestError}</p>}
-            {loadingRequests ? (
-              <p role="status" className="py-3 text-xs text-gray-500">Loading access requests...</p>
-            ) : pendingRequests.length === 0 ? (
-              <p className="py-3 text-xs text-gray-500">No pending requests for {requestTenant ? getAccountLabel(requestTenant) : 'any organization'}.</p>
-            ) : (
-              <div className="space-y-2">
-                {pendingRequests.map((applicant) => (
-                  <div key={applicant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3">
-                    <div className="min-w-0">
-                      <p className="text-xs font-bold text-gray-900">{applicant.name}</p>
-                      <p className="text-xs text-gray-600 break-all">{applicant.email}</p>
-                      <p className="text-xs text-blue-700 mt-1">Requested: {getAccountLabel(applicant.requested_tenant_id || '')}</p>
-                    </div>
-                    <button type="button" disabled={Boolean(approvingUserId)} onClick={() => handleApprove(applicant)} aria-label={`Approve ${applicant.name || applicant.email} for ${getAccountLabel(applicant.requested_tenant_id || '')}`} className="rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 px-3.5 py-2 text-xs font-semibold text-white">
-                      {approvingUserId === applicant.id ? 'Approving...' : 'Approve'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-      </div>
-
-      {/* Invite Modal */}
-      {showInviteModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-gray-900">Add Team Colleague</h3>
-              <button onClick={() => setShowInviteModal(false)} className="text-gray-400 hover:text-gray-600 font-bold">
-                &times;
-              </button>
-            </div>
-            <p className="text-xs text-gray-500">
-              Create a new user account for {getAccountLabel(teamTenant || selectedAccount)}. Share the initial password securely.
-            </p>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setInviting(true);
-                try {
-                  await inviteColleague(inviteEmail.trim(), invitePassword, inviteName.trim(), inviteRole, teamTenant);
-                  setShowInviteModal(false);
-                  const nameSaved = inviteName.trim();
-                  setInviteName('');
-                  setInviteEmail('');
-                  setInvitePassword('');
-                  const team = await fetchTeam(teamTenant);
-                  setTeamMembers(team || []);
-                  setBanner({ type: 'success', message: `Added ${nameSaved} to ${getAccountLabel(teamTenant || selectedAccount)}!` });
-                } catch (err) {
-                  setBanner({ type: 'error', message: err instanceof Error ? err.message : String(err) });
-                } finally {
-                  setInviting(false);
-                }
-              }}
-              className="space-y-3"
-            >
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Full Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Rahul Sharma"
-                  value={inviteName}
-                  onChange={(e) => setInviteName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Work Email <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="e.g. rahul@attributics.com"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Initial Password <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={12}
-                  autoComplete="new-password"
-                  placeholder="At least 12 characters (maximum 72 UTF-8 bytes)"
-                  value={invitePassword}
-                  onChange={(e) => setInvitePassword(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Role
-                </label>
-                <select
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                >
-                  <option value="operator">Operator (Preview, Submit, Poll)</option>
-                  <option value="admin">Admin (Manage Team & Credentials)</option>
-                </select>
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowInviteModal(false)}
-                  className="px-3.5 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={inviting}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold"
-                >
-                  {inviting ? 'Creating...' : 'Create Account'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Account Cards & Selector */}
-      <div className="space-y-3">
-        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">
-          Select Client Account
-        </label>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2.5">
-          {accounts.map((acc) => {
-            const isSelected = selectedAccount === acc.id;
-            return (
-              <div
-                key={acc.id}
-                onClick={() => {
-                  setSelectedAccount(acc.id);
-                  setActiveAccount(acc.id);
-                  setBanner(null);
-                }}
-                className={`group relative p-3 rounded-xl border text-left cursor-pointer transition-all ${
-                  isSelected
-                    ? 'bg-blue-50/70 border-blue-500 shadow-xs ring-2 ring-blue-500/20'
-                    : 'bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-1 mb-1">
-                  <span className="text-xs font-bold text-gray-900 truncate">
-                    {acc.name}
-                  </span>
-                  {!acc.is_builtin && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAccountToDelete({ id: acc.id, name: acc.name });
-                      }}
-                      title="Delete custom account"
-                      className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-600 transition-opacity p-0.5"
-                    >
-                      <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 text-[10px] text-gray-500 font-mono">
-                  <span>ID: {acc.id}</span>
-                  {acc.id === activeAccount && (
-                    <span className="ml-auto inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 text-emerald-800">
-                      ACTIVE
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Channel Tabs */}
-      <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-2">
-        <div className="flex flex-wrap gap-2">
-          {/* WhatsApp Tab (Hidden for Apparel) */}
-          {selectedAccount !== 'apparel' && (
-            <button
-              onClick={() => {
-                setSelectedChannel('whatsapp');
-                setShowMoEngage(false);
-                setBanner(null);
-              }}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-                selectedChannel === 'whatsapp'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              WhatsApp
-            </button>
-          )}
-          {/* RCS Tab */}
-          <button
-            onClick={() => {
-              setSelectedChannel('rcs');
-              setShowMoEngage(false);
-              setBanner(null);
-            }}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              selectedChannel === 'rcs'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-blue-400" />
-            RCS
-          </button>
-
-          {/* SMS Tab (Hidden for Apparel) */}
-          {selectedAccount !== 'apparel' && (
-            <button
-              onClick={() => {
-                setSelectedChannel('sms');
-                setShowMoEngage(false);
-                setBanner(null);
-              }}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-                selectedChannel === 'sms' && !showMoEngage
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <span className="w-2 h-2 rounded-full bg-purple-400" />
-              SMS
-            </button>
-          )}
-          {/* MoEngage Tab */}
-          <button
-            onClick={() => {
-              setShowMoEngage(true);
-              setBanner(null);
-            }}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 ${
-              showMoEngage
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-gray-600 hover:bg-gray-100'
-            }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
-            MoEngage
-          </button>
-        </div>
-      </div>
+      {isAssigned && <>
 
       {/* Target Info Banner */}
       <div className="flex items-center justify-between p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
@@ -965,7 +649,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <div className="text-xs font-bold text-gray-900">
-              {showMoEngage ? 'Configuring: MoEngage' : `Configuring: ${accountTitle} • ${channelTitle}`}
+              {showMoEngage ? `MoEngage integration · ${accountTitle}` : `Karix connection · ${accountTitle} · ${channelTitle}`}
             </div>
             <div className="text-[11px] text-gray-500">
               {showMoEngage
@@ -979,21 +663,6 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {!showMoEngage && (
-          <button
-            onClick={() => {
-              setActiveAccount(selectedAccount);
-              setActiveChannel(selectedChannel);
-              setBanner({
-                type: 'success',
-                message: `Active Context switched to ${accountTitle} • ${channelTitle}.`,
-              });
-            }}
-            className="px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-xs"
-          >
-            Set as Active Context
-          </button>
-        )}
       </div>
 
       {/* Credential Form Card */}
@@ -1832,6 +1501,248 @@ export default function SettingsPage() {
           Save the key to encrypted server storage. Leave it blank to preserve the saved key.
         </p>
       </div>}
+      </>}
+      <details className="rounded-2xl border border-gray-200 bg-white p-6">
+        <summary className="cursor-pointer text-sm font-bold text-gray-900">Team &amp; administration</summary>
+        <div className="pt-5 space-y-4">
+        {!isTenantLocked && (
+          <button
+            onClick={() => {
+              setShowAddModal(true);
+              setCreateError(null);
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add New Account
+          </button>
+        )}
+          {!isTenantLocked && isCustomAccount && selectedAccountItem && (
+            <button type="button" onClick={() => setAccountToDelete({ id: selectedAccountItem.id, name: selectedAccountItem.name })} className="rounded-lg border border-red-200 px-3.5 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+              Delete {accountTitle} account
+            </button>
+          )}
+          <div className="space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+          <div>
+            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+              <span>👥 Organization Team Directory</span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                {teamMembers.length} Members
+              </span>
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Team accounts registered for <strong>{teamTenant ? getAccountLabel(teamTenant) : 'all organizations'}</strong>.
+            </p>
+          </div>
+          {canManageTeam && Boolean(teamTenant) && (
+            <button
+              type="button"
+              onClick={() => setShowInviteModal(true)}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition flex items-center gap-1.5"
+            >
+              <span>➕ Add Colleague</span>
+            </button>
+          )}
+        </div>
+
+        {loadingTeam ? (
+          <div className="py-6 text-center text-xs text-gray-400">Loading team members...</div>
+        ) : teamMembers.length === 0 ? (
+          <div className="py-6 text-center text-xs text-gray-400">No team members registered yet for this organization.</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {teamMembers.map((member) => (
+              <div
+                key={member.id || member.email}
+                className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/50 flex items-start gap-3 hover:bg-white hover:border-blue-300 transition"
+              >
+                <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                  {(member.name || member.email || 'U').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <h4 className="text-xs font-bold text-gray-900 truncate">{member.name}</h4>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase font-mono ${
+                        member.role === 'superadmin'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : member.role === 'admin'
+                          ? 'bg-purple-100 text-purple-800'
+                          : 'bg-blue-100 text-blue-800'
+                      }`}
+                    >
+                      {member.role || 'Operator'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 font-mono truncate">{member.email}</p>
+                  <div className="mt-1 flex items-center justify-between text-[10px] text-gray-400">
+                    <span className="font-semibold text-gray-600">{getAccountLabel(member.tenant_id)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {canApprove && (
+          <section className="border-t border-gray-100 pt-4 space-y-3" aria-labelledby="access-requests-heading">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 id="access-requests-heading" className="text-sm font-bold text-gray-900">Pending access requests</h4>
+                <p className="text-xs text-gray-500">Approval grants operator access only to the requested organization.</p>
+              </div>
+              {currentUser?.role === 'superadmin' && (
+                <div>
+                  <label htmlFor="access-request-filter" className="block text-xs font-semibold text-gray-600 mb-1">Requested organization</label>
+                  <select id="access-request-filter" value={requestFilter} disabled={Boolean(approvingUserId)} onChange={(e) => setRequestFilter(e.target.value as RequestedTenant | '')} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs">
+                    <option value="">All organizations</option>
+                    <option value="bajaj">Bajaj Finserv</option>
+                    <option value="tata">Tata Capital</option>
+                    <option value="apparel">Apparel</option>
+                  </select>
+                </div>
+              )}
+            </div>
+            {requestError && <p role="alert" className="text-xs text-red-700">{requestError}</p>}
+            {loadingRequests ? (
+              <p role="status" className="py-3 text-xs text-gray-500">Loading access requests...</p>
+            ) : pendingRequests.length === 0 ? (
+              <p className="py-3 text-xs text-gray-500">No pending requests for {requestTenant ? getAccountLabel(requestTenant) : 'any organization'}.</p>
+            ) : (
+              <div className="space-y-2">
+                {pendingRequests.map((applicant) => (
+                  <div key={applicant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-gray-900">{applicant.name}</p>
+                      <p className="text-xs text-gray-600 break-all">{applicant.email}</p>
+                      <p className="text-xs text-blue-700 mt-1">Requested: {getAccountLabel(applicant.requested_tenant_id || '')}</p>
+                    </div>
+                    <button type="button" disabled={Boolean(approvingUserId)} onClick={() => handleApprove(applicant)} aria-label={`Approve ${applicant.name || applicant.email} for ${getAccountLabel(applicant.requested_tenant_id || '')}`} className="rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 px-3.5 py-2 text-xs font-semibold text-white">
+                      {approvingUserId === applicant.id ? 'Approving...' : 'Approve'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+      </div>
+        </div>
+      </details>
+
+      {/* Invite Modal */}
+      {showInviteModal && canManageTeam && teamTenant && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-gray-900">Add Team Colleague</h3>
+              <button onClick={() => setShowInviteModal(false)} className="text-gray-400 hover:text-gray-600 font-bold">
+                &times;
+              </button>
+            </div>
+            <p className="text-xs text-gray-500">
+              Create a new user account for {getAccountLabel(teamTenant || selectedAccount)}. Share the initial password securely.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!canManageTeam || !teamTenant) return;
+                setInviting(true);
+                try {
+                  await inviteColleague(inviteEmail.trim(), invitePassword, inviteName.trim(), inviteRole, teamTenant);
+                  setShowInviteModal(false);
+                  const nameSaved = inviteName.trim();
+                  setInviteName('');
+                  setInviteEmail('');
+                  setInvitePassword('');
+                  const team = await fetchTeam(teamTenant);
+                  setTeamMembers(team || []);
+                  setBanner({ type: 'success', message: `Added ${nameSaved} to ${getAccountLabel(teamTenant || selectedAccount)}!` });
+                } catch (err) {
+                  setBanner({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+                } finally {
+                  setInviting(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Full Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Rahul Sharma"
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Work Email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. rahul@attributics.com"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Initial Password <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={12}
+                  autoComplete="new-password"
+                  placeholder="At least 12 characters (maximum 72 UTF-8 bytes)"
+                  value={invitePassword}
+                  onChange={(e) => setInvitePassword(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  Role
+                </label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                >
+                  <option value="operator">Operator (Preview, Submit, Poll)</option>
+                  <option value="admin">Admin (Manage Team & Credentials)</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="px-3.5 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={inviting}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold"
+                >
+                  {inviting ? 'Creating...' : 'Create Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Banner */}
       {banner && (

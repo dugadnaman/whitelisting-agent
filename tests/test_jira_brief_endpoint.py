@@ -149,7 +149,7 @@ def test_jira_submit_preserves_text_header_footer_and_buttons(mock_fetch_issue, 
         assert response.status_code == 200, f"Expected 200, got: {response.text}"
         data = response.json()
         assert data["ok"] is True
-        assert data["account"] == data["whatsapp_account"] == "tcl_promo"
+        assert data["account"] == "tcl_promo"
         assert len(data["whatsapp_submitted"]) == 2
 
         assert len(captured_submissions) == 2
@@ -206,7 +206,6 @@ def _mock_parsed_brief():
 def _mixed_submission_payload():
     return {
         "account": "wealth",
-        "whatsapp_account": "tcl_promo",
         "channels": ["whatsapp", "rcs"],
         "whatsapp_templates": [{
             "template_name": "wealth_wa",
@@ -217,7 +216,7 @@ def _mixed_submission_payload():
     }
 
 
-def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit_user, client):
+def test_jira_submit_keeps_both_channels_on_the_explicit_selected_account(jira_submit_user, client):
     from models import ApprovalStatus, SubmissionResult, SubmissionStatus
     from rcs_models import RcsSubmissionResult, RcsSubmissionStatus
 
@@ -229,9 +228,9 @@ def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit
 
     def waba_id(account):
         waba_accounts.append(account)
-        if account != "tcl_promo":
+        if account != "wealth":
             raise OSError("Missing WABA ID")
-        return "tcl-waba"
+        return "wealth-waba"
 
     def submit_wa(submission, client):
         wa_submissions.append((submission, client))
@@ -268,17 +267,15 @@ def test_jira_submit_routes_whatsapp_and_rcs_to_independent_accounts(jira_submit
 
     assert response.status_code == 200, response.text
     data = response.json()
-    assert (data["account"], data["whatsapp_account"]) == ("wealth", "tcl_promo")
+    assert data["account"] == "wealth"
     assert len(data["whatsapp_submitted"]) == len(data["rcs_submitted"]) == 1
     get_bot.assert_called_once_with("wealth")
-    assert waba_accounts == ["tcl_promo", "tcl_promo"]
-    normalize.assert_called_once_with("Dear {{1}}, welcome.", client="tcl_promo")
-    assert wa_submissions[0][0].client == wa_submissions[0][1] == "tcl_promo"
-    assert wa_submissions[0][0].waba_id == "tcl-waba"
+    assert waba_accounts == ["wealth", "wealth"]
+    normalize.assert_called_once_with("Dear {{1}}, welcome.", client="wealth")
+    assert wa_submissions[0][0].client == wa_submissions[0][1] == "wealth"
+    assert wa_submissions[0][0].waba_id == "wealth-waba"
     assert rcs_submissions[0][0].client == rcs_submissions[0][1] == "wealth"
     assert audit[0]["account"] == "wealth"
-    assert audit[0]["details"]["whatsapp_account"] == "tcl_promo"
-    assert audit[0]["details"]["rcs_account"] == "wealth"
 
 
 @pytest.mark.parametrize("tenant", ["wealth", "tcl_promo"])
@@ -291,7 +288,9 @@ def test_jira_submit_rejects_unauthorized_destination_before_submitting(jira_sub
         patch("submission_client.submit_template") as submit_wa,
         patch("rcs_client.submit_rcs_template") as submit_rcs,
     ):
-        response = client.post("/api/jira/submit/TCN-999", json=_mixed_submission_payload())
+        payload = _mixed_submission_payload()
+        payload["account"] = "tcl_promo" if tenant == "wealth" else "wealth"
+        response = client.post("/api/jira/submit/TCN-999", json=payload)
 
     assert response.status_code == 403
     get_waba.assert_not_called()
@@ -311,8 +310,8 @@ def test_jira_submit_validates_selected_whatsapp_waba(jira_submit_user, client):
         response = client.post("/api/jira/submit/TCN-999", json=_mixed_submission_payload())
 
     assert response.status_code == 400
-    assert "TCL_PROMO" in response.json()["detail"]
-    get_waba.assert_called_once_with("tcl_promo")
+    assert "WEALTH" in response.json()["detail"]
+    get_waba.assert_called_once_with("wealth")
     submit_wa.assert_not_called()
     submit_rcs.assert_not_called()
 
@@ -340,7 +339,7 @@ def test_spreadsheet_submit_refuses_rcs_bot_changed_since_review(jira_submit_use
     jira_submit_user("tata")
     with patch("api.get_rcs_bot_id", return_value="different-live-bot"), patch("api._submit_rcs_batch") as submit:
         response = client.post(
-            "/api/submit?account=wealth&channel=rcs&auto_route=false&expected_rcs_bot_id=reviewed-wealth-bot",
+            "/api/submit?account=wealth&channel=rcs&expected_account=wealth&expected_channel=rcs&expected_rcs_bot_id=reviewed-wealth-bot",
             files={"file": ("brief.csv", b"template_name,body\nwealth_rcs,Welcome", "text/csv")},
         )
 
@@ -890,3 +889,22 @@ def test_jira_creative_upload_and_download(client):
     finally:
         if saved_path and saved_path.exists():
             saved_path.unlink()
+
+
+@pytest.mark.parametrize("endpoint,payload", [
+    ("/api/jira/preview", {"whatsapp_templates": [], "rcs_templates": []}),
+    ("/api/jira/submit/TCN-999", {"channels": ["whatsapp"]}),
+    ("/api/jira/preview", {"account": "wealth", "whatsapp_account": "tcl_promo"}),
+    ("/api/jira/submit/TCN-999", {
+        "account": "wealth", "whatsapp_account": "tcl_promo", "channels": ["whatsapp"],
+    }),
+])
+def test_jira_requires_one_explicit_account_without_split_routing(client, endpoint, payload):
+    response = client.post(endpoint, json=payload)
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.parametrize("channels", [[], ["other"]])
+def test_jira_rejects_unspecified_or_unknown_submission_channels(client, channels):
+    response = client.post("/api/jira/submit/TCN-999", json={"account": "wealth", "channels": channels})
+    assert response.status_code == 400, response.text

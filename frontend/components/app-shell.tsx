@@ -8,6 +8,7 @@ import { getAuthToken, isPendingUser } from '@/lib/api';
 import { useTabState, clearTabState } from '@/lib/tab-state';
 import Nav from '@/components/nav';
 import ChatWidget from '@/components/chat-widget';
+import DestinationSwitcher from '@/components/DestinationSwitcher';
 
 const TAB_META: Record<string, { label: string; icon: string }> = {
   '/': { label: 'Dashboard', icon: '📊' },
@@ -24,7 +25,7 @@ const TAB_META: Record<string, { label: string; icon: string }> = {
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { account, currentUser, authLoading, refreshSession } = useApp();
+  const { account, channel, currentUser, authLoading, refreshSession } = useApp();
   const isAuthPage = pathname === '/login' || pathname === '/signup';
   const hasWorkspace = !authLoading && Boolean(currentUser) && !isPendingUser(currentUser);
   const [retryingSession, setRetryingSession] = useState(false);
@@ -44,7 +45,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const [openTabs, setOpenTabs] = useTabState<string[]>('workspace_open_tabs', ['/']);
-  const prevAccountRef = useRef(account);
+  const scopeKey = `${currentUser?.id ?? ''}:${currentUser?.tenant_id ?? ''}:${account}:${channel}`;
+  const previousScope = useRef(scopeKey);
   useEffect(() => {
     if (authLoading || isAuthPage) return;
     if (!currentUser && !getAuthToken()) router.replace('/login');
@@ -61,14 +63,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, [pathname, isAuthPage, hasWorkspace, setOpenTabs]);
 
-  // When account changes, clear cached drafts so they don't leak across tenants
+  // The provider clears old drafts before the keyed destination content mounts.
   useEffect(() => {
-    if (prevAccountRef.current !== account) {
-      prevAccountRef.current = account;
-      clearTabState();
+    if (previousScope.current !== scopeKey) {
+      previousScope.current = scopeKey;
       setOpenTabs([pathname]);
+      window.scrollTo(0, 0);
     }
-  }, [account, pathname, setOpenTabs]);
+  }, [scopeKey, pathname, setOpenTabs]);
 
   const closeTab = (path: string) => {
     const remaining = openTabs.filter((t) => t !== path);
@@ -109,8 +111,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           children
         ) : (
           <div className="flex flex-col min-h-screen">
+            <div className="sticky top-14 md:top-0 z-20 bg-white border-b border-gray-200">
+              <DestinationSwitcher />
             {/* Workspace Tab Bar */}
-            <div className="sticky top-14 md:top-0 z-20 bg-gray-50/95 backdrop-blur-xs border-b border-gray-200 px-4 sm:px-6 pt-2 flex items-center gap-1.5 overflow-x-auto shadow-2xs">
+            <div className="bg-gray-50/95 border-t border-gray-100 px-4 sm:px-6 pt-2 flex items-center gap-1.5 overflow-x-auto">
               {openTabs.map((path) => {
                 const meta = TAB_META[path] || { label: path.replace(/^\//, ''), icon: '📌' };
                 const isActive = pathname === path;
@@ -145,9 +149,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 );
               })}
             </div>
+            </div>
 
             {/* Page Content */}
-            <div className="p-4 sm:p-8 flex-1 min-w-0">{children}</div>
+            <div key={scopeKey} className="p-4 sm:p-8 flex-1 min-w-0">{children}</div>
           </div>
         )}
       </main>

@@ -438,7 +438,7 @@ def test_rcs_batch_submission_preserves_order_and_handles_duplicates(provision_u
         patch("api.fetch_rcs_templates", return_value=[]),
     ):
         files = {"file": ("batch_test.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
-        resp = client.post("/api/submit", params={"account": "tata", "channel": "rcs", "skip_duplicates": "true"}, files=files)
+        resp = client.post("/api/submit", params={"account": "tata", "channel": "rcs", "expected_account": "tata", "expected_channel": "rcs", "skip_duplicates": "true"}, files=files)
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["total"] == 4
@@ -498,7 +498,7 @@ def test_rcs_live_catalog_duplicate_skipping(provision_user):
         patch("api.get_rcs_bot_id", return_value="bot_tata_official"),
     ):
         files = {"file": ("batch_dupe.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")}
-        resp = client.post("/api/submit", params={"account": "tata", "channel": "rcs", "skip_duplicates": "true"}, files=files)
+        resp = client.post("/api/submit", params={"account": "tata", "channel": "rcs", "expected_account": "tata", "expected_channel": "rcs", "skip_duplicates": "true"}, files=files)
         assert resp.status_code == 200
         body = resp.json()
         mock_submit.assert_not_called()  # Must not submit duplicate to Karix

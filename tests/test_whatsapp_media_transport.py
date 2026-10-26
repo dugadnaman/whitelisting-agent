@@ -434,7 +434,7 @@ def test_batch_records_provider_outcomes_on_its_own_rows(
         http, {"response": {"templateId": "real-batch-id"}} if http == 201 else {"error": "Invalid template"},
     )
     response = TestClient(api.app).post(
-        "/api/submit?account=tchfl&skip_duplicates=false&auto_route=false&fix_grammar=false",
+        "/api/submit?account=tchfl&channel=whatsapp&expected_account=tchfl&expected_channel=whatsapp&skip_duplicates=false&fix_grammar=false",
         headers=headers,
         files={"file": ("batch.csv", f"template_name,header_type,body_text\nbatch_offer,{header_type},Your offer is ready.\n", "text/csv")},
     )
@@ -451,3 +451,116 @@ def test_batch_records_provider_outcomes_on_its_own_rows(
     assert snapshot["tasks"][0]["status"] == status.upper()
     assert batch["results"][0]["task_id"] == snapshot["tasks"][0]["id"]
     assert len(create_calls(provider)) == (1 if status == "submitted" else 1)
+
+
+def test_reviewed_upload_stays_on_selected_account_despite_detection(provider, provision_user):
+    import api
+    from fastapi.testclient import TestClient
+
+    _, headers = provision_user(tenant="tata")
+    http = TestClient(api.app)
+    csv = (
+        "template_name,header_type,header_text,body_text\n"
+        "wealth_portfolio,TEXT,WEALTH TATAWL TATA_WEALTH,Explore your wealth securities portfolio demat trading options.\n"
+    )
+    upload = {"file": ("review.csv", csv, "text/csv")}
+    preview = http.post("/api/preview", params={"account": "tcl_promo", "channel": "whatsapp"},
+                        headers=headers, files=upload)
+    assert preview.status_code == 200, preview.text
+    suggestion = preview.json()[0]["account_detection"]
+    assert suggestion["detected_account_id"] == "wealth"
+    assert suggestion["is_mismatch"] is True
+    result = http.post("/api/submit", params={
+        "account": "tcl_promo", "channel": "whatsapp",
+        "expected_account": "tcl_promo", "expected_channel": "whatsapp",
+        "skip_duplicates": "false", "fix_grammar": "false",
+    }, headers=headers, files=upload)
+    assert result.status_code == 200, result.text
+    batch = result.json()
+    assert (batch["account"], batch["channel"]) == ("tcl_promo", "whatsapp")
+    assert [(row["client"], row["channel"], row["status"]) for row in batch["results"]] == [
+        ("tcl_promo", "whatsapp", "submitted"),
+    ]
+    assert [call[1] for call in create_calls(provider)] == ["/official/local-TCL_PROMO-waba"]
+    snapshot = http.get(f"/api/jobs/{batch['job_id']}", headers=headers).json()
+    assert (snapshot["job"]["tenant_id"], snapshot["job"]["channel"]) == ("tcl_promo", "whatsapp")
+
+
+@pytest.mark.parametrize("account,channel,expected_account,expected_channel,status", [
+    ("wealth", "rcs", "tcl_promo", "whatsapp", 409),
+    ("tchfl", "whatsapp", "tcl_promo", "whatsapp", 409),
+    ("tcl_promo", "rcs", "tcl_promo", "whatsapp", 409),
+    ("all", "whatsapp", "all", "whatsapp", 400),
+    ("tcl_promo", "other", "tcl_promo", "other", 400),
+])
+def test_submit_rejects_destination_changed_since_review(
+    provider, provision_user, account, channel, expected_account, expected_channel, status,
+):
+    import api
+    import db
+    from fastapi.testclient import TestClient
+
+    _, headers = provision_user(tenant="all", role="superadmin")
+    response = TestClient(api.app).post("/api/submit", params={
+        "account": account, "channel": channel, "expected_account": expected_account,
+        "expected_channel": expected_channel,
+    }, headers=headers, files={"file": ("review.csv", "template_name,body_text\nreview,Hello", "text/csv")})
+    assert response.status_code == status, response.text
+    assert not create_calls(provider)
+    with db.get_db() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM ingestion_jobs").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("field,value", [
+    ("client", "wealth"), ("account", "wealth"), ("channel", "rcs"), ("waba_id", "another-waba"),
+])
+@pytest.mark.parametrize("extension", ["csv", "xlsx"])
+@pytest.mark.parametrize("endpoint", ["preview", "submit"])
+def test_spreadsheet_cannot_override_selected_destination(
+    provider, provision_user, field, value, extension, endpoint,
+):
+    import api
+    from fastapi.testclient import TestClient
+
+    _, headers = provision_user(tenant="tata")
+    rows = [["template_name", "body_text", field], ["review", "Your offer is ready.", value]]
+    if extension == "xlsx":
+        import openpyxl
+        workbook = openpyxl.Workbook()
+        for row in rows:
+            workbook.active.append(row)
+        content = io.BytesIO()
+        workbook.save(content)
+        payload = content.getvalue()
+    else:
+        payload = "\n".join(",".join(row) for row in rows).encode()
+    response = TestClient(api.app).post(f"/api/{endpoint}", params={
+        "account": "tcl_promo", "channel": "whatsapp",
+        "expected_account": "tcl_promo", "expected_channel": "whatsapp",
+    }, headers=headers, files={"file": (f"review.{extension}", payload, "application/octet-stream")})
+    assert response.status_code == 400, response.text
+    assert not create_calls(provider)
+
+
+def test_submit_requires_explicit_review_scope(provider, provision_user):
+    import api
+    from fastapi.testclient import TestClient
+
+    _, headers = provision_user(tenant="tata")
+    http = TestClient(api.app)
+    files = {"file": ("review.csv", "template_name,body_text\nreview,Hello", "text/csv")}
+    for params in ({}, {"account": "tcl_promo", "channel": "whatsapp"}):
+        response = http.post("/api/submit", params=params, headers=headers, files=files)
+        assert response.status_code == 422, response.text
+    assert not create_calls(provider)
+
+
+def test_all_accounts_is_not_a_preview_destination(provider, provision_user):
+    import api
+    from fastapi.testclient import TestClient
+
+    _, headers = provision_user(tenant="all", role="superadmin")
+    response = TestClient(api.app).post("/api/preview", params={"account": "all", "channel": "whatsapp"},
+        headers=headers, files={"file": ("review.csv", "template_name,body_text\nreview,Hello", "text/csv")})
+    assert response.status_code == 400, response.text
+    assert not create_calls(provider)

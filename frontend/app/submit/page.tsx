@@ -6,6 +6,8 @@ import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identify
 import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
 import { useApp, getRcsDetails } from '@/lib/context';
 import { formatChannel, formatError } from '@/lib/format';
+import { destinationLabel } from '@/lib/destination';
+import type { Channel } from '@/lib/api';
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     pending: 'bg-amber-100 text-amber-800 border border-amber-200',
@@ -62,6 +64,8 @@ type State =
   | {
       step: 'submitted';
       submitted: number;
+      account: string;
+      channel: Channel;
       results: Template[];
       jobId?: string;
       isStreaming?: boolean;
@@ -84,9 +88,10 @@ function isAcceptedFile(file: File): boolean {
 }
 
 export default function SubmitPage() {
-  const { account, channel, user, setAccount, getAccountLabel, accounts } = useApp();
+  const { account, channel, user, setDestination, getAccountLabel, accounts } = useApp();
   const activeRcs = getRcsDetails(account, accounts);
   const [state, setState] = useTabState<State>('submit_state', { step: 'idle' });
+  const [review, setReview] = useState<{ account: string; channel: Channel; botId?: string; file: File } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [autoFixGrammar, setAutoFixGrammar] = useTabState<boolean>('submit_auto_fix_grammar', true);
@@ -96,6 +101,10 @@ export default function SubmitPage() {
   const streamControllerRef = useRef<AbortController | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const selectionVersionRef = useRef(0);
+  const identifyVersionRef = useRef(0);
+  const scopeRef = useRef({ account, channel });
+  scopeRef.current = { account, channel };
+  const mountedRef = useRef(true);
 
   // Phase 1 Identification Mode
   const [activeTab, setActiveTab] = useTabState<'SUBMIT' | 'IDENTIFY'>('submit_active_tab', 'SUBMIT');
@@ -108,16 +117,21 @@ export default function SubmitPage() {
   const identifyInputRef = useRef<HTMLInputElement>(null);
 
   const handleIdentifyFileSelect = async (selected: File) => {
+    if (!account || account === 'all') return;
+    const version = ++identifyVersionRef.current;
+    const requestedScope = { account, channel };
     setIdentifyFile(selected);
     setIdentifying(true);
     setIdentifyError(null);
     try {
       const rep = await identifyTemplates(selected, account);
+      if (!mountedRef.current || version !== identifyVersionRef.current || scopeRef.current.account !== requestedScope.account || scopeRef.current.channel !== requestedScope.channel) return;
       setIdentifyReport(rep);
     } catch (err: unknown) {
+      if (!mountedRef.current || version !== identifyVersionRef.current || scopeRef.current.account !== requestedScope.account || scopeRef.current.channel !== requestedScope.channel) return;
       setIdentifyError(err instanceof Error ? err.message : 'Identification failed');
     } finally {
-      setIdentifying(false);
+      if (mountedRef.current && version === identifyVersionRef.current) setIdentifying(false);
     }
   };
 
@@ -178,6 +192,7 @@ export default function SubmitPage() {
     document.body.removeChild(link);
   };
   const pollJobFallback = useCallback((jobId: string) => {
+    const requestedScope = scopeRef.current;
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
     let inFlight = false;
     const interval = setInterval(async () => {
@@ -185,7 +200,7 @@ export default function SubmitPage() {
       inFlight = true;
       try {
         const data = await fetchJob(jobId);
-        if (pollTimerRef.current !== interval) return;
+        if (!mountedRef.current || pollTimerRef.current !== interval || scopeRef.current.account !== requestedScope.account || scopeRef.current.channel !== requestedScope.channel) return;
         const terminal = ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.job.status);
         if (terminal) {
           clearInterval(interval);
@@ -196,7 +211,7 @@ export default function SubmitPage() {
           authPaused: data.job.status === 'PAUSED_FOR_AUTH', authPausedMessage: data.job.error_message,
         } : prev);
       } catch {
-        if (pollTimerRef.current !== interval) return;
+        if (!mountedRef.current || pollTimerRef.current !== interval || scopeRef.current.account !== requestedScope.account || scopeRef.current.channel !== requestedScope.channel) return;
         clearInterval(interval);
         pollTimerRef.current = null;
         setState((prev) => (prev.step === 'submitted' && prev.jobId === jobId ? { ...prev, isStreaming: false } : prev));
@@ -219,6 +234,7 @@ export default function SubmitPage() {
       try {
         for await (const message of streamJobEvents(jobId, controller.signal)) {
           const data = JSON.parse(message.data);
+          if (controller.signal.aborted || !mountedRef.current) return;
           if (message.event === 'task_update') {
             setState((prev) => {
               if (prev.step !== 'submitted' || prev.jobId !== jobId) return prev;
@@ -266,16 +282,26 @@ export default function SubmitPage() {
   }, [pollJobFallback]);
 
   useEffect(() => {
+    mountedRef.current = true;
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
     pollTimerRef.current = null;
     return () => {
+      mountedRef.current = false;
+      identifyVersionRef.current++;
       selectionVersionRef.current++;
       streamControllerRef.current?.abort();
       clearInterval(pollTimerRef.current as NodeJS.Timeout);
+      pollTimerRef.current = null;
     };
   }, []);
   useEffect(() => {
     selectionVersionRef.current++;
+    identifyVersionRef.current++;
+    setIdentifyReport(null);
+    setIdentifyFile(null);
+    setIdentifying(false);
+    setReview(null);
+    setShowBlockedModal(false);
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
     pollTimerRef.current = null;
     streamControllerRef.current?.abort();
@@ -287,6 +313,12 @@ export default function SubmitPage() {
   const handleFile = useCallback(
     async (selected: File) => {
       const version = ++selectionVersionRef.current;
+      const requestedScope = { account, channel };
+      setReview(null);
+      if (!account || account === 'all') {
+        setState({ step: 'error', message: 'Choose an account in “Whitelisting for” before uploading.', previews: null });
+        return;
+      }
       streamControllerRef.current?.abort();
       clearInterval(pollTimerRef.current as NodeJS.Timeout);
       pollTimerRef.current = null;
@@ -298,10 +330,11 @@ export default function SubmitPage() {
       setState({ step: 'previewing' });
       try {
         const previews = await previewFile(selected, account, channel);
-        if (version !== selectionVersionRef.current) return;
+        if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
+        setReview({ ...requestedScope, botId: activeRcs.botId || undefined, file: selected });
         setState({ step: 'previewed', previews });
       } catch (err) {
-        if (version !== selectionVersionRef.current) return;
+        if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
         setState({
           step: 'error',
           message: err instanceof Error ? err.message : 'Failed to parse template file.',
@@ -309,7 +342,7 @@ export default function SubmitPage() {
         });
       }
     },
-    [account, channel]
+    [account, channel, activeRcs.botId]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -345,6 +378,7 @@ export default function SubmitPage() {
 
   const handleClear = useCallback(() => {
     selectionVersionRef.current++;
+    setReview(null);
     streamControllerRef.current?.abort();
     clearInterval(pollTimerRef.current as NodeJS.Timeout);
     setFile(null);
@@ -353,8 +387,8 @@ export default function SubmitPage() {
   }, []);
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
   const executeSubmit = useCallback(async (fixRatio: boolean, fixGrammar: boolean) => {
-    if (!file || !currentPreviews) return;
-    if (channel === 'rcs' && !activeRcs.botId) {
+    if (!file || !currentPreviews || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
+    if (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId)) {
       setState({
         step: 'error',
         message: `RCS bot is not configured for ${account}. Refresh account settings before submitting.`,
@@ -368,12 +402,14 @@ export default function SubmitPage() {
     try {
       const res = await submitFile(
         file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates,
-        channel !== 'rcs', channel === 'rcs' ? activeRcs.botId : undefined
+        review, channel === 'rcs' ? review.botId : undefined
       );
-      if (version !== selectionVersionRef.current) return;
+      if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
       const isComplete = !res.job_id || ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(res.status || '');
       setState({
         step: 'submitted',
+        account: res.account,
+        channel: res.channel,
         submitted: res.submitted,
         results: res.results,
         jobId: res.job_id,
@@ -383,7 +419,7 @@ export default function SubmitPage() {
         setupJobStream(res.job_id);
       }
     } catch (err) {
-      if (version !== selectionVersionRef.current) return;
+      if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
       setState({
         step: 'error',
@@ -391,7 +427,7 @@ export default function SubmitPage() {
         previews: currentPreviews,
       });
     }
-  }, [file, account, channel, user, currentPreviews, autoSkipDuplicates, activeRcs.botId]);
+  }, [file, account, channel, user, currentPreviews, review, autoSkipDuplicates, activeRcs.botId, setupJobStream]);
 
   const handleInitiateSubmit = useCallback(() => {
     if (!file || !currentPreviews) return;
@@ -416,9 +452,11 @@ export default function SubmitPage() {
 
   const accountLabel = getAccountLabel(account);
   const channelLabel = formatChannel(channel);
+  const reviewedLabel = review ? destinationLabel(review.account, review.channel, getAccountLabel(review.account)) : '';
 
   return (
     <div className="space-y-6">
+      {account === 'all' && <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Choose a specific account in “Whitelisting for” before previewing or submitting templates.</p>}
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
@@ -647,7 +685,7 @@ export default function SubmitPage() {
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-indigo-950 flex items-center gap-2">
-                        <span>Smart Account Routing Detected</span>
+                        <span>Suggested Account</span>
                         <span className="text-[10px] bg-indigo-200/80 text-indigo-800 px-1.5 py-0.2 rounded font-mono font-semibold">
                           {(detection.confidence * 100).toFixed(0)}% Match
                         </span>
@@ -662,14 +700,12 @@ export default function SubmitPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        setAccount(detection.detected_account_id);
-                        try {
-                          localStorage.setItem('active_account', detection.detected_account_id);
-                        } catch {}
+                        if (!setDestination(detection.detected_account_id, channel)) return;
+                        handleClear();
                       }}
                       className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-xs"
                     >
-                      <span>Switch to {detection.detected_account_name} →</span>
+                      <span>Switch to {detection.detected_account_name} and preview again</span>
                     </button>
                   </div>
                 </div>
@@ -852,10 +888,8 @@ export default function SubmitPage() {
                   </h3>
                 </div>
                 <p className="text-xs text-blue-700/80 mt-0.5">
-                  Ready to submit to {accountLabel} on {channelLabel}
-                  {channel === 'rcs' && (
-                    <> (Karix RCS Bot: <strong>{activeRcs.botName}</strong> &bull; ID: <code className="font-mono">{activeRcs.botId || 'Not configured'}</code> &bull; User: <code className="font-mono">{activeRcs.rcsUser}</code>)</>
-                  )}. Review before final submission.
+                  Reviewed destination: <strong>{reviewedLabel}</strong>
+                  {review?.channel === 'rcs' && <> (Bot ID: <code>{review.botId || 'Not configured'}</code>)</>}. Review before final submission.
                 </p>
                 {channel === 'rcs' && !activeRcs.botId && (
                   <p role="alert" className="mt-1 text-xs font-semibold text-amber-800">
@@ -872,7 +906,7 @@ export default function SubmitPage() {
                 </button>
                 <button
                   onClick={handleInitiateSubmit}
-                  disabled={channel === 'rcs' && !activeRcs.botId}
+                  disabled={!review || review.account !== account || review.channel !== channel || account === 'all' || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
                   className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-sm transition-colors flex items-center gap-2"
                 >
                   {(() => {
@@ -882,7 +916,7 @@ export default function SubmitPage() {
                     if (blocked.length > 0) {
                       return (
                         <span>
-                          Submit {compliant} Compliant ({blocked.length} Blocked)
+                          Submit {compliant} {compliant === 1 ? 'template' : 'templates'} to {reviewedLabel} ({blocked.length} blocked)
                         </span>
                       );
                     }
@@ -890,12 +924,12 @@ export default function SubmitPage() {
                     if (dupes.length > 0 && autoSkipDuplicates) {
                       return (
                         <span>
-                          Submit {netNew} Net-New {netNew === 1 ? 'Template' : 'Templates'}
+                          Submit {netNew} {netNew === 1 ? 'template' : 'templates'} to {reviewedLabel}
                           {dupes.length > 0 && ` (${dupes.length} Skipped)`}
                         </span>
                       );
                     }
-                    return <span>Submit All ({state.previews.length})</span>;
+                    return <span>Submit {state.previews.length} {state.previews.length === 1 ? 'template' : 'templates'} to {reviewedLabel}</span>;
                   })()}
                   <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -1120,7 +1154,8 @@ export default function SubmitPage() {
                     onClick={async () => {
                       if (state.jobId) {
                         await resumeJob(state.jobId);
-                        setState((prev) => (prev.step === 'submitted' ? { ...prev, authPaused: false } : prev));
+                        if (!mountedRef.current) return;
+                        setState((prev) => (prev.step === 'submitted' && prev.jobId === state.jobId ? { ...prev, authPaused: false } : prev));
                       }
                     }}
                     className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 transition-colors"
@@ -1160,7 +1195,7 @@ export default function SubmitPage() {
                     )}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Processed {state.results.filter(r => r.status !== 'pending' && r.status !== 'processing').length} of {state.results.length} templates for {accountLabel} on {channelLabel}.
+                    Processed {state.results.filter(r => r.status !== 'pending' && r.status !== 'processing').length} of {state.results.length} templates for {destinationLabel(state.account, state.channel, getAccountLabel(state.account))}.
                     {state.jobId && <span className="font-mono text-[10px] ml-1.5 text-gray-400">({state.jobId})</span>}
                   </p>
                 </div>
@@ -1660,7 +1695,7 @@ export default function SubmitPage() {
 
             <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900 space-y-2">
               <p className="font-semibold">
-                Only compliant templates ({currentPreviews.filter(p => !p.aspect_ratio_blocked && (!p.aspect_ratio_warnings || !p.aspect_ratio_warnings.some(w => w.blocked))).length}) will be submitted to {channelLabel}.
+                Only compliant templates ({currentPreviews.filter(p => !p.aspect_ratio_blocked && (!p.aspect_ratio_warnings || !p.aspect_ratio_warnings.some(w => w.blocked))).length}) will be submitted to {reviewedLabel}.
               </p>
               <p className="text-[11px] text-red-700 leading-relaxed">
                 Blocked templates will be clearly distinguished in the results table as <strong>BLOCKED (Invalid Aspect Ratio)</strong> so you can correct their dimensions and re-upload.

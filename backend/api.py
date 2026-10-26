@@ -1438,17 +1438,63 @@ def _whatsapp_input_diagnostic(filename: str) -> str:
     )
 
 
+def _explicit_submission_destination(account: str, channel: str, current_user: dict) -> tuple[str, str]:
+    acc, chan = account.lower().strip(), channel.lower().strip()
+    if not acc or acc in {"all", "unassigned"}:
+        raise HTTPException(status_code=400, detail="Select a real account before previewing or submitting.")
+    if chan not in {"whatsapp", "rcs", "sms"}:
+        raise HTTPException(status_code=400, detail="Select a real submission channel.")
+    require_tenant_access(acc, current_user)
+    if acc not in {"tata", *(item["id"] for item in DEFAULT_ACCOUNTS)} and acc not in {item["id"] for item in load_accounts()}:
+        raise HTTPException(status_code=400, detail="Unknown submission account.")
+    return acc, chan
+
+
+def _validate_upload_destination(path: str, suffix: str, account: str, channel: str) -> None:
+    """Reject explicit spreadsheet routing fields, including ones a channel loader ignores."""
+    import csv
+
+    def validate(rows):
+        expected_waba = None
+        for index, raw in enumerate(rows, 2):
+            row = {str(key).strip().lower().replace(" ", "_"): str(value).strip()
+                   for key, value in raw.items() if key and value is not None}
+            for field in ("client", "account"):
+                if row.get(field) and row[field].lower() != account:
+                    raise HTTPException(status_code=400, detail=f"Row {index}: account does not match the selected destination.")
+            if row.get("channel") and row["channel"].lower() != channel:
+                raise HTTPException(status_code=400, detail=f"Row {index}: channel does not match the selected destination.")
+            if channel == "whatsapp" and row.get("waba_id"):
+                if expected_waba is None:
+                    expected_waba = str(get_waba_id(account) or "")
+                if row["waba_id"] != expected_waba:
+                    raise HTTPException(status_code=400, detail=f"Row {index}: WABA does not match the selected account.")
+
+    if suffix in (".xlsx", ".xls"):
+        import openpyxl
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            rows = workbook.active.iter_rows(values_only=True)
+            headers = next(rows, ())
+            validate(dict(zip(headers, row)) for row in rows)
+        finally:
+            workbook.close()
+    else:
+        with open(path, newline="", encoding="utf-8-sig") as source:
+            validate(csv.DictReader(source))
+
+
 @app.post("/api/preview")
 async def preview_file(
     file: UploadFile = File(...),
-    account: str = Query("bajaj"),
-    channel: str = Query("whatsapp"),
+    account: str = Query(...),
+    channel: str = Query(...),
     user: str = Query("Anonymous Operator"),
     use_ai: bool = Query(False),
     current_user: dict = Depends(get_current_user),
 ):
-    require_tenant_access(account, current_user)
-    acc = account.lower()
+    account, channel = _explicit_submission_destination(account, channel, current_user)
+    acc = account
     if acc == "apparel":
         raise HTTPException(
             status_code=400,
@@ -1460,6 +1506,7 @@ async def preview_file(
         tmp.write(await file.read())
         tmp_path = tmp.name
     try:
+        await asyncio.to_thread(_validate_upload_destination, tmp_path, suffix, account, chan)
         if chan == "sms":
             if suffix in (".xlsx", ".xls"):
                 sms_msgs = await asyncio.to_thread(load_sms_from_excel, tmp_path, client=account)
@@ -1573,8 +1620,6 @@ async def preview_file(
             },
             status="success",
         )
-        for s in submissions:
-            s.client = account
         return _inspect_template_quality_and_warnings(submissions, channel="whatsapp", account=account, use_ai=use_ai)
     except HTTPException:
         raise
@@ -1598,13 +1643,21 @@ async def preview_file(
         os.unlink(tmp_path)
 
 
+def _validate_parsed_destination(submissions: list, account: str, channel: str) -> None:
+    expected_waba = str(get_waba_id(account) or "") if channel == "whatsapp" else None
+    for submission in submissions:
+        if str(submission.client or "").strip().lower() != account or submission.channel != channel:
+            raise HTTPException(status_code=400, detail="Template row does not belong to the selected account/channel.")
+        if expected_waba is not None and str(submission.waba_id or "") != expected_waba:
+            raise HTTPException(status_code=400, detail="Template row WABA does not belong to the selected account.")
+
+
 async def _submit_rcs_batch(
     tmp_path: str,
     suffix: str,
     acc: str,
     user: str,
     skip_duplicates: bool,
-    auto_route: bool,
     filename: str,
     current_user: dict,
 ) -> dict:
@@ -1620,6 +1673,7 @@ async def _submit_rcs_batch(
     )
     if not subs:
         raise HTTPException(status_code=400, detail=f"No valid RCS templates found in '{filename}' to submit.")
+    _validate_parsed_destination(subs, acc, "rcs")
 
     results_by_index: list[dict | None] = [None] * len(subs)
     preliminary: dict[int, RcsSubmissionResult] = {}
@@ -1741,6 +1795,7 @@ async def _submit_rcs_batch(
         status="success" if submitted + duplicates else "failed",
     )
     return {
+        "account": acc, "channel": "rcs",
         "job_id": job_id, "status": final_job["status"] if final_job else "COMPLETED",
         "total": len(subs), "submitted": submitted, "skipped_duplicates": duplicates,
         "blocked_aspect_ratio": sum(entry["status"] == "blocked_aspect_ratio" for entry in results),
@@ -1754,7 +1809,6 @@ async def _submit_wa_batch(
     acc: str,
     user: str,
     skip_duplicates: bool,
-    auto_route: bool,
     fix_aspect_ratio: bool,
     fix_grammar: bool,
     filename: str,
@@ -1767,18 +1821,8 @@ async def _submit_wa_batch(
     )
     if not subs:
         raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(filename))
+    _validate_parsed_destination(subs, acc, "whatsapp")
 
-    if auto_route:
-        from loader import detect_spreadsheet_account
-
-        detection = detect_spreadsheet_account(subs, current_account=acc)
-        if detection.get("is_mismatch") and detection.get("confidence", 0) >= 0.45:
-            target_acc = detection["detected_account_id"]
-            try:
-                require_tenant_access(target_acc, current_user)
-                acc = target_acc
-            except HTTPException:
-                pass
 
     to_submit = []
     duplicate_entries = []
@@ -1973,6 +2017,7 @@ async def _submit_wa_batch(
         ]
     )
     return {
+        "account": acc, "channel": "whatsapp",
         "job_id": job_id,
         "status": final_job.get("status", "COMPLETED") if final_job else "COMPLETED",
         "total": len(subs),
@@ -1999,6 +2044,7 @@ async def _submit_sms_batch(
     )
     is_success = res.status == "accepted"
     return {
+        "account": acc, "channel": "sms",
         "status": "COMPLETED",
         "job_id": res.id,
         "results": [
@@ -2020,33 +2066,33 @@ async def _submit_sms_batch(
 @app.post("/api/submit")
 async def submit_file(
     file: UploadFile = File(...),
-    account: str = Query("bajaj"),
-    channel: str = Query("whatsapp"),
+    account: str = Query(...),
+    channel: str = Query(...),
+    expected_account: str = Query(...),
+    expected_channel: str = Query(...),
     user: str = Query("Anonymous Operator"),
     fix_aspect_ratio: bool = Query(True),
     fix_grammar: bool = Query(True),
     skip_duplicates: bool = Query(True),
-    auto_route: bool = Query(True),
     expected_rcs_bot_id: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
-    require_tenant_access(account, current_user)
-    acc = account.lower()
+    acc, chan = _explicit_submission_destination(account, channel, current_user)
+    if (expected_account, expected_channel) != (acc, chan):
+        raise HTTPException(status_code=409, detail="Destination changed since review. Preview again before submitting.")
     if acc == "apparel":
         raise HTTPException(
             status_code=400,
             detail="The Apparel account is strictly dedicated to RCS Karix-to-MoEngage sync only. Template creation spreadsheets are disabled for Apparel.",
         )
-    chan = channel.lower()
     if chan == "rcs" and expected_rcs_bot_id:
-        if auto_route:
-            raise HTTPException(status_code=400, detail="Confirm an explicit RCS account before submitting to a reviewed bot.")
         _verify_rcs_destination(acc, expected_rcs_bot_id)
     suffix = Path(file.filename or "upload.csv").suffix.lower()
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
     try:
+        await asyncio.to_thread(_validate_upload_destination, tmp_path, suffix, acc, chan)
         if chan == "sms":
             return await _submit_sms_batch(tmp_path, suffix, acc, user, file.filename or "upload.csv", current_user)
         elif chan == "rcs":
@@ -2056,7 +2102,6 @@ async def submit_file(
                 acc,
                 user,
                 skip_duplicates,
-                auto_route,
                 file.filename or "upload.csv",
                 current_user,
             )
@@ -2066,7 +2111,6 @@ async def submit_file(
             acc,
             user,
             skip_duplicates,
-            auto_route,
             fix_aspect_ratio,
             fix_grammar,
             file.filename or "upload.csv",
@@ -3837,14 +3881,13 @@ def _jira_live_names(account: str, channel: str) -> set[str]:
         return set()
 
 
-def _require_jira_accounts(account: str, whatsapp_account: str, current_user: dict) -> None:
+def _require_jira_account(account: str, current_user: dict) -> None:
     from auth import TATA_SUB_ACCOUNTS
 
     _require_tata_jira_access(current_user)
-    if account not in TATA_SUB_ACCOUNTS or whatsapp_account not in TATA_SUB_ACCOUNTS:
+    if account not in TATA_SUB_ACCOUNTS:
         raise HTTPException(status_code=403, detail="Jira briefs cannot be routed to another tenant")
     require_tenant_access(account, current_user)
-    require_tenant_access(whatsapp_account, current_user)
 
 
 def _require_tata_jira_access(current_user: dict) -> None:
@@ -3930,7 +3973,7 @@ def get_jira_brief_endpoint(
 
         # Independent live catalogs must not add their network waits to one another.
         target_client = (account or parsed.account or "tcl_promo").lower().strip()
-        _require_jira_accounts(target_client, target_client, current_user)
+        _require_jira_account(target_client, current_user)
         live_templates = []
         rcs_live_names = set()
         inventory_errors = {}
@@ -4017,18 +4060,18 @@ def get_jira_brief_endpoint(
 
 
 class JiraSubmitRequest(BaseModel):
-    account: str | None = None
-    whatsapp_account: str | None = None
+    model_config = ConfigDict(extra="forbid")
+    account: str
     expected_rcs_bot_id: str | None = None
-    channels: list[str] = ["whatsapp", "rcs"]
+    channels: list[str]
     user: str = "Briefing Operator"
     whatsapp_templates: list[dict] | None = None
     rcs_templates: list[dict] | None = None
 
 
 class JiraPreviewRequest(BaseModel):
-    account: str | None = None
-    whatsapp_account: str | None = None
+    model_config = ConfigDict(extra="forbid")
+    account: str
     whatsapp_templates: list[dict] = []
     rcs_templates: list[dict] = []
 
@@ -4036,14 +4079,13 @@ class JiraPreviewRequest(BaseModel):
 @app.post("/api/jira/preview")
 def preview_jira_brief_endpoint(req: JiraPreviewRequest, current_user: dict = Depends(get_current_user)):
     """Reinspect edited drafts and current private creative bytes without submitting."""
-    acc = (req.account or "tcl_promo").lower().strip()
-    wa_acc = (req.whatsapp_account or acc).lower().strip()
-    _require_jira_accounts(acc, wa_acc, current_user)
-    wa_names = _jira_live_names(wa_acc, "whatsapp") if req.whatsapp_templates else set()
+    acc = req.account.lower().strip()
+    _require_jira_account(acc, current_user)
+    wa_names = _jira_live_names(acc, "whatsapp") if req.whatsapp_templates else set()
     rcs_names = _jira_live_names(acc, "rcs") if req.rcs_templates else set()
     return _json_safe({
         "whatsapp_templates": [
-            _inspect_jira_draft(draft, "whatsapp", wa_acc, wa_names) for draft in req.whatsapp_templates
+            _inspect_jira_draft(draft, "whatsapp", acc, wa_names) for draft in req.whatsapp_templates
         ],
         "rcs_templates": [
             _inspect_jira_draft(draft, "rcs", acc, rcs_names) for draft in req.rcs_templates
@@ -4056,11 +4098,10 @@ class JiraValidationCommentRequest(JiraPreviewRequest):
 
 
 def _jira_validation_comment(issue_key: str, req: JiraPreviewRequest) -> str:
-    account = (req.account or "tcl_promo").lower().strip()
-    whatsapp_account = (req.whatsapp_account or account).lower().strip()
+    account = req.account.lower().strip()
     sections = []
     for channel, drafts, destination in (
-        ("whatsapp", req.whatsapp_templates, whatsapp_account),
+        ("whatsapp", req.whatsapp_templates, account),
         ("rcs", req.rcs_templates, account),
     ):
         for draft in drafts:
@@ -4101,9 +4142,8 @@ def post_jira_validation_comment_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Preview errors without writes; post only the exact comment explicitly approved by a human."""
-    account = (req.account or "tcl_promo").lower().strip()
-    whatsapp_account = (req.whatsapp_account or account).lower().strip()
-    _require_jira_accounts(account, whatsapp_account, current_user)
+    account = req.account.lower().strip()
+    _require_jira_account(account, current_user)
     clean_key = issue_key.strip().upper()
     if not re.fullmatch(r"[A-Z][A-Z0-9_]*-\d+", clean_key):
         raise HTTPException(status_code=400, detail="A valid Jira ticket key is required.")
@@ -4149,6 +4189,8 @@ async def submit_jira_brief_endpoint(
     Jira comments are a separate, explicitly human-confirmed action.
     """
     _require_tata_jira_access(current_user)
+    if not req.channels or any(channel not in {"whatsapp", "rcs"} for channel in req.channels):
+        raise HTTPException(status_code=400, detail="Select explicit WhatsApp or RCS submission channels.")
     from briefing_parser import parse_jira_brief
     from jira_client import fetch_jira_issue
     from models import TemplateComponent, TemplateSubmission
@@ -4162,13 +4204,10 @@ async def submit_jira_brief_endpoint(
     parsed = await asyncio.to_thread(parse_jira_brief, issue_data, download_creatives=True)
     from auth import TATA_SUB_ACCOUNTS
 
-    acc = (req.account or parsed.account or "tcl_promo").lower().strip()
-    wa_acc = (req.whatsapp_account or acc).lower().strip()
-    if acc not in TATA_SUB_ACCOUNTS or wa_acc not in TATA_SUB_ACCOUNTS:
+    acc = req.account.lower().strip()
+    if acc not in TATA_SUB_ACCOUNTS:
         raise HTTPException(status_code=403, detail="Jira briefs cannot be submitted to another tenant")
     require_tenant_access(acc, current_user)
-    if "whatsapp" in req.channels:
-        require_tenant_access(wa_acc, current_user)
     rcs_sources = req.rcs_templates if req.rcs_templates is not None else parsed.rcs_templates
     if "rcs" in req.channels and rcs_sources:
         _verify_rcs_destination(acc, req.expected_rcs_bot_id)
@@ -4178,11 +4217,11 @@ async def submit_jira_brief_endpoint(
         try:
             from config import get_waba_id
 
-            _ = get_waba_id(wa_acc)
+            _ = get_waba_id(acc)
         except Exception as waba_err:
             raise HTTPException(
                 status_code=400,
-                detail=f"Account '{wa_acc.upper()}' does not have WhatsApp WABA credentials configured ({waba_err!s}).",
+                detail=f"Account '{acc.upper()}' does not have WhatsApp WABA credentials configured ({waba_err!s}).",
             ) from waba_err
 
     user_name = req.user or current_user.get("name", "Briefing Operator")
@@ -4191,10 +4230,9 @@ async def submit_jira_brief_endpoint(
 
     # 1. Submit WhatsApp templates
     if "whatsapp" in req.channels:
-        # The RCS/general account does not need a WABA when WhatsApp is routed elsewhere.
         for wa in wa_sources:
-            actual = await asyncio.to_thread(_jira_draft_input, wa, "whatsapp", wa_acc)
-            quality = _inspect_single_submission(actual, set(), {}, wa_acc, "whatsapp")
+            actual = await asyncio.to_thread(_jira_draft_input, wa, "whatsapp", acc)
+            quality = _inspect_single_submission(actual, set(), {}, acc, "whatsapp")
             if quality["aspect_ratio_blocked"]:
                 res = SubmissionResult(
                     source_ref=f"{issue_key}_{wa['template_name']}",
@@ -4202,7 +4240,7 @@ async def submit_jira_brief_endpoint(
                     status=SubmissionStatus.BLOCKED_ASPECT_RATIO,
                     approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
                     error=quality["aspect_ratio_block_reason"],
-                    client=wa_acc, channel="whatsapp",
+                    client=acc, channel="whatsapp",
                     submitted_by=user_name, source_file=f"Jira: {issue_key}",
                 )
                 log_result(res, LOG_PATH)
@@ -4215,18 +4253,18 @@ async def submit_jira_brief_endpoint(
             from config import get_waba_id
 
             submission = TemplateSubmission(
-                client=wa_acc,
+                client=acc,
                 channel="whatsapp",
                 template_name=wa["template_name"],
                 language=wa.get("language", "en"),
                 category=wa.get("category", "MARKETING"),
-                waba_id=get_waba_id(wa_acc),
+                waba_id=get_waba_id(acc),
                 components=comps,
                 source_ref=f"{issue_key}_{wa['template_name']}",
             )
 
             try:
-                res = await asyncio.to_thread(submit_template, submission, client=wa_acc)
+                res = await asyncio.to_thread(submit_template, submission, client=acc)
                 res.submitted_by = user_name
                 res.source_file = f"Jira: {issue_key}"
                 log_result(res, LOG_PATH)
@@ -4345,12 +4383,10 @@ async def submit_jira_brief_endpoint(
     log_activity(
         user=user_name,
         action="JIRA_BRIEF_SUBMISSION",
-        account=wa_acc if submitted_wa and not submitted_rcs else acc,
+        account=acc,
         channel="all",
         details={
             "issue_key": issue_key,
-            "whatsapp_account": wa_acc,
-            "rcs_account": acc,
             "whatsapp_count": len(submitted_wa),
             "rcs_count": len(submitted_rcs),
             "jira_comment_posted": False,
@@ -4363,7 +4399,7 @@ async def submit_jira_brief_endpoint(
             "ok": True,
             "issue_key": issue_key,
             "account": acc,
-            "whatsapp_account": wa_acc,
+            "channels": req.channels,
             "whatsapp_submitted": submitted_wa,
             "rcs_submitted": submitted_rcs,
             "jira_comment": jira_comment_res,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTabState } from '@/lib/tab-state';
+import { clearTabState, setTabState, useTabState } from '@/lib/tab-state';
 import { useApp } from '@/lib/context';
 import {
   automateMoEngageWhatsAppBatch,
@@ -328,6 +328,10 @@ export default function MoEngageCampaignsPage() {
   // Batch & Spreadsheet state
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<MoEngageDraftPreview | null>(null);
+  useEffect(() => {
+    setTabState('moe_unsaved_preview', Boolean(file || preview));
+  }, [file, preview]);
+  useEffect(() => () => clearTabState('moe_unsaved_preview'), []);
   const [batch, setBatch] = useState<MoEngageDraftBatch | null>(null);
   const [batchScope, setBatchScope] = useState('');
   const [loading, setLoading] = useState(false);

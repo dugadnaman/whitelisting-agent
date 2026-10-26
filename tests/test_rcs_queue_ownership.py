@@ -310,7 +310,7 @@ def test_failed_inventory_blocks_batch_without_creating_or_dispatching(monkeypat
 
     monkeypatch.setattr(api, "fetch_rcs_templates", unavailable)
     with pytest.raises(HTTPException) as error:
-        asyncio.run(api._submit_rcs_batch(str(source), ".csv", "tata", "Tester", True, False,
+        asyncio.run(api._submit_rcs_batch(str(source), ".csv", "tata", "Tester", True,
                     source.name, {"tenant_id": "tata", "role": "operator"}))
     assert error.value.status_code == 503
     with db.get_db() as conn:

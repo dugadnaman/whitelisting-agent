@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { fetchWithRetry, getApiUrl } from '@/lib/api';
+import { useApp } from '@/lib/context';
+import { destinationAccountLabel } from '@/lib/destination';
 
 type Integration = 'whatsapp' | 'rcs' | 'sms' | 'moengage';
 type Scope = { account: string; integration: Integration };
@@ -150,6 +152,9 @@ function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' 
 }
 
 export default function KarixAuthSync({ account, integration }: Scope) {
+  const { getAccountLabel } = useApp();
+  const accountTitle = destinationAccountLabel(account, getAccountLabel(account));
+  const integrationTitle = integration === 'moengage' ? 'MoEngage' : integration === 'whatsapp' ? 'WhatsApp' : integration.toUpperCase();
   const titleId = useId();
   const [target, setTarget] = useState<SyncTarget | null>(null);
   const [status, setStatus] = useState<SyncStatus | null>(null);
@@ -328,7 +333,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     void perform('select', async (signal) => {
       await extensionMessage('KARIX_EXTENSION_SELECT', signal, { account, integration });
       await readBrowserStatus(signal);
-      return `This browser is now capturing ${account} · ${integration.toUpperCase()}. Reload its matching portal inventory to sync. Other accounts’ saved sessions were not changed.`;
+      return `This browser is now capturing ${accountTitle} · ${integrationTitle}. Reload its matching portal inventory to sync. Other accounts’ saved sessions were not changed.`;
     });
   }
 
@@ -385,7 +390,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     <section aria-labelledby={titleId} aria-busy={disabled} className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 id={titleId} className="text-sm font-bold text-gray-900">{account} · {integration.toUpperCase()} Auth Sync</h3>
+          <h3 id={titleId} className="text-sm font-bold text-gray-900">{accountTitle} · {integrationTitle} Auth Sync</h3>
           <p className="mt-1 text-xs text-gray-600">Credentials and device pairing are isolated to this account and integration.</p>
         </div>
         <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${validated ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : invalid ? 'border-red-200 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-gray-600'}`}>{statusLabel}</span>
@@ -419,7 +424,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
           <div><dt className="font-semibold text-gray-500">Last validation</dt><dd className="mt-1 text-gray-800">{status?.last_validated_at ? new Date(status.last_validated_at * 1000).toLocaleString() : 'Not checked yet'}</dd></div>
         </dl>
         <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2" role="status" aria-live="polite">
-          <p className="font-semibold text-gray-700">Current browser · {account} · {integration.toUpperCase()}</p>
+          <p className="font-semibold text-gray-700">Current browser · {accountTitle} · {integrationTitle}</p>
           <p>{!browserStatus ? 'Current browser capture unavailable. Reload Auth Sync 2.0.4 and this Settings page.' : !browserStatus.paired ? 'This browser is not paired for this account and integration.' : browserStatus.syncing ? 'Captured session is being validated by the backend.' : browserStatus.pending ? 'Matching session captured and pending sync. Retry below without reconnecting.' : 'This browser is paired; no captured session is waiting to sync.'}</p>
           {!statusError && status?.paired && browserStatus && !browserStatus.paired && <p className="text-amber-800">The server has an active device registration, but this browser has no active pairing for this scope. Connect this browser separately; another device’s session is not adopted.</p>}
           {browserStatus?.paired && !browserStatus.capture_active && <p className="text-amber-800">This target is not active for capture. Use this target below, then reload its matching portal inventory. Saved credentials for other targets stay separate.</p>}

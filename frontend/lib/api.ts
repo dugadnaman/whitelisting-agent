@@ -424,9 +424,10 @@ export async function fetchTemplates(params?: {
 
 export async function previewFile(
   file: File,
-  account: Account = "bajaj",
-  channel: Channel = "whatsapp"
+  account: Account,
+  channel: Channel
 ): Promise<TemplatePreview[]> {
+  if (!account || account === "all") throw new Error("Select an account before previewing.");
   const form = new FormData();
   form.append("file", file);
   const qs = new URLSearchParams({ account, channel }).toString();
@@ -446,15 +447,18 @@ export async function previewFile(
 
 export async function submitFile(
   file: File,
-  account: Account = "bajaj",
-  channel: Channel = "whatsapp",
+  account: Account,
+  channel: Channel,
   user: string = "Operator",
   fixAspectRatio: boolean = true,
   fixGrammar: boolean = true,
   skipDuplicates: boolean = true,
-  autoRoute: boolean = true,
+  reviewedDestination: { account: Account; channel: Channel },
   expectedRcsBotId?: string
-): Promise<{ submitted: number; skipped_duplicates?: number; results: Template[]; job_id?: string; status?: string }> {
+): Promise<{ account: Account; channel: Channel; submitted: number; skipped_duplicates?: number; results: Template[]; job_id?: string; status?: string }> {
+  if (!account || account === "all" || reviewedDestination.account !== account || reviewedDestination.channel !== channel) {
+    throw new Error("Destination changed since review. Preview again before submitting.");
+  }
   const form = new FormData();
   form.append("file", file);
   const qs = new URLSearchParams({
@@ -464,7 +468,8 @@ export async function submitFile(
     fix_aspect_ratio: String(fixAspectRatio),
     fix_grammar: String(fixGrammar),
     skip_duplicates: String(skipDuplicates),
-    auto_route: String(autoRoute),
+    expected_account: reviewedDestination.account,
+    expected_channel: reviewedDestination.channel,
   });
   if (expectedRcsBotId) qs.set("expected_rcs_bot_id", expectedRcsBotId);
   const res = await fetchWithRetry(
@@ -1242,7 +1247,6 @@ export async function fetchJiraBrief(issueKey: string, account?: string): Promis
 
 export type JiraDraftPreviewRequest = {
   account: string;
-  whatsapp_account: string;
   whatsapp_templates: JiraWhatsAppDraft[];
   rcs_templates: JiraRcsDraft[];
 };
@@ -1299,27 +1303,29 @@ export async function reportJiraValidation(
 
 export async function submitJiraBrief(
   issueKey: string,
-  channels: string[] = ["whatsapp", "rcs"],
+  channels: Channel[],
   user: string = "Briefing Operator",
-  whatsappTemplates?: JiraWhatsAppDraft[],
-  rcsTemplates?: JiraRcsDraft[],
-  account?: string,
-  whatsappAccount?: string,
+  whatsappTemplates: JiraWhatsAppDraft[] | undefined,
+  rcsTemplates: JiraRcsDraft[] | undefined,
+  account: string,
   expectedRcsBotId?: string
 ): Promise<{
   ok: boolean;
   issue_key: string;
   account: string;
+  channels: Channel[];
   whatsapp_submitted: Array<{ template_name: string; status: string; approval_status: string; error?: string }>;
   rcs_submitted: Array<{ template_name: string; status: string; template_id?: string; error?: string }>;
 }> {
+  if (!account || account === "all" || !channels.length || channels.some((channel) => channel !== "whatsapp" && channel !== "rcs")) {
+    throw new Error("Choose an explicit account and channel before submitting.");
+  }
   const cleanKey = encodeURIComponent(issueKey.trim().toUpperCase());
   const res = await fetchWithRetry(getApiUrl(`/api/jira/submit/${cleanKey}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       account,
-      whatsapp_account: whatsappAccount,
       expected_rcs_bot_id: expectedRcsBotId,
       channels,
       user,

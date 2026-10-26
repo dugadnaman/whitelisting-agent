@@ -33,6 +33,7 @@ import { formatError, formatDate } from '@/lib/format';
 import { JiraCreativeImage, JiraCreativeDownload } from '@/components/jira-creative';
 import { carouselCardWarnings, carouselSelectionError, selectedRcsDraft, type SelectableRcsDraft } from '@/lib/jira-carousel';
 import { newRcsTemplateName } from '@/lib/jira-template-name';
+import { destinationAccountLabel, destinationLabel } from '@/lib/destination';
 
 const UNCHECKED_WARNINGS: DraftWarnings = {
   aspect_ratio_warnings: [],
@@ -126,7 +127,12 @@ function BriefStatusBadge({ status }: { status?: string }) {
 }
 
 export default function JiraBriefsPage() {
-  const { user, accounts, getAccountLabel } = useApp();
+  const { account, channel, user, accounts, getAccountLabel, setDestination } = useApp();
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(true);
   const [projectsList, setProjectsList] = useState<JiraProjectItem[]>([
@@ -144,7 +150,7 @@ export default function JiraBriefsPage() {
   const [loadingBrief, setLoadingBrief] = useState(false);
   const [campaignTypeFilter, setCampaignTypeFilter] = useTabState<'all' | 'messaging' | 'email'>('briefs_campaign_type', 'all');
   const [briefStatusFilter, setBriefStatusFilter] = useTabState<'all' | 'pending' | 'in_progress' | 'completed' | 'failed' | 'not_generated'>('briefs_status_filter', 'all');
-  const [activeTab, setActiveTab] = useTabState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('briefs_active_tab', 'whatsapp');
+  const [activeTab, setActiveTab] = useTabState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('briefs_active_tab', channel);
   const [submitting, setSubmitting] = useState(false);
   const [confirmationMode, setConfirmationMode] = useState<'all' | 'whatsapp' | 'rcs' | null>(null);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -160,7 +166,8 @@ export default function JiraBriefsPage() {
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
   const [previewCreativeModal, setPreviewCreativeModal] = useState<(JiraCreativeSource & { filename: string; channel?: string }) | null>(null);
-  const [targetAccount, setTargetAccount] = useTabState<string>('briefs_target_account', 'tcl_promo');
+  const targetAccount = account;
+  const selectedDestinationLabel = destinationLabel(account, channel, getAccountLabel(account));
   const briefRef = useRef(brief);
   briefRef.current = brief;
   const waTemplatesRef = useRef(waTemplates);
@@ -168,8 +175,6 @@ export default function JiraBriefsPage() {
   const rcsTemplatesRef = useRef(rcsTemplates);
   rcsTemplatesRef.current = rcsTemplates;
   const currentRcs = getRcsDetails(targetAccount, accounts);
-  const whatsappAccount = targetAccount === 'wealth' ? 'tcl_promo' : targetAccount;
-  const whatsappAccountName = accounts.find((acc) => acc.id === whatsappAccount)?.name || whatsappAccount;
   const activeRequestKey = useRef<string>('');
   const [uploadingCreative, setUploadingCreative] = useState<Record<string, boolean>>({});
   const [previewAttempt, setPreviewAttempt] = useState(0);
@@ -191,10 +196,9 @@ export default function JiraBriefsPage() {
   const effectiveRcsTemplates = useMemo(() => rcsTemplates.map(selectedRcsDraft), [rcsTemplates]);
   const previewPayload = useMemo(() => ({
     account: targetAccount,
-    whatsapp_account: whatsappAccount,
-    whatsapp_templates: waTemplates,
-    rcs_templates: effectiveRcsTemplates,
-  }), [targetAccount, whatsappAccount, waTemplates, effectiveRcsTemplates]);
+    whatsapp_templates: channel === 'whatsapp' ? waTemplates : [],
+    rcs_templates: channel === 'rcs' ? effectiveRcsTemplates : [],
+  }), [targetAccount, channel, waTemplates, effectiveRcsTemplates]);
   const previewSignature = useMemo<JiraPreviewSnapshot>(
     () => ({ selectedKey, issueKey: brief?.issue_key, payload: previewPayload, attempt: previewAttempt }),
     [selectedKey, brief?.issue_key, previewPayload, previewAttempt]
@@ -203,9 +207,10 @@ export default function JiraBriefsPage() {
   previewSignatureRef.current = previewSignature;
   const validationReady = validation.signature === previewSignature && validation.status === 'ready'
     && !loadingBrief && selectedKey === brief?.issue_key && !Object.values(uploadingCreative).some(Boolean);
-  const getWaWarnings = (index: number): DraftWarnings => (validationReady ? validation.data?.whatsapp_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
+  const destinationAvailable = Boolean(account && account !== 'all' && (channel === 'whatsapp' || channel === 'rcs'));
+  const getWaWarnings = (index: number): DraftWarnings => (channel === 'whatsapp' && validationReady ? validation.data?.whatsapp_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
   const validationError = validation.signature === previewSignature && validation.status === 'error' ? validation.error : undefined;
-  const getRcsWarnings = (index: number): DraftWarnings => (validationReady ? validation.data?.rcs_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
+  const getRcsWarnings = (index: number): DraftWarnings => (channel === 'rcs' && validationReady ? validation.data?.rcs_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
   const isRcsEligible = (index: number) => !carouselSelectionError(effectiveRcsTemplates[index]) && !isAspectBlocked(getRcsWarnings(index));
   const creativeSource = (path?: string | null, filename?: string | null, attachmentId?: string | null): JiraCreativeSource => ({
     path,
@@ -459,6 +464,7 @@ export default function JiraBriefsPage() {
       setLoadingBrief(true);
       setFeedback(null);
       const data = await fetchJiraBrief(cleanKey);
+      if (!mountedRef.current) return;
       // Discard stale response if user already switched to another ticket
       if (activeRequestKey.current !== cleanKey && activeRequestKey.current !== (data.issue_key || '')) {
         return;
@@ -483,13 +489,6 @@ export default function JiraBriefsPage() {
       setSelectedWa(new Set(waList.map((_, idx) => idx)));
       setSelectedRcs(new Set(rcsList.map((_, idx) => idx)));
       setEditingCard({});
-      const hasWa = waList.length > 0;
-      const hasRcs = rcsList.length > 0;
-      let initialAcc = data.account || 'tcl_promo';
-      if (data.account === 'wealth' && hasWa && !hasRcs) {
-        initialAcc = 'tcl_promo';
-      }
-      setTargetAccount(initialAcc);
       if (data.moengage_campaign) {
         setMoeCampaignName(data.moengage_campaign.campaign_name || `${data.issue_key} - ${data.summary}`);
         setMoePushTitle(data.moengage_campaign.push_title || `Tata Capital: ${data.summary?.slice(0, 30)}`);
@@ -513,25 +512,19 @@ export default function JiraBriefsPage() {
       }
       if (data.is_email_campaign) {
         setActiveTab('email');
-      } else if (waList.length > 0) {
-        setActiveTab('whatsapp');
-      } else if (rcsList.length > 0) {
-        setActiveTab('rcs');
-      } else if (data.sms_templates?.length > 0) {
-        setActiveTab('sms');
       } else {
-        setActiveTab('moengage');
+        setActiveTab(channel);
       }
     } catch (err) {
-      if (activeRequestKey.current === cleanKey) {
+      if (mountedRef.current && activeRequestKey.current === cleanKey) {
         setFeedback({ message: `Failed to load brief for ${key}: ${formatError(err)}`, type: 'error' });
       }
     } finally {
-      if (activeRequestKey.current === cleanKey) {
+      if (mountedRef.current && activeRequestKey.current === cleanKey) {
         setLoadingBrief(false);
       }
     }
-  }, []);
+  }, [channel, setActiveTab]);
 
   useEffect(() => {
     if (selectedKey) {
@@ -540,7 +533,7 @@ export default function JiraBriefsPage() {
   }, [selectedKey, loadBrief]);
 
   useEffect(() => {
-    if (!brief || loadingBrief || selectedKey !== brief.issue_key) return;
+    if (!destinationAvailable || !brief || loadingBrief || selectedKey !== brief.issue_key) return;
     const controller = new AbortController();
     let disposed = false;
     setValidation({ signature: previewSignature, status: 'pending' });
@@ -562,7 +555,7 @@ export default function JiraBriefsPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [brief?.issue_key, loadingBrief, selectedKey, previewPayload, previewSignature, previewAttempt]);
+  }, [destinationAvailable, brief?.issue_key, loadingBrief, selectedKey, previewPayload, previewSignature, previewAttempt]);
 
   useEffect(() => {
     setCommentReview((current) => current?.signature === previewSignature && validationReady ? current : null);
@@ -622,6 +615,11 @@ export default function JiraBriefsPage() {
   // Submission handler with selective channel filtering
   const handleSubmitChannel = async (channelMode: 'all' | 'whatsapp' | 'rcs') => {
     if (!brief) return;
+    if (!destinationAvailable || (channelMode !== 'all' && channelMode !== channel)) {
+      setFeedback({ message: `Choose the matching account and channel in “Whitelisting for” before submitting. Current destination: ${selectedDestinationLabel}.`, type: 'error' });
+      return;
+    }
+    const signature = previewSignature;
     if (!validationReady) {
       setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
       return;
@@ -630,16 +628,16 @@ export default function JiraBriefsPage() {
       setSubmitting(true);
       setFeedback(null);
 
-      const submitChannels: string[] = [];
+      const submitChannels: Array<'whatsapp' | 'rcs'> = [];
       let waToSubmit: JiraWhatsAppDraft[] = [];
       let rcsToSubmit: JiraRcsDraft[] = [];
 
-      if (channelMode === 'all' || channelMode === 'whatsapp') {
+      if (channel === 'whatsapp' && (channelMode === 'all' || channelMode === 'whatsapp')) {
         waToSubmit = waTemplates.filter((_, idx) => selectedWa.has(idx) && !isAspectBlocked(getWaWarnings(idx)));
         if (waToSubmit.length > 0) submitChannels.push('whatsapp');
       }
 
-      if (channelMode === 'all' || channelMode === 'rcs') {
+      if (channel === 'rcs' && (channelMode === 'all' || channelMode === 'rcs')) {
         rcsToSubmit = effectiveRcsTemplates.filter((_, idx) => selectedRcs.has(idx) && isRcsEligible(idx));
         if (rcsToSubmit.length > 0) submitChannels.push('rcs');
       }
@@ -662,9 +660,9 @@ export default function JiraBriefsPage() {
         waToSubmit,
         rcsToSubmit,
         targetAccount,
-        waToSubmit.length > 0 ? whatsappAccount : undefined,
         rcsToSubmit.length > 0 ? currentRcs.botId : undefined
       );
+      if (!mountedRef.current || previewSignatureRef.current !== signature) return;
 
       const waResults = res.whatsapp_submitted || [];
       const rcsResults = res.rcs_submitted || [];
@@ -674,7 +672,7 @@ export default function JiraBriefsPage() {
       const errors = outcomes.filter((result) => result.status !== 'submitted' && result.status !== 'duplicate');
       const duplicateCount = outcomes.filter((result) => result.status === 'duplicate').length;
       setFeedback({
-        message: `Submitted ${waCount} WhatsApp and ${rcsCount} RCS templates for ${brief.issue_key}.`
+        message: `Submitted ${waCount + rcsCount} templates to ${destinationLabel(res.account, res.channels[0], getAccountLabel(res.account))} for ${brief.issue_key}.`
           + (duplicateCount ? ` ${duplicateCount} already registered.` : '')
           + (errors.length ? ` ${errors.length} blocked or failed: ${errors.map((result) => `${result.template_name}: ${result.error || result.status}`).join('; ')}.` : '')
           + ' No Jira comment was posted.',
@@ -682,31 +680,31 @@ export default function JiraBriefsPage() {
       });
       loadBrief(brief.issue_key);
     } catch (err) {
-      setFeedback({ message: formatError(err), type: 'error' });
+      if (mountedRef.current && previewSignatureRef.current === signature) setFeedback({ message: formatError(err), type: 'error' });
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) setSubmitting(false);
     }
   };
 
   const requestWhitelist = (channelMode: 'all' | 'whatsapp' | 'rcs') => {
+    if (!destinationAvailable || (channelMode !== 'all' && channelMode !== channel)) {
+      setFeedback({ message: `Use “Whitelisting for” to select the matching destination. Current destination: ${selectedDestinationLabel}.`, type: 'error' });
+      return;
+    }
     if (!validationReady) {
       setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
       return;
     }
-    const count = channelMode === 'whatsapp'
-      ? selectedWaCount
-      : channelMode === 'rcs'
-      ? selectedRcsCount
-      : selectedWaCount + selectedRcsCount;
+    const count = channel === 'whatsapp' ? selectedWaCount : selectedRcsCount;
     if (count === 0) {
       setFeedback({ message: 'Please select at least one template to whitelist.', type: 'error' });
       return;
     }
-    if (channelMode !== 'whatsapp' && selectedRcsCount > 0 && !currentRcs.botId) {
+    if (channel === 'rcs' && selectedRcsCount > 0 && !currentRcs.botId) {
       setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Refresh account settings before submitting.`, type: 'error' });
       return;
     }
-    setConfirmationMode(channelMode);
+    setConfirmationMode(channel === 'whatsapp' ? 'whatsapp' : 'rcs');
   };
 
   const confirmWhitelist = async () => {
@@ -1108,7 +1106,7 @@ export default function JiraBriefsPage() {
     try {
       setUploadingCreative((prev) => ({ ...prev, [key]: true }));
       const res = await uploadJiraCreative(file);
-      if (briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
+      if (!mountedRef.current || briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
           || !waTemplatesRef.current.some((draft) => draft.template_name === templateName)) return;
       setWaTemplates((prev) =>
         prev.map((w) =>
@@ -1144,7 +1142,7 @@ export default function JiraBriefsPage() {
     try {
       setUploadingCreative((prev) => ({ ...prev, [key]: true }));
       const res = await uploadJiraCreative(file);
-      if (briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
+      if (!mountedRef.current || briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
           || !rcsTemplatesRef.current.some((draft) => draft.template_name === templateName)) return;
       setRcsTemplates((prev) =>
         prev.map((r) =>
@@ -1184,7 +1182,7 @@ export default function JiraBriefsPage() {
     try {
       setUploadingCreative((prev) => ({ ...prev, [key]: true }));
       const res = await uploadJiraCreative(file);
-      if (briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
+      if (!mountedRef.current || briefRef.current?.issue_key !== issueKey || activeRequestKey.current !== issueKey
           || !rcsTemplatesRef.current.some((draft) => draft.template_name === templateName && draft.carousel_cards?.[cardIdx])) return;
       setRcsTemplates((prev) => {
         const next = [...prev];
@@ -1278,7 +1276,7 @@ export default function JiraBriefsPage() {
   const selectedRcsCount = rcsTemplates.filter((_, index) => selectedRcs.has(index) && isRcsEligible(index)).length;
   const eligibleWaCount = waTemplates.filter((_, index) => !isAspectBlocked(getWaWarnings(index))).length;
   const eligibleRcsCount = rcsTemplates.filter((_, index) => isRcsEligible(index)).length;
-  const totalSelectedCount = selectedWaCount + selectedRcsCount;
+  const totalSelectedCount = channel === 'whatsapp' ? selectedWaCount : channel === 'rcs' ? selectedRcsCount : 0;
   const hasValidationErrors = [...waTemplates.map((_, index) => getWaWarnings(index)), ...rcsTemplates.map((_, index) => getRcsWarnings(index))]
     .some((draft) => isAspectBlocked(draft) || draft.compliance_warnings?.some((warning) => warning.severity === 'error'));
 
@@ -1579,7 +1577,7 @@ export default function JiraBriefsPage() {
                       <BriefStatusBadge status={brief.brief_status} />
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                      <span>🏢 Sub-Account: <strong className="text-gray-800 uppercase">{brief.account}</strong></span>
+                      <span>Detected account (suggestion): <strong className="text-gray-800">{destinationAccountLabel(brief.account, getAccountLabel(brief.account))}</strong></span>
                       <span>👤 Reporter: <strong>{brief.reporter}</strong></span>
                       <span>🛠️ Assignee: <strong>{brief.assignee}</strong></span>
                       {brief.duedate && <span>📅 Due Date: <strong>{formatDate(brief.duedate)}</strong></span>}
@@ -1637,33 +1635,12 @@ export default function JiraBriefsPage() {
                     </div>
                   </div>
                     <div className="flex flex-wrap items-center gap-2 pt-1.5">
-                      <span className="text-xs font-bold text-gray-700">🏢 Whitelist Under Account:</span>
-                      <select
-                        value={targetAccount}
-                        onChange={(e) => setTargetAccount(e.target.value)}
-                        className="text-xs font-bold bg-white border border-blue-300 text-blue-900 rounded-lg px-2.5 py-1.5 shadow-2xs focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                        aria-label="Target Account for Karix Whitelisting"
-                      >
-                        {accounts.map((acc) => {
-                          const rcsInfo = getRcsDetails(acc.id, accounts);
-                          return (
-                            <option key={acc.id} value={acc.id}>
-                              {acc.name} ({acc.id.toUpperCase()}) — RCS Bot: {rcsInfo.botName}
-                            </option>
-                          );
-                        })}
-                      </select>
-                      <span className="text-[11px] text-gray-500">
-                        {rcsTemplates.length > 0 && waTemplates.length > 0
-                          ? `(WhatsApp ➔ ${whatsappAccountName} WABA · RCS ➔ Karix Bot '${currentRcs.botName}' / ${currentRcs.rcsUser})`
-                          : rcsTemplates.length > 0
-                          ? `(RCS templates will be submitted to Karix Bot '${currentRcs.botName}' · ${currentRcs.rcsUser} · Bot ID: ${currentRcs.botId || 'Not configured'})`
-                          : `(WhatsApp templates will be registered on Karix WABA under ${whatsappAccountName})`}
-                      </span>
+                      <span className="text-xs font-bold text-gray-700">Reviewed whitelisting destination: {selectedDestinationLabel}</span>
+                      <span className="text-[11px] text-gray-500">Only the shared workspace channel can be submitted. Other channel drafts remain available to review.</span>
                     </div>
 
                     {/* Dedicated RCS Destination Card when RCS templates are present */}
-                    {rcsTemplates.length > 0 && (
+                    {channel === 'rcs' && rcsTemplates.length > 0 && (
                       <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-950 shadow-2xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
@@ -1697,14 +1674,14 @@ export default function JiraBriefsPage() {
                         {brief.account && brief.account !== targetAccount && (
                           <div className="mt-1 pt-1.5 border-t border-blue-200/80 flex flex-wrap items-center justify-between gap-2 text-xs bg-amber-50/90 p-2 rounded-lg border border-amber-200 text-amber-900">
                             <span>
-                              💡 <strong>Notice:</strong> This brief was detected as <strong>{brief.account.toUpperCase()}</strong>, but target account is currently set to <strong>{targetAccount.toUpperCase()}</strong>.
+                              <strong>Suggested account:</strong> {destinationAccountLabel(brief.account, getAccountLabel(brief.account))}. Your reviewed destination remains <strong>{selectedDestinationLabel}</strong>.
                             </span>
                             <button
                               type="button"
-                              onClick={() => setTargetAccount(brief.account)}
+                              onClick={() => { if (!setDestination(brief.account, channel)) return; }}
                               className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-2xs"
                             >
-                              Switch to {brief.account.toUpperCase()} ({getRcsDetails(brief.account, accounts).botName})
+                              Use {destinationLabel(brief.account, channel, getAccountLabel(brief.account))}
                             </button>
                           </div>
                         )}
@@ -1747,7 +1724,7 @@ export default function JiraBriefsPage() {
                         {waTemplates.length > 0 && (
                           <button
                             onClick={() => requestWhitelist('whatsapp')}
-                            disabled={submitting || !validationReady || selectedWaCount === 0}
+                            disabled={channel !== 'whatsapp' || !destinationAvailable || submitting || !validationReady || selectedWaCount === 0}
                             className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
                             title="Submit only the checked WhatsApp templates"
                           >
@@ -1761,7 +1738,7 @@ export default function JiraBriefsPage() {
                         {rcsTemplates.length > 0 && (
                           <button
                             onClick={() => requestWhitelist('rcs')}
-                            disabled={submitting || !validationReady || selectedRcsCount === 0 || !currentRcs.botId}
+                            disabled={channel !== 'rcs' || !destinationAvailable || submitting || !validationReady || selectedRcsCount === 0 || !currentRcs.botId}
                             className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
                             title={`Submit ${selectedRcsCount} RCS template(s) to Karix RCS Bot '${currentRcs.botName}' (ID: ${currentRcs.botId})`}
                           >
@@ -1777,7 +1754,7 @@ export default function JiraBriefsPage() {
 
                         <button
                           onClick={() => requestWhitelist('all')}
-                          disabled={submitting || !validationReady || totalSelectedCount === 0 || (selectedRcsCount > 0 && !currentRcs.botId)}
+                          disabled={!destinationAvailable || submitting || !validationReady || totalSelectedCount === 0 || (channel === 'rcs' && !currentRcs.botId)}
                           className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
                         >
                           {submitting ? (
@@ -1787,7 +1764,7 @@ export default function JiraBriefsPage() {
                             </>
                           ) : (
                             <>
-                              <span>🚀 Whitelist All Selected</span>
+                              <span>Whitelist Selected to {selectedDestinationLabel}</span>
                               <span className="bg-gray-800 px-1.5 py-0.2 rounded text-[10px]">
                                 {totalSelectedCount}
                               </span>
@@ -3362,7 +3339,7 @@ export default function JiraBriefsPage() {
             </ul>
             {(confirmationMode === 'all' || confirmationMode === 'whatsapp') && selectedWaCount > 0 && (
               <p className="font-semibold text-gray-800">
-                WhatsApp destination: <strong>{whatsappAccountName}</strong> ({whatsappAccount.toUpperCase()}) — WABA
+                WhatsApp destination: <strong>{selectedDestinationLabel}</strong> — WABA
               </p>
             )}
 
@@ -3398,23 +3375,7 @@ export default function JiraBriefsPage() {
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-blue-200/80 flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-gray-600 font-medium text-[11px]">Wrong account? Change destination:</span>
-                  <select
-                    value={targetAccount}
-                    onChange={(e) => setTargetAccount(e.target.value)}
-                    className="text-xs font-bold bg-white border border-blue-300 text-blue-900 rounded-lg px-2.5 py-1 shadow-2xs cursor-pointer focus:ring-2 focus:ring-blue-500"
-                  >
-                    {accounts.map((acc) => {
-                      const rcsInfo = getRcsDetails(acc.id, accounts);
-                      return (
-                        <option key={acc.id} value={acc.id}>
-                          {acc.name} — Bot: {rcsInfo.botName}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
+                <p className="pt-2 border-t border-blue-200/80 text-gray-600 text-[11px]">To change destination, close this review and use “Whitelisting for”. Switching clears drafts after confirmation and requires a new preview.</p>
               </div>
             )}
 
@@ -3435,10 +3396,10 @@ export default function JiraBriefsPage() {
             <button
               type="button"
               onClick={confirmWhitelist}
-              disabled={submitting || !validationReady || totalSelectedCount === 0 || (confirmationMode !== 'whatsapp' && selectedRcsCount > 0 && !currentRcs.botId)}
+              disabled={!destinationAvailable || confirmationMode !== channel || submitting || !validationReady || totalSelectedCount === 0 || (channel === 'rcs' && !currentRcs.botId)}
               className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
             >
-              {submitting ? 'Whitelisting...' : 'Confirm & Whitelist'}
+              {submitting ? 'Whitelisting...' : `Confirm & Whitelist to ${selectedDestinationLabel}`}
             </button>
           </div>
         </div>

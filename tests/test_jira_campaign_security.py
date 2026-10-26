@@ -31,7 +31,7 @@ def test_tata_jira_briefs_and_creatives_reject_other_tenants(client, provision_u
             client.get("/api/jira/projects"),
             client.get("/api/jira/issues"),
             client.get("/api/jira/brief/TCN-999"),
-            client.post("/api/jira/submit/TCN-999", json={"channels": []}),
+            client.post("/api/jira/submit/TCN-999", json={"account": "tcl_promo", "channels": []}),
             client.get("/api/jira/creative/download", params={"attachment_id": "123"}),
             client.post("/api/jira/creative/upload", files={"file": ("test.png", b"image")}),
         ]

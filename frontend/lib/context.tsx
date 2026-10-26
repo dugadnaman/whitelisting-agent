@@ -13,6 +13,8 @@ import {
   isPendingUser,
 } from './api';
 import type { Account, Channel, AccountItem, AuthUser, UserItem } from './api';
+import { clearTabState, getTabState, hasWorkspaceDrafts, setTabState } from './tab-state';
+import { destinationChannels, destinationLabel } from './destination';
 
 const DEFAULT_ACCOUNTS: AccountItem[] = [
   {
@@ -57,9 +59,8 @@ export function getRcsDetails(accId: string, accList: AccountItem[] = DEFAULT_AC
 
 type AppContextType = {
   account: Account;
-  setAccount: (account: Account) => void;
   channel: Channel;
-  setChannel: (channel: Channel) => void;
+  setDestination: (account: Account, channel: Channel) => boolean;
   user: string;
   setUser: (user: string) => void;
   currentUser: AuthUser | null;
@@ -81,13 +82,15 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
-  const [account, setAccountState] = useState<Account>('');
-  const [channel, setChannelState] = useState<Channel>('whatsapp');
+  const [destination, setDestinationState] = useState<{ account: Account; channel: Channel }>({ account: '', channel: 'whatsapp' });
+  const { account, channel } = destination;
+  const destinationRef = useRef(destination);
   const [user, setUserState] = useState<string>('');
   const [currentUser, setCurrentUserState] = useState<AuthUser | null>(null);
   const currentUserRef = useRef<AuthUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [accounts, setAccounts] = useState<AccountItem[]>([]);
+  const accountsRef = useRef<AccountItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [mounted, setMounted] = useState(false);
   const isTenantLocked = Boolean(
@@ -100,18 +103,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setCurrentUserState(profile);
     setUserState(profile?.name || profile?.email || '');
     const selectedAccount = profile ? authorizedAccount(profile, localStorage.getItem('karix_account')) : '';
-    setAccountState(selectedAccount);
-    if (!profile || isPendingUser(profile) || previous?.tenant_id !== profile.tenant_id || previous?.id !== profile.id) {
+    const savedChannel = localStorage.getItem('karix_channel');
+    const nextChannel: Channel = selectedAccount === 'apparel' ? 'rcs'
+      : savedChannel === 'rcs' || savedChannel === 'sms' ? savedChannel : 'whatsapp';
+    const identityChanged = !profile || previous?.tenant_id !== profile.tenant_id || previous?.id !== profile.id;
+    const cachedScope = getTabState<{ userId: string | number; tenant: string; account: string; channel: Channel } | null>('workspace_destination', null);
+    if (!profile || cachedScope?.userId !== profile.id || cachedScope?.tenant !== profile.tenant_id
+      || cachedScope?.account !== selectedAccount || cachedScope?.channel !== nextChannel) clearTabState();
+    if (profile) setTabState('workspace_destination', { userId: profile.id, tenant: profile.tenant_id, account: selectedAccount, channel: nextChannel });
+    if (identityChanged || isPendingUser(profile)) {
+      accountsRef.current = [];
       setAccounts([]);
       setUsers([]);
     }
-    if (!selectedAccount) return;
-    localStorage.setItem('karix_account', selectedAccount);
-    const savedChannel = localStorage.getItem('karix_channel');
-    if (selectedAccount === 'apparel') {
-      setChannelState('rcs');
-    } else if (savedChannel === 'whatsapp' || savedChannel === 'rcs' || savedChannel === 'sms') {
-      setChannelState(savedChannel);
+    const next = { account: selectedAccount, channel: nextChannel };
+    destinationRef.current = next;
+    setDestinationState(next);
+    if (selectedAccount) {
+      localStorage.setItem('karix_account', selectedAccount);
+      localStorage.setItem('karix_channel', nextChannel);
     }
   }, []);
 
@@ -135,14 +145,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const refreshAccounts = useCallback(async () => {
     const profile = currentUserRef.current;
     if (!profile || isPendingUser(profile)) {
+      accountsRef.current = [];
       setAccounts([]);
       return;
     }
     try {
       const data = await fetchAccounts();
-      if (currentUserRef.current === profile && Array.isArray(data)) setAccounts(data);
+      if (currentUserRef.current === profile && Array.isArray(data)) {
+        accountsRef.current = data;
+        setAccounts(data);
+      }
     } catch {
-      if (currentUserRef.current === profile) setAccounts([]);
+      if (currentUserRef.current === profile) {
+        accountsRef.current = [];
+        setAccounts([]);
+      }
     }
   }, []);
 
@@ -163,7 +180,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     clearAuthToken();
     setCurrentUser(null);
-    setAccountState('');
     router.push('/login');
   }, [router, setCurrentUser]);
 
@@ -214,37 +230,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshAccounts();
   }, [currentUser, refreshAccounts]);
 
-  const setAccount = (newAccount: Account) => {
-    const cleanAccount = newAccount.toLowerCase();
-    if (!canAccessAccount(currentUser, cleanAccount)) {
-      alert('Access denied: This account is outside your authorized organization.');
-      return;
+  const setDestination = (newAccount: Account, newChannel: Channel): boolean => {
+    const cleanAccount = newAccount.toLowerCase().trim();
+    if (!canAccessAccount(currentUserRef.current, cleanAccount)) {
+      alert('This destination is outside your authorized organization.');
+      return false;
     }
-    if (cleanAccount !== 'all' && accounts.length > 0 && !accounts.some((a) => a.id.toLowerCase() === cleanAccount)) {
-      alert(`Access Denied: You do not have permission to access ${newAccount.toUpperCase()}.`);
-      return;
+    if (cleanAccount !== 'all' && !accountsRef.current.some((item) => item.id.toLowerCase() === cleanAccount)) {
+      alert('This account is unavailable. Refresh the account list and try again.');
+      return false;
     }
-    setAccountState(cleanAccount);
+    if (!destinationChannels(cleanAccount).includes(newChannel)) {
+      alert('Choose an available channel for this account.');
+      return false;
+    }
+    if (destinationRef.current.account === cleanAccount && destinationRef.current.channel === newChannel) return true;
+    const label = destinationLabel(cleanAccount, newChannel, accountsRef.current.find((item) => item.id === cleanAccount)?.name);
+    if (hasWorkspaceDrafts() && !window.confirm(`Switch to ${label}?\n\nThis clears the current workspace's unsaved drafts and previews. Submitted templates stay with their original destination. You must preview your file again before submitting.`)) return false;
+    clearTabState();
+    const next = { account: cleanAccount, channel: newChannel };
+    destinationRef.current = next;
+    setDestinationState(next);
+    const profile = currentUserRef.current;
+    if (profile) setTabState('workspace_destination', { userId: profile.id, tenant: profile.tenant_id, ...next });
     try {
       localStorage.setItem('karix_account', cleanAccount);
-    } catch {}
-    if (cleanAccount === 'apparel') {
-      setChannelState('rcs');
-      try {
-        localStorage.setItem('karix_channel', 'rcs');
-      } catch {}
-    }
-  };
-
-  const setChannel = (newChannel: Channel) => {
-    if (account === 'apparel') {
-      setChannelState('rcs');
-      return;
-    }
-    setChannelState(newChannel);
-    try {
       localStorage.setItem('karix_channel', newChannel);
     } catch {}
+    return true;
   };
 
   const setUser = (newUser: string) => {
@@ -270,9 +283,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     <AppContext.Provider
       value={{
         account,
-        setAccount,
         channel,
-        setChannel,
+        setDestination,
         user: user || currentUser?.name || 'Operator',
         setUser,
         currentUser,

@@ -27,7 +27,10 @@ function createTestHarness() {
     require: (mod) => {
       if (mod === 'react') {
         return {
-          useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
+          useState: (init) => {
+            let value = typeof init === 'function' ? init() : init;
+            return [value, (action) => { value = typeof action === 'function' ? action(value) : action; }];
+          },
           useCallback: (fn) => fn,
           useRef: (val) => ({ current: val }),
         };
@@ -91,4 +94,32 @@ test('clearTabState selectively clears by prefix or wipes completely', () => {
   mod.clearTabState();
   assert.equal(mod.getTabState('submit_file', null), null);
   assert.equal(sessionStorage.size, 0);
+});
+
+test('destination changes detect hidden restored drafts without warning for navigation preferences', () => {
+  const { mod, sessionStorage } = createTestHarness();
+  mod.setTabState('workspace_open_tabs', ['/', '/submit']);
+  mod.setTabState('submit_auto_skip_duplicates', true);
+  mod.setTabState('submit_identify_filter', 'MISSING');
+  mod.setTabState('submit_state', { step: 'idle' });
+  assert.equal(mod.hasWorkspaceDrafts(), false);
+
+  // Restored storage represents a draft on another, currently unmounted workspace tab.
+  sessionStorage.set('karix_tab:briefs_wa_templates', JSON.stringify([{ template_name: 'review_me', body: 'Keep my draft' }]));
+  assert.equal(mod.hasWorkspaceDrafts(), true);
+  mod.clearTabState();
+  assert.equal(mod.hasWorkspaceDrafts(), false);
+});
+
+test('late callbacks cannot restore or erase work after a destination switch', () => {
+  const { mod } = createTestHarness();
+  const [, oldResponse, oldReset] = mod.useTabState('submit_state', { step: 'idle' });
+  mod.clearTabState();
+  const [, newResponse] = mod.useTabState('submit_state', { step: 'idle' });
+  const reviewed = { step: 'previewed', account: 'wealth', channel: 'rcs' };
+  newResponse(reviewed);
+  oldResponse({ step: 'previewed', account: 'tcl_promo', channel: 'whatsapp' });
+  assert.deepEqual(mod.getTabState('submit_state', null), reviewed);
+  oldReset();
+  assert.deepEqual(mod.getTabState('submit_state', null), reviewed);
 });

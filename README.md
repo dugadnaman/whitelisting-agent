@@ -42,7 +42,10 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 2. **Phase 2 — Multi-Channel Submission & Tracking**:
    - **WhatsApp**: Submits via Karix Portal API or Official WABA API with parameter checking and aspect-ratio validation.
    - **RCS**: Submits Rich Cards and Carousels (Google RCS / Jio) with compliant aspect ratio and button validation.
-   - **RCS destination safety**: Account labels and bot IDs come from the effective backend configuration, including overrides. Spreadsheet RCS submission keeps the selected account (no automatic re-routing) and rejects a submission if its bot changed since preview; an account without a verified bot cannot be submitted from the UI.
+   - **One whitelisting destination**: the persistent **Whitelisting for** header combines the account/sub-account and channel. Use **Change → account → channel → Use this destination**; the sidebar and Settings no longer maintain competing selections. For example, select **Tata Capital · Promotional · WhatsApp**, then switch to **Tata Capital · Wealth · RCS** for the next batch.
+   - **Reviewed destination safety**: previews and submit buttons name the destination; results and queue records retain the actual submitted account/channel. Switching with current work requires confirmation, clears old drafts/previews and returns to the top; upload and preview again before sending a new batch. Late callbacks cannot restore or erase work after a destination change. Spreadsheet account/channel/WABA conflicts are rejected rather than silently rerouted. Detected accounts are suggestions only.
+   - **RCS destination safety**: account labels and bot IDs come from effective backend configuration, including overrides. Submission rejects a bot changed since preview; an account without a verified bot cannot submit from the UI.
+   - **API cutover**: `/api/submit` requires explicit `account`, `channel`, `expected_account`, and `expected_channel`; a changed reviewed scope returns HTTP 409. The obsolete `auto_route` parameter is removed. **All accounts** is read-only overview: select one account before uploading, whitelisting or managing connections.
    - **SMS**: End-to-end DLT template compliance, AES-256 CBC PII encryption (`sms_crypto.py`), and real-time DLR forwarding callbacks.
    - **Dashboard resilience**: When Karix's WhatsApp inventory is unavailable,
      the dashboard keeps tenant-scoped local submission history visible and marks
@@ -51,7 +54,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 
 3. **Phase 3 — Operational Work Management & Sync**:
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
-   - Mixed Wealth briefs can submit WhatsApp to `tcl_promo` and RCS to `wealth` in one request. The confirmation shows both destinations; the backend authorizes each account and rejects a changed RCS bot before either channel is submitted.
+   - Jira Briefs follows the same shared destination and opens its selected channel for messaging briefs. Other channel drafts remain available to review, but cannot be submitted through the wrong channel's action. Wealth WhatsApp is no longer silently redirected to Promotional: choose Promotional WhatsApp explicitly, review, then submit. Jira preview/submit requests require one `account`; submission also requires explicit `channels`. The obsolete `whatsapp_account` split-routing field is rejected.
    - Jira Briefs CTA previews support WhatsApp API buttons with `text` and legacy fallback buttons with `label`/`text`. Both shapes are type-checked by the production frontend build.
    - Jira Briefs has **Add template content** in WhatsApp, RCS, and SMS panels, including empty channels. Use it to separate two messages incorrectly parsed into one template, then edit the original. New drafts have unique names, open in edit mode, and remain unchecked for whitelisting. Changes are local to the loaded brief until WhatsApp/RCS submission; reloading reparses Jira and discards unsent edits. SMS remains review/edit-only.
    - Jira WhatsApp/RCS drafts use the same pre-submission inspection as Excel uploads: image dimensions/ratios, grammar, compliance and duplicate warnings are visible before whitelisting. Copy, CTA, channel and creative changes trigger fresh validation; unavailable validation or invalid media cannot be bypassed by submitting stale browser flags. Carousel images are checked individually.
@@ -193,7 +196,7 @@ backend. The application handles this for autonomous remediation flows.
 
 ### Enterprise Multi-Channel Auth Sync (no credential copy-paste)
 
-Deploy/restart the updated backend and frontend together. In **Settings**, choose any account and channel:
+Deploy/restart the updated backend and frontend together. Choose an account and delivery channel using **Whitelisting for → Change** at the top of the app, then open **Settings → Connections**. Manage the selected Karix channel or open the separate **MoEngage integration** panel; neither opening Settings nor viewing an integration activates extension capture or changes your whitelisting destination. Unsaved connection edits require confirmation before changing destination or integration. **Team & administration** is collapsed below the connection controls.
 
 1. Click **Download extension ZIP** and unzip it into a permanent local folder.
 2. Open `chrome://extensions` in Chrome 124 or newer, enable **Developer mode**, click
