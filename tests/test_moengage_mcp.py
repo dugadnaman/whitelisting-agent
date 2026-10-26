@@ -29,10 +29,7 @@ def isolated_mcp_credentials(monkeypatch):
         if "MOENGAGE" in key:
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(moengage_mcp, "_load_env_file", lambda: None)
-    monkeypatch.setattr(moengage_mcp, "_load_db_mcp_creds", lambda: {})
-    monkeypatch.setattr(moengage_mcp, "update_env_vars", lambda mapping: None)
     monkeypatch.setattr(moengage_mcp, "_MCP_SESSIONS", {})
-    monkeypatch.setattr(moengage_mcp, "_PENDING_OAUTH_STATES", {})
 
 def test_mcp_status_and_config_json():
     """Verify get_mcp_status returns standard mcpServers.moengage JSON configuration."""
@@ -82,7 +79,6 @@ def test_mcp_oauth_dynamic_registration_and_pkce_flow():
     with (
         patch.dict("os.environ", {}, clear=False),
         patch("moengage_mcp.requests.post", return_value=mock_tok_resp),
-        patch("moengage_mcp.update_env_vars"),
     ):
         done = complete_mcp_oauth(code="auth_code_999", state=res["state"])
         assert done["ok"] is True
@@ -186,3 +182,100 @@ def test_mcp_api_endpoints(provision_user):
     body = r.json()
     assert body["mcp_url"] == "https://mcp.moengage.com"
     assert body["mcp_config_json"]["mcpServers"]["moengage"]["url"] == "https://mcp.moengage.com"
+
+
+def test_mcp_credentials_survive_reload_without_cross_account_or_portal_writes(tmp_path, monkeypatch):
+    import base64
+    import importlib
+    import os
+    import moengage_mcp
+    from db import get_db
+    from portal_sessions import load_session, save_session
+
+    monkeypatch.chdir(tmp_path)
+    portal = {"bearer_token": "original-portal", "refresh_token": "original-refresh", "cookie": "portal=original"}
+    save_session(portal, "tcl_promo", "moengage")
+    payload = base64.urlsafe_b64encode(json.dumps({"moe_bearer": "mcp-only-bearer"}).encode()).decode().rstrip("=")
+    access = f"header.{payload}.signature"
+    save_mcp_tokens("apparel", access_token=access, refresh_token="apparel-refresh", client_id="apparel-client")
+    save_mcp_tokens("tcl_promo", access_token="promo-access", refresh_token="promo-refresh")
+    monkeypatch.setenv("MOENGAGE_MCP_ACCESS_TOKEN", "unscoped-foreign-token")
+    reloaded = importlib.reload(moengage_mcp)
+    monkeypatch.setattr(reloaded, "_load_env_file", lambda: None)
+
+    assert reloaded.get_mcp_config("apparel")["access_token"] == access
+    assert reloaded.get_mcp_config("tcl_promo")["refresh_token"] == "promo-refresh"
+    assert reloaded.get_mcp_config("bajaj")["access_token"] == ""
+    assert reloaded.get_mcp_config("tata")["access_token"] == ""
+    assert load_session("tcl_promo", "moengage") == portal
+    assert not any(key.endswith("_MOENGAGE_BEARER_TOKEN") for key in os.environ)
+    assert not (tmp_path / "credentials.json").exists()
+    with get_db() as conn:
+        ciphertext = " ".join(row["encrypted_credentials"] for row in conn.execute("SELECT encrypted_credentials FROM karix_scoped_credentials").fetchall())
+        assert access not in ciphertext and "apparel-refresh" not in ciphertext and "promo-refresh" not in ciphertext
+
+
+def test_mcp_refresh_rotates_numeric_expiry_credentials_only_for_requested_account(monkeypatch):
+    import moengage_mcp
+
+    save_mcp_tokens("apparel", access_token="old-access", refresh_token="old-refresh", client_id="apparel-client")
+    save_mcp_tokens("tcl_promo", access_token="untouched-access", refresh_token="untouched-refresh")
+    response = MagicMock(ok=True)
+    response.json.return_value = {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+    with patch("moengage_mcp.requests.post", return_value=response):
+        assert moengage_mcp.refresh_mcp_access_token("apparel") == "new-access"
+    config = moengage_mcp.get_mcp_config("apparel")
+    assert config["access_token"] == "new-access" and config["refresh_token"] == "new-refresh"
+    assert config["expires_at"] > __import__("time").time()
+    assert moengage_mcp.get_mcp_config("tcl_promo")["access_token"] == "untouched-access"
+
+
+def test_oauth_state_is_encrypted_one_use_and_survives_module_reload(monkeypatch):
+    import importlib
+    import moengage_mcp
+
+    registration = MagicMock(ok=True)
+    registration.json.return_value = {"client_id": "fixture-client"}
+    with patch("moengage_mcp.requests.post", return_value=registration):
+        pending = moengage_mcp.start_mcp_oauth("https://portal.example.invalid/callback", account="apparel")
+    reloaded = importlib.reload(moengage_mcp)
+    monkeypatch.setattr(reloaded, "_load_env_file", lambda: None)
+    response = MagicMock(ok=True)
+    response.json.return_value = {"access_token": "oauth-access", "refresh_token": "oauth-refresh", "expires_in": 3600}
+    with patch("moengage_mcp.requests.post", return_value=response) as exchange:
+        completed = reloaded.complete_mcp_oauth("fixture-code", pending["state"])
+        assert completed["account"] == "apparel" and completed["has_token"]
+        with pytest.raises(RuntimeError, match="Invalid or expired"):
+            reloaded.complete_mcp_oauth("fixture-code", pending["state"])
+        assert exchange.call_count == 1
+    assert reloaded.get_mcp_config("tata")["access_token"] == ""
+
+
+def test_expired_mcp_oauth_state_never_exchanges_the_code(monkeypatch):
+    import moengage_mcp
+    from db import get_db
+
+    registration = MagicMock(ok=True)
+    registration.json.return_value = {"client_id": "fixture-client"}
+    with patch("moengage_mcp.requests.post", return_value=registration):
+        pending = moengage_mcp.start_mcp_oauth("https://portal.example.invalid/callback", account="apparel")
+    with get_db() as conn:
+        row = conn.execute("SELECT encrypted_credentials FROM karix_scoped_credentials WHERE kind LIKE 'mcp-oauth-%'").fetchone()
+        assert pending["state"] not in row["encrypted_credentials"]
+        conn.execute("UPDATE karix_scoped_credentials SET updated_at = updated_at - 601 WHERE kind LIKE 'mcp-oauth-%'")
+    with patch("moengage_mcp.requests.post") as exchange:
+        with pytest.raises(RuntimeError, match="Invalid or expired"):
+            moengage_mcp.complete_mcp_oauth("fixture-code", pending["state"])
+        exchange.assert_not_called()
+
+
+def test_manual_mcp_token_replacement_discards_previous_expiry():
+    import time
+    import jwt
+
+    save_mcp_tokens("tcl_promo", access_token="old-token", expires_in=-60)
+    assert get_mcp_status("tcl_promo")["expired"]
+    token = jwt.encode({"exp": int(time.time()) + 3600}, "synthetic-mcp-signing-key-at-least-32-bytes", algorithm="HS256")
+    replacement = save_mcp_tokens("tcl_promo", access_token=token)
+    assert not replacement["expired"]
+    assert replacement["remaining_min"] > 50

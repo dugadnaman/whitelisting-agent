@@ -27,71 +27,28 @@ from typing import Any
 import requests
 
 from config import _account_prefix, _load_env_file
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def _load_db_mcp_creds() -> dict[str, str]:
-    """Load persisted MoEngage MCP credentials from shared PostgreSQL/SQLite DB."""
-    try:
-        from db import get_db
+def _consume_oauth_state(state: str) -> dict[str, Any]:
+    """Consume an encrypted, one-use PKCE state across workers and restarts."""
+    from db import get_db, init_database
+    from portal_sessions import _decrypt
 
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT details_json FROM alert_scheduler_runs WHERE slot_key = ?",
-                ("__MOENGAGE_MCP_CREDENTIALS__",),
-            ).fetchone()
-            if row and row["details_json"]:
-                data = json.loads(row["details_json"])
-                if isinstance(data, dict):
-                    for k, v in data.items():
-                        if isinstance(v, str) and v and not os.environ.get(k):
-                            os.environ[k] = v
-                    return data
-    except Exception:
-        pass
-    return {}
-
-
-def update_env_vars(mapping: dict[str, str]) -> None:
-    """Update live os.environ, credentials.json, and shared PostgreSQL DB with MoEngage MCP keys."""
-    for k, v in mapping.items():
-        os.environ[k] = v
-    saved_creds: dict[str, Any] = {}
-    try:
-        cred_json_path = Path("credentials.json")
-        if cred_json_path.exists():
-            try:
-                saved_creds = json.loads(cred_json_path.read_text(encoding="utf-8"))
-            except Exception:
-                saved_creds = {}
-        saved_creds.update(mapping)
-        cred_json_path.write_text(json.dumps(saved_creds, indent=2) + "\n", encoding="utf-8")
-    except Exception as exc:
-        logger.debug("Could not write credentials.json: %s", exc)
-
-    try:
-        from db import get_db
-
-        db_creds = _load_db_mcp_creds()
-        db_creds.update({k: v for k, v in mapping.items() if not k.startswith("MOE_MCP_OAUTH_STATE_")})
-        with get_db() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO alert_scheduler_runs "
-                "(slot_key, day_str, stage, dispatched_at, details_json) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (
-                    "__MOENGAGE_MCP_CREDENTIALS__",
-                    "GLOBAL",
-                    "MCP_OAUTH",
-                    str(int(time.time())),
-                    json.dumps(db_creds),
-                ),
-            )
-            conn.commit()
-    except Exception as exc:
-        logger.debug("Could not persist MCP creds to DB: %s", exc)
+    if not isinstance(state, str) or len(state) != 32:
+        raise RuntimeError("Invalid or expired OAuth state. Connect MoEngage MCP again.")
+    kind = "mcp-oauth-" + hashlib.sha256(state.encode()).hexdigest()
+    with get_db() as conn:
+        init_database(conn)
+        record = conn.execute(
+            "DELETE FROM karix_scoped_credentials WHERE integration = 'moengage' AND kind = ? RETURNING *",
+            (kind,),
+        ).fetchone()
+    if not record or time.time() - record["updated_at"] > 600:
+        raise RuntimeError("Invalid or expired OAuth state. Connect MoEngage MCP again.")
+    values = _decrypt(dict(record), record["account"], "moengage", kind)
+    return json.loads(values["state"])
 
 MOENGAGE_MCP_URL = "https://mcp.moengage.com"
 MOENGAGE_OAUTH_ISSUER = "https://moeauth.moengage.com"
@@ -100,7 +57,6 @@ MOENGAGE_OAUTH_AUTHORIZE_URL = f"{MOENGAGE_OAUTH_ISSUER}/oauth2/authorize"
 MOENGAGE_OAUTH_TOKEN_URL = f"{MOENGAGE_OAUTH_ISSUER}/oauth2/token"
 MOENGAGE_MCP_SCOPES = "openid email profile offline_access campaigns:read"
 
-_PENDING_OAUTH_STATES: dict[str, dict[str, Any]] = {}
 _MCP_SESSIONS: dict[str, str] = {}
 
 
@@ -111,40 +67,22 @@ def _setting_key(account: str, suffix: str) -> str:
 
 def get_mcp_config(account: str = "tata") -> dict[str, Any]:
     """Load MoEngage MCP server URL and OAuth/Bearer credentials for an account."""
+    from portal_sessions import load_settings
+
     _load_env_file()
-    if not os.environ.get("MOENGAGE_MCP_ACCESS_TOKEN"):
-        _load_db_mcp_creds()
-    prefix = _account_prefix(account or "tata")
+    acc = account.strip().lower()
+    prefix = _account_prefix(acc)
+    saved = load_settings(acc, "moengage")
 
-    mcp_url = (
-        os.environ.get(f"{prefix}_MOENGAGE_MCP_URL")
-        or os.environ.get("MOENGAGE_MCP_URL")
-        or MOENGAGE_MCP_URL
-    ).rstrip("/")
+    def value(suffix: str) -> str:
+        key = f"{prefix}_MOENGAGE_MCP_{suffix}"
+        return saved.get(key, os.environ.get(key, "")).strip()
 
-    access_token = (
-        os.environ.get(f"{prefix}_MOENGAGE_MCP_ACCESS_TOKEN")
-        or os.environ.get("MOENGAGE_MCP_ACCESS_TOKEN")
-        or ""
-    ).strip()
-
-    refresh_token = (
-        os.environ.get(f"{prefix}_MOENGAGE_MCP_REFRESH_TOKEN")
-        or os.environ.get("MOENGAGE_MCP_REFRESH_TOKEN")
-        or ""
-    ).strip()
-
-    client_id = (
-        os.environ.get(f"{prefix}_MOENGAGE_MCP_CLIENT_ID")
-        or os.environ.get("MOENGAGE_MCP_CLIENT_ID")
-        or ""
-    ).strip()
-
-    expires_at_raw = (
-        os.environ.get(f"{prefix}_MOENGAGE_MCP_EXPIRES_AT")
-        or os.environ.get("MOENGAGE_MCP_EXPIRES_AT")
-        or "0"
-    )
+    mcp_url = (value("URL") or MOENGAGE_MCP_URL).rstrip("/")
+    access_token = value("ACCESS_TOKEN")
+    refresh_token = value("REFRESH_TOKEN")
+    client_id = value("CLIENT_ID")
+    expires_at_raw = value("EXPIRES_AT") or "0"
     try:
         expires_at = int(float(expires_at_raw))
     except Exception:
@@ -183,8 +121,11 @@ def save_mcp_tokens(
     expires_in: int | None = None,
     mcp_url: str | None = None,
 ) -> dict[str, Any]:
-    """Persist MoEngage MCP access/refresh tokens to DB and .env."""
-    prefix = _account_prefix(account or "tata")
+    """Save only this account's MCP credentials, never a partial portal session."""
+    from portal_sessions import save_settings
+
+    acc = account.strip().lower()
+    prefix = _account_prefix(acc)
     clean_access = access_token.strip()
     if clean_access.lower().startswith("bearer "):
         clean_access = clean_access[7:].strip()
@@ -192,37 +133,25 @@ def save_mcp_tokens(
     updates: dict[str, str] = {}
     if mcp_url:
         updates[f"{prefix}_MOENGAGE_MCP_URL"] = mcp_url.strip().rstrip("/")
-        updates["MOENGAGE_MCP_URL"] = mcp_url.strip().rstrip("/")
 
     if clean_access:
         updates[f"{prefix}_MOENGAGE_MCP_ACCESS_TOKEN"] = clean_access
-        updates["MOENGAGE_MCP_ACCESS_TOKEN"] = clean_access
-        embedded_moe_bearer = extract_moe_bearer_from_mcp_token(clean_access)
-        if embedded_moe_bearer:
-            updates[f"{prefix}_MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
-            updates["MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
-            updates["TATA_MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
-            updates["TCL_PROMO_MOENGAGE_BEARER_TOKEN"] = embedded_moe_bearer
+        if expires_in is None:
+            updates[f"{prefix}_MOENGAGE_MCP_EXPIRES_AT"] = "0"
     if refresh_token is not None and refresh_token.strip():
         updates[f"{prefix}_MOENGAGE_MCP_REFRESH_TOKEN"] = refresh_token.strip()
-        updates["MOENGAGE_MCP_REFRESH_TOKEN"] = refresh_token.strip()
 
     if client_id is not None and client_id.strip():
         updates[f"{prefix}_MOENGAGE_MCP_CLIENT_ID"] = client_id.strip()
-        updates["MOENGAGE_MCP_CLIENT_ID"] = client_id.strip()
 
-    if expires_in:
+    if expires_in is not None:
         exp_ts = str(int(time.time()) + int(expires_in))
         updates[f"{prefix}_MOENGAGE_MCP_EXPIRES_AT"] = exp_ts
-        updates["MOENGAGE_MCP_EXPIRES_AT"] = exp_ts
 
     if updates:
-        for k, v in updates.items():
-            os.environ[k] = v
-        update_env_vars(updates)
+        save_settings(acc, "moengage", updates)
     _MCP_SESSIONS.pop(prefix, None)
     return get_mcp_status(account)
-
 
 def get_mcp_status(account: str = "tata") -> dict[str, Any]:
     """Return current MoEngage MCP configuration and connection state."""
@@ -305,11 +234,10 @@ def start_mcp_oauth(
         "return_to": return_to,
         "created_at": int(time.time()),
     }
-    _PENDING_OAUTH_STATES[state] = state_record
-    try:
-        update_env_vars({f"MOE_MCP_OAUTH_STATE_{state}": json.dumps(state_record)})
-    except Exception:
-        pass
+    from portal_sessions import _save
+
+    kind = "mcp-oauth-" + hashlib.sha256(state.encode()).hexdigest()
+    _save({"state": json.dumps(state_record)}, account.strip().lower(), "moengage", kind)
 
     params = {
         "response_type": "code",
@@ -332,17 +260,7 @@ def start_mcp_oauth(
 
 def complete_mcp_oauth(code: str, state: str) -> dict[str, Any]:
     """Exchange OAuth 2.0 authorization code + PKCE verifier for MoEngage MCP access & refresh tokens."""
-    state_record = _PENDING_OAUTH_STATES.pop(state, None)
-    if not state_record:
-        _load_env_file()
-        raw = os.environ.get(f"MOE_MCP_OAUTH_STATE_{state}")
-        if raw:
-            try:
-                state_record = json.loads(raw)
-            except Exception:
-                state_record = None
-    if not state_record:
-        raise RuntimeError("Invalid or expired OAuth state parameter. Please initiate Connect MoEngage MCP again.")
+    state_record = _consume_oauth_state(state)
 
     token_data = {
         "grant_type": "authorization_code",
@@ -411,15 +329,14 @@ def refresh_mcp_access_token(account: str = "tata") -> str | None:
     expires_in = tok_json.get("expires_in")
     if not isinstance(expires_in, (int, float)):
         expires_in = 2592000
-        save_mcp_tokens(
-            account=account,
-            access_token=new_access,
-            refresh_token=new_refresh,
-            client_id=cfg["client_id"],
-            expires_in=expires_in,
-        )
-        return new_access
-    return None
+    save_mcp_tokens(
+        account=account,
+        access_token=new_access,
+        refresh_token=new_refresh,
+        client_id=cfg["client_id"],
+        expires_in=expires_in,
+    )
+    return new_access
 
 
 def _parse_mcp_http_response(resp: requests.Response) -> dict[str, Any]:

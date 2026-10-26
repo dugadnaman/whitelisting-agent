@@ -774,3 +774,51 @@ def test_pairing_scope_mismatch_never_replaces_the_connected_target(scoped_brows
     flow.settings.goto("https://rcsgui.karix.solutions/settings")
     assert flow.message("KARIX_EXTENSION_SCOPED_STATUS")["capture_active"]
     assert pairing.json()["code"] not in json.dumps(mismatched)
+
+
+def test_settings_capture_switch_waits_for_slow_validation_without_losing_browser_status(scoped_browser):
+    flow = scoped_browser
+    frontend = Path(__file__).resolve().parents[1] / "frontend"
+    compiled = subprocess.run(
+        ["node", "-e", """
+            const ts = require('typescript');
+            const fs = require('node:fs');
+            process.stdout.write(ts.transpileModule(fs.readFileSync(process.argv[1], 'utf8'), {
+                compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX}
+            }).outputText);
+        """, str(frontend / "components" / "KarixAuthSync.tsx")],
+        cwd=frontend, check=True, capture_output=True, text=True,
+    ).stdout
+    flow.settings.add_script_tag(content=(
+        "(() => { const exports = {}; const require = () => ({}); " + compiled
+        + " window.authSyncMessage = extensionMessage; })();"
+    ))
+    flow.pair()
+    flow.pair("tcl_promo")
+    flow.message("KARIX_EXTENSION_SELECT", "bajaj", "whatsapp")
+    gate = threading.Event()
+    flow.state["validation_gate"] = gate
+    flow.state["validation_started"] = threading.Event()
+    try:
+        assert flow.capture_wa() == 200
+        assert flow.state["validation_started"].wait(5)
+        status = flow.message("KARIX_EXTENSION_SCOPED_STATUS", "bajaj", "whatsapp")
+        assert status["ok"] and status["syncing"]
+        flow.settings.evaluate("""() => {
+            window.captureSwitch = window.authSyncMessage('KARIX_EXTENSION_SELECT', new AbortController().signal,
+                {account: 'tcl_promo', integration: 'whatsapp'})
+                .then(result => ({result}), error => ({error: error.message}));
+        }""")
+        timer = threading.Timer(3, gate.set)
+        timer.start()
+        try:
+            switched = flow.settings.evaluate("() => window.captureSwitch")
+        finally:
+            timer.cancel()
+        assert "error" not in switched, switched
+        assert switched["result"]["account"] == "tcl_promo"
+        status = flow.message("KARIX_EXTENSION_SCOPED_STATUS", "tcl_promo", "whatsapp")
+        assert status["capture_active"] and not status["syncing"]
+    finally:
+        gate.set()
+        flow.state["validation_gate"] = None

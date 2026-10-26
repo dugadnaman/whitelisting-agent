@@ -220,11 +220,13 @@ Deploy/restart the updated backend and frontend together. In **Settings**, choos
    a fresh provider validation check. Historical backend validation and this browser's pairing
    are shown separately.
 
-**Updating an unpacked extension:** use version **2.0.3**, replace its files in the same folder, then click
+**Updating an unpacked extension:** use version **2.0.4**, replace its files in the same folder, then click
 its reload icon in `chrome://extensions` and reload Settings and the provider inventory. Keeping the
 same unpacked folder preserves device pairings. The downloaded ZIP retains the exact Karix frontend
 permission (`https://rcmui.instaalerts.zone/*`) as well as the API host: Chrome requires both.
 The MV3 worker preserves the first matching request while restoring stored pairings.
+Capture switches wait for an in-flight provider check rather than timing out after 2.5 seconds
+while the extension is busy. Scoped status reads remain available while validation is running.
 
 **Capture vs validation:** Settings shows the current browser's scoped pairing, pending capture and
 safe error category separately from server-side device registrations and saved-session history.
@@ -238,6 +240,18 @@ provider error bodies.
 Identical recaptures are revalidated rather than permanently suppressed, so an expired/revoked
 capability or deleted saved session is detected. Switching targets while a request is in flight
 never reassigns that request's credentials to the newly selected target.
+Token expiry alone is not a connection check. Settings uses the scoped backend validation result and
+timestamp; the current browser's pairing and active capture target remain separate. Dashboard/Settings
+do not display a green connection claim just because a stored JWT has not expired.
+
+MoEngage MCP tokens use encrypted, exact-account settings, independently of portal Auth Sync snapshots.
+Saving or rotating MCP credentials never replaces portal bearer/cookie/refresh headers or another
+account's tokens. Configure exact `<ACCOUNT>_MOENGAGE_MCP_*` environment defaults or reconnect that
+account's MCP integration; legacy unscoped token slots are not adopted across accounts. OAuth PKCE
+state is encrypted, one-use, survives process restarts, and expires after ten minutes.
+Manual MCP token replacement discards the previous token's expiry instead of marking the new token
+expired using stale metadata.
+
 
 
 If the initial agent session check fails while the API is starting, protected pages retain the
@@ -407,6 +421,8 @@ pytest tests/test_extension_browser_capture.py tests/test_karix_extension.py tes
 These launch isolated Chromium with the downloaded MV3 extension, loopback TLS portals and real HTTP
 provider simulators. They cover capture/pairing/selection/retry/revocation/isolation and template/media
 success, failure and duplicate reconciliation without creating production templates or sending messages.
+Install the frontend dependencies with `npm ci` in `frontend/` first: the slow capture-switch
+regression runs the actual TypeScript website bridge against the queued MV3 worker.
 
 Reliability verification (23 October 2026): the complete default backend suite passed **1,405 tests**
 plus four subtests; three opt-in live checks were deselected. **58 frontend behavioral tests** and the

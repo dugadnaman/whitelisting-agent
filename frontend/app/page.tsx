@@ -11,7 +11,6 @@ import {
   deleteTemplatesFromFile,
   syncKarixRcsToMoEngage,
   syncRcsTemplateToMoEngage,
-  fetchMoEngageCredentials,
 } from '@/lib/api';
 import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
@@ -108,27 +107,6 @@ export default function DashboardPage() {
   const [syncRcsFeedback, setSyncRcsFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [syncingSingleRcs, setSyncingSingleRcs] = useState<Record<string, boolean>>({});
   const [syncedSingleRcs, setSyncedSingleRcs] = useState<Record<string, string>>({});
-  const [moeStatus, setMoeStatus] = useState<{ has_token?: boolean; expired?: boolean; remaining_min?: number | null } | null>(null);
-
-  useEffect(() => {
-    let ignore = false;
-    if (account === 'apparel') {
-      fetchMoEngageCredentials('apparel')
-        .then((res) => {
-          if (!ignore) {
-            setMoeStatus({
-              has_token: res.has_token,
-              expired: res.expired,
-              remaining_min: res.remaining_min,
-            });
-          }
-        })
-        .catch(() => {});
-    } else {
-      setMoeStatus(null);
-    }
-    return () => { ignore = true; };
-  }, [account]);
 
   const handleSyncSingleRcsToMoEngage = async (t: Template) => {
     const tName = t.template_name;
@@ -620,27 +598,12 @@ export default function DashboardPage() {
                 <span className="text-xs text-purple-300 font-medium">
                   Karix RCS Bot &rarr; MoEngage Apparel Workspace
                 </span>
-                {moeStatus && (
-                  moeStatus.expired ? (
-                    <a
-                      href="/settings"
-                      className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 transition-colors flex items-center gap-1.5"
-                    >
-                      <span>⚠️</span> MoEngage Token Expired (Click to Refresh in Settings)
-                    </a>
-                  ) : moeStatus.has_token ? (
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 flex items-center gap-1.5">
-                      <span>✅</span> MoEngage Token Active {moeStatus.remaining_min != null ? `(~${moeStatus.remaining_min}m remaining)` : ''}
-                    </span>
-                  ) : (
-                    <a
-                      href="/settings"
-                      className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-500/20 text-red-200 border border-red-500/40 hover:bg-red-500/30 transition-colors flex items-center gap-1.5"
-                    >
-                      <span>⚠️</span> MoEngage Token Missing (Click to Add in Settings)
-                    </a>
-                  )
-                )}
+                <a
+                  href="/settings"
+                  className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/20 text-purple-200 border border-purple-500/40 hover:bg-purple-500/30 transition-colors"
+                >
+                  MoEngage connection settings
+                </a>
               </div>
               <h2 className="text-xl font-bold text-white tracking-tight">
                 Apparel Brand — Karix RCS to MoEngage Sync Hub

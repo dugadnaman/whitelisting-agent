@@ -111,7 +111,6 @@ export default function SettingsPage() {
   const [moeWorkspaceId, setMoeWorkspaceId] = useState('');
   const [manualMoeSession, setManualMoeSession] = useState(false);
   const savedMoeFields = useRef<Record<string, string>>({});
-  const [moeExpiry, setMoeExpiry] = useState<{ has_session?: boolean; expired?: boolean; remaining_min?: number | null }>({});
   const [moeLoadedScope, setMoeLoadedScope] = useState('');
   // Load MoEngage credentials for the selected account
   useEffect(() => {
@@ -122,7 +121,6 @@ export default function SettingsPage() {
     setMoeBaseUrl('');
     setMoeWorkspaceId('');
     setMoeSenderId('');
-    setMoeExpiry({});
     setMoeLoadedScope('');
     if (!isAssigned) return;
     let ignore = false;
@@ -135,7 +133,6 @@ export default function SettingsPage() {
         setMoeSenderId(creds.sender_id || '');
         setMoeWorkspaceId(creds.workspace_id || '');
         savedMoeFields.current = { base_url: creds.base_url || '', workspace_id: creds.workspace_id || '', sender_id: creds.sender_id || '' };
-        setMoeExpiry({ has_session: creds.has_token || creds.has_cookie || creds.has_refresh_token === true, expired: creds.expired, remaining_min: creds.remaining_min });
         setMoeLoadedScope(settingsScope);
       } catch {
         if (!ignore) setBanner({ type: 'error', message: 'Could not load MoEngage settings for this account. Retry after checking your access and connection.' });
@@ -503,7 +500,7 @@ export default function SettingsPage() {
     setBanner(null);
     try {
       const draft = moengageDraft();
-      const res = await saveMoEngageCredentials(selectedAccount, draft);
+      await saveMoEngageCredentials(selectedAccount, draft);
       if (currentSettingsScope.current !== settingsScope) return;
       savedMoeFields.current = { base_url: moeBaseUrl.trim(), workspace_id: moeWorkspaceId.trim(), sender_id: moeSenderId.trim() };
       setManualMoeSession(false);
@@ -511,10 +508,9 @@ export default function SettingsPage() {
       setMoeRefreshToken('');
       setMoeCookie('');
       setSyncRevision((revision) => revision + 1);
-      setMoeExpiry((previous) => ({ has_session: Boolean(draft.bearer_token) || previous.has_session, expired: res.expired, remaining_min: res.remaining_min }));
       setBanner({
         type: 'success',
-        message: `MoEngage settings saved for ${accountTitle}${res.remaining_min != null ? ` — token valid for ~${res.remaining_min} minutes` : ''}.`,
+        message: `MoEngage settings saved for ${accountTitle}.`,
       });
     } catch (err) {
       if (currentSettingsScope.current !== settingsScope) return;
@@ -534,10 +530,11 @@ export default function SettingsPage() {
       const res = await testMoEngageConnection(selectedAccount, moengageDraft());
       if (currentSettingsScope.current !== settingsScope) return;
       if (res.ok) {
-        setMoeExpiry((previous) => ({ ...previous, expired: res.expired, remaining_min: res.remaining_min }));
         setBanner({
           type: 'success',
-          message: `MoEngage connection verified for ${accountTitle} — ${res.template_count ?? 0} templates accessible live in MoEngage.`,
+          message: res.template_count === undefined
+            ? `MoEngage session verified for ${accountTitle}.`
+            : `MoEngage connection verified for ${accountTitle} — ${res.template_count} templates accessible live in MoEngage.`,
         });
       } else {
         setBanner({
@@ -1006,24 +1003,6 @@ export default function SettingsPage() {
         )}
         {showMoEngage ? (
           <>
-            {moeExpiry.has_session !== undefined && (
-              <div className={`p-3 rounded-lg text-xs font-semibold border ${
-                !moeExpiry.has_session
-                  ? 'bg-gray-50 text-gray-700 border-gray-200'
-                  : moeExpiry.expired
-                    ? 'bg-red-50 text-red-700 border-red-200'
-                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              }`}>
-                {!moeExpiry.has_session
-                  ? 'MoEngage is not connected: no saved browser session. Pair this account’s MoEngage target, select it in the extension, and reload its configured workspace using your already logged-in portal session.'
-                  : moeExpiry.expired
-                    ? 'The saved MoEngage session expired. Reload the configured workspace to capture a fresh session; sign in only if the portal itself requires it.'
-                    : moeExpiry.remaining_min != null
-                      ? `MoEngage token valid for ~${moeExpiry.remaining_min} more minutes.`
-                      : 'MoEngage session present.'}
-              </div>
-            )}
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="moe_base_url" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
