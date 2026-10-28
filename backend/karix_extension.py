@@ -121,8 +121,8 @@ def target_identity(account: str, integration: str) -> dict:
         settings = load_settings(account, "moengage")
         base = settings.get(prefix + "BASE_URL", os.environ.get(prefix + "BASE_URL", "")).rstrip("/")
         workspace = settings.get(prefix + "WORKSPACE_ID", os.environ.get(prefix + "WORKSPACE_ID", ""))
-        if not re.fullmatch(r"https://dashboard(?:-\d+)?\.moengage\.com", base) or not re.fullmatch(r"[a-fA-F0-9]{24}", workspace):
-            raise OSError("Configure this account's exact MoEngage dashboard origin and 24-character dashboard workspace app ID (not public API app key) first.")
+        if not re.fullmatch(r"https://dashboard(?:-\d+)?\.moengage\.com", base) or not re.fullmatch(r"[A-Za-z0-9]{24}", workspace):
+            raise OSError("Configure this account's exact MoEngage dashboard origin and 24-character alphanumeric dashboard workspace ID first.")
         return {"base_url": base, "workspace_id": workspace}
     raise OSError("This integration uses static credentials, not browser sessions.")
 

@@ -372,9 +372,9 @@ def test_undecryptable_legacy_row_is_preserved_and_fails_closed(extension_flow):
         assert row[0] == "not-valid-ciphertext"
 
 
-def test_moengage_binds_provider_returned_tokens_and_preserves_failed_refresh(extension_flow, monkeypatch):
+@pytest.mark.parametrize("workspace", ["0123456789abcdef01234567", "ABCDEFGHIJKLMNOPQRSTUVWX"])
+def test_moengage_binds_provider_returned_tokens_and_preserves_failed_refresh(extension_flow, monkeypatch, workspace):
     client, headers, _, _, _ = extension_flow
-    workspace = "0123456789abcdef01234567"
     base = "https://dashboard-03.moengage.com"
     portal_sessions.save_settings("bajaj", "moengage", {
         "BAJAJ_MOENGAGE_BASE_URL": base, "BAJAJ_MOENGAGE_WORKSPACE_ID": workspace,

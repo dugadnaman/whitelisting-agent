@@ -707,8 +707,8 @@ export default function SettingsPage() {
               </div>
               <div className="sm:col-span-2">
                 <label htmlFor="moe_workspace_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">MoEngage Internal Workspace ID</label>
-                <input id="moe_workspace_id" type="text" value={moeWorkspaceId} onChange={(event) => setMoeWorkspaceId(event.target.value)} placeholder="24-character hexadecimal ID from listApps / changeApp" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none" />
-                <p className="text-[11px] text-gray-500 mt-1">The portal’s internal 24-hex workspace ID from listApps or changeApp, not the public API app/workspace key. Confirm it belongs to this account; unknown workspaces are never adopted from browsing.</p>
+                <input id="moe_workspace_id" type="text" value={moeWorkspaceId} onChange={(event) => setMoeWorkspaceId(event.target.value)} placeholder="24-character alphanumeric ID from listApps / changeApp" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none" />
+                <p className="text-[11px] text-gray-500 mt-1">The portal’s 24-character alphanumeric workspace ID from listApps or changeApp. Preserve its exact case and confirm it belongs to this account; unknown workspaces are never adopted from browsing.</p>
               </div>
             </div>
             <p className="text-xs text-gray-600">For first-time setup, save Dashboard URL, Internal Workspace ID, and Sender Profile ID with manual override off. Then refresh Auth Sync and connect, or explicitly enter a complete session for that configured workspace. Editing metadata never resubmits saved tokens or cookies.</p>

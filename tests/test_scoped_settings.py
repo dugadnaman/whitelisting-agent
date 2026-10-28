@@ -43,14 +43,14 @@ def test_moengage_metadata_setup_is_separate_per_account(tmp_path, monkeypatch, 
     monkeypatch.setattr(config, "_load_env_file", lambda: None)
     _, headers = provision_user("tata")
     client = TestClient(api.app)
-    for account, workspace in (("tchfl", "aaaaaaaaaaaaaaaaaaaaaaaa"), ("tcl_promo", "bbbbbbbbbbbbbbbbbbbbbbbb")):
+    for account, workspace in (("tchfl", "ABCDEFGHIJKLMNOPQRSTUVWX"), ("tcl_promo", "bbbbbbbbbbbbbbbbbbbbbbbb")):
         response = client.put("/api/moengage/credentials", headers=headers, json={
             "account": account, "base_url": "https://dashboard-03.moengage.com", "workspace_id": workspace,
         })
         assert response.status_code == 200, response.text
-    assert load_settings("tchfl", "moengage")["TCHFL_MOENGAGE_WORKSPACE_ID"] == "aaaaaaaaaaaaaaaaaaaaaaaa"
+    assert load_settings("tchfl", "moengage")["TCHFL_MOENGAGE_WORKSPACE_ID"] == "ABCDEFGHIJKLMNOPQRSTUVWX"
     assert load_settings("tcl_promo", "moengage")["TCL_PROMO_MOENGAGE_WORKSPACE_ID"] == "bbbbbbbbbbbbbbbbbbbbbbbb"
     partial = client.put("/api/moengage/credentials", headers=headers, json={"account": "tchfl", "bearer_token": "partial-session"})
     assert partial.status_code == 422
-    assert load_settings("tchfl", "moengage")["TCHFL_MOENGAGE_WORKSPACE_ID"] == "aaaaaaaaaaaaaaaaaaaaaaaa"
+    assert load_settings("tchfl", "moengage")["TCHFL_MOENGAGE_WORKSPACE_ID"] == "ABCDEFGHIJKLMNOPQRSTUVWX"
     assert not Path("credentials.json").exists() and not Path(".env").exists()

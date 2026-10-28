@@ -214,7 +214,7 @@ Deploy/restart the updated backend and frontend together. Choose an account and 
    - **RCS (Karix)**: Open **Template Management**, select the configured **Sender ID**,
      then reload that inventory (`/api/rcstemplate/fetchTemplates` or `/getTemplatesWithFilter`).
      The campaign screen and a different bot's inventory do not match the paired target.
-   - **MoEngage**: Configure the account's exact dashboard origin and internal 24-hex workspace app ID
+   - **MoEngage**: Configure the account's exact dashboard origin and internal 24-character alphanumeric workspace ID (case-sensitive)
      once, then connect or activate that account's MoEngage target and reload the configured workspace
      dashboard. The backend verifies `/dash/auth/listApps` and binds via `/changeApp`;
      it never guesses account-to-workspace mappings from a login.

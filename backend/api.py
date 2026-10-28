@@ -4622,8 +4622,8 @@ def update_moengage_credentials_endpoint(
     _require_moengage_account_access(req.account, current_user)
     if req.base_url and not re.fullmatch(r"https://dashboard(?:-\d+)?\.moengage\.com/?", req.base_url.strip()):
         raise HTTPException(status_code=422, detail="Use the exact HTTPS MoEngage dashboard origin.")
-    if req.workspace_id and not re.fullmatch(r"[a-fA-F0-9]{24}", req.workspace_id.strip()):
-        raise HTTPException(status_code=422, detail="Use the internal 24-hex MoEngage portal workspace ID, not the public API app key.")
+    if req.workspace_id and not re.fullmatch(r"[A-Za-z0-9]{24}", req.workspace_id.strip()):
+        raise HTTPException(status_code=422, detail="Use the exact 24-character alphanumeric MoEngage dashboard workspace ID.")
     from portal_sessions import save_settings, save_session
     from karix_extension import SessionRequest, validate_session
     acc = req.account.lower().strip()

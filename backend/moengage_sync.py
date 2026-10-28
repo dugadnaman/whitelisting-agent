@@ -63,8 +63,8 @@ def check_moengage_session(
     """Authorize the configured workspace, then bind the saved bearer to that exact app."""
     if not re.fullmatch(r"https://dashboard(?:-\d+)?\.moengage\.com", base_url):
         raise ValueError("A configured MoEngage dashboard HTTPS origin is required.")
-    if not re.fullmatch(r"[a-fA-F0-9]{24}", workspace_id):
-        raise ValueError("Configure the MoEngage dashboard workspace's 24-character app ID, not its public API app key.")
+    if not re.fullmatch(r"[A-Za-z0-9]{24}", workspace_id):
+        raise ValueError("Configure the MoEngage dashboard workspace's exact 24-character alphanumeric ID.")
     headers = {
         "authorization": f"Bearer {bearer_token}", "refreshtoken": refresh_token,
         "cookie": cookie, "accept": "application/json", "origin": base_url,
