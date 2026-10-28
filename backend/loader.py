@@ -15,6 +15,7 @@ from pathlib import Path
 
 from config import get_waba_id
 from models import TemplateComponent, TemplateSubmission
+from cta import normalize_whatsapp_cta_buttons
 
 logger = logging.getLogger(__name__)
 # Mirror of submission_client._TATA_GROUP — kept in sync manually.
@@ -241,6 +242,16 @@ def normalize_whatsapp_template_name(name: str) -> str:
 
 
 
+def _normalize_whatsapp_buttons(components: list, client: str) -> list:
+    """Apply the same URL CTA policy at import and at final submission."""
+    for component in components:
+        kind = component.get("type") if isinstance(component, dict) else component.type
+        if str(kind or "").upper() == "BUTTONS":
+            buttons = component.get("buttons", []) if isinstance(component, dict) else component.buttons
+            normalize_whatsapp_cta_buttons(buttons or [])
+    return components
+
+
 def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
     _TC_FIELDS = {
         "type",
@@ -276,7 +287,7 @@ def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
         language=row.get("language", "en"),
         category=row.get("category", "MARKETING"),
         waba_id=row.get("waba_id") or _resolve_row_waba(c_client, {}),
-        components=components,
+        components=_normalize_whatsapp_buttons(components, c_client) if channel == "whatsapp" else components,
         source_ref=source_ref,
     )
 
@@ -335,7 +346,7 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
     btype = (raw_row.get("button_type") or "").strip().upper()
     btext = (raw_row.get("button_text") or "").strip()
     burl = (raw_row.get("button_url") or "").strip()
-    bexample = (raw_row.get("button_url_example") or "").strip() or "https://www.tatacapital.com/personal-loan.html"
+    bexample = (raw_row.get("button_url_example") or "").strip()
 
     if btype in ("URL", "") and btext and burl:
         btn_data = {
@@ -343,8 +354,7 @@ def _flat_row_to_components(raw_row: dict) -> list[dict]:
             "text": btext,
             "url": burl,
         }
-        # Meta Rule: 'example' is ONLY valid if URL contains dynamic variables (e.g. {{1}})
-        if "{{1}}" in burl or "{{0}}" in burl or "<" in burl:
+        if bexample:
             btn_data["example"] = [bexample]
         components.append(
             {
@@ -553,8 +563,10 @@ def _dynamic_row_to_submission(
             "text": (button_text or "Check Offer")[:25],
             "url": button_url or "https://u3.mnge.co/",
         }
-        if "{{" in button["url"]:
-            button["example"] = [parsed.get("button_example") or "https://www.tatacapital.com"]
+        if row.get("button_url_example"):
+            button["example"] = [row["button_url_example"]]
+        elif not row.get("button_url") and parsed.get("button_example"):
+            button["example"] = [parsed["button_example"]]
         components.append({"type": "BUTTONS", "buttons": [button]})
 
     try:
@@ -574,7 +586,7 @@ def _dynamic_row_to_submission(
         language=language,
         category=category,
         waba_id=_resolve_row_waba(client, waba_cache),
-        components=[TemplateComponent(**component) for component in components],
+        components=[TemplateComponent(**component) for component in _normalize_whatsapp_buttons(components, client)],
         source_ref=template_name,
     )
 
@@ -687,7 +699,7 @@ def _build_single_cell_card_submission(
         language="en",
         category="MARKETING",
         waba_id=_resolve_row_waba(client, waba_cache),
-        components=components,
+        components=_normalize_whatsapp_buttons(components, client),
         source_ref=t_name,
     )
 
@@ -730,7 +742,9 @@ def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission
     all_raw_rows = list(sheet.iter_rows(values_only=True))
     first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
     has_standard_headers = any(
-        h in ("template_name", "name", "body", "body_text", "components", "category", "language") for h in first_row
+        _DYNAMIC_FIELD_ALIASES.get(_dynamic_key(h), _dynamic_key(h))
+        in ("template_name", "name", "body", "body_text", "components", "category", "language")
+        for h in first_row
     )
     block_subs = (
         _parse_single_cell_excel_blocks(all_raw_rows, path, client, extracted_media, waba_cache)

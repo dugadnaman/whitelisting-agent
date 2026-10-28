@@ -12,6 +12,7 @@ import os
 import re
 from pathlib import Path
 
+from cta import ensure_dynamic_cta_url
 from rcs_config import _account_prefix, get_rcs_bot_id, get_rcs_entity_id, get_rcs_esmeaddr
 from rcs_models import RcsTemplateSubmission
 
@@ -39,7 +40,7 @@ def parse_single_cell_card_block(cell_text: str) -> dict:
         "card_title": clean_lines[0] if clean_lines else "",
         "card_description": "\n\n".join(clean_lines),
         "button_text": button_text,
-        "button_url": button_url,
+        "button_url": ensure_dynamic_cta_url(button_url),
     }
 
 
@@ -54,12 +55,23 @@ def _json_objects(value, label: str) -> list[dict]:
     return value
 
 
+def normalize_rcs_suggestions(suggestions: list[dict]) -> list[dict]:
+    """Make URL actions dynamic without changing reply or dialer actions."""
+    return [
+        {**suggestion, "url": ensure_dynamic_cta_url(suggestion.get("url") or "")}
+        if suggestion.get("suggestionType") == "url_action"
+        or (not suggestion.get("suggestionType") and suggestion.get("url"))
+        else dict(suggestion)
+        for suggestion in suggestions
+    ]
+
+
 def _build_suggestions_from_row(row: dict) -> list[dict]:
     """Parse button columns into Karix RCS suggestion dictionaries."""
     suggestions = []
 
     if row.get("suggestions") not in (None, ""):
-        return _json_objects(row["suggestions"], "suggestions")
+        return normalize_rcs_suggestions(_json_objects(row["suggestions"], "suggestions"))
 
     btype = (row.get("button_type") or row.get("suggestion_type") or "").strip().upper()
     btext = (row.get("button_text") or row.get("suggestion_text") or "").strip()
@@ -97,7 +109,7 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                     "suggestionType": "url_action",
                     "text": btext,
                     "postbackData": btext,
-                    "url": burl,
+                    "url": ensure_dynamic_cta_url(burl),
                 }
             )
         else:
@@ -162,7 +174,19 @@ def _parse_sender_ids(raw) -> list[str]:
 def _build_carousel_cards_from_row(row: dict) -> list[dict]:
     """Keep card column positions, including blanks, without borrowing another card's data."""
     if row.get("carousel_cards") not in (None, ""):
-        return _json_objects(row["carousel_cards"], "carousel_cards")
+        cards = _json_objects(row["carousel_cards"], "carousel_cards")
+        normalized = []
+        for card in cards:
+            card = dict(card)
+            if "suggestions" in card or card.get("button_text"):
+                card["suggestions"] = _build_suggestions_from_row(card)
+                if card.get("button_url") and any(
+                    suggestion.get("suggestionType") == "url_action"
+                    for suggestion in card["suggestions"]
+                ):
+                    card["button_url"] = ensure_dynamic_cta_url(card["button_url"])
+            normalized.append(card)
+        return normalized
 
     def parts(*keys):
         value = next((row[key] for key in keys if row.get(key) not in (None, "")), "")

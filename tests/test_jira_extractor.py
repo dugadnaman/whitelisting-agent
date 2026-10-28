@@ -135,7 +135,7 @@ def test_briefing_parser_integration_freeform_jira():
     assert "T&C apply. Tata Capital Financial Services." in draft["body"]
     assert draft["footer_text"] is None
     assert draft["button_text"] == "Apply Now"
-    assert draft["button_url"] == "https://www.tatacapital.com/twl"
+    assert draft["button_url"] == "https://www.tatacapital.com/twl{{1}}"
     assert len(draft["variables"]) == 4
     assert len(draft["sample_values"]) == 4
 

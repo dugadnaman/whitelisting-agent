@@ -227,17 +227,107 @@ def test_carousel_blanks_and_cta_types_stay_with_their_card():
     assert [card["mediaUrl"] for card in cards] == ["", "https://example.test/two.png", ""]
     assert [card["suggestions"][0]["suggestionType"] for card in cards] == ["reply", "dialer_action", "url_action"]
     assert cards[1]["suggestions"][0]["phoneNumber"] == "+919999999999"
-    assert cards[2]["suggestions"][0]["url"] == "https://example.test/three"
+    assert cards[2]["suggestions"][0]["url"] == "https://example.test/three{{1}}"
 
 
 def test_copy_and_cta_are_not_invented_or_removed():
     card = parse_single_cell_card_block("Dear [Name]\nTap below to apply\nCTA Button: See Offer\nCTA URL: https://example.test/offer")
     assert card["card_title"] == "Dear [Name]"
     assert card["card_description"] == "Dear [Name]\n\nTap below to apply"
-    assert card["button_url"] == "https://example.test/offer"
+    assert card["button_url"] == "https://example.test/offer{{1}}"
     plain = parse_single_cell_card_block("Home loan copy without CTA")
     assert plain["button_text"] == plain["button_url"] == ""
     assert _build_suggestions_from_row(plain) == []
+
+
+@pytest.mark.parametrize("template_type", ["text", "richcard"])
+def test_imported_multi_cta_urls_are_dynamic_and_globally_numbered(template_type):
+    suggestions = [
+        {"text": "Open", "url": " https://example.test/open "},
+        {"suggestionType": "url_action", "text": "Track", "url": "https://example.test/{{tracking}}"},
+        {"suggestionType": "reply", "text": "Confirm", "url": "https://example.test/unrelated"},
+        {"suggestionType": "dialer_action", "text": "Call", "phoneNumber": "+919999999999"},
+    ]
+    submission = load_rcs_from_list([{
+        "template_name": "dynamic_multi_cta",
+        "template_type": template_type,
+        "card_title": "Hello {{name}}" if template_type == "richcard" else "",
+        "body": "Offer <offer>",
+        "file_name": "provider-image" if template_type == "richcard" else "",
+        "suggestions": json.dumps(suggestions),
+    }], client="tcl_promo")[0]
+    assert submission.suggestions[0]["url"] == "https://example.test/open{{1}}"
+    assert submission.suggestions[1]["url"] == "https://example.test/{{tracking}}"
+    assert submission.suggestions[2:] == suggestions[2:]
+    builder = (
+        rcs_client._build_rcs_richcard_vi_template if template_type == "richcard"
+        else rcs_client._build_rcs_text_vi_template
+    )
+    template, params = builder(submission, "dynamic_multi_cta", submission.bot_id)
+    content = template["standaloneCard"] if template_type == "richcard" else template
+    first_cta_index = 3 if template_type == "richcard" else 2
+    assert content["suggestions"][0]["url"] == f"https://example.test/open[{first_cta_index}]"
+    assert content["suggestions"][1]["url"] == f"https://example.test/[{first_cta_index + 1}]"
+    assert params == [str(index) for index in range(1, first_cta_index + 2)]
+    assert content["suggestions"][2]["suggestionType"] == "reply"
+    assert "url" not in content["suggestions"][2]
+    assert content["suggestions"][3]["phoneNumber"] == "+919999999999"
+
+
+def test_imported_carousel_urls_are_dynamic_across_all_cards_without_duplicates():
+    cards = [
+        {
+            "cardTitle": "Hello {{name}}", "cardDescription": "Offer <offer>",
+            "fileName": "provider-first",
+            "suggestions": [
+                {"text": "Open", "url": "https://example.test/first"},
+                {"text": "Track", "url": "https://example.test/[tracking]"},
+            ],
+        },
+        {
+            "card_title": "Next {title}", "body": "Details #detail#",
+            "fileName": "provider-second", "button_text": "Apply",
+            "button_url": "https://example.test/second",
+        },
+        {"cardTitle": "No CTA", "fileName": "provider-third"},
+    ]
+    submission = load_rcs_from_list([{
+        "template_name": "dynamic_carousel", "template_type": "carousel",
+        "carousel_cards": json.dumps(cards),
+    }], client="tcl_promo")[0]
+    assert submission.carousel_cards[0]["suggestions"][0]["url"] == "https://example.test/first{{1}}"
+    assert submission.carousel_cards[0]["suggestions"][1]["url"] == "https://example.test/[tracking]"
+    assert submission.carousel_cards[1]["suggestions"][0]["url"] == "https://example.test/second{{1}}"
+    assert submission.carousel_cards[2] == cards[2]
+    template, params = rcs_client._build_rcs_carousel_vi_template(
+        submission, "dynamic_carousel", submission.bot_id
+    )
+    emitted = template["carouselCard"]
+    assert emitted[0]["cardTitle"] == "Hello [1]"
+    assert emitted[0]["cardDescription"] == "Offer [2]"
+    assert [action["url"] for action in emitted[0]["suggestions"]] == [
+        "https://example.test/first[3]", "https://example.test/[4]",
+    ]
+    assert emitted[1]["cardTitle"] == "Next [5]"
+    assert emitted[1]["cardDescription"] == "Details [6]"
+    assert emitted[1]["suggestions"][0]["url"] == "https://example.test/second[7]"
+    assert emitted[2]["suggestions"] == []
+    assert params == [str(index) for index in range(1, 8)]
+
+
+def test_flat_import_and_single_cell_urls_normalize_idempotently():
+    row = {
+        "template_name": "flat_dynamic", "body": "Copy",
+        "button_type": "URL", "button_text": "Open", "button_url": "https://example.test/apply",
+    }
+    submission = load_rcs_from_list([row], client="tcl_promo")[0]
+    assert submission.suggestions[0]["url"] == "https://example.test/apply{{1}}"
+    row["suggestions"] = submission.suggestions
+    assert load_rcs_from_list([row], client="tcl_promo")[0].suggestions == submission.suggestions
+    card = parse_single_cell_card_block(
+        "Offer copy\nCTA Button: Open\nCTA URL: https://example.test/apply"
+    )
+    assert _build_suggestions_from_row(card)[0]["url"] == "https://example.test/apply{{1}}"
 
 
 def test_truncated_image_header_is_not_a_valid_image(provider):

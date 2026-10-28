@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 import requests
 
+from cta import CTA_VARIABLE_PATTERN, ensure_dynamic_cta_url
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
     KARIX_RCS_FETCH_TEMPLATES_URL,
@@ -32,7 +33,7 @@ from rcs_models import (
 # Constants & Timeout
 # ---------------------------------------------------------------------------
 REQUEST_TIMEOUT = 30  # seconds
-_VARIABLE_PATTERN = re.compile(r"<[^<>]+>|\[[^\[\]]+\]|\{[^{}]+\}|#[a-zA-Z0-9_\-]+#")
+_VARIABLE_PATTERN = CTA_VARIABLE_PATTERN
 
 
 def check_rcs_credentials(
@@ -246,7 +247,7 @@ def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[
 
 def _ensure_url_variable(url: str, var_number: int) -> str:
     """Karix expects a variable suffix for otherwise static action URLs."""
-    return f"{url}[{var_number}]"
+    return ensure_dynamic_cta_url(url).replace("{{1}}", f"[{var_number}]")
 
 
 def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:

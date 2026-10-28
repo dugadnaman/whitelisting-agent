@@ -36,6 +36,7 @@ from config import (
     get_template_namespace_id,
     get_waba_id,
 )
+from cta import normalize_whatsapp_cta_buttons
 from models import (
     ApprovalStatus,
     SubmissionResult,
@@ -712,8 +713,8 @@ def normalize_whatsapp_text_variables(text: str, client: str = "bajaj") -> tuple
 
 def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar: bool = True) -> list:
     """
-    Ensure any BODY or BUTTON component containing variables ({{1}}, {{2}}, <name>, etc.)
-    is properly formatted, optionally grammar-fixed, and has example samples populated for Meta whitelisting.
+    Ensure BODY/HEADER variables and every URL button are properly formatted
+    with example samples, optionally grammar-fixing text for Meta whitelisting.
     """
     from grammar_checker import lint_and_fix_body
 
@@ -721,7 +722,7 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
         if not isinstance(comp, dict):
             continue
 
-        ctype = comp.get("type")
+        ctype = str(comp.get("type") or "").upper()
 
         # BODY component with variables
         if ctype == "BODY":
@@ -756,21 +757,9 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
                 if "header_text" not in example or not example.get("header_text"):
                     example["header_text"] = [auto_samples[0]]
         elif ctype == "BUTTONS":
-            _resolve_button_cta_variables(comp.get("buttons", []), client)
+            normalize_whatsapp_cta_buttons(comp.get("buttons", []))
 
     return components
-
-
-def _resolve_button_cta_variables(btns: list, client: str) -> None:
-    for b in btns:
-        if isinstance(b, dict) and b.get("type") == "URL":
-            url = b.get("url", "")
-            # Static CTA destinations must remain static; do not change user intent.
-            if re.search(r"\{\{[^{}]+\}\}|<[^>]+>", url):
-                url = re.sub(r"\{\{[^{}]+\}\}|<[^>]+>", "{{1}}", url)
-                b["url"] = url
-                if not b.get("example"):
-                    b["example"] = [url.replace("{{1}}", "sample")]
 
 
 def _template_components(payload: TemplateSubmission) -> list[dict]:

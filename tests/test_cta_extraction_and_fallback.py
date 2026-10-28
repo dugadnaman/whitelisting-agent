@@ -130,10 +130,10 @@ def test_parse_jira_brief_end_to_end_removes_cta_from_wa_body():
     assert "👉 *Check Your Offer:*" not in wa["body"]
     assert "https://www.tatacapital.com" not in wa["body"]
 
-    # Button must have the CTA and https://u3.mnge.co/
+    # Whitelisting drafts always expose a dynamic URL, even when the source is static.
     assert wa["button_type"] == "URL"
     assert wa["button_text"] == "Check Your Offer"
-    assert wa["button_url"] == "https://u3.mnge.co/"
+    assert wa["button_url"] == "https://u3.mnge.co/{{1}}"
 
 
 def test_cta_variable_extraction_and_stripping():
@@ -422,6 +422,10 @@ def test_swcm_114_multi_cta_extraction_and_rcs_suggestions():
     assert len(rcs["suggestions"]) == 2
     assert rcs["suggestions"][0]["label"] == "Read Blog!"
     assert rcs["suggestions"][1]["label"] == "Learn More"
+    assert rcs["action_url"] == f"{p_url}{{{{1}}}}"
+    assert [suggestion["url"] for suggestion in rcs["suggestions"]] == [
+        f"{cta['url']}{{{{1}}}}" for cta in all_ctas
+    ]
 
 
 def test_swcm_164_single_cta_and_direct_attachments_extraction():

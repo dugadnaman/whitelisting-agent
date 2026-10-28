@@ -256,13 +256,13 @@ def test_attached_spreadsheet_comprehensive_content_mapping(tmp_path: Path):
     assert wa_draft["footer_text"] is None
     assert "T&C apply" in wa_draft["body"]
     assert wa_draft["button_text"] == "Claim Loan"
-    assert wa_draft["button_url"] == "https://u3.mnge.co/diwali"
+    assert wa_draft["button_url"] == "https://u3.mnge.co/diwali{{1}}"
 
     rcs_draft = brief.rcs_templates[0]
     assert rcs_draft["template_name"] == "diwali_home_loan_rcs"
     assert rcs_draft["card_title"] == "Durga Pooja Special"
     assert rcs_draft["action_label"] == "Check Rates"
-    assert rcs_draft["action_url"] == "https://u3.mnge.co/home"
+    assert rcs_draft["action_url"] == "https://u3.mnge.co/home{{1}}"
 
 
 def test_jira_duplicate_workbook_bytes_keep_copy_and_embedded_creative(tmp_path, monkeypatch):
@@ -301,7 +301,7 @@ def test_jira_duplicate_workbook_bytes_keep_copy_and_embedded_creative(tmp_path,
     for draft in parsed.whatsapp_templates:
         assert draft["header_text"] is None  # internal workflow name is never customer copy
         assert draft["button_text"] == "Apply Now"
-        assert draft["button_url"] == "https://example.com/offer"
+        assert draft["button_url"] == "https://example.com/offer{{1}}"
         assert draft["header_type"] == "IMAGE"
         assert Path(draft["media_file"]).read_bytes() == image_path.read_bytes()
     assert len([a for a in parsed.attachments_mapped if a["target_channel"] == "SPREADSHEET_BRIEF"]) == 3

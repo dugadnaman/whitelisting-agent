@@ -3749,20 +3749,31 @@ def _jira_whatsapp_components(wa: dict, account: str) -> list[dict]:
                 "phone_number": wa.get("phone_number") or wa.get("button_phone") or "+919876543210",
             })
     if btn_list:
+        from cta import normalize_whatsapp_cta_buttons
+
+        normalize_whatsapp_cta_buttons(btn_list)
         comps.append({"type": "BUTTONS", "buttons": btn_list})
     return comps
 
 
 def _jira_rcs_suggestions(draft: dict, carousel: bool = False) -> list[dict]:
+    from cta import ensure_dynamic_cta_url
+
     if "suggestions" in draft:
-        return draft["suggestions"]
-    label = draft.get("button_text") or draft.get("action_label") or ("Explore Now" if carousel else None)
-    if not label:
-        return []
-    return [{
-        "suggestionType": "url_action", "text": label, "postbackData": label,
-        "url": draft.get("button_url") or draft.get("action_url") or "https://u3.mnge.co/",
-    }]
+        suggestions = [dict(suggestion) for suggestion in draft["suggestions"]]
+    else:
+        label = draft.get("button_text") or draft.get("action_label") or ("Explore Now" if carousel else None)
+        if not label:
+            return []
+        suggestions = [{
+            "suggestionType": "url_action", "text": label, "postbackData": label,
+            "url": draft.get("button_url") or draft.get("action_url") or "https://u3.mnge.co/",
+        }]
+    for suggestion in suggestions:
+        action_type = suggestion.get("suggestionType") or suggestion.get("type", "URL")
+        if action_type.upper() in ("URL", "URL_ACTION") and suggestion.get("url"):
+            suggestion["url"] = ensure_dynamic_cta_url(suggestion["url"])
+    return suggestions
 
 
 def _jira_draft_input(draft: dict, channel: str, account: str) -> dict:

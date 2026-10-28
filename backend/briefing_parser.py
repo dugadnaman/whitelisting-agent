@@ -21,6 +21,7 @@ from typing import Any
 
 import openpyxl
 
+from cta import ensure_dynamic_cta_url
 from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
 
 logger = logging.getLogger(__name__)
@@ -3373,6 +3374,24 @@ def parse_jira_brief(
         "email": email_count,
         "push": push_count,
     }
+    # Apply the same URL policy to every extraction path, including SWCM and carousels.
+    for draft in wa_drafts:
+        if draft.button_type.upper() == "URL" and draft.button_url:
+            draft.button_url = ensure_dynamic_cta_url(draft.button_url)
+        for button in draft.buttons:
+            if button.get("type", "URL").upper() == "URL" and button.get("url"):
+                button["url"] = ensure_dynamic_cta_url(button["url"])
+    for draft in rcs_drafts:
+        if draft.action_type.upper() == "URL":
+            draft.action_url = ensure_dynamic_cta_url(draft.action_url)
+        for target in [{"suggestions": draft.suggestions}, *draft.carousel_cards]:
+            if target.get("button_url"):
+                target["button_url"] = ensure_dynamic_cta_url(target["button_url"])
+            for suggestion in target.get("suggestions", []):
+                action_type = suggestion.get("suggestionType") or suggestion.get("type", "URL")
+                if action_type.upper() in ("URL", "URL_ACTION") and suggestion.get("url"):
+                    suggestion["url"] = ensure_dynamic_cta_url(suggestion["url"])
+
 
     return ParsedJiraBrief(
         issue_key=key,

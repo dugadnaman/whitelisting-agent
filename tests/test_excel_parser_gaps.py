@@ -234,3 +234,42 @@ def test_tcn_551_pa_bl_gst_internal_real_file_if_available():
     assert any(s["text"].startswith("Dear") for s in sms_items)
     assert any(s["text"].startswith("Urgent") for s in sms_items)
     assert not any(s["text"].startswith("1.") or s["text"].startswith("2.") for s in sms_items)
+
+
+def test_jira_sheet_ctas_are_dynamic_including_every_carousel_card(tmp_path):
+    from briefing_parser import parse_jira_brief
+
+    workbook = openpyxl.Workbook()
+    workbook.active.title = "WhatsApp"
+    for sheet_name, name, url in (
+        ("WhatsApp", "sheet_wa", "https://example.test/wa?offer="),
+        ("RCS", "sheet_rcs", "https://example.test/rcs/"),
+        ("RCS Carousel", "card_one", "https://example.test/card-one/"),
+        ("RCS Carousel", "card_two", "https://example.test/card-two/{{offer}}"),
+    ):
+        sheet = workbook[sheet_name] if sheet_name in workbook.sheetnames else workbook.create_sheet(sheet_name)
+        if sheet.max_row == 1 and sheet["A1"].value is None:
+            sheet.append(["template_name", "body", "button_text", "button_url"])
+        sheet.append([
+            name,
+            f"Dear Customer, your Tata Capital {name} loan offer is ready. Apply today with flexible repayments.",
+            "Apply Now",
+            url,
+        ])
+    path = tmp_path / "cta_brief.xlsx"
+    workbook.save(path)
+    brief = parse_jira_brief({
+        "key": "TCN-999", "summary": "Loan whitelisting",
+        "attachments": [{"id": "1", "filename": path.name, "local_path": str(path)}],
+    }, download_creatives=False)
+
+    assert brief.whatsapp_templates[0]["button_url"] == "https://example.test/wa?offer={{1}}"
+    standalone = next(draft for draft in brief.rcs_templates if draft["template_type"] != "carousel")
+    assert standalone["action_url"] == "https://example.test/rcs/{{1}}"
+    carousel = next(draft for draft in brief.rcs_templates if draft["template_type"] == "carousel")
+    assert [card["button_url"] for card in carousel["carousel_cards"]] == [
+        "https://example.test/card-one/{{1}}", "https://example.test/card-two/{{offer}}",
+    ]
+    assert [card["suggestions"][0]["url"] for card in carousel["carousel_cards"]] == [
+        "https://example.test/card-one/{{1}}", "https://example.test/card-two/{{offer}}",
+    ]
