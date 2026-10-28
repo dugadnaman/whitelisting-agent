@@ -2346,7 +2346,7 @@ export default function JiraBriefsPage() {
                                     </span>
                                   ) : (
                                     <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
-                                      {blocked ? 'Blocked: invalid creative' : validationReady ? 'Ready to Whitelist' : 'Validation required'}
+                                      {validationReady ? 'Ready to Whitelist' : 'Validation required'}
                                     </span>
                                   )}
 
