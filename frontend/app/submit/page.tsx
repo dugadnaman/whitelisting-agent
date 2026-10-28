@@ -386,7 +386,7 @@ export default function SubmitPage() {
     if (inputRef.current) inputRef.current.value = '';
   }, []);
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
-  const executeSubmit = useCallback(async (fixRatio: boolean, fixGrammar: boolean) => {
+  const executeSubmit = useCallback(async (fixGrammar: boolean) => {
     if (!file || !currentPreviews || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
     if (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId)) {
       setState({
@@ -401,7 +401,7 @@ export default function SubmitPage() {
     setState({ step: 'submitting' });
     try {
       const res = await submitFile(
-        file, account, channel, user, fixRatio, fixGrammar, autoSkipDuplicates,
+        file, account, channel, user, fixGrammar, autoSkipDuplicates,
         review, channel === 'rcs' ? review.botId : undefined
       );
       if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
@@ -431,9 +431,9 @@ export default function SubmitPage() {
 
   const handleInitiateSubmit = useCallback(() => {
     if (!file || !currentPreviews) return;
-    const blocked = currentPreviews.filter(
+    const blocked = channel === 'rcs' ? currentPreviews.filter(
       p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))
-    );
+    ) : [];
     if (blocked.length === currentPreviews.length) {
       alert(
         `Cannot submit: All ${blocked.length} templates have invalid image aspect ratios and will NOT be created. Auto-resizing has been removed. Please update the images in your spreadsheet to the recommended aspect ratio (e.g. 16:9 or 1:1).`
@@ -444,8 +444,8 @@ export default function SubmitPage() {
       setShowBlockedModal(true);
       return;
     }
-    executeSubmit(false, autoFixGrammar);
-  }, [file, currentPreviews, autoFixGrammar, executeSubmit]);
+    executeSubmit(autoFixGrammar);
+  }, [file, currentPreviews, channel, autoFixGrammar, executeSubmit]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -788,10 +788,15 @@ export default function SubmitPage() {
             );
           })()}
 
+          {channel === 'whatsapp' && (
+            <p className="text-xs text-gray-600">
+              WhatsApp whitelisting has no image dimension or aspect ratio requirements. A placeholder sample is used for an IMAGE header when no creative is provided.
+            </p>
+          )}
 
-          {/* Aspect Ratio Alert Banner if non-16:9 images are detected */}
-          {/* Strict Aspect Ratio Block Banner */}
+          {/* RCS Aspect Ratio Block Banner */}
           {(() => {
+            if (channel !== 'rcs') return null;
             const blocked = state.previews.filter(
               p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))
             );
@@ -809,11 +814,7 @@ export default function SubmitPage() {
                       </h4>
                       <p className="text-[11px] text-red-800/90 mt-0.5 leading-relaxed">
                         Auto-resizing has been removed to preserve creative design. Templates with non-compliant image dimensions are strictly blocked from creation.
-                        {channel === 'rcs' ? (
-                          <> Required for RCS: <strong>16:9 (1280x720)</strong>, <strong>1:1 (770x720)</strong>, or <strong>3:4 (Portrait)</strong> for carousel cards; <strong>2:1 (1200x600)</strong> for rich cards.</>
-                        ) : (
-                          <> Required for WhatsApp: <strong>16:9 (1280x720)</strong> or <strong>1:1 (Square)</strong> for header creatives.</>
-                        )}
+                        <> Required for RCS: <strong>16:9 (1280x720)</strong>, <strong>1:1 (770x720)</strong>, or <strong>3:4 (Portrait)</strong> for carousel cards; <strong>2:1 (1200x600)</strong> for rich cards.</>
                       </p>
                     </div>
                   </div>
@@ -910,7 +911,7 @@ export default function SubmitPage() {
                   className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed shadow-sm transition-colors flex items-center gap-2"
                 >
                   {(() => {
-                    const blocked = state.previews.filter(p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked)));
+                    const blocked = channel === 'rcs' ? state.previews.filter(p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))) : [];
                     const dupes = state.previews.filter(p => p.already_exists_on_waba || p.exists_on_waba || p.duplicate_warning);
                     const compliant = Math.max(0, state.previews.length - blocked.length);
                     if (blocked.length > 0) {
@@ -1003,7 +1004,7 @@ export default function SubmitPage() {
                                 })}
                               </div>
 
-                              {(p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0)) && (
+                              {channel === 'rcs' && (p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0)) && (
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {p.aspect_ratio_warnings?.map((w, wIdx) => (
                                     <span
@@ -1668,7 +1669,7 @@ export default function SubmitPage() {
       )}
       {/* Aspect Ratio Adjustment Confirmation Modal */}
       {/* Aspect Ratio Block Confirmation Modal */}
-      {showBlockedModal && currentPreviews && (
+      {channel === 'rcs' && showBlockedModal && currentPreviews && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-100 space-y-5">
             <div className="flex items-start justify-between pb-3 border-b border-gray-100">
@@ -1714,7 +1715,7 @@ export default function SubmitPage() {
                 type="button"
                 onClick={() => {
                   setShowBlockedModal(false);
-                  executeSubmit(false, autoFixGrammar);
+                  executeSubmit(autoFixGrammar);
                 }}
                 className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
               >

@@ -247,6 +247,65 @@ def test_image_header_without_attached_file_uses_sample_placeholder(provider):
     assert parts["file"].get_content_type() == "image/png"
     assert len(create_calls(provider)) == 1
 
+
+@pytest.mark.parametrize("portal", [False, True])
+@pytest.mark.parametrize("dimensions", [(73, 181), (311, 47), (19, 19)])
+def test_whatsapp_whitelisting_preserves_any_image_dimensions_and_ignores_stale_flags(
+    provider, monkeypatch, portal, dimensions,
+):
+    if portal:
+        portal_credentials(monkeypatch)
+    raw = io.BytesIO()
+    Image.new("RGB", dimensions, "navy").save(raw, format="PNG")
+    result = submit(submission(
+        {"type": "HEADER", "format": "IMAGE", "image_bytes": raw.getvalue()},
+        aspect_ratio_blocked=True, aspect_ratio_error="Obsolete dimension restriction",
+    ))
+    assert result.status == SubmissionStatus.SUBMITTED
+    assert multipart(provider.calls[0])["file"].get_payload(decode=True) == raw.getvalue()
+    assert len(create_calls(provider)) == 1
+
+
+def test_whatsapp_runner_ignores_stale_dimension_block(provider, monkeypatch):
+    from dataclasses import asdict
+
+    import runner
+
+    raw = io.BytesIO()
+    Image.new("RGB", (73, 181), "navy").save(raw, format="PNG")
+    payload = submission(
+        {"type": "HEADER", "format": "IMAGE", "image_bytes": raw.getvalue()},
+        aspect_ratio_blocked=True, aspect_ratio_error="Obsolete dimension restriction",
+    )
+    monkeypatch.setattr(runner, "load_from_list", lambda *args, **kwargs: [payload])
+    monkeypatch.setattr(runner, "log_result", lambda result, *args, **kwargs: asdict(result))
+    monkeypatch.setattr(client._GOVERNOR, "get_pacing_delay", lambda: 0)
+    results = runner.run([asdict(payload)], client=payload.client, fix_grammar=False)
+    assert results[0]["status"] == SubmissionStatus.SUBMITTED
+    assert multipart(provider.calls[0])["file"].get_payload(decode=True) == raw.getvalue()
+    assert len(create_calls(provider)) == 1
+
+
+@pytest.mark.parametrize("dimensions", [(73, 181), (311, 47), (19, 19)])
+def test_whatsapp_shared_preview_accepts_any_dimensions_and_clears_stale_ratio_block(dimensions):
+    import api
+
+    raw = io.BytesIO()
+    Image.new("RGB", dimensions, "navy").save(raw, format="PNG")
+    original = {
+        "template_name": "preview_any_dimensions", "category": "MARKETING",
+        "components": [{"type": "HEADER", "format": "IMAGE", "image_bytes": raw.getvalue()}],
+        "aspect_ratio_blocked": True, "aspect_ratio_error": "Obsolete restriction",
+        "aspect_ratio_block_reason": "Obsolete restriction",
+    }
+    preview = api._inspect_single_submission(original, set(), {}, "tcl_promo", "whatsapp")
+    assert preview["aspect_ratio_blocked"] is False
+    assert preview["aspect_ratio_warnings"] == []
+    assert "aspect_ratio_block_reason" not in preview
+    assert "aspect_ratio_error" not in preview
+    assert preview["components"][0]["thumbnail_url"].startswith("data:image/png;base64,")
+    assert original["components"][0]["image_bytes"] == raw.getvalue()
+
 def test_failed_download_does_not_upload_default_or_expose_signed_url(provider):
     secret = "private-signed-query"
     result = submit(submission({"type": "HEADER", "format": "IMAGE", "media_url": provider.base + "/missing?token=" + secret}))

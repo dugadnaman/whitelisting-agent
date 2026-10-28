@@ -1200,11 +1200,13 @@ def _inspect_image_aspect_ratio(
         from PIL import Image
 
         if not reason:
-            # Decode fully: the WhatsApp ratio checker alone accepts unreadable data.
+            # Validate the actual image independently of channel-specific dimensions.
             with Image.open(io.BytesIO(img_bytes)) as img:
                 img.verify()
             with Image.open(io.BytesIO(img_bytes)) as img:
                 img.load()
+                w, h = img.size
+                ratio = w / h
             if channel == "rcs":
                 from rcs_loader import check_rcs_image_aspect_ratio
 
@@ -1213,9 +1215,7 @@ def _inspect_image_aspect_ratio(
                 if valid and len(img_bytes) > maximum:
                     valid, reason = False, f"RCS media exceeds {maximum} bytes"
             else:
-                from submission_client import check_whatsapp_image_aspect_ratio
-
-                valid, reason, (w, h), ratio = check_whatsapp_image_aspect_ratio(img_bytes)
+                valid = True
             if valid:
                 reason = None
             comp["thumbnail_url"] = (
@@ -1231,7 +1231,7 @@ def _inspect_image_aspect_ratio(
             "recommended_ratio": (
                 "16:9, 1:1, 3:4, 8:5, or 5:2" if channel == "rcs" and template_type == "carousel"
                 else "2:1, 16:9, 3:4, or 3:1" if channel == "rcs"
-                else "16:9, 1:1, or 2:1"
+                else "Any dimensions (readable image required)"
             ),
             "action": "BLOCKED: Replace the creative before submission. Auto-resizing is disabled.",
             "error": f"{component}: {reason}",
@@ -1368,7 +1368,9 @@ def _inspect_single_submission(
 
     blocked_aspect = [w for w in aspect_warnings if w.get("blocked")]
     item["aspect_ratio_warnings"] = aspect_warnings
-    item["aspect_ratio_blocked"] = bool(blocked_aspect) or item.get("aspect_ratio_blocked", False)
+    item["aspect_ratio_blocked"] = bool(blocked_aspect) or (
+        channel == "rcs" and item.get("aspect_ratio_blocked", False)
+    )
     if item["aspect_ratio_blocked"]:
         item["aspect_ratio_block_reason"] = (
             blocked_aspect[0]["error"]
@@ -1376,6 +1378,10 @@ def _inspect_single_submission(
             else item.get("aspect_ratio_error")
             or "Image is not in recommended aspect ratio. Template will NOT be created."
         )
+    else:
+        item.pop("aspect_ratio_block_reason", None)
+        if channel == "whatsapp":
+            item.pop("aspect_ratio_error", None)
     item["grammar_warnings"] = grammar_warnings
 
     body_text = next(
@@ -1809,7 +1815,6 @@ async def _submit_wa_batch(
     acc: str,
     user: str,
     skip_duplicates: bool,
-    fix_aspect_ratio: bool,
     fix_grammar: bool,
     filename: str,
     current_user: dict,
@@ -1837,44 +1842,6 @@ async def _submit_wa_batch(
         }
 
     for idx, s in enumerate(subs):
-        # Strict Aspect Ratio Validation Gate for WhatsApp header images
-        wa_blocked = getattr(s, "aspect_ratio_blocked", False)
-        wa_blocked_err = getattr(s, "aspect_ratio_error", None)
-        if not wa_blocked and getattr(s, "components", None):
-            from submission_client import check_whatsapp_image_aspect_ratio
-
-            for comp in s.components:
-                if getattr(comp, "type", None) == "HEADER" and str(getattr(comp, "format", "")).upper() == "IMAGE":
-                    img_data = getattr(comp, "image_bytes", None)
-                    if not img_data and getattr(comp, "media_file", None) and Path(comp.media_file).exists():
-                        img_data = Path(comp.media_file).read_bytes()
-                    if img_data:
-                        is_v, err_m, (w, h), r = check_whatsapp_image_aspect_ratio(img_data)
-                        if not is_v:
-                            wa_blocked = True
-                            wa_blocked_err = err_m
-                            s.aspect_ratio_blocked = True
-                            s.aspect_ratio_error = err_m
-                            break
-
-        if wa_blocked:
-            block_res = SubmissionResult(
-                source_ref=s.source_ref,
-                template_name=s.template_name,
-                status=SubmissionStatus.BLOCKED_ASPECT_RATIO,
-                provider_ref_id="",
-                error=f"BLOCKED (Invalid Aspect Ratio): {wa_blocked_err or 'Header image does not match 16:9 or 1:1 aspect ratio. Auto-resizing has been removed.'}",
-                provider_response=None,
-                approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
-                client=acc,
-                channel="whatsapp",
-                submitted_by=user,
-                source_file=filename,
-            )
-            entry_dict = asdict(block_res)
-            results_by_index[idx] = entry_dict
-            continue
-
         name_key = s.template_name.strip().lower()
         if skip_duplicates and name_key in live_map:
             live_obj = live_map[name_key]
@@ -1956,7 +1923,7 @@ async def _submit_wa_batch(
             submission_task = asyncio.create_task(asyncio.to_thread(
                 run, [asdict(s) for _, s in to_submit], LOG_PATH,
                 client=acc, user=user, source_file=filename,
-                fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar,
+                fix_grammar=fix_grammar,
                 task_ids=[f"task_{job_id}_{idx:04d}" for idx, _ in to_submit],
             ))
             cancelled = False
@@ -2071,7 +2038,6 @@ async def submit_file(
     expected_account: str = Query(...),
     expected_channel: str = Query(...),
     user: str = Query("Anonymous Operator"),
-    fix_aspect_ratio: bool = Query(True),
     fix_grammar: bool = Query(True),
     skip_duplicates: bool = Query(True),
     expected_rcs_bot_id: str | None = Query(None),
@@ -2111,7 +2077,6 @@ async def submit_file(
             acc,
             user,
             skip_duplicates,
-            fix_aspect_ratio,
             fix_grammar,
             file.filename or "upload.csv",
             current_user,
@@ -3822,7 +3787,11 @@ def _jira_draft_input(draft: dict, channel: str, account: str) -> dict:
     if channel == "whatsapp":
         item["components"] = _jira_whatsapp_components(draft, account)
         for component in item["components"]:
-            if component.get("format") == "IMAGE":
+            if component.get("format") == "IMAGE" and any(
+                draft.get(field) for field in (
+                    "media_file", "media_url", "mediaUrl", "media_attachment_id", "attachment_id",
+                )
+            ):
                 load_media(component, draft)
     else:
         cards = draft.get("carousel_cards") or []

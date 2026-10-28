@@ -40,7 +40,7 @@ def preview_case(tmp_path, monkeypatch, provision_user):
     return TestClient(api.app, headers=headers), brief, creative, headers
 
 
-def test_jira_brief_exposes_sparse_copy_and_invalid_creative_warnings(preview_case):
+def test_jira_brief_exposes_sparse_copy_warnings_without_dimension_blocking(preview_case):
     client, brief, _, _ = preview_case
     with (
         patch("jira_client.fetch_jira_issue", return_value={"key": brief.issue_key}),
@@ -53,8 +53,8 @@ def test_jira_brief_exposes_sparse_copy_and_invalid_creative_warnings(preview_ca
     warning_types = {warning["type"] for warning in draft.get("compliance_warnings", [])}
     assert "META_WORD_RATIO" in warning_types
     assert "BUTTON_LENGTH_LIMIT" in warning_types
-    assert draft["aspect_ratio_blocked"] is True
-    assert draft["aspect_ratio_warnings"][0]["original_size"] == "400x800px"
+    assert draft["aspect_ratio_blocked"] is False
+    assert draft["aspect_ratio_warnings"] == []
 
 
 def test_jira_edited_preview_rechecks_replacement_image_and_copy(preview_case):
@@ -65,7 +65,7 @@ def test_jira_edited_preview_rechecks_replacement_image_and_copy(preview_case):
     with patch("submission_client.fetch_template_list", return_value=([], None)):
         initial = client.post("/api/jira/preview", json=payload)
         assert initial.status_code == 200, initial.text
-        assert initial.json()["whatsapp_templates"][0]["aspect_ratio_blocked"] is True
+        assert initial.json()["whatsapp_templates"][0]["aspect_ratio_blocked"] is False
         Image.new("RGB", (1280, 720), "navy").save(creative)
         draft["body"] = "Dear {{1}}, your loan application {{2}} is ready for review today."
         draft["button_text"] = "Review offer"
@@ -154,7 +154,8 @@ def test_jira_unreadable_creatives_are_not_reported_as_valid(preview_case, missi
 def test_jira_submission_rechecks_media_and_preserves_valid_siblings(preview_case):
     from models import SubmissionResult, SubmissionStatus
 
-    client, brief, _, _ = preview_case
+    client, brief, creative, _ = preview_case
+    creative.write_bytes(b"not an image")
     blocked = {**brief.whatsapp_templates[0], "aspect_ratio_blocked": False, "aspect_ratio_warnings": []}
     valid = {**blocked, "template_name": "valid_text_sibling", "header_type": "NONE", "media_file": None,
              "body": "Your loan application is ready for review today.", "variables": [], "button_type": "NONE"}
@@ -185,6 +186,51 @@ def test_jira_submission_rechecks_media_and_preserves_valid_siblings(preview_cas
     assert submitted_names == ["valid_text_sibling"]
 
 
+@pytest.mark.parametrize("placeholder", [False, True])
+def test_jira_submission_accepts_portrait_or_placeholder_despite_stale_ratio_flag(preview_case, placeholder):
+    from models import SubmissionResult, SubmissionStatus
+
+    client, brief, _, _ = preview_case
+    draft = {
+        **brief.whatsapp_templates[0], "aspect_ratio_blocked": True,
+        "aspect_ratio_error": "Old dimension restriction",
+        "body": "Your loan application is ready for review today.", "variables": [],
+        "button_type": "NONE",
+    }
+    if placeholder:
+        draft.update(media_file=None, media_filename=None)
+    submitted = []
+
+    def submit(submission, client):
+        submitted.append(submission)
+        return SubmissionResult(
+            source_ref=submission.source_ref, template_name=submission.template_name,
+            status=SubmissionStatus.SUBMITTED, provider_ref_id="real-created-id", client=client,
+        )
+
+    with (
+        patch("jira_client.fetch_jira_issue", return_value={"key": brief.issue_key}),
+        patch("briefing_parser.parse_jira_brief", return_value=brief),
+        patch("config.get_waba_id", return_value="local-test-waba"),
+        patch("submission_client.fetch_template_list", return_value=([], None)),
+        patch("submission_client.submit_template", side_effect=submit),
+        patch("tracker.log_result"),
+    ):
+        preview = client.post("/api/jira/preview", json={
+            "account": "tcl_promo", "whatsapp_templates": [draft], "rcs_templates": [],
+        })
+        response = client.post(f"/api/jira/submit/{brief.issue_key}", json={
+            "account": "tcl_promo", "channels": ["whatsapp"], "whatsapp_templates": [draft],
+        })
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["whatsapp_templates"][0]["aspect_ratio_blocked"] is False
+    assert response.status_code == 200, response.text
+    assert response.json()["whatsapp_submitted"][0]["status"] == "submitted"
+    assert len(submitted) == 1
+    header = next(component for component in submitted[0].components if component.type == "HEADER")
+    assert bool(header.image_bytes) is not placeholder
+
+
 def test_jira_preview_rejects_another_tenant_account(preview_case):
     client, brief, _, _ = preview_case
     response = client.post("/api/jira/preview", json={
@@ -212,8 +258,6 @@ def test_jira_validation_comment_requires_review_and_explicit_confirmation(previ
         review = preview.json()
         assert review["posted"] is False
         assert brief.whatsapp_templates[0]["template_name"] in review["comment_text"]
-        assert "400x800" in review["comment_text"]
-        assert "ratio" in review["comment_text"].lower()
         assert writes == []
         declined = client.post(f"/api/jira/validation-comment/{brief.issue_key}", json={**payload, "confirmed": False})
         assert declined.status_code == 200
@@ -315,8 +359,8 @@ def test_jira_brief_loads_catalogs_concurrently_and_preserves_cached_copy(previe
         loaded = response.json()["brief"]
         assert loaded["whatsapp_templates"][0]["body"] == brief.whatsapp_templates[0]["body"]
         assert loaded["rcs_templates"][0]["body"] == "Review your loan offer."
-        for channel in ("whatsapp", "rcs"):
-            assert loaded[f"{channel}_templates"][0]["aspect_ratio_blocked"] is True
+        assert loaded["whatsapp_templates"][0]["aspect_ratio_blocked"] is False
+        assert loaded["rcs_templates"][0]["aspect_ratio_blocked"] is True
         assert any(
             warning["type"] == "LIVE_INVENTORY_UNAVAILABLE"
             for warning in loaded["whatsapp_templates"][0]["compliance_warnings"]

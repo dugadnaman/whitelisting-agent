@@ -450,7 +450,6 @@ export async function submitFile(
   account: Account,
   channel: Channel,
   user: string = "Operator",
-  fixAspectRatio: boolean = true,
   fixGrammar: boolean = true,
   skipDuplicates: boolean = true,
   reviewedDestination: { account: Account; channel: Channel },
@@ -465,7 +464,6 @@ export async function submitFile(
     account,
     channel,
     user,
-    fix_aspect_ratio: String(fixAspectRatio),
     fix_grammar: String(fixGrammar),
     skip_duplicates: String(skipDuplicates),
     expected_account: reviewedDestination.account,
@@ -1268,8 +1266,9 @@ export async function previewJiraDrafts(params: JiraDraftPreviewRequest, signal?
   if (!Array.isArray(data.whatsapp_templates) || !Array.isArray(data.rcs_templates)
       || data.whatsapp_templates.length !== params.whatsapp_templates.length
       || data.rcs_templates.length !== params.rcs_templates.length
-      || [...data.whatsapp_templates, ...data.rcs_templates].some(
-        (draft) => !draft || typeof draft.aspect_ratio_blocked !== "boolean"
+      || data.whatsapp_templates.some((draft: JiraWhatsAppDraft) => !draft)
+      || data.rcs_templates.some(
+        (draft: JiraRcsDraft) => !draft || typeof draft.aspect_ratio_blocked !== "boolean"
       )) {
     throw new Error("Creative validation is unavailable. Please retry before whitelisting.");
   }

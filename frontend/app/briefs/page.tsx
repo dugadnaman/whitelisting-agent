@@ -45,15 +45,15 @@ function isAspectBlocked(draft: DraftWarnings) {
   return Boolean(draft.aspect_ratio_blocked || draft.aspect_ratio_warnings?.some((warning) => warning.blocked));
 }
 
-function DraftWarningList({ draft }: { draft: DraftWarnings }) {
+function DraftWarningList({ draft, showAspectWarnings = true }: { draft: DraftWarnings; showAspectWarnings?: boolean }) {
   return (
     <div className="space-y-2 text-xs">
-      {isAspectBlocked(draft) && (
+      {showAspectWarnings && isAspectBlocked(draft) && (
         <p role="alert" className="font-semibold text-rose-800">
           Whitelisting blocked: {draft.aspect_ratio_block_reason || 'Replace the creative with a compliant image.'}
         </p>
       )}
-      {draft.aspect_ratio_warnings?.map((warning, index) => (
+      {showAspectWarnings && draft.aspect_ratio_warnings?.map((warning, index) => (
         <div key={`aspect-${index}`} className="p-2 rounded border border-rose-200 bg-rose-50 text-rose-900">
           <p className="font-semibold">{warning.component}: {warning.error || warning.action || 'Image aspect ratio warning'}</p>
           <p>Original: {warning.original_size || 'Unknown'} · Current ratio: {warning.current_ratio || 'Unknown'} · Required: {warning.recommended_ratio || 'See recommendation'}</p>
@@ -633,7 +633,7 @@ export default function JiraBriefsPage() {
       let rcsToSubmit: JiraRcsDraft[] = [];
 
       if (channel === 'whatsapp' && (channelMode === 'all' || channelMode === 'whatsapp')) {
-        waToSubmit = waTemplates.filter((_, idx) => selectedWa.has(idx) && !isAspectBlocked(getWaWarnings(idx)));
+        waToSubmit = waTemplates.filter((_, idx) => selectedWa.has(idx));
         if (waToSubmit.length > 0) submitChannels.push('whatsapp');
       }
 
@@ -1222,7 +1222,7 @@ export default function JiraBriefsPage() {
   };
 
   const toggleSelectWa = (idx: number) => {
-    if (!validationReady || isAspectBlocked(getWaWarnings(idx))) return;
+    if (!validationReady) return;
     setSelectedWa((prev) => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx);
@@ -1254,7 +1254,7 @@ export default function JiraBriefsPage() {
 
   const selectAllWa = (select: boolean) => {
     if (!validationReady) return;
-    setSelectedWa(select ? new Set(waTemplates.flatMap((_, idx) => isAspectBlocked(getWaWarnings(idx)) ? [] : [idx])) : new Set());
+    setSelectedWa(select ? new Set(waTemplates.map((_, idx) => idx)) : new Set());
   };
 
   const selectAllRcs = (select: boolean) => {
@@ -1435,13 +1435,14 @@ export default function JiraBriefsPage() {
       (i.assignee || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
   });
-  const selectedWaCount = waTemplates.filter((_, index) => selectedWa.has(index) && !isAspectBlocked(getWaWarnings(index))).length;
+  const selectedWaCount = waTemplates.filter((_, index) => selectedWa.has(index)).length;
   const selectedRcsCount = rcsTemplates.filter((_, index) => selectedRcs.has(index) && isRcsEligible(index)).length;
-  const eligibleWaCount = waTemplates.filter((_, index) => !isAspectBlocked(getWaWarnings(index))).length;
+  const eligibleWaCount = waTemplates.length;
   const eligibleRcsCount = rcsTemplates.filter((_, index) => isRcsEligible(index)).length;
   const totalSelectedCount = channel === 'whatsapp' ? selectedWaCount : channel === 'rcs' ? selectedRcsCount : 0;
-  const hasValidationErrors = [...waTemplates.map((_, index) => getWaWarnings(index)), ...rcsTemplates.map((_, index) => getRcsWarnings(index))]
-    .some((draft) => isAspectBlocked(draft) || draft.compliance_warnings?.some((warning) => warning.severity === 'error'));
+  const hasValidationErrors = rcsTemplates.some((_, index) => isAspectBlocked(getRcsWarnings(index)))
+    || [...waTemplates.map((_, index) => getWaWarnings(index)), ...rcsTemplates.map((_, index) => getRcsWarnings(index))]
+      .some((draft) => draft.compliance_warnings?.some((warning) => warning.severity === 'error'));
 
   return (
     <>
@@ -2256,8 +2257,7 @@ export default function JiraBriefsPage() {
                       ) : (
                         waTemplates.map((wa, idx) => {
                           const warnings = getWaWarnings(idx);
-                          const blocked = isAspectBlocked(warnings);
-                          const isSelected = selectedWa.has(idx) && !blocked;
+                          const isSelected = selectedWa.has(idx);
                           const source = creativeSource(wa.media_file, wa.media_filename, wa.media_attachment_id);
                           const isEditing = editingCard[`wa-${idx}`] || false;
                           const waButtons = (wa.buttons && wa.buttons.length > 0)
@@ -2279,7 +2279,7 @@ export default function JiraBriefsPage() {
                                     type="checkbox"
                                     checked={isSelected}
                                     onChange={() => toggleSelectWa(idx)}
-                                    disabled={!validationReady || blocked}
+                                    disabled={!validationReady}
                                     aria-label={`Select ${wa.template_name} for whitelisting`}
                                     className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
                                   />
@@ -2378,7 +2378,7 @@ export default function JiraBriefsPage() {
                                   </select>
                                 </div>
                               </div>
-                              <DraftWarningList draft={warnings} />
+                              <DraftWarningList draft={warnings} showAspectWarnings={false} />
 
                               {/* Header Creative (Image / Media) — Download & Replace */}
                               <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
@@ -2414,12 +2414,15 @@ export default function JiraBriefsPage() {
                                     </label>
                                   </div>
                                 </div>
+                                <p className="text-gray-500">
+                                  WhatsApp whitelisting has no image dimension or aspect ratio requirements. A placeholder sample is used for an IMAGE header when no creative is attached.
+                                </p>
                                 {(wa.media_file || wa.media_attachment_id) && (
                                   <div className="pt-1">
                                     <JiraCreativeImage
                                       source={source}
                                       className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white hover:opacity-90 transition shadow-2xs"
-                                      onPreview={() => setPreviewCreativeModal({ ...source, filename: wa.media_filename || 'whatsapp_creative.jpg', channel: 'WhatsApp (16:9 / 1.91:1)' })}
+                                      onPreview={() => setPreviewCreativeModal({ ...source, filename: wa.media_filename || 'whatsapp_creative.jpg', channel: 'WhatsApp' })}
                                     />
                                   </div>
                                 )}

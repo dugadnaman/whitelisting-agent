@@ -166,7 +166,6 @@ def run(
     client: str = "bajaj",
     user: str = "Anonymous Operator",
     source_file: str | None = None,
-    fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
     *,
     task_ids: list[str] | None = None,
@@ -208,29 +207,12 @@ def run(
                 return _row_to_entry_dict(get_job_task(task_id))
         submission.client = client
         submission.waba_id = get_waba_id(client)
-        if getattr(submission, "aspect_ratio_blocked", False):
-            result = SubmissionResult(
-                source_ref=submission.source_ref,
-                template_name=submission.template_name,
-                status=SubmissionStatus.BLOCKED_ASPECT_RATIO,
-                provider_ref_id="",
-                error=f"BLOCKED (Invalid Aspect Ratio): {getattr(submission, 'aspect_ratio_error', None) or 'Image is not in recommended aspect ratio (16:9 or 1:1). Auto-resizing has been removed.'}",
-                provider_response=None,
-                approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
-                client=client,
-                channel="whatsapp",
-                submitted_by=user,
-                source_file=source_file,
-            )
-            return log_result(result, log_path, task_id=task_id)
-
         if pacing > 0:
             time.sleep(pacing)
         try:
             result = submit_template(
                 submission,
                 client=client,
-                fix_aspect_ratio=fix_aspect_ratio,
                 fix_grammar=fix_grammar,
             )
         except Exception as exc:
@@ -340,7 +322,6 @@ def run_file(
     log_path: str = "submission_log.jsonl",
     client: str = "bajaj",
     user: str = "Anonymous Operator",
-    fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
 ) -> None:
     """Phase 2, step 1 (from CSV or XLSX): load templates from file, submit in parallel pool, log results."""
@@ -371,7 +352,6 @@ def run_file(
         result = submit_template(
             submission,
             client=client,
-            fix_aspect_ratio=fix_aspect_ratio,
             fix_grammar=fix_grammar,
         )
         result.client = client

@@ -487,48 +487,8 @@ def _ensure_default_sample_pdf() -> str:
 
 
 
-def check_whatsapp_image_aspect_ratio(
-    input_path_or_bytes: str | bytes | None,
-) -> tuple[bool, str, tuple[int, int], float]:
-    """
-    Validate that a WhatsApp header image strictly adheres to Meta aspect ratio guidelines.
-    NO auto-resizing, auto-cropping, or canvas padding is performed.
-    Returns: (is_valid, error_reason_if_invalid, (width, height), ratio)
-    """
-    if not input_path_or_bytes:
-        return True, "", (0, 0), 1.0
-    try:
-        from PIL import Image
-
-        if isinstance(input_path_or_bytes, bytes):
-            img = Image.open(io.BytesIO(input_path_or_bytes))
-        else:
-            img = Image.open(str(input_path_or_bytes))
-        w, h = img.size
-        if w <= 0 or h <= 0:
-            return False, "Invalid image dimensions (0x0)", (w, h), 0.0
-        ratio = w / h
-
-        # Allowed: 16:9 (~1.78:1) or 1:1 (1.0:1) or 2:1 (2.0:1)
-        is_16_9 = abs(ratio - (16 / 9)) < 0.08
-        is_1_1 = abs(ratio - 1.0) < 0.08
-        is_2_1 = abs(ratio - 2.0) < 0.08
-
-        if is_16_9 or is_1_1 or is_2_1:
-            return True, "", (w, h), ratio
-        return (
-            False,
-            f"Header image dimension {w}x{h} ({ratio:.2f}:1) does not match required WhatsApp aspect ratio: 16:9 (1280x720) or 1:1 (Square).",
-            (w, h),
-            ratio,
-        )
-    except Exception as exc:
-        logger.warning("Failed to inspect WhatsApp image aspect ratio: %s", exc)
-        return True, "", (0, 0), 1.0
-
-
 def _prepare_local_media_bytes(
-    cformat: str, image_bytes: bytes | None, media_file: str | None, media_url: str | None, fix_aspect_ratio: bool
+    cformat: str, image_bytes: bytes | None, media_file: str | None, media_url: str | None
 ) -> tuple[str | None, str]:
     import mimetypes
     import tempfile
@@ -576,14 +536,14 @@ def _download_remote_media(cformat: str, media_url: str) -> tuple[str, str]:
                 for chunk in resp.iter_content(chunk_size=65536):
                     if chunk:
                         tmp.write(chunk)
-        return _prepare_local_media_bytes(cformat, None, media_file, None, False)
+        return _prepare_local_media_bytes(cformat, None, media_file, None)
     except (requests.RequestException, OSError, ValueError) as exc:
         if media_file:
             Path(media_file).unlink(missing_ok=True)
         raise ValueError("Could not download media creative. Check access to the media URL or attach the file directly.") from exc
 
 
-def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ratio: bool = True) -> list:
+def _resolve_header_media(components: list, client: str = "bajaj") -> list:
     """
     Pre-process components before submission: for any HEADER component with
     format in (IMAGE, VIDEO, DOCUMENT), ensure a valid media handle is attached.
@@ -616,7 +576,7 @@ def _resolve_header_media(components: list, client: str = "bajaj", fix_aspect_ra
         resolved_file = None
         try:
             resolved_file, file_type = _prepare_local_media_bytes(
-                cformat, image_bytes, media_file, media_url, fix_aspect_ratio
+                cformat, image_bytes, media_file, media_url
             )
             if media_url and not resolved_file:
                 resolved_file, file_type = _download_remote_media(cformat, media_url)
@@ -1031,14 +991,14 @@ _STATUS_MAP = {
 
 def _submit_portal_template(
     payload: TemplateSubmission, client: str = "bajaj",
-    fix_aspect_ratio: bool = True, fix_grammar: bool = True,
+    fix_grammar: bool = True,
 ) -> SubmissionResult:
     """Issue exactly one create; a lost response must never replay a side effect."""
     c = (client or payload.client or "bajaj").lower().strip()
     try:
         headers = get_portal_auth_headers(c)
         body = _build_portal_create_body(payload, client=c)
-        body["components"] = _resolve_header_media(body["components"], client=c, fix_aspect_ratio=fix_aspect_ratio)
+        body["components"] = _resolve_header_media(body["components"], client=c)
         body["components"] = _resolve_body_variables(body["components"], client=c, fix_grammar=fix_grammar)
     except (OSError, RuntimeError, ValueError) as exc:
         return _failed_submission(payload, c, f"Template/media preparation failed: {exc}")
@@ -1061,7 +1021,6 @@ def _submit_portal_template(
 def _build_official_create_body(
     payload: TemplateSubmission,
     client: str = "bajaj",
-    fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
 ) -> dict:
     """
@@ -1070,7 +1029,7 @@ def _build_official_create_body(
     Portal-only account fields and the literal sessionId are deliberately absent.
     """
     components = _template_components(payload)
-    components = _resolve_header_media(components, client=client, fix_aspect_ratio=fix_aspect_ratio)
+    components = _resolve_header_media(components, client=client)
     components = _resolve_body_variables(components, client=client, fix_grammar=fix_grammar)
 
     return {
@@ -1084,7 +1043,6 @@ def _build_official_create_body(
 def _submit_official_template(
     payload: TemplateSubmission,
     client: str = "bajaj",
-    fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
 ) -> SubmissionResult:
     """Submit to the selected account through the official Karix API once."""
@@ -1093,7 +1051,7 @@ def _submit_official_template(
         waba_id = get_waba_id(c)
         headers = get_official_auth_headers(c)
         headers["Content-Type"] = "application/json"
-        body = _build_official_create_body(payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar)
+        body = _build_official_create_body(payload, client=c, fix_grammar=fix_grammar)
     except (OSError, RuntimeError, ValueError) as exc:
         return _failed_submission(payload, c, f"Template/media preparation failed: {exc}")
     try:
@@ -1112,7 +1070,6 @@ def _submit_official_template(
 def submit_template(
     payload: TemplateSubmission,
     client: str = "bajaj",
-    fix_aspect_ratio: bool = True,
     fix_grammar: bool = True,
     validate_ai: bool = False,
 ) -> SubmissionResult:
@@ -1123,18 +1080,6 @@ def submit_template(
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
 
-    # Strict Aspect Ratio Validation Gate: Block submission if non-compliant
-    if getattr(payload, "aspect_ratio_blocked", False):
-        logger.warning("Blocking submission of WhatsApp template %s due to invalid aspect ratio", payload.template_name)
-        return SubmissionResult(
-            source_ref=payload.source_ref,
-            template_name=payload.template_name,
-            status=SubmissionStatus.FAILED,
-            approval_status=ApprovalStatus.BLOCKED_ASPECT_RATIO,
-            error=f"BLOCKED (Invalid Aspect Ratio): {getattr(payload, 'aspect_ratio_error', None) or 'Header image is not in recommended aspect ratio (16:9 or 1:1). Auto-resizing has been removed.'}",
-            client=c,
-            channel="whatsapp",
-        )
     # Optional TypeSafe AI Pre-Flight Gate
     if validate_ai:
         try:
@@ -1186,10 +1131,10 @@ def submit_template(
             get_portal_auth_headers(c)
         except OSError:
             return _submit_official_template(
-                payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar,
+                payload, client=c, fix_grammar=fix_grammar,
             )
         return _submit_portal_template(
-            payload, client=c, fix_aspect_ratio=fix_aspect_ratio, fix_grammar=fix_grammar,
+            payload, client=c, fix_grammar=fix_grammar,
         )
     except (OSError, ValueError) as exc:
         return _failed_submission(payload, c, str(exc))
