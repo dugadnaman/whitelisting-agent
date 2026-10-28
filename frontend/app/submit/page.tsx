@@ -1004,29 +1004,6 @@ export default function SubmitPage() {
                                 })}
                               </div>
 
-                              {channel === 'rcs' && (p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.length > 0)) && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {p.aspect_ratio_warnings?.map((w, wIdx) => (
-                                    <span
-                                      key={wIdx}
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-300"
-                                      title={w.error || w.action}
-                                    >
-                                      <span>⛔ Will NOT Be Created</span>
-                                      <span className="font-normal text-rose-700">({w.original_size} &bull; {w.current_ratio})</span>
-                                    </span>
-                                  ))}
-                                  {(!p.aspect_ratio_warnings || p.aspect_ratio_warnings.length === 0) && p.aspect_ratio_blocked && (
-                                    <span
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-300"
-                                      title={p.aspect_ratio_block_reason || 'Invalid aspect ratio'}
-                                    >
-                                      <span>⛔ Will NOT Be Created (Invalid Aspect Ratio)</span>
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
                               {p.grammar_warnings && p.grammar_warnings.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mt-1">
                                   {p.grammar_warnings.slice(0, 3).map((gw, gIdx) => (
