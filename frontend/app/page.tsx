@@ -34,7 +34,8 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function LiveBadge({ live, existsOnWaba }: { live?: boolean; existsOnWaba?: boolean }) {
+function LiveBadge({ live, existsOnWaba, channel }: { live?: boolean; existsOnWaba?: boolean; channel?: string }) {
+  if (channel === 'sms' && (live || existsOnWaba)) return <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700" title="Found in the VILPOWER DLT inventory; see approval status separately">On DLT portal</span>;
   if (live) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200" title="Synced live from the Karix WABA">
@@ -252,7 +253,7 @@ export default function DashboardPage() {
       if (requestVersion !== requestVersionRef.current) return;
       setStats(data);
       setLastSynced(data.error ? null : new Date().toISOString());
-      setStatsError(data.error ? `Karix sync degraded: ${formatError(data.error)}` : null);
+      setStatsError(data.error ? `${channel === 'sms' ? 'VILPOWER' : 'Karix'} sync degraded: ${formatError(data.error)}` : null);
     } catch (err) {
       if (requestVersion === requestVersionRef.current) {
         setStatsError(err instanceof Error ? err.message : 'Failed to fetch stats');
@@ -486,15 +487,15 @@ export default function DashboardPage() {
             {stats?.error || statsError || templatesError ? (
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200" title={formatError(statsError || templatesError || stats?.error || '')}>
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                {templatesError && !stats?.error && !statsError ? 'Dashboard Degraded' : 'Karix Degraded'}
+                {templatesError && !stats?.error && !statsError ? 'Dashboard Degraded' : `${channel === 'sms' ? 'VILPOWER' : 'Karix'} Degraded`}
               </span>
             ) : stats ? (
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                Karix Synced{lastSynced ? ` · ${relativeTime(lastSynced)}` : ''}
+                {channel === 'sms' ? 'VILPOWER' : 'Karix'} Synced{lastSynced ? ` · ${relativeTime(lastSynced)}` : ''}
               </span>
             ) : (
-              <span className="text-[11px] text-gray-500">Checking Karix connection…</span>
+              <span className="text-[11px] text-gray-500">Checking {channel === 'sms' ? 'VILPOWER' : 'Karix'} connection…</span>
             )}
             {stats?.karix_health && (
               <span
@@ -532,7 +533,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {channel === 'whatsapp' && (
+          {(channel === 'whatsapp' || (channel === 'sms' && account === 'tata')) && (
             <button
               onClick={handlePoll}
               disabled={polling}
@@ -548,7 +549,7 @@ export default function DashboardPage() {
                   <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               )}
-              {polling ? 'Polling…' : 'Poll Pending'}
+              {polling ? 'Polling…' : channel === 'sms' ? 'Refresh DLT Approvals' : 'Poll Pending'}
             </button>
           )}
 
@@ -998,7 +999,7 @@ export default function DashboardPage() {
                             {templatesError
                               ? 'Template history is unavailable.'
                               : stats?.error
-                                ? 'Karix connection degraded — showing local history only'
+                                ? `${channel === 'sms' ? 'VILPOWER' : 'Karix'} connection degraded — showing local history only`
                                 : `No ${channelLabel} templates found for ${accountLabel}.`}
                           </div>
                           <p className="text-xs text-gray-400 max-w-xs text-center">
@@ -1021,7 +1022,9 @@ export default function DashboardPage() {
                     </tr>
                   ) : (
                     visibleTemplates.map((t, idx) => {
-                      const key = t.source_ref || t.template_name || `row-${idx}`;
+                      const key = channel === 'sms'
+                        ? (t.template_id || t.provider_ref_id || t.task_id || `sms-row-${idx}`)
+                        : (t.source_ref || t.template_name || `row-${idx}`);
                       const isExpanded = expandedRow === key;
                       const rejectionReason = t.approval_reason && String(t.approval_reason) !== 'NONE' ? String(t.approval_reason) : null;
                       const pipelineError = t.status === 'failed' && t.error ? formatError(t.error) : null;
@@ -1054,10 +1057,10 @@ export default function DashboardPage() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
                                 <span className="font-semibold text-gray-900 font-mono text-[11px]">{t.template_name}</span>
-                                <LiveBadge live={t.live} existsOnWaba={t.exists_on_waba} />
+                                <LiveBadge live={t.live} existsOnWaba={t.exists_on_waba} channel={channel} />
                               </div>
                               <div className="text-[10px] text-gray-400 font-mono mt-0.5">
-                                {channel === 'whatsapp' ? (t.provider_ref_id ? `ID ${t.provider_ref_id}` : 'Not submitted yet') : (t.template_id ? `DLT ${t.template_id}` : '')}
+                                {channel === 'whatsapp' ? (t.provider_ref_id ? `ID ${t.provider_ref_id}` : 'Not submitted yet') : ((t.template_id || t.provider_ref_id) ? `DLT ${t.template_id || t.provider_ref_id}` : '')}
                               </div>
                             </td>
 
@@ -1101,7 +1104,7 @@ export default function DashboardPage() {
                                   <span className="text-[11px] font-semibold text-gray-700 truncate">{t.submitted_by}</span>
                                 </span>
                               ) : (
-                                <span className="text-[11px] text-gray-400">Karix Sync</span>
+                                <span className="text-[11px] text-gray-400">{channel === 'sms' ? 'VILPOWER Sync' : 'Karix Sync'}</span>
                               )}
                             </td>
 
@@ -1160,12 +1163,12 @@ export default function DashboardPage() {
                                     <div>
                                       <span className="font-semibold text-gray-500">Template ID: </span>
                                       <span className="font-mono text-gray-800">
-                                        {channel === 'whatsapp' ? (t.provider_ref_id || '—') : (t.template_id || '—')}
+                                        {channel === 'whatsapp' ? (t.provider_ref_id || '—') : (t.template_id || t.provider_ref_id || '—')}
                                       </span>
                                     </div>
                                     <div>
                                       <span className="font-semibold text-gray-500">Operator: </span>
-                                      <span className="text-gray-800">{t.submitted_by || 'Karix Sync'}</span>
+                                      <span className="text-gray-800">{t.submitted_by || (channel === 'sms' ? 'VILPOWER Sync' : 'Karix Sync')}</span>
                                     </div>
                                     <div>
                                       <span className="font-semibold text-gray-500">Source File: </span>
@@ -1173,7 +1176,7 @@ export default function DashboardPage() {
                                     </div>
                                     <div>
                                       <span className="font-semibold text-gray-500">Record: </span>
-                                      <LiveBadge live={t.live} />
+                                      <LiveBadge live={t.live} existsOnWaba={t.exists_on_waba} channel={channel} />
                                     </div>
                                   </div>
 

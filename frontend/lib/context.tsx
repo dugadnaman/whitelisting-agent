@@ -17,6 +17,7 @@ import { clearTabState, getTabState, hasWorkspaceDrafts, setTabState } from './t
 import { destinationChannels, destinationLabel } from './destination';
 
 const DEFAULT_ACCOUNTS: AccountItem[] = [
+  { id: 'tata', name: 'Tata Capital (SMS DLT)', is_builtin: true, entity: 'TATA CAPITAL LIMITED', channels: ['sms'] },
   {
     id: 'tcl_promo',
     name: 'Tata Capital Limited (Promotional)',
@@ -104,8 +105,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUserState(profile?.name || profile?.email || '');
     const selectedAccount = profile ? authorizedAccount(profile, localStorage.getItem('karix_account')) : '';
     const savedChannel = localStorage.getItem('karix_channel');
-    const nextChannel: Channel = selectedAccount === 'apparel' ? 'rcs'
-      : savedChannel === 'rcs' || savedChannel === 'sms' ? savedChannel : 'whatsapp';
+    const availableChannels = destinationChannels(selectedAccount, accountsRef.current);
+    const preferredChannel = savedChannel === 'rcs' || savedChannel === 'sms' ? savedChannel : 'whatsapp';
+    const nextChannel: Channel = availableChannels.includes(preferredChannel) ? preferredChannel : availableChannels[0];
     const identityChanged = !profile || previous?.tenant_id !== profile.tenant_id || previous?.id !== profile.id;
     const cachedScope = getTabState<{ userId: string | number; tenant: string; account: string; channel: Channel } | null>('workspace_destination', null);
     if (!profile || cachedScope?.userId !== profile.id || cachedScope?.tenant !== profile.tenant_id
@@ -240,7 +242,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       alert('This account is unavailable. Refresh the account list and try again.');
       return false;
     }
-    if (!destinationChannels(cleanAccount).includes(newChannel)) {
+    if (!destinationChannels(cleanAccount, accountsRef.current).includes(newChannel)) {
       alert('Choose an available channel for this account.');
       return false;
     }

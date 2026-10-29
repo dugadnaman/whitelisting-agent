@@ -2993,7 +2993,7 @@ def parse_jira_brief(
     for idx, campaign in enumerate(swcm_campaigns, start=1):
         c_chan = campaign.get("channel", "WA").upper()
         cta_text, cta_url, all_ctas = _parse_swcm_cta(campaign.get("cta_text", ""), campaign.get("cta_links", []))
-        norm_text, samples = normalize_placeholders(campaign["body"])
+        norm_text, samples = (campaign["body"], []) if c_chan == "SMS" else normalize_placeholders(campaign["body"])
         clean_body, swcm_btn_text, swcm_btn_url, swcm_footer = extract_and_strip_cta(
             norm_text,
             existing_btn_text=cta_text,
@@ -3088,10 +3088,10 @@ def parse_jira_brief(
             sms_drafts.append(
                 SmsTemplateDraft(
                     template_name=tname,
-                    text=clean_body,
-                    char_count=len(clean_body),
+                    text=norm_text,
+                    char_count=len(norm_text),
                     variant=f"SWCM {campaign['wa_label']}",
-                    variables=var_tags,
+                    variables=re.findall(r"\{#(num|alp|urg|uro|cbn|eml)#\}", norm_text),
                     raw_source=campaign["body"],
                 )
             )
@@ -3143,8 +3143,8 @@ def parse_jira_brief(
         if title and is_internal_identifier(title, summary=summary):
             title = ""
         source_origin = item.get("source", "jira")
-        norm_text, norm_samples = normalize_placeholders(clean_content)
-        var_tags = re.findall(r"\{\{(\d+)\}\}", norm_text)
+        norm_text, norm_samples = (clean_content, []) if chan == "SMS" else normalize_placeholders(clean_content)
+        var_tags = re.findall(r"\{#(num|alp|urg|uro|cbn|eml)#\}", norm_text) if chan == "SMS" else re.findall(r"\{\{(\d+)\}\}", norm_text)
         resolved_vars = item.get("variables") or var_tags
         resolved_samples = item.get("sample_values") or norm_samples
 
@@ -3285,7 +3285,7 @@ def parse_jira_brief(
             rcs_counter += 1
 
         elif chan == "SMS":
-            norm_key = re.sub(r"[^a-z0-9]", "", norm_text.lower())[:150]
+            norm_key = norm_text
             if norm_key in seen_sms_texts:
                 prev_idx = seen_sms_texts[norm_key]
                 if item.get("template_name") and not item["template_name"].startswith("swcm_"):

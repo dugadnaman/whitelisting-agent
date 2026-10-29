@@ -13,7 +13,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from auth import get_current_user, get_user_profile, require_tenant_access
 from config import _esmeaddr_from_session_token, get_esmeaddr, get_waba_id
@@ -25,7 +25,7 @@ PAIRING_SECONDS = 300
 DEVICE_SECONDS = 90 * 24 * 3600
 ASSET_DIR = Path(__file__).resolve().parent.parent / "browser-extension" / "karix-auth-sync"
 DEFAULT_ORIGINS = {"https://whitelisting-agent.onrender.com", "http://localhost:3000", "http://127.0.0.1:3000"}
-Integration = Literal["whatsapp", "rcs", "moengage"]
+Integration = Literal["whatsapp", "rcs", "moengage", "sms"]
 
 
 class OriginRequest(BaseModel):
@@ -46,7 +46,7 @@ class SessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     account: str = Field(pattern=r"^[a-z][a-z0-9_]*$", max_length=100)
     integration: Integration
-    bearer_token: str = Field(min_length=1, max_length=16000)
+    bearer_token: str | None = Field(default=None, min_length=1, max_length=16000)
     session: str | None = Field(default=None, min_length=1, max_length=1000)
     user: str | None = Field(default=None, min_length=1, max_length=300)
     waba_id: str | None = Field(default=None, max_length=100)
@@ -56,8 +56,9 @@ class SessionRequest(BaseModel):
     workspace_id: str | None = Field(default=None, max_length=128)
     refresh_token: str | None = Field(default=None, max_length=16000)
     cookie: str | None = Field(default=None, max_length=32000)
+    entity_id: str | None = Field(default=None, min_length=1, max_length=100)
 
-    @field_validator("bearer_token", "session", "user", "refresh_token", "cookie", "waba_id", "esmeaddr", "bot_id", "base_url", "workspace_id")
+    @field_validator("bearer_token", "session", "user", "refresh_token", "cookie", "waba_id", "esmeaddr", "bot_id", "base_url", "workspace_id", "entity_id")
     @classmethod
     def clean_header(cls, value: str | None) -> str | None:
         if value is None:
@@ -68,6 +69,20 @@ class SessionRequest(BaseModel):
         if not value:
             raise ValueError("A complete portal session is required")
         return value
+
+    @model_validator(mode="after")
+    def integration_shape(self):
+        if self.integration == "sms":
+            if any(getattr(self, field) is not None for field in (
+                "bearer_token", "session", "user", "waba_id", "esmeaddr", "bot_id",
+                "base_url", "workspace_id", "refresh_token",
+            )):
+                raise ValueError("SMS requires only a VILPOWER cookie and entity ID")
+        elif self.bearer_token is None:
+            raise ValueError("A portal bearer token is required")
+        elif self.entity_id is not None:
+            raise ValueError("An SMS entity cannot identify this integration")
+        return self
 
 
 def _hash(value: str) -> str:
@@ -107,6 +122,10 @@ def _authorize(account: str, user: dict) -> None:
 
 def target_identity(account: str, integration: str) -> dict:
     """Only server-owned settings/defaults establish identity; never captured credentials."""
+    if integration == "sms":
+        if account != "tata":
+            raise OSError("VILPOWER SMS browser sessions are supported only for Tata Capital.")
+        return {"entity_id": "1101637310000019220"}
     if integration == "whatsapp":
         return {"waba_id": get_waba_id(account), "esmeaddr": get_esmeaddr(account)}
     if integration == "rcs":
@@ -155,6 +174,17 @@ def _device_user(authorization: str | None) -> tuple[dict, dict]:
 def validate_session(body: SessionRequest, *, bind_workspace: bool = True) -> dict[str, str]:
     """Validate an unsaved exact snapshot; failure never changes stored credentials."""
     identity = _browser_identity(body.account, body.integration)
+    if body.integration == "sms":
+        if not body.cookie or not body.entity_id:
+            raise HTTPException(status_code=422, detail={"code": "incomplete_session", "integration": "sms"})
+        if body.entity_id != identity["entity_id"]:
+            raise HTTPException(status_code=409, detail={"code": "identity_conflict", "integration": "sms"})
+        import vilpower_client
+        try:
+            vilpower_client.validate_session(body.cookie, identity["entity_id"], client=body.account)
+        except (vilpower_client.VilpowerUnavailable, ValueError, TypeError):
+            raise HTTPException(status_code=422, detail={"code": "provider_validation_failed", "integration": "sms"}) from None
+        return {"cookie": body.cookie, "entity_id": identity["entity_id"], "provider": "vilpower"}
     bearer = re.sub(r"^(?:Authorization\s*:\s*)?Bearer\s+", "", body.bearer_token, flags=re.IGNORECASE).strip()
     if not bearer:
         raise HTTPException(status_code=422, detail="A portal bearer token is required.")
@@ -245,15 +275,11 @@ def extension_targets(response: Response, account: str | None = None, user: dict
         except HTTPException:
             continue
         for integration in ("whatsapp", "rcs", "moengage", "sms"):
-            if integration == "sms":
-                mode, identity = "static", {}
-                message = "SMS API/encryption keys are one-time persistent Settings setup; browser login cannot generate them."
-            else:
-                try:
-                    identity = target_identity(selected, integration)
-                    mode, message = "browser", "Human login remains required; Auth Sync renews only this configured account/integration's session."
-                except OSError as exc:
-                    mode, identity, message = "setup_required", {}, str(exc)
+            try:
+                identity = target_identity(selected, integration)
+                mode, message = "browser", "Human login remains required; Auth Sync renews only this configured account/integration's session."
+            except OSError as exc:
+                mode, identity, message = ("unsupported" if integration == "sms" else "setup_required"), {}, str(exc)
             targets.append({"account": selected, "integration": integration, "mode": mode, "identity": identity, "message": message})
     response.headers["Cache-Control"] = "no-store"
     return {"targets": targets}
@@ -322,8 +348,9 @@ def sync_session(body: SessionRequest, response: Response, authorization: str | 
     if _browser_identity(body.account, body.integration) != identity:
         raise HTTPException(status_code=409, detail="Configured identity changed during validation. Reconnect this exact target.")
     synced_at = save_session(credentials, body.account, body.integration)
-    from queue_manager import QUEUE_MANAGER
-    QUEUE_MANAGER.notify_credentials_updated(body.account)
+    if body.integration != "sms":
+        from queue_manager import QUEUE_MANAGER
+        QUEUE_MANAGER.notify_credentials_updated(body.account)
     response.headers["Cache-Control"] = "no-store"
     return {"ok": True, "last_synced_at": synced_at, "account": body.account, "integration": body.integration}
 
@@ -342,6 +369,10 @@ def check_session(response: Response, account: str, integration: Integration, us
     if record:
         try:
             saved = load_session(account, integration)
+            if integration == "sms":
+                saved = dict(saved)
+                if saved.pop("provider", None) != "vilpower":
+                    raise ValueError("Unexpected SMS session provider")
             validate_session(SessionRequest(account=account, integration=integration, **saved), bind_workspace=False)
             valid = True
         except (HTTPException, OSError, ValueError):

@@ -46,7 +46,8 @@ export default function DestinationSwitcher() {
             <select id="destination-account" required value={nextAccount} onChange={(event) => {
               const selected = event.target.value;
               setNextAccount(selected);
-              if (!destinationChannels(selected).includes(nextChannel)) setNextChannel(destinationChannels(selected)[0]);
+              const channels = destinationChannels(selected, accounts);
+              if (!channels.includes(nextChannel)) setNextChannel(channels[0]);
               setMessage('');
             }} className="w-full rounded-lg border border-gray-300 bg-white p-2.5 text-sm">
               <option value="" disabled>Choose an account</option>
@@ -56,14 +57,15 @@ export default function DestinationSwitcher() {
           </div>
           {nextAccount !== 'all' && <div>
             <label htmlFor="destination-channel" className="mb-1 block text-sm font-semibold">Channel</label>
-            <select id="destination-channel" value={nextChannel} onChange={(event) => { setNextChannel(event.target.value as Channel); setMessage(''); }} className="w-full rounded-lg border border-gray-300 bg-white p-2.5 text-sm" disabled={nextAccount === 'apparel'}>
-              {destinationChannels(nextAccount).map((item) => <option key={item} value={item}>{CHANNEL_NAMES[item]}</option>)}
+            <select id="destination-channel" value={nextChannel} onChange={(event) => { setNextChannel(event.target.value as Channel); setMessage(''); }} className="w-full rounded-lg border border-gray-300 bg-white p-2.5 text-sm" disabled={destinationChannels(nextAccount, accounts).length === 1}>
+              {destinationChannels(nextAccount, accounts).map((item) => <option key={item} value={item}>{CHANNEL_NAMES[item]}</option>)}
             </select>
             {nextAccount === 'apparel' && <p className="mt-1 text-xs text-gray-500">Apparel supports RCS only.</p>}
+            {nextAccount === 'tata' && <p className="mt-1 text-xs text-gray-500">Tata Capital uses VILPOWER SMS DLT only. WhatsApp and RCS remain on their separate sub-accounts.</p>}
           </div>}
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm">
             <p className="font-semibold">{destinationLabel(nextAccount, nextChannel, getAccountLabel(nextAccount))}</p>
-            <p className="mt-1 text-blue-900">{nextAccount === 'all' ? 'Overview only. Choose one account before whitelisting or connecting a session.' : 'Used for Karix template previews, whitelisting and connections in Settings. Existing submissions are never moved.'}</p>
+            <p className="mt-1 text-blue-900">{nextAccount === 'all' ? 'Overview only. Choose one account before whitelisting or connecting a session.' : `Used for ${nextAccount === 'tata' && nextChannel === 'sms' ? 'VILPOWER SMS DLT' : 'Karix'} template previews, whitelisting and connections in Settings. Existing submissions are never moved.`}</p>
           </div>
           {message && <p role="status" className="text-sm text-amber-800">{message}</p>}
           <div className="flex justify-end gap-2">

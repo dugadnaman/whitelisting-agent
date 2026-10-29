@@ -14,7 +14,8 @@
         !/^[A-Za-z0-9_-]{1,128}$/.test(message.requestId)) return;
     const scoped = message.type !== 'KARIX_EXTENSION_PING';
     if (scoped && (typeof message.account !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(message.account) ||
-        !['whatsapp', 'rcs', 'moengage'].includes(message.integration))) return;
+        !['whatsapp', 'rcs', 'moengage', 'sms'].includes(message.integration) ||
+        (message.integration === 'sms' && message.account !== 'tata'))) return;
     if (message.type === 'KARIX_EXTENSION_PAIR' &&
         (typeof message.code !== 'string' || !message.code || message.code.length > 1024)) return;
     if (activeRequests.has(message.requestId) || activeRequests.size >= 10) return;

@@ -12,17 +12,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, sync_playwright
 from fastapi.testclient import TestClient
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 
 import api
 import config
 import db
+import moengage_sync
 import portal_sessions
 import rcs_client
-import moengage_sync
 import rcs_config
 import submission_client
+import vilpower_client
 
 
 @pytest.fixture
@@ -323,6 +325,16 @@ def scoped_browser(tmp_path, monkeypatch, provision_user):
     token = "header." + encoded + ".fixture-signature"
     state = {"sync": [], "inventory": [], "validation": [], "drop_sync": False,
              "drop_disconnect": False, "inventory_status": 200, "inventory_gate": None, "validation_gate": None}
+    state["sms_entity"] = "1101637310000019220"
+    state["sms_validation"] = []
+
+    def validate_sms(cookie, entity_id, client="tata"):
+        state["sms_validation"].append({"cookie": cookie, "entity_id": entity_id, "client": client})
+        if cookie != "portal_session=sms-request-cookie" or state["sms_entity"] != entity_id:
+            raise ValueError("Provider rejected session")
+        return {"entity_id": entity_id, "cookie": cookie, "provider": "vilpower"}
+
+    monkeypatch.setattr(vilpower_client, "validate_session", validate_sms)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config, "_load_env_file", lambda: None)
     monkeypatch.setenv("KARIX_EXTENSION_AGENT_ORIGINS", origin)
@@ -399,6 +411,9 @@ def scoped_browser(tmp_path, monkeypatch, provision_user):
                     "Authorization": self.headers.get("Authorization", ""),
                 }, json=body)
                 self.reply(response.status_code, response.json())
+            elif self.path == "/content_templates/contentTemplateJson/":
+                state["inventory"].append({"body": body, "headers": dict(self.headers)})
+                self.reply(state["inventory_status"], {"data": []})
             elif self.path == "/v1.0/templates/getAllTemplates":
                 if isinstance(self.connection, ssl.SSLSocket):
                     state["inventory"].append({"body": body, "headers": dict(self.headers)})
@@ -470,7 +485,7 @@ def scoped_browser(tmp_path, monkeypatch, provision_user):
                     "--ignore-certificate-errors", "--no-proxy-server",
                     "--host-resolver-rules=" + ", ".join(
                         f"MAP {host}:443 127.0.0.1:{server.server_port}"
-                        for host in ("rcmui.instaalerts.zone", "rcsgui.karix.solutions", "dashboard-03.moengage.com")
+                        for host in ("rcmui.instaalerts.zone", "rcsgui.karix.solutions", "dashboard-03.moengage.com", "www.vilpower.in")
                     ),
                 ],
             )
@@ -489,6 +504,8 @@ def scoped_browser(tmp_path, monkeypatch, provision_user):
                 portal.goto("https://rcmui.instaalerts.zone/bot_builder_gui/")
                 moengage = context.new_page()
                 moengage.goto(dashboard + "/")
+                sms = context.new_page()
+                sms.goto("https://www.vilpower.in/")
                 popup = context.new_page()
                 popup.goto(worker.evaluate("() => chrome.runtime.getURL('popup.html')"))
 
@@ -556,7 +573,7 @@ def scoped_browser(tmp_path, monkeypatch, provision_user):
 
                 yield SimpleNamespace(
                     client=client, headers=bajaj_headers, context=context, state=state, settle=settle,
-                    settings=settings, portal=portal, moengage=moengage, popup=popup,
+                    settings=settings, portal=portal, moengage=moengage, sms=sms, popup=popup,
                     pair=pair_target, message=message, capture_wa=capture_wa, capture_moengage=capture_moengage,
                     wait_status=wait_status, waba=waba, esme=esme, token=token, workspace=workspace,
                     other_workspace=other_workspace, dashboard=dashboard,
@@ -822,3 +839,131 @@ def test_settings_capture_switch_waits_for_slow_validation_without_losing_browse
     finally:
         gate.set()
         flow.state["validation_gate"] = None
+
+
+def test_sms_cookie_only_inventory_capture_and_worker_recovery(scoped_browser):
+    flow = scoped_browser
+    flow.pair()
+    flow.pair("tata", "sms")
+    flow.context.add_cookies([{
+        "name": "portal_session", "value": "sms-request-cookie", "domain": "www.vilpower.in",
+        "path": "/", "secure": True, "httpOnly": True, "sameSite": "Strict",
+    }])
+
+    def capture(path="/content_templates/contentTemplateJson/"):
+        return flow.sms.evaluate("""async path => {
+            const response = await fetch(path, {method: 'POST', credentials: 'include',
+                headers: {'Content-Type': 'application/json'}, body: '{}'});
+            await response.json(); return response.status;
+        }""", path)
+
+    assert capture() == 200
+    flow.settle()
+    assert flow.state["sync"][-1]["body"] == {
+        "account": "tata", "integration": "sms", "entity_id": "1101637310000019220",
+        "cookie": "portal_session=sms-request-cookie",
+    }
+    assert portal_sessions.load_session("tata", "sms")["cookie"] == "portal_session=sms-request-cookie"
+    assert flow.message("KARIX_EXTENSION_SCOPED_STATUS")["last_synced_at"] is None
+    count = len(flow.state["sync"])
+    # No inactive SMS capture, even with a valid logged-in portal.
+    assert flow.message("KARIX_EXTENSION_SELECT")["ok"]
+    assert capture() == 200
+    flow.settle()
+    assert len(flow.state["sync"]) == count
+    assert flow.message("KARIX_EXTENSION_SELECT", "tata", "sms")["ok"]
+    flow.state["inventory_status"] = 401
+    assert capture() == 401
+    flow.settle()
+    assert len(flow.state["sync"]) == count
+    assert flow.wait_status("tata", "sms", error="inventory_failed")
+    flow.state["inventory_status"] = 200
+    # A failed backend submission retains renewable credentials only in session storage.
+    flow.state["drop_sync"] = True
+    assert capture() == 200
+    flow.wait_status("tata", "sms", pending=True, error="network_error")
+    worker = flow.context.service_workers[0]
+    local = worker.evaluate("async () => chrome.storage.local.get(null)")
+    assert "sms-request-cookie" not in json.dumps(local)
+    cdp = flow.context.new_cdp_session(flow.sms)
+    cdp.send("ServiceWorker.enable")
+    cdp.send("ServiceWorker.stopAllWorkers")
+    cdp.detach()
+    flow.state["drop_sync"] = False
+    assert flow.message("KARIX_EXTENSION_RETRY", "tata", "sms")["ok"]
+    flow.wait_status("tata", "sms", pending=False, error=None)
+    # Wrong live entity is backend-rejected without replacing the saved credential.
+    saved = portal_sessions.session_record("tata", "sms")
+    flow.state["sms_entity"] = "another-entity"
+    assert capture() == 200
+    flow.wait_status("tata", "sms", pending=True, error="provider_validation_failed")
+    assert portal_sessions.session_record("tata", "sms")["updated_at"] == saved["updated_at"]
+
+
+def test_sms_worker_registered_listeners_reject_invalid_capture():
+    extension = Path(__file__).resolve().parents[1] / "browser-extension" / "karix-auth-sync"
+    result = subprocess.run(["node", "-e", r"""
+        const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
+        const listeners = {}, stores = {local: {}, session: {}}, syncs = [];
+        const event = name => ({addListener(fn) { listeners[name] = fn; }});
+        const chrome = {
+            runtime: {id:'fixture', getURL:p=>'chrome-extension://fixture/'+p, onMessage:event('message')},
+            storage: Object.fromEntries(['local','session'].map(n => [n, {
+                async setAccessLevel() {}, async get() { return structuredClone(stores[n]); },
+                async set(v) { Object.assign(stores[n], structuredClone(v)); },
+            }])),
+            webRequest: Object.fromEntries(['onBeforeRequest','onBeforeSendHeaders','onCompleted',
+                'onErrorOccurred','onBeforeRedirect'].map(n=>[n,event(n)])),
+        };
+        const ctx = vm.createContext({chrome, URL, TextDecoder, Uint8Array, AbortSignal, atob,
+            importScripts() {}, KARIX_SYNC_CONFIG:{agentOrigin:'https://agent.test'},
+            fetch: async (_u,o) => {
+                syncs.push(JSON.parse(o.body));
+                return {ok:true,json:async()=>({ok:true,account:'tata',integration:'sms',last_synced_at:1})};
+            }});
+        const run = s=>vm.runInContext(s,ctx);
+        (async()=>{
+            run(fs.readFileSync(process.argv[1]+'/background.js','utf8')); await run('ready');
+            await run(`mutate(async()=>{
+                devices['tata/sms']={account:'tata',integration:'sms',deviceToken:'device',
+                    deviceExpiresAt:Date.now()/1000+3600,identity:{entity_id:'1101637310000019220'}};
+                activeTarget='tata/sms'; await persistLocal();
+            })`);
+            let id=0;
+            const base={url:'https://www.vilpower.in/content_templates/contentTemplateJson/',method:'POST'};
+            async function capture(changes={},headers=[{name:'Cookie',value:'sessionid=fixture; csrf=atomic'}]) {
+                const d={...base,requestId:String(++id),...changes};
+                listeners.onBeforeRequest(d);
+                listeners.onBeforeSendHeaders({...d,requestHeaders:headers});
+                listeners.onCompleted({statusCode:200,fromCache:false,...d});
+                await run('operations');
+            }
+            await capture();
+            assert.deepEqual(syncs,[{account:'tata',integration:'sms',entity_id:'1101637310000019220',
+                cookie:'sessionid=fixture; csrf=atomic'}]);
+            assert(!JSON.stringify(stores.local).includes('sessionid='));
+            for(const change of [{method:'GET'},{url:'https://evil.test/content_templates/contentTemplateJson/'},
+                {url:'https://www.vilpower.in/content_templates/contentAdd/'},
+                {url:'https://www.vilpower.in/login/'},{url:'https://www.vilpower.in/otp/'},
+                {statusCode:401},{statusCode:500},{fromCache:true}]) await capture(change);
+            for(const headers of [[],[{name:'Cookie',value:''}],
+                [{name:'Cookie',value:'one'},{name:'cookie',value:'two'}],
+                [{name:'Cookie',value:'x'.repeat(32001)}],
+                [{name:'Cookie',value:'sessionid=bad\r\nInjected: yes'}]]) await capture({},headers);
+            assert.equal(syncs.length,1);
+            // Two request IDs cannot supply each other's missing credentials or completion.
+            listeners.onBeforeRequest({...base,requestId:'first'});
+            listeners.onBeforeRequest({...base,requestId:'second'});
+            listeners.onBeforeSendHeaders({...base,requestId:'first',
+                requestHeaders:[{name:'Cookie',value:'sessionid=uncompleted'}]});
+            listeners.onCompleted({...base,requestId:'second',statusCode:200});
+            listeners.onErrorOccurred({...base,requestId:'first'});
+            await run('operations');
+            assert.equal(syncs.length,1);
+            await run("mutate(async()=>{activeTarget=''})"); await capture();
+            assert.equal(syncs.length,1);
+            await run("mutate(async()=>{activeTarget='tata/sms';devices['tata/sms'].deviceExpiresAt=0})");
+            await capture(); assert.equal(syncs.length,1);
+        })().catch(()=>{console.error('SMS listener regression failed');process.exitCode=1});
+    """, str(extension)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

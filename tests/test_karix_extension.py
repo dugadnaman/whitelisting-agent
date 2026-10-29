@@ -195,8 +195,8 @@ def test_all_account_targets_are_authorized_and_unknown_identity_requires_setup(
                == {"whatsapp", "rcs", "moengage", "sms"} for account in accounts)
     custom = {target["integration"]: target for target in all_targets if target["account"] == "custom"}
     assert custom["whatsapp"]["mode"] == custom["rcs"]["mode"] == custom["moengage"]["mode"] == "setup_required"
-    assert custom["sms"]["mode"] == "static"
-    assert "cannot generate" in custom["sms"]["message"]
+    assert custom["sms"]["mode"] == "unsupported"
+    assert "Tata Capital" in custom["sms"]["message"]
     bajaj = client.get(PREFIX + "/targets", headers=bajaj_headers).json()["targets"]
     assert {target["account"] for target in bajaj} == {"bajaj"}
     tata = client.get(PREFIX + "/targets", headers=tata_headers).json()["targets"]
@@ -439,3 +439,139 @@ def test_moengage_binds_provider_returned_tokens_and_preserves_failed_refresh(ex
     assert portal_sessions.load_session("bajaj", "moengage") is None
 
 
+
+
+@pytest.fixture
+def sms_extension_flow(extension_flow, provision_user, monkeypatch):
+    import vilpower_client
+
+    client, _, _, _, _ = extension_flow
+    _, headers = provision_user("tata")
+    state = {"entity": vilpower_client.TATA_ENTITY_ID, "status": 200, "requests": [], "notifications": []}
+
+    class Provider(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            state["requests"].append((self.command, self.path))
+            valid = self.path == "/accountsettings/profile" and self.headers.get("Cookie") == "sessionid=sms-session; csrftoken=sms-csrf"
+            self.send_response(state["status"] if valid else 401)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(("<div>TATA CAPITAL LIMITED | " + state["entity"] + "</div>").encode())
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(vilpower_client, "BASE_URL", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setattr(api.QUEUE_MANAGER, "notify_credentials_updated", state["notifications"].append)
+    payload = {"account": "tata", "integration": "sms", "entity_id": vilpower_client.TATA_ENTITY_ID,
+               "cookie": "sessionid=sms-session; csrftoken=sms-csrf"}
+    try:
+        yield client, headers, payload, state
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+def test_sms_pairing_sync_check_and_disconnect_are_scoped(sms_extension_flow):
+    client, headers, payload, state = sms_extension_flow
+    targets = client.get(PREFIX + "/targets?account=tata", headers=headers).json()["targets"]
+    sms = next(target for target in targets if target["integration"] == "sms")
+    assert sms["mode"] == "browser" and sms["identity"] == {"entity_id": payload["entity_id"]}
+    device, _ = pair(client, headers, "tata", "sms")
+    assert client.post(PREFIX + "/sync", headers=device, json=payload).status_code == 200
+    expected = {"cookie": payload["cookie"], "entity_id": payload["entity_id"], "provider": "vilpower"}
+    assert portal_sessions.load_session("tata", "sms") == expected
+    assert portal_sessions.load_session("bajaj", "sms") is None
+    assert portal_sessions.load_session("tata", "whatsapp") is None
+    scope = "?account=tata&integration=sms"
+    checked = client.post(PREFIX + "/check" + scope, headers=headers)
+    assert checked.json()["validation_state"] == "valid"
+    assert state["requests"] == [("GET", "/accountsettings/profile")] * 2
+    assert state["notifications"] == []
+    state["status"] = 401
+    assert client.post(PREFIX + "/check" + scope, headers=headers).json()["validation_state"] == "invalid"
+    assert portal_sessions.load_session("tata", "sms") == expected
+    assert client.delete(PREFIX + "/device?account=tata&integration=whatsapp", headers=device).status_code == 403
+    assert client.delete(PREFIX + "/pairing" + scope, headers=headers).status_code == 200
+    assert client.post(PREFIX + "/sync", headers=device, json=payload).status_code == 401
+
+
+def test_sms_refused_snapshots_preserve_prior_credentials(sms_extension_flow, provision_user):
+    client, headers, payload, state = sms_extension_flow
+    device, _ = pair(client, headers, "tata", "sms")
+    assert client.post(PREFIX + "/sync", headers=device, json=payload).status_code == 200
+    original = portal_sessions.session_record("tata", "sms")["updated_at"]
+    saved = portal_sessions.load_session("tata", "sms")
+    for changed, status, code in [
+        ({"entity_id": "9999999999999999999"}, 409, "identity_conflict"),
+        ({"cookie": None}, 422, "incomplete_session"),
+        ({"cookie": "sessionid=expired"}, 422, "provider_validation_failed"),
+    ]:
+        rejected = client.post(PREFIX + "/sync", headers=device, json={**payload, **changed})
+        assert rejected.status_code == status
+        assert rejected.json()["detail"]["code"] == code
+    state["entity"] = "9999999999999999999"
+    rejected = client.post(PREFIX + "/sync", headers=device, json=payload)
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == {"code": "provider_validation_failed", "integration": "sms"}
+    assert client.post(PREFIX + "/sync", headers=device, json={**payload, "account": "bajaj"}).status_code == 403
+    assert client.post(PREFIX + "/sync", json=payload).status_code == 401
+    _, bajaj_headers = provision_user("bajaj")
+    assert client.post(PREFIX + "/pairing", headers=bajaj_headers, json={
+        "agent_origin": ORIGIN, "account": "bajaj", "integration": "sms",
+    }).status_code == 409
+    assert client.post(PREFIX + "/pairing", headers=bajaj_headers, json={
+        "agent_origin": ORIGIN, "account": "tata", "integration": "sms",
+    }).status_code == 403
+    assert portal_sessions.load_session("tata", "sms") == saved
+    assert portal_sessions.session_record("tata", "sms")["updated_at"] == original
+    assert state["notifications"] == []
+
+
+@pytest.mark.parametrize("integration", ["whatsapp", "rcs", "moengage"])
+def test_non_sms_sync_still_requires_bearer(extension_flow, integration):
+    client, _, _, _, _ = extension_flow
+    response = client.post(PREFIX + "/sync", json={
+        "account": "bajaj", "integration": integration, "cookie": "sessionid=not-a-bearer",
+    })
+    assert response.status_code == 422
+
+
+def test_sms_revoked_during_validation_cannot_publish(sms_extension_flow, monkeypatch):
+    import vilpower_client
+
+    client, headers, payload, _ = sms_extension_flow
+    device, _ = pair(client, headers, "tata", "sms")
+    assert client.post(PREFIX + "/sync", headers=device, json=payload).status_code == 200
+    original = portal_sessions.session_record("tata", "sms")["updated_at"]
+    verify = vilpower_client.validate_session
+
+    def revoke_during_validation(*args, **kwargs):
+        result = verify(*args, **kwargs)
+        with db.get_db() as conn:
+            conn.execute("DELETE FROM karix_extension_links WHERE account = 'tata' AND integration = 'sms'")
+        return result
+
+    monkeypatch.setattr(vilpower_client, "validate_session", revoke_during_validation)
+    assert client.post(PREFIX + "/sync", headers=device, json=payload).status_code == 401
+    assert portal_sessions.session_record("tata", "sms")["updated_at"] == original
+
+
+@pytest.mark.parametrize("extra", [
+    {"bearer_token": "not-an-sms-token"},
+    {"cookie": "sessionid=sms-session\r\nInjected: header"},
+    {"cookie": "x" * 32001},
+    {"entity_id": "x" * 101},
+    {"provider": "vilpower"},
+])
+def test_sms_invalid_request_shapes_never_replace_session(sms_extension_flow, extra):
+    client, headers, payload, _ = sms_extension_flow
+    device, _ = pair(client, headers, "tata", "sms")
+    assert client.post(PREFIX + "/sync", headers=device, json=payload).status_code == 200
+    original = portal_sessions.session_record("tata", "sms")["updated_at"]
+    assert client.post(PREFIX + "/sync", headers=device, json={**payload, **extra}).status_code == 422
+    assert portal_sessions.session_record("tata", "sms")["updated_at"] == original

@@ -49,7 +49,7 @@ export function formatChannel(channel: string | null | undefined): string {
     case 'rcs':
       return 'RCS (DLT)';
     case 'sms':
-      return 'SMS (Karix)';
+      return 'SMS (DLT)';
     case 'all':
       return 'All Channels';
     default:

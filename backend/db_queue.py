@@ -80,8 +80,10 @@ def create_job_with_tasks(
     """
     tenant_id = str(tenant_id or "").lower().strip()
     channel = str(channel or "").lower().strip()
-    if not tenant_id or channel not in ("whatsapp", "rcs"):
-        raise ValueError("A tenant and an explicit whatsapp/rcs channel are required.")
+    if not tenant_id or channel not in ("whatsapp", "rcs", "sms"):
+        raise ValueError("A tenant and an explicit whatsapp/rcs/sms channel are required.")
+    if channel == "sms" and tenant_id != "tata":
+        raise ValueError("VILPOWER SMS whitelisting belongs only to Tata Capital.")
     now = datetime.now(UTC).isoformat()
     jid = job_id or f"job_{uuid.uuid4().hex[:12]}"
     total_count = len(tasks_data)

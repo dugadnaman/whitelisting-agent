@@ -11,17 +11,17 @@ if (agentUrl.origin !== AGENT_ORIGIN || agentUrl.username || agentUrl.password |
 const LOCAL_KEY = 'karixAuthSync';
 const SESSION_KEY = 'karixAuthSyncSession';
 const REQUEST_FILTER = {
-  urls: ['https://rcsgui.karix.solutions/*', 'https://*.moengage.com/*'],
+  urls: ['https://rcsgui.karix.solutions/*', 'https://*.moengage.com/*', 'https://www.vilpower.in/*'],
   types: ['xmlhttprequest'],
 };
-const INTEGRATIONS = ['whatsapp', 'rcs', 'moengage'];
+const INTEGRATIONS = ['whatsapp', 'rcs', 'moengage', 'sms'];
 const ERROR_MESSAGES = {
   device_expired: 'This browser’s device pairing expired or was revoked. Reconnect only this account and integration in Settings; your portal login is separate.',
   scope_denied: 'This device is not authorized for the selected account and integration. Check this exact target in Settings; do not copy a session from another account.',
   identity_conflict: 'The captured identity does not match this target’s configured identity. Select its exact configured bot, WABA, or MoEngage workspace and reload its inventory.',
   provider_validation_failed: 'The provider did not validate the captured session. Reload the matching inventory in your already logged-in portal and retry. If that inventory works but sync still fails, ask your administrator to check provider validation; do not re-pair or repeat OTP just to retry.',
   incomplete_session: 'The captured session is incomplete. Reload this exact target’s inventory in the already logged-in portal to capture all required headers together.',
-  schema_rejected: 'The agent rejected the captured session format or size. Use extension 2.0.4 and reload this target’s inventory. Credentials are never truncated; ask your administrator if this repeats.',
+  schema_rejected: 'The agent rejected the captured session format or size. Use extension 2.0.5 and reload this target’s inventory. Credentials are never truncated; ask your administrator if this repeats.',
   capture_invalid: 'The matching request had incomplete, conflicting, or oversized authentication. Reload this exact target’s inventory in the already logged-in portal. Limits: bearer/refresh 16000, session 1000, user 300, cookie 32000, bot 200 characters.',
   inventory_failed: 'The inventory request did not complete with a fresh successful response. Check the portal connection and reload this exact target’s inventory; sign in only if the portal session itself has expired.',
   network_error: 'Could not reach the agent. Check your connection and retry the captured session.',
@@ -37,7 +37,7 @@ let operations = Promise.resolve();
 
 function validScope(value) {
   return value && typeof value.account === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value.account) &&
-    INTEGRATIONS.includes(value.integration);
+    INTEGRATIONS.includes(value.integration) && (value.integration !== 'sms' || value.account === 'tata');
 }
 function scopeKey(value) { return `${value.account}/${value.integration}`; }
 function valueString(value) {
@@ -51,6 +51,9 @@ function dashboardOrigin(value) {
 }
 function normalizedIdentity(integration, value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (integration === 'sms') {
+    return value.entity_id === '1101637310000019220' ? {entity_id: value.entity_id} : null;
+  }
   if (integration === 'whatsapp') {
     return /^\d{1,64}$/.test(value.waba_id) && /^\d{1,64}$/.test(value.esmeaddr)
       ? {waba_id: value.waba_id, esmeaddr: value.esmeaddr} : null;
@@ -72,8 +75,12 @@ function stateFor(key) {
   return transient[key] ||= {pendingSnapshot: null, lastError: '', lastErrorCode: '', syncing: false};
 }
 function isSnapshot(value, device) {
-  if (!validScope(value) || scopeKey(value) !== scopeKey(device) || !credential(value.bearer_token)) return false;
+  if (!validScope(value) || scopeKey(value) !== scopeKey(device)) return false;
   const expected = device.identity;
+  if (device.integration === 'sms') {
+    return value.entity_id === expected.entity_id && credential(value.cookie, 32000);
+  }
+  if (!credential(value.bearer_token)) return false;
   if (device.integration === 'whatsapp') {
     return value.waba_id === expected.waba_id && value.esmeaddr === expected.esmeaddr &&
       credential(value.session, 1000) && credential(value.user, 300);
@@ -177,6 +184,9 @@ async function api(path, {method = 'POST', body, device} = {}) {
   }
 }
 function nextStep(device) {
+  if (device.integration === 'sms') {
+    return 'Select Tata SMS as the active capture target and reload Content Templates at https://www.vilpower.in in your already logged-in session. Sign in only if it has expired. The backend verifies the live entity profile before saving; login, OTP, and template registration requests are never captured.';
+  }
   if (device.integration === 'moengage') {
     return 'Select this target in the extension popup and open its configured MoEngage workspace. If already logged in, reload that dashboard; repeat login only if the session has expired. The backend verifies workspace authorization before saving.';
   }
@@ -378,6 +388,8 @@ function requestBody(body) {
 function knownRequest(details) {
   try {
     const url = new URL(details.url);
+    if (url.origin === 'https://www.vilpower.in' && details.method === 'POST' &&
+        url.pathname === '/content_templates/contentTemplateJson/') return {integration: 'sms', url};
     if (url.origin === 'https://rcsgui.karix.solutions') {
       if (details.method === 'POST' && url.pathname === '/v1.0/templates/getAllTemplates') return {integration: 'whatsapp', url};
       if ((details.method === 'GET' && url.pathname === '/api/v1.0/rcstemplate/getTemplatesWithFilter') ||
@@ -402,6 +414,10 @@ function exactObserved(values, expected, required = true) {
 function matchingIdentity(request, body, device) {
   const {url} = request;
   const expected = device.identity;
+  if (device.integration === 'sms') {
+    // The pairing pins an expectation, not observed account proof. The backend checks the live profile.
+    return device.account === 'tata' && scopeKey(device) === activeTarget ? {entity_id: expected.entity_id} : null;
+  }
   if (device.integration === 'whatsapp') {
     const esmes = observedValues(url, body, ['esmeaddr']);
     // The WhatsApp list uses 0 for an unfiltered ESME. The exact WABA must still match,
@@ -471,8 +487,8 @@ chrome.webRequest.onBeforeRequest.addListener(details => {
       if (!paired(device) || device.integration !== request.integration) continue;
       const identity = matchingIdentity(request, body, device);
       if (identity) candidates.push({key, device, identity, snapshot: null, error: '',
-        activeOnly: device.integration === 'moengage' &&
-          !observedValues(request.url, body, ['workspace_id', 'workspaceId', 'app_id', 'appId', 'account_id', 'accountId']).length});
+        activeOnly: device.integration === 'sms' || (device.integration === 'moengage' &&
+          !observedValues(request.url, body, ['workspace_id', 'workspaceId', 'app_id', 'appId', 'account_id', 'accountId']).length)});
     }
     if (candidates.length > 1) {
       // Shared bot/workspace identifiers are ambiguous; never fan credentials out.
@@ -499,17 +515,20 @@ chrome.webRequest.onBeforeSendHeaders.addListener(details => {
     const bearer = /^Bearer[\t ]+(\S+)$/i.exec((headers.get('authorization') || '').trim());
     for (const candidate of record.candidates) {
       const device = candidate.device;
-      const snapshot = {account: device.account, integration: device.integration,
-        ...candidate.identity, bearer_token: bearer?.[1] || ''};
+      const snapshot = {account: device.account, integration: device.integration, ...candidate.identity};
+      if (device.integration === 'sms') {
+        snapshot.cookie = headers.get('cookie') || '';
+      } else snapshot.bearer_token = bearer?.[1] || '';
       if (device.integration === 'moengage') {
         snapshot.refresh_token = (headers.get('refreshtoken') || '').trim();
         snapshot.cookie = (headers.get('cookie') || '').trim();
-      } else {
+      } else if (device.integration !== 'sms') {
         for (const name of ['session', 'user']) {
           if (headers.has(name)) snapshot[name] = (headers.get(name) || '').trim();
         }
       }
-      if (ambiguous || !isSnapshot(snapshot, device) || !tokenIdentityMatches(snapshot.bearer_token, device, snapshot)) {
+      if (ambiguous || !isSnapshot(snapshot, device) ||
+          (device.integration !== 'sms' && !tokenIdentityMatches(snapshot.bearer_token, device, snapshot))) {
         candidate.error = ERROR_MESSAGES.capture_invalid;
         candidate.snapshot = null;
       } else candidate.snapshot = snapshot;

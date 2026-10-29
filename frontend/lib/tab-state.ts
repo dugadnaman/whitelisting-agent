@@ -102,6 +102,8 @@ export function clearTabState(prefix?: string): void {
 export function hasWorkspaceDrafts(): boolean {
   const submission = getTabState<{ step?: string } | null>('submit_state', null);
   if (submission?.step && submission.step !== 'idle') return true;
+  if (getTabState<unknown[] | null>('submit_sms_dlt_source', null)?.length) return true;
+  if (getTabState('submit_sms_dlt_identification', null)) return true;
   if (getTabState('submit_identify_report', null)) return true;
   for (const key of ['briefs_wa_templates', 'briefs_rcs_templates', 'briefs_sms_templates']) {
     if (getTabState<unknown[]>(key, []).length > 0) return true;

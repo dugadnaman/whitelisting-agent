@@ -280,8 +280,9 @@ class QueueManager:
             self.broadcast_event(job_id, "job_status", job)
             return
         try:
-            if channel == "rcs":
-                bucket = self._buckets.setdefault(f"rcs:{clean_tenant}", WabaTokenBucket(f"rcs:{clean_tenant}"))
+            if channel in {"rcs", "sms"}:
+                key = f"{channel}:{clean_tenant}"
+                bucket = self._buckets.setdefault(key, WabaTokenBucket(key, rate_per_sec=1.0 if channel == "sms" else 10.0, capacity=1.0 if channel == "sms" else 15.0))
             else:
                 bucket = self.get_bucket_for_tenant(clean_tenant)
             if job["status"] == "QUEUED":
@@ -294,7 +295,7 @@ class QueueManager:
                     job = get_job(job_id)
                     if not job or job["status"] in JOB_TERMINAL_STATUSES:
                         return
-                    if job["status"] == "PAUSED_FOR_AUTH" or (self.is_auth_tripped(clean_tenant) and not observed_pause):
+                    if channel != "sms" and (job["status"] == "PAUSED_FOR_AUTH" or (self.is_auth_tripped(clean_tenant) and not observed_pause)):
                         observed_pause = True
                         if job["status"] != "PAUSED_FOR_AUTH":
                             update_job_status(job_id, "PAUSED_FOR_AUTH", "Tenant credentials require refresh before dispatch.")
@@ -304,7 +305,8 @@ class QueueManager:
                         except TimeoutError:
                             pass
                         continue
-                    self._auth_circuits[clean_tenant] = False
+                    if channel != "sms":
+                        self._auth_circuits[clean_tenant] = False
                     await bucket.acquire()
                     claimed = claim_task(task_row["id"], clean_tenant, channel)
                     if claimed is None:
@@ -335,7 +337,7 @@ class QueueManager:
                             client=clean_tenant, channel=channel,
                         )
                     from rcs_runner import is_definitive_auth_refusal
-                    if is_definitive_auth_refusal(result) and not cancelled:
+                    if channel != "sms" and is_definitive_auth_refusal(result) and not cancelled:
                         self.trip_auth_circuit(clean_tenant, job_id, str(result.error))
                         release_task_for_auth(claimed["id"])
                         continue
@@ -370,6 +372,13 @@ class QueueManager:
         channel: str,
     ) -> Any:
         """Run single template submission in threadpool to avoid blocking event loop."""
+        if channel == "sms":
+            from vilpower_client import submit_sms_template
+            result = await asyncio.to_thread(submit_sms_template, payload_dict, client=clean_tenant)
+            result.submitted_by = payload_dict.get("submitted_by") or result.submitted_by
+            result.source_file = payload_dict.get("source_file") or result.source_file
+            return result
+
         if channel == "rcs":
             from rcs_client import submit_rcs_template
             from rcs_runner import rcs_submission_from_payload

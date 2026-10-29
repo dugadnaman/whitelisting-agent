@@ -201,6 +201,7 @@ export type DraftWarnings = {
 
 export type TemplatePreview = DraftWarnings & {
   template_name: string;
+  sms_dlt?: SmsDltDraft;
   category?: string;
   language?: string;
   client?: string;
@@ -400,7 +401,7 @@ export async function fetchStats(
   channel: Channel = "whatsapp"
 ): Promise<Stats> {
   const qs = new URLSearchParams({ account, channel }).toString();
-  const res = await fetchWithRetry(getApiUrl(`/api/stats?${qs}`));
+  const res = await fetchWithRetry(getApiUrl(`/api/stats?${qs}`), undefined, channel === 'sms' ? 0 : 2, 800, channel === 'sms' ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -417,7 +418,7 @@ export async function fetchTemplates(params?: {
   if (params?.status) qs.set("status", params.status);
   if (params?.search) qs.set("search", params.search);
 
-  const res = await fetchWithRetry(getApiUrl(`/api/templates?${qs.toString()}`));
+  const res = await fetchWithRetry(getApiUrl(`/api/templates?${qs.toString()}`), undefined, params?.channel === 'sms' ? 0 : 2, 800, params?.channel === 'sms' ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -578,7 +579,7 @@ export async function pollPending(
   const res = await fetchWithRetry(getApiUrl(`/api/poll?${qs}`), {
     method: "POST",
     headers: { "X-User": user },
-  });
+  }, channel === 'sms' ? 0 : 2, 800, channel === 'sms' ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -797,6 +798,83 @@ export async function fetchActivityStats(): Promise<ActivityStats> {
 
 export function getSampleCsvUrl(channel: Channel = "whatsapp"): string {
   return getApiUrl(`/api/sample-csv?channel=${channel}`);
+}
+
+export type SmsDltDraft = {
+  template_name: string;
+  text: string;
+  template_type: '' | '1' | '2' | '3';
+  category_id: string;
+  header_id: string;
+  header: string;
+  brand_id?: string;
+  message_type: '' | '1' | '2';
+  sample_message: string;
+  service_type?: string;
+};
+export type SmsDltOption = { id: string; text: string };
+export type SmsDltOptions = {
+  categories: SmsDltOption[];
+  headers: SmsDltOption[];
+  brands: SmsDltOption[];
+  service_types?: SmsDltOption[];
+};
+export type SmsDltSession = {
+  configured: boolean;
+  entity_id: string;
+  provider: 'vilpower';
+  expired?: boolean;
+  validation_state?: string;
+  validated_at?: string;
+};
+export type SmsDltSubmission = {
+  job_id?: string;
+  status: string;
+  account: string;
+  channel: Channel;
+  total: number;
+  results: Template[];
+};
+export async function fetchSmsDltSession(account: string): Promise<SmsDltSession> {
+  const qs = new URLSearchParams({ account });
+  const res = await fetchWithRetry(getApiUrl(`/api/sms-dlt/session?${qs}`), { cache: 'no-store' });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+export async function saveSmsDltSession(account: string, cookie: string, entity_id: string): Promise<SmsDltSession> {
+  const res = await fetchWithRetry(getApiUrl('/api/sms-dlt/session'), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account, cookie, entity_id }),
+  }, 0);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+export async function fetchSmsDltOptions(
+  account: string, draft: Pick<SmsDltDraft, 'template_type' | 'category_id' | 'service_type'>,
+  search = '', signal?: AbortSignal,
+): Promise<SmsDltOptions> {
+  const qs = new URLSearchParams({ account, template_type: draft.template_type, category_id: draft.category_id, search });
+  if (draft.service_type) qs.set('service_type', draft.service_type);
+  const res = await fetchWithRetry(getApiUrl(`/api/sms-dlt/options?${qs}`), { signal, cache: 'no-store' });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+export async function previewSmsDltDrafts(account: string, templates: SmsDltDraft[]): Promise<TemplatePreview[]> {
+  const res = await fetchWithRetry(getApiUrl('/api/sms-dlt/preview'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account, templates }),
+  }, 0, 800, 180000);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+export async function submitSmsDltDrafts(account: string, templates: SmsDltDraft[], user: string): Promise<SmsDltSubmission> {
+  if (account !== 'tata') throw new Error('SMS DLT whitelisting is supported only for Tata Capital.');
+  const res = await fetchWithRetry(getApiUrl('/api/sms-dlt/submit'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User': user },
+    body: JSON.stringify({ account, expected_account: account, expected_channel: 'sms', templates, skip_duplicates: true, user }),
+  }, 0, 800, 600000);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
 }
 
 export async function fetchAccounts(): Promise<AccountItem[]> {
@@ -1917,24 +1995,24 @@ export type IdentificationReport = {
   missing_templates: Array<Record<string, unknown>>;
 };
 
-export async function identifyTemplates(file: File, account: string = 'bajaj'): Promise<IdentificationReport> {
+export async function identifyTemplates(file: File, account: string = 'bajaj', channel: Channel = 'whatsapp'): Promise<IdentificationReport> {
   const form = new FormData();
   form.append('file', file);
-  const qs = new URLSearchParams({ account });
+  const qs = new URLSearchParams({ account, channel });
   const res = await fetchWithRetry(getApiUrl(`/api/templates/identify?${qs.toString()}`), {
     method: 'POST',
     body: form,
-  });
+  }, channel === 'sms' ? 0 : 2, 800, channel === 'sms' ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
 
-export async function identifyTemplatesJson(templates: Array<Record<string, unknown>>, account: string = 'bajaj'): Promise<IdentificationReport> {
+export async function identifyTemplatesJson(templates: Array<Record<string, unknown>>, account: string = 'bajaj', channel: Channel = 'whatsapp'): Promise<IdentificationReport> {
   const res = await fetchWithRetry(getApiUrl('/api/templates/identify-json'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ templates, account }),
-  });
+    body: JSON.stringify({ templates, account, channel }),
+  }, channel === 'sms' ? 0 : 2, 800, channel === 'sms' ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

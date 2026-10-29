@@ -8,6 +8,7 @@ import { useApp, getRcsDetails } from '@/lib/context';
 import { formatChannel, formatError } from '@/lib/format';
 import { destinationLabel } from '@/lib/destination';
 import type { Channel } from '@/lib/api';
+import { SmsDltUpload } from '@/components/sms-dlt';
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     pending: 'bg-amber-100 text-amber-800 border border-amber-200',
@@ -124,7 +125,7 @@ export default function SubmitPage() {
     setIdentifying(true);
     setIdentifyError(null);
     try {
-      const rep = await identifyTemplates(selected, account);
+      const rep = await identifyTemplates(selected, account, channel);
       if (!mountedRef.current || version !== identifyVersionRef.current || scopeRef.current.account !== requestedScope.account || scopeRef.current.channel !== requestedScope.channel) return;
       setIdentifyReport(rep);
     } catch (err: unknown) {
@@ -453,6 +454,8 @@ export default function SubmitPage() {
   const accountLabel = getAccountLabel(account);
   const channelLabel = formatChannel(channel);
   const reviewedLabel = review ? destinationLabel(review.account, review.channel, getAccountLabel(review.account)) : '';
+
+  if (channel === 'sms') return <SmsDltUpload key={`${account}:${channel}`} />;
 
   return (
     <div className="space-y-6">

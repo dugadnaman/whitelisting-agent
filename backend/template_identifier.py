@@ -624,6 +624,23 @@ def find_template_by_content(
             message="No content provided to search.",
         )
 
+    if (channel or "").lower().strip() == "sms":
+        from sms_dlt import require_tata
+        from vilpower_client import fetch_sms_templates
+        require_tata(client)
+        inventory = fetch_sms_templates(client=client) if live_templates is None else live_templates
+        matches = [item for item in inventory if item.get("template_message") == content]
+        if not matches:
+            return ContentSearchResult(found=False, message="No exact VILPOWER DLT copy match. Whitespace and typed variables are significant.")
+        matches.sort(key=lambda item: item.get("status") != "approved")
+        matched = matches[0]
+        return ContentSearchResult(
+            found=True, template_name=matched["template_name"], template_id=matched.get("template_id"),
+            status=matched.get("status"), category=matched.get("category"), language=matched.get("language"),
+            match_type="EXACT", similarity_score=1.0, matched_live_body=content,
+            candidate_matches=matches, message="Exact VILPOWER DLT copy match; check the registered header and approval status before use.",
+        )
+
     query_text = content.strip()
     query_norm = normalize_template_text(query_text)
 
@@ -646,9 +663,7 @@ def find_template_by_content(
                 fetch_error = str(exc)
                 live_templates = []
         else:
-            from sms_tracker import load_sms_submissions
-
-            live_templates = load_sms_submissions(client=client) or []
+            raise ValueError("Unsupported template search channel.")
 
     candidates: list[dict[str, Any]] = []
 

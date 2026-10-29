@@ -138,6 +138,7 @@ from apparel_attribution import router as apparel_attribution_router
 from moengage_click_count import router as moengage_click_count_router
 
 from karix_extension import router as karix_extension_router
+from sms_dlt_api import router as sms_dlt_router
 app = FastAPI(title="Karix Template Whitelisting API (WhatsApp & RCS)")
 
 cors_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
@@ -194,6 +195,7 @@ async def authenticate_api_requests(request: Request, call_next):
 app.include_router(apparel_attribution_router)
 app.include_router(moengage_click_count_router)
 app.include_router(karix_extension_router)
+app.include_router(sms_dlt_router)
 
 LOG_PATH = "submission_log.jsonl"
 RCS_LOG_PATH = "rcs_submission_log.jsonl"
@@ -302,6 +304,17 @@ DEFAULT_ACCOUNTS = [
         "is_builtin": True,
         "group": "Bajaj",
         "headers": [],
+    },
+    {
+        "id": "tata",
+        "name": "Tata Capital (SMS DLT)",
+        "entity": "Tata Capital Limited",
+        "type": "SMS DLT",
+        "is_builtin": True,
+        "group": "Tata Capital",
+        "channels": ["sms"],
+        "headers": [],
+        "description": "VILPOWER DLT registration for Tata Capital's principal entity",
     },
     {
         "id": "apparel",
@@ -750,26 +763,21 @@ def get_stats(
     chan = channel.lower()
     try:
         if chan == "sms":
-            s_stats = get_sms_stats(client=acc)
+            from sms_dlt import merged_inventory
+            entries = merged_inventory(acc)
+            pending = sum(e.get("approval_status") == "pending" for e in entries)
             return {
-                "total": s_stats["total_submissions"],
-                "submitted": s_stats["accepted_submissions"],
-                "failed": s_stats["failed_submissions"],
-                "duplicate": 0,
-                "pending": s_stats["pending"],
-                "approved": s_stats["delivered"],
-                "rejected": s_stats["rejected"] + s_stats["failed"],
-                "delivered": s_stats["delivered"],
-                "clicks": s_stats["clicks"],
-                "delivery_rate": s_stats["delivery_rate"],
+                "total": len(entries),
+                "submitted": sum(e.get("status") == "submitted" for e in entries),
+                "failed": sum(e.get("status") == "failed" for e in entries),
+                "duplicate": sum(e.get("status") == "duplicate" for e in entries),
+                "pending": pending,
+                "approved": sum(e.get("approval_status") == "approved" for e in entries),
+                "rejected": sum(e.get("approval_status") == "rejected" for e in entries),
                 "error": None,
-                "karix_health": _GOVERNOR.get_health_stats(),
-                "sla_insights": {
-                    "pending_count": s_stats["pending"],
-                    "due_for_poll_count": 0,
-                    "categories": {},
-                    "next_recommended_poll_sec": 120,
-                },
+                "provider": "vilpower",
+                "sla_insights": {"pending_count": pending, "due_for_poll_count": pending,
+                                 "categories": {}, "next_recommended_poll_sec": 120},
             }
         elif chan == "rcs":
             merged = _merge_rcs_templates(acc, None, None)
@@ -1079,54 +1087,8 @@ def _merge_wa_templates(acc: str, status: str | None, search: str | None) -> lis
 
 
 def _merge_sms_templates(acc: str, status: str | None, search: str | None) -> list[dict]:
-    local_entries = load_sms_submissions(client=acc)
-    dlrs = load_sms_dlrs(client=acc)
-    dlr_by_ackid = {}
-    for d in dlrs:
-        ack = d.get("ackid")
-        if ack:
-            dlr_by_ackid[str(ack).strip()] = d
-
-    items = []
-    for sub in local_entries:
-        ack = str(sub.get("ackid", "")).strip()
-        dlr_info = dlr_by_ackid.get(ack)
-        if dlr_info:
-            d_flag = str(dlr_info.get("status_flag") or "").lower()
-            d_reason = str(dlr_info.get("reason") or "").lower()
-            if d_flag == "success" or d_reason == "delivered":
-                appr_status = "approved"
-            elif d_flag in ("failed", "rejected") or "fail" in d_reason:
-                appr_status = "rejected"
-            else:
-                appr_status = "pending"
-        else:
-            appr_status = "approved" if sub.get("status_code") == "200" else "rejected"
-
-        t_name = f"{sub.get('sender_id', 'SMS')}_{ack}" if ack and ack != "N/A" else f"SMS_{sub.get('id', '')[:8]}"
-        items.append(
-            {
-                "source_ref": t_name,
-                "template_name": t_name,
-                "template_id": sub.get("dlt_template_id") or ack,
-                "template_type": "SMS (Text)",
-                "category": "TRANSACTIONAL",
-                "template_message": sub.get("message_preview") or "",
-                "sender_ids": [sub.get("sender_id")] if sub.get("sender_id") else [],
-                "status": "submitted" if sub.get("status_code") == "200" else "failed",
-                "approval_status": appr_status,
-                "submitted_at": sub.get("submitted_at") or "",
-                "client": sub.get("client") or acc,
-                "channel": "sms",
-                "submitted_by": sub.get("submitted_by"),
-                "source_file": sub.get("source_file"),
-                "dest_count": sub.get("dest_count", 0),
-                "error": sub.get("error"),
-                "live": True,
-                "exists_on_waba": False,
-            }
-        )
-    return _filter_and_sort_templates(items, status, search)
+    from sms_dlt import merged_inventory
+    return _filter_and_sort_templates(merged_inventory(acc), status, search)
 
 
 @app.get("/api/templates")
@@ -1458,6 +1420,9 @@ def _explicit_submission_destination(account: str, channel: str, current_user: d
 
 def _validate_upload_destination(path: str, suffix: str, account: str, channel: str) -> None:
     """Reject explicit spreadsheet routing fields, including ones a channel loader ignores."""
+    if channel == "sms":
+        # DLT's loader validates every row's ownership, including legacy XLS files.
+        return
     import csv
 
     def validate(rows):
@@ -1514,56 +1479,9 @@ async def preview_file(
     try:
         await asyncio.to_thread(_validate_upload_destination, tmp_path, suffix, account, chan)
         if chan == "sms":
-            if suffix in (".xlsx", ".xls"):
-                sms_msgs = await asyncio.to_thread(load_sms_from_excel, tmp_path, client=account)
-            else:
-                sms_msgs = await asyncio.to_thread(load_sms_from_csv, tmp_path, client=account)
-            if not sms_msgs:
-                log_activity(
-                    user=user,
-                    action="TEMPLATE_PREVIEW",
-                    account=account,
-                    channel="sms",
-                    details={"filename": file.filename or "upload.csv", "count": 0},
-                    status="failed",
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"No valid SMS messages found in '{file.filename or 'uploaded file'}'.",
-                )
-            log_activity(
-                user=user,
-                action="TEMPLATE_PREVIEW",
-                account=account,
-                channel="sms",
-                details={
-                    "filename": file.filename or "upload.csv",
-                    "count": len(sms_msgs),
-                },
-                status="success",
-            )
-            previews = preview_sms_rows(sms_msgs, client=account)
-            return [
-                {
-                    "template_name": f"{p['sender_id']}_{idx + 1}",
-                    "category": "TRANSACTIONAL",
-                    "language": "en",
-                    "status": "VALID",
-                    "dest_count": p["dest_count"],
-                    "sender_id": p["sender_id"],
-                    "components": [
-                        {
-                            "type": "BODY",
-                            "text": p["message"],
-                        }
-                    ],
-                    "raw_sms": p,
-                    "aspect_ratio_warnings": [],
-                    "grammar_warnings": [],
-                    "compliance_warnings": [],
-                }
-                for idx, p in enumerate(previews)
-            ]
+            from sms_dlt import load_drafts, preview_drafts
+            drafts = await asyncio.to_thread(load_drafts, tmp_path, account)
+            return await asyncio.to_thread(preview_drafts, drafts, account)
         elif chan == "rcs":
             if suffix in (".xlsx", ".xls"):
                 submissions = await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=account, upload_media=False)
@@ -1995,39 +1913,6 @@ async def _submit_wa_batch(
     }
 
 
-async def _submit_sms_batch(
-    tmp_path: str,
-    suffix: str,
-    acc: str,
-    user: str,
-    filename: str,
-    current_user: dict,
-) -> dict:
-    res = await asyncio.to_thread(
-        run_sms_file,
-        tmp_path,
-        client=acc,
-        user=user or current_user.get("name", "Operator"),
-    )
-    is_success = res.status == "accepted"
-    return {
-        "account": acc, "channel": "sms",
-        "status": "COMPLETED",
-        "job_id": res.id,
-        "results": [
-            {
-                "template_name": f"{res.sender_id}_{res.ackid}" if res.ackid != "N/A" else f"SMS_{res.id[:8]}",
-                "status": "submitted" if is_success else "failed",
-                "approval_status": "approved" if is_success else "rejected",
-                "ackid": res.ackid,
-                "dest_count": res.dest_count,
-                "error": res.error,
-            }
-        ],
-        "total_count": res.dest_count,
-        "submitted_count": res.dest_count if is_success else 0,
-        "failed_count": 0 if is_success else res.dest_count,
-    }
 
 
 @app.post("/api/submit")
@@ -2060,7 +1945,10 @@ async def submit_file(
     try:
         await asyncio.to_thread(_validate_upload_destination, tmp_path, suffix, acc, chan)
         if chan == "sms":
-            return await _submit_sms_batch(tmp_path, suffix, acc, user, file.filename or "upload.csv", current_user)
+            from sms_dlt import load_drafts
+            from sms_dlt_api import enqueue
+            drafts = await asyncio.to_thread(load_drafts, tmp_path, acc)
+            return await enqueue(drafts, acc, current_user["name"], file.filename or "upload.csv", skip_duplicates)
         elif chan == "rcs":
             return await _submit_rcs_batch(
                 tmp_path,
@@ -2255,6 +2143,9 @@ def poll(
     acc = account.lower()
     chan = channel.lower()
     try:
+        if chan == "sms":
+            from sms_dlt import poll_approvals
+            return poll_approvals(acc)
         if chan == "rcs":
             bot_id = get_rcs_bot_id(acc)
             pending = [entry for entry in load_rcs_log(RCS_LOG_PATH, client=acc, pending_only=True)
@@ -2457,6 +2348,7 @@ async def delete_templates_from_file(
 async def identify_templates_endpoint(
     file: UploadFile = File(...),
     account: str = Query("bajaj"),
+    channel: str = Query("whatsapp"),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -2475,6 +2367,10 @@ async def identify_templates_endpoint(
         tmp_path = tmp.name
 
     try:
+        if channel == "sms":
+            from sms_dlt import identify_drafts, load_drafts
+            rows = json.loads(Path(tmp_path).read_text(encoding="utf-8")) if suffix == ".json" else await asyncio.to_thread(load_drafts, tmp_path, acc)
+            return await asyncio.to_thread(identify_drafts, rows, acc)
         from template_identifier import identify_from_file
 
         report = await asyncio.to_thread(identify_from_file, tmp_path, client=acc)
@@ -2502,6 +2398,7 @@ async def identify_templates_endpoint(
 
 class IdentifyJsonRequest(BaseModel):
     account: str = "bajaj"
+    channel: str = "whatsapp"
     templates: list[dict[str, Any]]
 
 
@@ -2512,6 +2409,9 @@ def identify_templates_json_endpoint(
 ):
     """Run Phase 1 Identification directly on a JSON list of master templates."""
     require_tenant_access(body.account, current_user)
+    if body.channel == "sms":
+        from sms_dlt import identify_drafts
+        return identify_drafts(body.templates, body.account)
     from template_identifier import identify_master_templates
 
     report = identify_master_templates(body.templates, client=body.account)
@@ -2688,6 +2588,13 @@ def get_credentials(
     _load_env_file()
     acc = account.lower().strip()
     chan = channel.lower().strip()
+    if chan == "sms":
+        if acc != "tata":
+            return {"account": acc, "channel": chan, "provider": "unavailable", "is_configured": False}
+        from sms_dlt_api import session_status
+        state = session_status(acc, current_user)
+        return {**state, "account": acc, "channel": chan, "is_configured": state["configured"],
+                "extension_session": False}
     prefix = _account_prefix(acc)
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
@@ -3084,6 +2991,13 @@ def test_credentials(
     is_tata = acc == "tata"
     is_bajaj = acc == "bajaj"
     _load_env_file()
+    if chan == "sms":
+        from vilpower_client import VilpowerUnavailable, fetch_sms_options
+        try:
+            fetch_sms_options(client=acc)
+            return {"ok": True, "message": "Tata Capital VILPOWER session verified. This connection registers templates; it does not send SMS."}
+        except (ValueError, VilpowerUnavailable) as exc:
+            return {"ok": False, "message": str(exc)}
     if chan == "rcs":
         return _test_rcs_channel(acc, acc_name, creds)
 
@@ -3118,8 +3032,12 @@ def test_credentials(
 def get_sample_csv(channel: str = Query("whatsapp")):
     chan = channel.lower()
     if chan == "sms":
-        candidates = [Path("samples/sms_sample.csv"), Path("sms_sample.csv")]
-        filename = "sms_templates_sample.csv"
+        return PlainTextResponse(
+            "template_name,text,template_type,category_id,header_id,header,message_type,sample_message\n"
+            "example_sms,Your application is being processed.,1,,,,1,Your application is being processed.\n",
+            headers={"Content-Disposition": 'attachment; filename="sms_dlt_templates_sample.csv"'},
+            media_type="text/csv",
+        )
     elif chan == "rcs":
         candidates = [Path("samples/rcs_templates_sample.csv"), Path("rcs_templates_sample.csv")]
         filename = "rcs_templates_sample.csv"

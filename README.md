@@ -1,8 +1,68 @@
 # Karix Multi-Channel Template Whitelisting & Automation Platform
 
-Automated enterprise messaging template submission, validation, and lifecycle status tracking for **Bajaj** and **Tata Capital**, built on top of the Karix Business Solution Provider (BSP) platform.
+Automated enterprise messaging template submission, validation, and lifecycle status tracking for **Bajaj** and **Tata Capital**. WhatsApp/RCS use Karix; Tata SMS DLT registration uses **VILPOWER**.
 
 Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must be registered and approved ("whitelisted") across regulatory registries (DLT) and carrier/meta platforms. This platform automates the end-to-end ingestion, compliance validation, API submission, Jira workflow tracking, and MoEngage synchronization.
+
+## Tata Capital SMS DLT — VILPOWER portal
+
+SMS whitelisting registers **content templates**, not messages to recipients. Choose
+**Whitelisting for → Tata Capital (SMS DLT) → SMS** (`account=tata`).
+Tata's Karix WhatsApp/RCS sub-accounts and Bajaj do not inherit this connection.
+
+1. Open **Settings → VILPOWER · SMS DLT**. Download Auth Sync **2.0.5**, unzip it,
+   load the folder in Chrome's **Load unpacked**, then reload Settings.
+2. **Detect extension → Connect extension** for Tata Capital / SMS. Sign into
+   VILPOWER normally, including CAPTCHA/mobile OTP when required. Verify the
+   profile identifies **TATA CAPITAL LIMITED · 1101637310000019220**.
+3. Reload VILPOWER **Content Templates**. The extension captures the Cookie from
+   that successful inventory request and the backend verifies the live principal
+   entity before encrypted storage. No credential copying is required. Captured
+   cookies stay in extension session storage, never persistent local storage or
+   Settings responses; device pairings remain account/integration-scoped.
+   **Manual portal-session override** remains available for replacing the complete
+   request Cookie and entity ID. Keep the application's JWT encryption secret stable.
+4. On **Submit Templates**, download the SMS DLT CSV sample and upload CSV,
+   XLSX or XLS containing `template_name` and `text`. Optional import columns:
+   `template_type`, `category_id`, `header_id`, `header`, `brand_id`,
+   `message_type`, `sample_message`, `service_type`. No phone numbers are needed.
+   Choose missing category/header/type fields from live portal options.
+5. Alternatively, in **Jira Briefs → SMS**, select drafts and choose **Review
+   selected SMS for DLT whitelisting**. The same DLT editor and confirmation
+   are used; edits are retained in the current tab until cleared or the
+   destination changes.
+6. Use exact lowercase typed variables: `{#num#}`, `{#alp#}`, `{#urg#}`,
+   `{#uro#}`, `{#cbn#}`, `{#eml#}` (maximum 15). Supply a complete sample with
+   valid example values. Legacy `{#var#}` and WhatsApp `{{1}}` must be edited
+   explicitly. Copy, whitespace, punctuation and variable types are never
+   normalized or grammar-corrected.
+7. **Validate and review DLT drafts**, check the destination/header/category/body/
+   sample confirmation, then **Confirm and queue DLT whitelisting**. A successful
+   registration can still be **pending**; it is not approval.
+8. Use the dashboard's **Refresh DLT Approvals** to reconcile exact DLT IDs.
+   The identification panel compares exact copy and can hand missing templates
+   directly into review. Identical names with different DLT IDs remain separate.
+
+The portal session expires and requires normal human sign-in again. Reloading the
+inventory then captures the renewed session; reconnecting the extension is not
+required. There is no automatic login, paid API activation, or automatic registration replay.
+Timeouts and unverified outcomes stay failed/unknown: inspect VILPOWER/history
+before creating another reviewed batch. Full historical inventory reads can take
+several minutes; unavailable or incomplete data is not treated as an empty catalog.
+The client reads all dates using count-verified disjoint date windows because
+VILPOWER's default date range is only a week and offset pagination can skip rows
+with identical request dates.
+
+Single-template registration mirrors the portal's multipart form, including empty
+consent/LOB and upload controls. HTTP 200/302 alone is not registration proof:
+the catalog must return a DLT ID with the exact name, body and sender header.
+
+Implementation: `backend/vilpower_client.py` owns portal HTTP and identity checks;
+`sms_dlt.py` owns draft loading, exact comparison and history reconciliation;
+`sms_dlt_api.py` exposes authenticated session/options/review/queue endpoints.
+Queue results use tenant-scoped `job_tasks` with `channel=sms`; approval polling
+updates only matching DLT IDs. Existing dedicated `/api/sms/send` and delivery
+report endpoints remain separate Karix message-sending functionality.
 
 ---
 
@@ -26,7 +86,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
           └───────────────┘     └─────────────┘     │           │
                         ┌───────────────────────────▼─┐         │
                         │ SMS & DLT                   │         │
-                        │ (AES-256 PII, DLR Callbacks)│         │
+                        │ (VILPOWER registration)      │         │
                         └─────────────────────────────┘         │
                         ┌───────────────────────────────────────▼─┐
                         │ Integrations & Intelligence             │
@@ -47,7 +107,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - **Reviewed destination safety**: previews and submit buttons name the destination; results and queue records retain the actual submitted account/channel. Switching with current work requires confirmation, clears old drafts/previews and returns to the top; upload and preview again before sending a new batch. Late callbacks cannot restore or erase work after a destination change. Spreadsheet account/channel/WABA conflicts are rejected rather than silently rerouted. Detected accounts are suggestions only.
    - **RCS destination safety**: account labels and bot IDs come from effective backend configuration, including overrides. Submission rejects a bot changed since preview; an account without a verified bot cannot submit from the UI.
    - **API cutover**: `/api/submit` requires explicit `account`, `channel`, `expected_account`, and `expected_channel`; a changed reviewed scope returns HTTP 409. The obsolete `auto_route` parameter is removed. **All accounts** is read-only overview: select one account before uploading, whitelisting or managing connections.
-   - **SMS**: End-to-end DLT template compliance, AES-256 CBC PII encryption (`sms_crypto.py`), and real-time DLR forwarding callbacks.
+   - **SMS**: Tata Capital DLT content-template identification, VILPOWER portal registration, and approval tracking. Legacy Karix SMS delivery/encryption and DLR callbacks remain separate from whitelisting.
    - **Dashboard resilience**: When Karix's WhatsApp inventory is unavailable,
      the dashboard keeps tenant-scoped local submission history visible and marks
      the provider connection as degraded. An unavailable local history is reported
@@ -57,7 +117,7 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
    - Jira Briefs follows the same shared destination and opens its selected channel for messaging briefs. Other channel drafts remain available to review, but cannot be submitted through the wrong channel's action. Wealth WhatsApp is no longer silently redirected to Promotional: choose Promotional WhatsApp explicitly, review, then submit. Jira preview/submit requests require one `account`; submission also requires explicit `channels`. The obsolete `whatsapp_account` split-routing field is rejected.
    - Jira Briefs CTA previews support WhatsApp API buttons with `text` and legacy fallback buttons with `label`/`text`. Both shapes are type-checked by the production frontend build.
-   - Jira Briefs has **Add template content** in WhatsApp, RCS, and SMS panels, including empty channels. Use it to separate two messages incorrectly parsed into one template, then edit the original. New drafts have unique names, open in edit mode, and remain unchecked for whitelisting. Changes are local to the loaded brief until WhatsApp/RCS submission; reloading reparses Jira and discards unsent edits. SMS remains review/edit-only.
+   - Jira Briefs has **Add template content** in WhatsApp, RCS, and SMS panels, including empty channels. Use it to separate two messages incorrectly parsed into one template, then edit the original. New drafts have unique names, open in edit mode, and remain unchecked for whitelisting. Unsent source edits are local to the loaded brief. Tata SMS selections can enter the dedicated VILPOWER DLT review flow; reloading Jira reparses its source.
    - Jira WhatsApp/RCS drafts use the same pre-submission inspection as Excel uploads: image dimensions/ratios, grammar, compliance and duplicate warnings are visible before whitelisting. Copy, CTA, channel and creative changes trigger fresh validation; unavailable validation or invalid media cannot be bypassed by submitting stale browser flags. Carousel images are checked individually.
    - Jira draft warnings belong only to the current validated copy and creative. Editing a template name or other field clears the previous inspection's warnings while a fresh preview runs; failed preview shows **Retry validation**, not errors from the old draft. Whitelisting remains disabled until current validation succeeds. RCS names still require letters or numbers and at most 25 normalized characters.
    - Automatically generated RCS names reserve room within the 25-character limit for the channel and numeric suffix, including carousels, manual additions and moves from WhatsApp/SMS. Truncation preserves distinct draft names; explicit spreadsheet names and operator edits are never silently shortened and remain subject to provider validation.
@@ -120,8 +180,11 @@ karix/
 │   ├── rcs_client.py          # RCS Karix API client
 │   ├── rcs_loader.py          # RCS spreadsheet parser
 │   │
-│   ├── sms_config.py          # SMS DLT entity configuration
-│   ├── sms_client.py          # SMS submission API client
+│   ├── vilpower_client.py     # Tata VILPOWER DLT inventory and registration
+│   ├── sms_dlt.py             # Exact DLT comparison, drafts and approval history
+│   ├── sms_dlt_api.py         # Authenticated Tata DLT session and review endpoints
+│   ├── sms_config.py          # Separate legacy Karix SMS delivery configuration
+│   ├── sms_client.py          # Separate Karix SMS message-sending client
 │   ├── sms_crypto.py          # AES-256-CBC PII encryption engine
 │   │
 │   ├── jira_client.py         # Jira Cloud REST client
@@ -224,10 +287,16 @@ Deploy/restart the updated backend and frontend together. Choose an account and 
    a fresh provider validation check. Historical backend validation and this browser's pairing
    are shown separately.
 
-**Updating an unpacked extension:** use version **2.0.4**, replace its files in the same folder, then click
+**Updating an unpacked extension:** use version **2.0.5**, replace its files in the same folder, then click
 its reload icon in `chrome://extensions` and reload Settings and the provider inventory. Keeping the
 same unpacked folder preserves device pairings. The downloaded ZIP retains the exact Karix frontend
 permission (`https://rcmui.instaalerts.zone/*`) as well as the API host: Chrome requires both.
+Version 2.0.5 also requires the exact VILPOWER host permission
+(`https://www.vilpower.in/*`) for Tata SMS. Grant the updated permission, reload
+Settings, and select the Tata/SMS target before reloading Content Templates.
+Only its successful inventory POST is captured; login, CAPTCHA, OTP and template
+registration requests are excluded. The backend verifies the real principal
+entity even though the request itself has no entity ID.
 The MV3 worker preserves the first matching request while restoring stored pairings.
 Capture switches wait for an in-flight provider check rather than timing out after 2.5 seconds
 while the extension is busy. Scoped status reads remain available while validation is running.
@@ -263,7 +332,7 @@ existing sign-in but keep workspace data hidden. Use **Retry session verificatio
 401/403 authentication rejection still clears the session.
 
 **Static vs Browser Credentials**:
-- **Renewable browser sessions** (Karix WhatsApp, Karix RCS, MoEngage) sync automatically from real browser requests.
+- **Renewable browser sessions** (Karix WhatsApp, Karix RCS, MoEngage, and Tata VILPOWER SMS DLT) sync automatically from their matching inventory requests.
 - **Static credentials** (official WABA API token, Karix SMS key/encryption key/DLT ID, Gemini platform key)
   are configured once and stored in encrypted database storage. Auth Sync cannot create service keys.
 - **Jira Cloud credentials** and **Google service-account JSON** remain deployment-level configurations.

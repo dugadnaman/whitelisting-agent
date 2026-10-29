@@ -34,6 +34,8 @@ import { JiraCreativeImage, JiraCreativeDownload } from '@/components/jira-creat
 import { carouselCardWarnings, carouselSelectionError, selectedRcsDraft, type SelectableRcsDraft } from '@/lib/jira-carousel';
 import { newRcsTemplateName } from '@/lib/jira-template-name';
 import { destinationAccountLabel, destinationLabel } from '@/lib/destination';
+import { SmsDltReview, smsDltDraft } from '@/components/sms-dlt';
+import type { SmsDltDraft } from '@/lib/api';
 
 const UNCHECKED_WARNINGS: DraftWarnings = {
   aspect_ratio_warnings: [],
@@ -162,6 +164,8 @@ export default function JiraBriefsPage() {
   const [smsTemplates, setSmsTemplates] = useTabState<JiraSmsDraft[]>('briefs_sms_templates', []);
   const [selectedWa, setSelectedWa] = useTabState<Set<number>>('briefs_selected_wa', new Set());
   const [selectedRcs, setSelectedRcs] = useTabState<Set<number>>('briefs_selected_rcs', new Set());
+  const [selectedSms, setSelectedSms] = useTabState<Set<number>>('briefs_selected_sms', new Set());
+  const [smsReview, setSmsReview] = useTabState<{ issueKey: string; drafts: SmsDltDraft[]; revision: number } | null>('briefs_sms_dlt_review', null);
   const [editingCard, setEditingCard] = useTabState<Record<string, boolean>>('briefs_editing_card', {});
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
   const [syncedRcs, setSyncedRcs] = useState<Record<string, string>>({});
@@ -463,7 +467,7 @@ export default function JiraBriefsPage() {
     try {
       setLoadingBrief(true);
       setFeedback(null);
-      const data = await fetchJiraBrief(cleanKey);
+      const data = await fetchJiraBrief(cleanKey, account);
       if (!mountedRef.current) return;
       // Discard stale response if user already switched to another ticket
       if (activeRequestKey.current !== cleanKey && activeRequestKey.current !== (data.issue_key || '')) {
@@ -486,6 +490,8 @@ export default function JiraBriefsPage() {
       setWaTemplates(waList);
       setRcsTemplates(rcsList);
       setSmsTemplates(smsList);
+      setSelectedSms(new Set());
+      setSmsReview(null);
       setSelectedWa(new Set(waList.map((_, idx) => idx)));
       setSelectedRcs(new Set(rcsList.map((_, idx) => idx)));
       setEditingCard({});
@@ -1152,6 +1158,7 @@ export default function JiraBriefsPage() {
       if (!sms) return;
       templateName = sms.template_name;
       setSmsTemplates((prev) => prev.filter((_, i) => i !== fromIndex));
+      setSelectedSms((previous) => new Set(Array.from(previous).filter((index) => index !== fromIndex).map((index) => index > fromIndex ? index - 1 : index)));
 
       if (toChannel === 'whatsapp') {
         const newWa: JiraWhatsAppDraft = {
@@ -1478,7 +1485,7 @@ export default function JiraBriefsPage() {
             </span>
           </div>
           <p className="text-sm text-gray-500 mt-1">
-            Automated multi-channel intake: review, manually edit, and selectively submit WhatsApp or RCS templates to Karix.
+            Review and selectively whitelist WhatsApp/RCS templates through Karix or Tata SMS DLT templates through VILPOWER.
           </p>
         </div>
 
@@ -1916,7 +1923,7 @@ export default function JiraBriefsPage() {
                           </button>
                         )}
 
-                        <button
+                        {channel !== 'sms' && <button
                           onClick={() => requestWhitelist('all')}
                           disabled={!destinationAvailable || submitting || !validationReady || totalSelectedCount === 0 || (channel === 'rcs' && !currentRcs.botId)}
                           className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
@@ -1934,7 +1941,7 @@ export default function JiraBriefsPage() {
                               </span>
                             </>
                           )}
-                        </button>
+                        </button>}
                       </>
                     )}
                   </div>
@@ -3032,6 +3039,20 @@ export default function JiraBriefsPage() {
                   {/* SMS Panel */}
                   {activeTab === 'sms' && (
                     <div className="space-y-4">
+                      {smsReview?.issueKey === brief.issue_key ? (
+                        <SmsDltReview key={smsReview.revision} initialDrafts={smsReview.drafts} storageKey={`briefs_sms_dlt_${smsReview.revision}`} onClose={() => {
+                          if (window.confirm('Discard this DLT review and return to source drafts? Provider-field and body edits made in this review will be cleared; any queued batch remains in History.')) setSmsReview(null);
+                        }} />
+                      ) : <>
+                      <div className="space-y-3 rounded-xl border border-purple-200 bg-purple-50 p-4 text-xs">
+                        <p className="font-bold">Tata Capital · SMS DLT · VILPOWER whitelisting</p>
+                        <p>Select SMS drafts below, then choose the provider-required header, category, type and sample during review. Exact SMS text is preserved; typed DLT variables must be edited explicitly. This never sends SMS.</p>
+                        {(account !== 'tata' || channel !== 'sms') && <p role="alert" className="text-amber-900">Select Tata Capital (tata) · SMS in Whitelisting for. Other SMS accounts are not integrated; no Tata credentials or Bajaj routing will be inferred.</p>}
+                        <button type="button" className="rounded-lg bg-purple-700 px-4 py-2 font-semibold text-white disabled:opacity-50" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || !smsTemplates.some((_, index) => selectedSms.has(index))} onClick={() => {
+                          if (account !== 'tata' || channel !== 'sms' || selectedKey !== brief.issue_key) return;
+                          setSmsReview({ issueKey: brief.issue_key, drafts: smsTemplates.filter((_, index) => selectedSms.has(index)).map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text })), revision: Date.now() });
+                        }}>Review selected SMS for DLT whitelisting ({smsTemplates.filter((_, index) => selectedSms.has(index)).length})</button>
+                      </div>
                       {smsTemplates.length === 0 ? (
                         <p className="py-8 text-center text-xs text-gray-400">No SMS variants detected in this brief.</p>
                       ) : (
@@ -3041,6 +3062,11 @@ export default function JiraBriefsPage() {
                             <div key={`sms-card-${idx}`} className="p-4 rounded-xl border border-gray-200 bg-white space-y-2.5 shadow-2xs">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
+                                  <input type="checkbox" aria-label={`Select ${sms.template_name} for SMS DLT whitelisting`} checked={selectedSms.has(idx)} onChange={() => setSelectedSms((previous) => {
+                                    const next = new Set(previous);
+                                    if (next.has(idx)) next.delete(idx); else next.add(idx);
+                                    return next;
+                                  })} />
                                   {isEditing ? (
                                     <input
                                       type="text"
@@ -3110,6 +3136,7 @@ export default function JiraBriefsPage() {
                           );
                         })
                       )}
+                      </>}
                     </div>
                   )}
                   {/* Email Packages & Templates Panel */}

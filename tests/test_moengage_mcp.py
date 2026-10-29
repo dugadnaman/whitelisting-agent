@@ -234,6 +234,8 @@ def test_oauth_state_is_encrypted_one_use_and_survives_module_reload(monkeypatch
     import importlib
     import moengage_mcp
 
+    # An existing other-account token must survive this Apparel OAuth exchange.
+    save_mcp_tokens("tata", access_token="unrelated-tata-access")
     registration = MagicMock(ok=True)
     registration.json.return_value = {"client_id": "fixture-client"}
     with patch("moengage_mcp.requests.post", return_value=registration):
@@ -248,7 +250,7 @@ def test_oauth_state_is_encrypted_one_use_and_survives_module_reload(monkeypatch
         with pytest.raises(RuntimeError, match="Invalid or expired"):
             reloaded.complete_mcp_oauth("fixture-code", pending["state"])
         assert exchange.call_count == 1
-    assert reloaded.get_mcp_config("tata")["access_token"] == ""
+    assert reloaded.get_mcp_config("tata")["access_token"] == "unrelated-tata-access"
 
 
 def test_expired_mcp_oauth_state_never_exchanges_the_code(monkeypatch):

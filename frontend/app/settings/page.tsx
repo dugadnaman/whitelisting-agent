@@ -7,6 +7,7 @@ import { useApp } from '@/lib/context';
 import { destinationAccountLabel } from '@/lib/destination';
 import { clearTabState, setTabState } from '@/lib/tab-state';
 import KarixAuthSync from '@/components/KarixAuthSync';
+import { SmsDltSessionForm } from '@/components/sms-dlt';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
 
@@ -45,6 +46,7 @@ export default function SettingsPage() {
   const [user, setUser] = useState('');
   const [manualPortalSession, setManualPortalSession] = useState(false);
   const [showMoEngage, setShowMoEngage] = useState(false);
+  const [smsSessionDirty, setSmsSessionDirty] = useState(false);
   const [syncRevision, setSyncRevision] = useState(0);
   const settingsScope = `${currentUser?.id}:${currentUser?.tenant_id}:${currentUser?.role}:${selectedAccount}:${selectedChannel}:${showMoEngage ? 'moengage' : 'karix'}`;
   const [loadedScope, setLoadedScope] = useState('');
@@ -53,17 +55,14 @@ export default function SettingsPage() {
   currentSettingsScope.current = settingsScope;
   useEffect(() => {
     savedFields.current = {};
+    setSmsSessionDirty(false);
     setManualPortalSession(false);
     setBearerToken('');
     setSession('');
     setUser('');
     setRcsAuthToken('');
-    setLoungeCookie('');
     setPortalPassword('');
     setWabaAuthToken('');
-    setSmsKey('');
-    setSmsEncryptionKey('');
-    setSmsDlrAuthToken('');
     setEditPermanent(false);
     setGeminiApiKey('');
     setLoadedScope('');
@@ -73,23 +72,15 @@ export default function SettingsPage() {
     setEntityId('');
     setRcsBotId('');
     setEsmeaddr('');
-    setSmsUsername('');
-    setSmsSenderId('');
     setBanner(null);
   }, [settingsScope, syncRevision]);
   const [portalUsername, setPortalUsername] = useState('');
   const [portalPassword, setPortalPassword] = useState('');
   const [templateNamespaceId, setTemplateNamespaceId] = useState('');
   const [entityId, setEntityId] = useState('');
-  const [loungeCookie, setLoungeCookie] = useState('');
   const [rcsBotId, setRcsBotId] = useState('');
   const [rcsAuthToken, setRcsAuthToken] = useState('');
   const [esmeaddr, setEsmeaddr] = useState('');
-  const [smsKey, setSmsKey] = useState('');
-  const [smsUsername, setSmsUsername] = useState('');
-  const [smsEncryptionKey, setSmsEncryptionKey] = useState('');
-  const [smsSenderId, setSmsSenderId] = useState('');
-  const [smsDlrAuthToken, setSmsDlrAuthToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [geminiApiKey, setGeminiApiKey] = useState('');
@@ -204,7 +195,6 @@ export default function SettingsPage() {
           waba_id: creds.waba_id || '', portal_username: creds.portal_username || '',
           esmeaddr: creds.esmeaddr || '',
           template_namespace_id: creds.template_namespace_id || '', entity_id: creds.entity_id || '',
-          sms_username: creds.sms_username || '', sms_sender_id: creds.sms_sender_id || '',
           rcs_bot_id: creds.rcs_bot_id || '', rcs_esmeaddr: creds.rcs_esmeaddr || creds.esmeaddr || '',
         };
         setGeminiApiKey('');
@@ -219,17 +209,8 @@ export default function SettingsPage() {
           setPortalUsername(creds.portal_username || '');
           setPortalPassword('');
           setTemplateNamespaceId(creds.template_namespace_id || '');
-        } else if (selectedChannel === 'sms') {
-          setSmsKey('');
-          setSmsUsername(creds.sms_username || '');
-          setSmsEncryptionKey('');
-          setSmsSenderId(creds.sms_sender_id || '');
-          setSmsDlrAuthToken('');
+        } else if (selectedChannel !== 'sms') {
           setEntityId(creds.entity_id || '');
-          setLoungeCookie('');
-        } else {
-          setEntityId(creds.entity_id || '');
-          setLoungeCookie('');
           setPortalUsername(creds.portal_username || '');
           setPortalPassword('');
           setRcsBotId(creds.rcs_bot_id || '');
@@ -255,7 +236,7 @@ export default function SettingsPage() {
       }
     }
 
-    if (isAssigned) loadServerCreds();
+    if (isAssigned && selectedChannel !== 'sms') loadServerCreds();
     loadTeam();
     return () => {
       ignore = true;
@@ -279,12 +260,11 @@ export default function SettingsPage() {
   function credentialMetadata(): Record<string, string> {
     return isWhatsApp
       ? { waba_auth_token: wabaAuthToken, waba_id: wabaId, esmeaddr, portal_username: portalUsername, portal_password: portalPassword, template_namespace_id: templateNamespaceId, entity_id: entityId }
-      : isSms
-        ? { sms_key: smsKey, sms_username: smsUsername, sms_encryption_key: smsEncryptionKey, sms_sender_id: smsSenderId, sms_dlr_auth_token: smsDlrAuthToken, entity_id: entityId, lounge_cookie: manualPortalSession ? loungeCookie : '' }
-        : { rcs_bot_id: rcsBotId, rcs_esmeaddr: esmeaddr, entity_id: entityId };
+      : { rcs_bot_id: rcsBotId, rcs_esmeaddr: esmeaddr, entity_id: entityId };
   }
   const hasUnsavedSettings = isAssigned && (
     Boolean(geminiApiKey.trim()) ||
+    (!showMoEngage && isSms && smsSessionDirty) ||
     (!showMoEngage && loadedScope === settingsScope && (
       manualPortalSession || Object.entries(credentialMetadata()).some(([key, value]) => value.trim() !== (savedFields.current[key] || '').trim())
     )) ||
@@ -469,11 +449,7 @@ export default function SettingsPage() {
         setSession('');
         setUser('');
         setRcsAuthToken('');
-        setLoungeCookie('');
         setWabaAuthToken('');
-        setSmsKey('');
-        setSmsEncryptionKey('');
-        setSmsDlrAuthToken('');
         setPortalPassword('');
         setGeminiApiKey('');
         setSyncRevision((revision) => revision + 1);
@@ -630,7 +606,7 @@ export default function SettingsPage() {
         ) : (
           <div className="flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2">
             <button type="button" aria-pressed={!showMoEngage} onClick={() => showConnection(false)} className={`rounded-lg px-4 py-2 text-xs font-bold ${!showMoEngage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
-              Karix · {channelTitle}
+              {isSms ? 'VILPOWER · SMS DLT' : `Karix · ${channelTitle}`}
             </button>
             <button type="button" aria-pressed={showMoEngage} onClick={() => showConnection(true)} className={`rounded-lg px-4 py-2 text-xs font-bold ${showMoEngage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
               MoEngage integration
@@ -649,7 +625,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <div className="text-xs font-bold text-gray-900">
-              {showMoEngage ? `MoEngage integration · ${accountTitle}` : `Karix connection · ${accountTitle} · ${channelTitle}`}
+              {showMoEngage ? `MoEngage integration · ${accountTitle}` : `${isSms ? 'VILPOWER DLT' : 'Karix'} connection · ${accountTitle} · ${channelTitle}`}
             </div>
             <div className="text-[11px] text-gray-500">
               {showMoEngage
@@ -657,7 +633,7 @@ export default function SettingsPage() {
                 : isWhatsApp
                 ? 'Karix Portal Session for Media Uploads & Official WABA Template API'
                 : isSms
-                ? 'DLT SMS Template Registration via Karix Lounge & Send SMS API'
+                ? 'DLT SMS template whitelisting via the Tata Capital VILPOWER portal; no SMS sending'
                 : 'RCS bot template registration using Karix bearer authentication'}
             </div>
           </div>
@@ -667,7 +643,7 @@ export default function SettingsPage() {
 
       {/* Credential Form Card */}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-6 space-y-5">
-        {isAssigned && currentUser && (
+        {isAssigned && currentUser && (!isSms || showMoEngage) && (
           <KarixAuthSync key={`${settingsScope}:${syncRevision}`} account={selectedAccount} integration={showMoEngage ? 'moengage' : selectedChannel} />
         )}
         {showMoEngage ? (
@@ -1043,187 +1019,7 @@ export default function SettingsPage() {
             </div>
           </>
         ) : isSms ? (
-          <>
-            {/* Active / Expiring Lounge Session Section */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔑 Active Karix Lounge Session</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                      Session Cookie — Refresh When Expired
-                    </span>
-                  </h4>
-                  <p className="text-[11px] text-gray-500">
-                    Browser session cookie from <code>lounge.karix.solutions</code> required for automated DLT SMS template registration.
-                  </p>
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
-                <input type="checkbox" checked={manualPortalSession} onChange={(event) => {
-                  setManualPortalSession(event.target.checked);
-                  setLoungeCookie('');
-                }} />
-                Explicitly replace this account’s Lounge cookie manually
-              </label>
-              <p className="text-[11px] text-gray-500">Lounge cookies are not SMS API/encryption keys and are not captured by Auth Sync. Leave this off to preserve the saved cookie.</p>
-              {manualPortalSession && (
-
-              <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
-                <label htmlFor="sms_lounge_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Karix Lounge Session Cookie ({envPrefix}_KARIX_LOUNGE_COOKIE)
-                </label>
-                <input
-                  id="sms_lounge_cookie"
-                  type="password"
-                  value={loungeCookie}
-                  onChange={(e) => setLoungeCookie(e.target.value)}
-                  placeholder="Paste PHPSESSID=... cookie from lounge.karix.solutions DevTools"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
-                />
-                <p className="text-[11px] text-gray-400 mt-1">
-                  Session cookie from browser when logged in to <code>lounge.karix.solutions</code>.
-                </p>
-              </div>
-              )}
-            </div>
-
-            {/* Permanent SMS Identifiers (Pre-Configured) */}
-            <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔒 Permanent SMS Identifiers &amp; API Key</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                      One-time setup
-                    </span>
-                  </h4>
-                  <p className="text-[11px] text-gray-500">
-                    One-time provider setup: existing SMS Access Key, encryption key, Sender ID, telecom username, and DLT Entity ID for {accountTitle}. The extension cannot generate static keys. Blank secret fields preserve saved values.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setEditPermanent((prev) => !prev)}
-                  className="px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
-                >
-                  {editPermanent ? 'Done' : '✏️ Override'}
-                </button>
-              </div>
-
-              {!editPermanent ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">SMS Access Key</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
-                      {smsKey ? 'New value entered' : 'Saved value not displayed'}
-                    </div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-managed API key</div>
-                  </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Sender ID Header</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsSenderId || 'Not configured'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured sender header</div>
-                  </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">SMS Username</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{smsUsername || 'Not configured'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Telecom account</div>
-                  </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5">{entityId || 'Not configured'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                  <div className="sm:col-span-2">
-                    <label htmlFor="sms_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      Permanent Karix SMS Access Key ({envPrefix}_SMS_KEY)
-                    </label>
-                    <input
-                      id="sms_key"
-                      type="password"
-                      value={smsKey}
-                      onChange={(e) => setSmsKey(e.target.value)}
-                      placeholder="e.g. ZOucgqXGgGSfKfNWqQdYJA=="
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="sms_sender_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      Sender ID Header
-                    </label>
-                    <input
-                      id="sms_sender_id"
-                      type="text"
-                      value={smsSenderId}
-                      onChange={(e) => setSmsSenderId(e.target.value)}
-                      placeholder="e.g. BAJAJF"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="sms_username" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      SMS Username
-                    </label>
-                    <input
-                      id="sms_username"
-                      type="text"
-                      value={smsUsername}
-                      onChange={(e) => setSmsUsername(e.target.value)}
-                      placeholder="e.g. bajaj_sms_prod"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="sms_encryption_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      AES-256 PII Key
-                    </label>
-                    <input
-                      id="sms_encryption_key"
-                      type="password"
-                      value={smsEncryptionKey}
-                      onChange={(e) => setSmsEncryptionKey(e.target.value)}
-                      placeholder="Base64 AES key"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="sms_dlr_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                      DLR Webhook Secret
-                    </label>
-                    <input
-                      id="sms_dlr_auth_token"
-                      type="password"
-                      value={smsDlrAuthToken}
-                      onChange={(e) => setSmsDlrAuthToken(e.target.value)}
-                      placeholder="Webhook secret"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Webhook Configuration Guide */}
-            <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-xl space-y-2">
-              <div className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
-                <span>📡</span> Karix Webhook Callback URLs (Configure in Karix Portal)
-              </div>
-              <div className="space-y-1.5 text-[11px] text-purple-800">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 p-2 bg-white/80 rounded-lg border border-purple-100 font-mono">
-                  <span className="text-purple-600 font-semibold">Delivery Reports (DLR):</span>
-                  <span className="select-all text-gray-800">https://&lt;your-domain&gt;/api/sms/dlr</span>
-                </div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 p-2 bg-white/80 rounded-lg border border-purple-100 font-mono">
-                  <span className="text-purple-600 font-semibold">Click Tracking:</span>
-                  <span className="select-all text-gray-800">https://&lt;your-domain&gt;/api/sms/click</span>
-                </div>
-              </div>
-            </div>
-          </>
+          <SmsDltSessionForm key={settingsScope} account={selectedAccount} onDirty={setSmsSessionDirty} />
         ) : (
           <>
             {/* RCS requests use bearer authentication, not the legacy Lounge cookie. */}
@@ -1403,7 +1199,7 @@ export default function SettingsPage() {
         )}
 
         {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
+        {!isSms && <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
           <div className="text-[11px] text-gray-400">
             Current operator: <span className="font-semibold text-gray-600">{currentOperator}</span>
           </div>
@@ -1449,7 +1245,7 @@ export default function SettingsPage() {
               )}
             </button>
           </div>
-        </div>
+        </div>}
           </>
         )}
       </div>

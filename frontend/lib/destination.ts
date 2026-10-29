@@ -1,4 +1,4 @@
-import type { Channel } from './api';
+import type { AccountItem, Channel } from './api';
 
 const ACCOUNT_LABELS: Record<string, string> = {
   bajaj: 'Bajaj Finserv', apparel: 'Apparel', tata: 'Tata Capital',
@@ -16,6 +16,9 @@ export function destinationLabel(account: string, channel: Channel, fallback?: s
   return account === 'all' ? `${name} · Overview` : `${name} · ${CHANNEL_LABELS[channel]}`;
 }
 
-export function destinationChannels(account: string): Channel[] {
-  return account === 'apparel' ? ['rcs'] : ['whatsapp', 'rcs', 'sms'];
+export function destinationChannels(account: string, accounts: AccountItem[] = []): Channel[] {
+  if (account === 'tata') return ['sms'];
+  if (account === 'apparel') return ['rcs'];
+  const configured = accounts.find((item) => item.id === account)?.channels;
+  return configured ? configured.filter((channel): channel is Channel => channel === 'whatsapp' || channel === 'rcs' || channel === 'sms') : ['whatsapp', 'rcs', 'sms'];
 }

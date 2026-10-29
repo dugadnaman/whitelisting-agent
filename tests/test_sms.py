@@ -477,13 +477,6 @@ class TestSmsApiEndpoints(unittest.TestCase):
         self.assertEqual(data["status"], "OK")
         self.assertEqual(data["mobile_number"], "919876543210")
 
-    def test_sample_csv_for_sms(self):
-        """Test downloading sample CSV for channel=sms."""
-        resp = self.client.get("/api/sample-csv?channel=sms", headers=self.auth_headers)
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("text/csv", resp.headers.get("content-type", ""))
-        self.assertIn("dest,text,send", resp.text)
-
     @patch("api.send_sms")
     def test_sms_send_requires_authenticated_account_access(self, mock_send):
         payload = {
