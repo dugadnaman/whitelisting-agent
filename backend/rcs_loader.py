@@ -3,6 +3,8 @@ Input loader for Karix RCS Bot Builder & DLT templates.
 
 Turns raw rows (CSV, XLSX, JSON) into validated RcsTemplateSubmission objects.
 Supports text messages, rich cards, suggestions (URL, Reply, Dialer), and variables.
+Structured client briefs use their own header-bearing worksheets, retaining source
+sheet/row, explicit routing, numbered cards/actions, and row-local media.
 """
 
 import csv
@@ -16,6 +18,7 @@ from cta import ensure_dynamic_cta_url
 from rcs_config import _account_prefix, get_rcs_bot_id, get_rcs_entity_id, get_rcs_esmeaddr
 from rcs_models import RcsTemplateSubmission
 
+from client_brief import read_client_brief_rows
 logger = logging.getLogger(__name__)
 
 
@@ -417,7 +420,7 @@ def check_rcs_image_aspect_ratio(
             return False, "Empty image data", (0, 0), 0.0
         return False, f"Invalid or unreadable image data ({exc})", (0, 0), 0.0
 
-def _extract_images_spatially(path: str, workbook=None) -> dict[int, list[tuple[str, bytes]]]:
+def _extract_images_spatially(path: str, workbook=None, sheet_name: str | None = None) -> dict[int, list[tuple[str, bytes]]]:
     """
     Extract embedded images from an Excel (.xlsx) file, mapping each image
     to its exact (row, col) cell coordinates in the worksheet.
@@ -431,7 +434,8 @@ def _extract_images_spatially(path: str, workbook=None) -> dict[int, list[tuple[
     images_by_row: dict[int, list[tuple[int, str, bytes]]] = collections.defaultdict(list)
     wb = workbook if workbook is not None else openpyxl.load_workbook(path, data_only=True)
     try:
-        for idx, img in enumerate(getattr(wb.active, "_images", [])):
+        sheet = wb[sheet_name] if sheet_name is not None else wb.active
+        for idx, img in enumerate(getattr(sheet, "_images", [])):
             anchor_from = getattr(img.anchor, "_from", None)
             if anchor_from:
                 r = anchor_from.row + 1
@@ -548,6 +552,167 @@ def _upload_and_bind_rcs_images(
                 target.file_name = uploaded[data]
 
 
+def _brief_blocks(value: str, label: str) -> dict[int, str] | None:
+    """Split explicit headings while preserving inner line breaks."""
+    pattern = re.compile(rf"(?im)^[ \t]*{label}[ \t]+(\d+)[ \t]*(?::[ \t]*-?|-[ \t]*:?)?[ \t]*")
+    matches = list(pattern.finditer(value or ""))
+    if not matches:
+        return None
+    if value[:matches[0].start()].strip():
+        raise ValueError(f"Ambiguous text before {label} 1")
+    result = {}
+    for index, match in enumerate(matches):
+        number = int(match.group(1))
+        if number in result:
+            raise ValueError(f"Duplicate {label} {number}")
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(value)
+        result[number] = value[match.end():end].strip()
+    if sorted(result) != list(range(1, len(result) + 1)):
+        raise ValueError(f"{label} numbers must be consecutive starting at 1")
+    return result
+
+
+def _brief_actions(value: str, count: int, label: str) -> dict[int, dict[int, str]]:
+    """Legacy Button N maps to card N; Card N / Button M maps nested actions."""
+    value = (value or "").strip()
+    if not value:
+        return {number: {} for number in range(1, count + 1)}
+    pattern = re.compile(r"(?im)^[ \t]*Card[ \t]+(\d+)[ \t]*/[ \t]*Button[ \t]+(\d+)[ \t]*(?::[ \t]*-?|-[ \t]*:?)?[ \t]*")
+    flat = list(pattern.finditer(value))
+    if flat:
+        if value[:flat[0].start()].strip():
+            raise ValueError(f"Ambiguous {label} before first card/button")
+        result = {}
+        for index, match in enumerate(flat):
+            card, button = map(int, match.groups())
+            end = flat[index + 1].start() if index + 1 < len(flat) else len(value)
+            buttons = result.setdefault(card, {})
+            if button in buttons:
+                raise ValueError(f"Duplicate Card {card} / Button {button}")
+            buttons[button] = value[match.end():end].strip()
+        if sorted(result) != list(range(1, count + 1)) or any(sorted(buttons) != list(range(1, len(buttons) + 1)) for buttons in result.values()):
+            raise ValueError(f"{label} card/button counts are contradictory")
+        return result
+    cards = _brief_blocks(value, "Card")
+    if cards is not None:
+        if len(cards) != count:
+            raise ValueError(f"{label} card count does not match carousel")
+        return {number: _brief_blocks(text, "Button") or {1: text} for number, text in cards.items()}
+    buttons = _brief_blocks(value, "Button")
+    if buttons is not None:
+        if count == 1:
+            return {1: buttons}
+        if len(buttons) != count:
+            raise ValueError(f"{label} button count does not match carousel")
+        return {number: {1: text} for number, text in buttons.items()}
+    if count == 1:
+        return {1: {1: value}}
+    raise ValueError(f"Ambiguous {label}: use explicit Card N / Button M headings")
+
+
+def _brief_suggestions(row: dict, count: int) -> dict[int, list[dict]]:
+    texts = _brief_actions(row.get("button_text", ""), count, "button text")
+    fields = {}
+    for key in ("button_type", "button_url"):
+        value = row.get(key, "").strip()
+        explicit = bool(re.search(r"(?im)^[ \t]*(?:Card|Button)[ \t]+\d+", value))
+        fields[key] = (_brief_actions(value, count, key), False) if explicit else (value, True)
+    output = {}
+    for card, buttons in texts.items():
+        suggestions = []
+        if not buttons and any(
+            scalar and mapping.strip().lower() not in ("", "na", "n/a")
+            for mapping, scalar in fields.values()
+        ):
+            raise ValueError(f"Card {card} action requires explicit button text")
+        for key, (mapping, scalar) in fields.items():
+            if not scalar and set(mapping[card]) != set(buttons):
+                raise ValueError(f"{key} button count does not match button text for Card {card}")
+        for button, text in buttons.items():
+            action = {"button_text": text}
+            for key, (mapping, scalar) in fields.items():
+                action[key] = mapping if scalar else mapping[card][button]
+            kind = action["button_type"].strip().lower()
+            action["button_type"] = {
+                "website (rcs)": "URL", "url action (rcs)": "URL",
+                "reply (rcs)": "REPLY", "suggested reply (rcs)": "REPLY",
+                "na": "", "n/a": "",
+            }.get(kind, action["button_type"])
+            suggestions.extend(_build_suggestions_from_row(action))
+        output[card] = suggestions
+    return output
+
+
+def _brief_rcs_row(row: dict) -> dict:
+    import hashlib
+
+    result = dict(row)
+    if row.get("account") and row.get("client") and row["account"].strip().lower() != row["client"].strip().lower():
+        raise ValueError("Contradictory explicit client and account")
+    if row.get("account"):
+        result["client"] = row["account"]
+    if not any(row.get(key, "").strip() for key in ("template_name", "campaign_name")):
+        digest = hashlib.sha256(json.dumps(row, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:10]
+        sheet = re.sub(r"[^a-z0-9]", "_", row["sheet"].lower()).strip("_")[:6] or "sheet"
+        result["template_name"] = f"{sheet}_{row['excel_row']}_{digest}"[:25]
+    kind = row.get("header_type", "").strip().lower()
+    result["template_type"] = kind if kind in ("carousel", "richcard") else ""
+    if kind == "carousel":
+        titles = _brief_blocks(row.get("card_title", ""), "Card")
+        bodies = _brief_blocks(row.get("body", ""), "Card")
+        if not titles or not bodies or titles.keys() != bodies.keys():
+            raise ValueError("Carousel title/body card counts must match explicit Card N headings")
+        actions = _brief_suggestions(row, len(titles))
+        media_text = row.get("image_url", "").strip()
+        media = _brief_blocks(media_text, "Card") if media_text else {}
+        if media_text and (media is None or media.keys() != titles.keys()):
+            raise ValueError("Carousel media must map explicitly to every Card N; a single asset cannot be reused")
+        result["carousel_cards"] = [
+            {"cardTitle": titles[number], "cardDescription": bodies[number],
+             "mediaUrl": media.get(number, ""), "suggestions": actions[number]}
+            for number in titles
+        ]
+    else:
+        result["suggestions"] = _brief_suggestions(row, 1)[1]
+    return result
+
+
+def _load_rcs_client_brief(path: str, records: list[dict], client: str, upload_media: bool) -> list[RcsTemplateSubmission]:
+    import openpyxl
+
+    submissions = []
+    # Validate all routing before media processing can upload anything.
+    for row in records:
+        if row["channel"].strip().lower() != "rcs":
+            continue
+        try:
+            sub = _row_to_rcs_submission(_brief_rcs_row(row), client=client, fallback_idx=row["excel_row"])
+        except ValueError as exc:
+            raise ValueError(f"{row['source_ref']}: {exc}") from exc
+        sub._excel_row = row["excel_row"]
+        sub._excel_sheet = row["sheet"]
+        submissions.append(sub)
+    workbook = openpyxl.load_workbook(path, data_only=True)
+    try:
+        for sheet_name in dict.fromkeys(sub._excel_sheet for sub in submissions):
+            images = _extract_images_spatially(path, workbook=workbook, sheet_name=sheet_name)
+            sheet_subs = [sub for sub in submissions if sub._excel_sheet == sheet_name]
+            for sub in sheet_subs:
+                row_images = images.get(sub._excel_row, [])
+                targets = sub.carousel_cards if sub.template_type == "carousel" else [sub] if sub.template_type == "richcard" else []
+                # Partial sets do not identify individual cards unambiguously.
+                if row_images and len(row_images) != len(targets):
+                    logger.warning(
+                        "%s: %d embedded images cannot map unambiguously to %d media targets; leaving media missing",
+                        sub.source_ref, len(row_images), len(targets),
+                    )
+                    images.pop(sub._excel_row, None)
+            _upload_and_bind_rcs_images([], sheet_subs, client, spatial_images=images, upload_now=upload_media)
+    finally:
+        workbook.close()
+    return submissions
+
+
 def load_rcs_from_excel(
     path: str,
     client: str = "tata",
@@ -555,6 +720,10 @@ def load_rcs_from_excel(
 ) -> list[RcsTemplateSubmission]:
     """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
     import openpyxl
+
+    brief_rows = read_client_brief_rows(path)
+    if brief_rows is not None:
+        return _load_rcs_client_brief(path, brief_rows, client, upload_media)
 
     wb = openpyxl.load_workbook(path, data_only=True)
     try:

@@ -1420,16 +1420,18 @@ def _explicit_submission_destination(account: str, channel: str, current_user: d
 
 def _validate_upload_destination(path: str, suffix: str, account: str, channel: str) -> None:
     """Reject explicit spreadsheet routing fields, including ones a channel loader ignores."""
-    if channel == "sms":
-        # DLT's loader validates every row's ownership, including legacy XLS files.
-        return
+    channel_aliases = {"wa": "whatsapp", "whatsapp": "whatsapp", "rcs": "rcs", "sms": "sms"}
     import csv
 
-    def validate(rows):
+    def validate(rows, client_brief=False):
         expected_waba = None
+        expected_bot = None
         for index, raw in enumerate(rows, 2):
             row = {str(key).strip().lower().replace(" ", "_"): str(value).strip()
                    for key, value in raw.items() if key and value is not None}
+            if client_brief:
+                index = row.get("excel_row") or index
+                row["channel"] = channel_aliases.get(row.get("channel", "").lower(), row.get("channel", ""))
             for field in ("client", "account"):
                 if row.get(field) and row[field].lower() != account:
                     raise HTTPException(status_code=400, detail=f"Row {index}: account does not match the selected destination.")
@@ -1440,6 +1442,26 @@ def _validate_upload_destination(path: str, suffix: str, account: str, channel: 
                     expected_waba = str(get_waba_id(account) or "")
                 if row["waba_id"] != expected_waba:
                     raise HTTPException(status_code=400, detail=f"Row {index}: WABA does not match the selected account.")
+            if client_brief and channel == "rcs" and row.get("bot_id"):
+                if expected_bot is None:
+                    expected_bot = str(get_rcs_bot_id(account) or "")
+                if row["bot_id"] != expected_bot:
+                    raise HTTPException(status_code=400, detail=f"Row {index}: RCS bot ID does not match the selected account.")
+
+    if suffix == ".xlsx":
+        from client_brief import read_client_brief_rows
+
+        brief_rows = read_client_brief_rows(path)
+        if brief_rows is not None:
+            validate(
+                (row for row in brief_rows
+                 if channel_aliases.get(str(row.get("channel", "")).strip().lower()) == channel),
+                client_brief=True,
+            )
+            return
+    if channel == "sms":
+        # DLT's loader validates every row's ownership, including legacy XLS files.
+        return
 
     if suffix in (".xlsx", ".xls"):
         import openpyxl
