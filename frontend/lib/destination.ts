@@ -20,5 +20,5 @@ export function destinationChannels(account: string, accounts: AccountItem[] = [
   if (account === 'tata') return ['sms'];
   if (account === 'apparel') return ['rcs'];
   const configured = accounts.find((item) => item.id === account)?.channels;
-  return configured ? configured.filter((channel): channel is Channel => channel === 'whatsapp' || channel === 'rcs' || channel === 'sms') : ['whatsapp', 'rcs', 'sms'];
+  return configured ? configured.filter((channel): channel is Channel => channel === 'whatsapp' || channel === 'rcs' || channel === 'sms') : ['whatsapp', 'rcs'];
 }

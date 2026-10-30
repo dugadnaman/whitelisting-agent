@@ -10,6 +10,12 @@ SMS whitelisting registers **content templates**, not messages to recipients. Ch
 **Whitelisting for → Tata Capital (SMS DLT) → SMS** (`account=tata`).
 Tata's Karix WhatsApp/RCS sub-accounts and Bajaj do not inherit this connection.
 
+Tata organization admins and operators can use this destination. If an older
+selection shows “not integrated”, use **Change → Tata Capital → SMS**, not a
+Promotional/Transactional or other Karix sub-account. The picker no longer assumes
+SMS support for accounts without channel metadata; changing channels never
+silently redirects credentials or submissions to another account.
+
 1. Open **Settings → VILPOWER · SMS DLT**. Download Auth Sync **2.0.5**, unzip it,
    load the folder in Chrome's **Load unpacked**, then reload Settings.
 2. **Detect extension → Connect extension** for Tata Capital / SMS. Sign into
