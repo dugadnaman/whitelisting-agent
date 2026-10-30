@@ -484,10 +484,10 @@ def _upload_and_bind_rcs_images(
     """Preserve and validate local media, uploading only when explicitly requested.
 
     Local preview paths are not provider fileNames. Content-addressed cache names
-    avoid overwriting an earlier batch with a similarly named template.
+    avoid overwriting previews; provider uploads stay distinct for every card.
     """
     import hashlib
-    from rcs_client import upload_rcs_media
+    from rcs_client import _validate_rcs_carousel_media_names, upload_rcs_media
 
     c = client.strip().lower()
     _account_prefix(c)
@@ -495,11 +495,14 @@ def _upload_and_bind_rcs_images(
         if sub.client.strip().lower() != c:
             raise ValueError("RCS media account does not match the selected account")
     if not raw_media and not spatial_images:
+        if upload_now:
+            for sub in subs:
+                if sub.template_type == "carousel":
+                    _validate_rcs_carousel_media_names(sub.carousel_cards)
         return
     media_cache_dir = Path("media_cache")
     media_cache_dir.mkdir(parents=True, exist_ok=True)
     public_base = (os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_APP_URL") or "").rstrip("/")
-    uploaded = {}
     inspected = {}
     media_cursor = 0
     bindings = []
@@ -544,12 +547,15 @@ def _upload_and_bind_rcs_images(
             bindings.append((sub, target, fname, data))
     for sub, target, fname, data in bindings:
         if upload_now and not sub.aspect_ratio_blocked:
-            if data not in uploaded:
-                uploaded[data] = upload_rcs_media(data, filename=fname, client=c)
+            file_name = upload_rcs_media(data, filename=fname, client=c)
             if isinstance(target, dict):
-                target["fileName"] = uploaded[data]
+                target["fileName"] = file_name
             else:
-                target.file_name = uploaded[data]
+                target.file_name = file_name
+    if upload_now:
+        for sub in subs:
+            if sub.template_type == "carousel" and not sub.aspect_ratio_blocked:
+                _validate_rcs_carousel_media_names(sub.carousel_cards)
 
 
 def _brief_blocks(value: str, label: str) -> dict[int, str] | None:

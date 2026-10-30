@@ -8,6 +8,7 @@ POST https://rcsgui.karix.solutions/api/rcstemplate/save
 import os
 import re
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import requests
 
@@ -155,7 +156,7 @@ class RcsAuthenticationRefused(RuntimeError):
 def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str = "tata") -> str:
     """
     Upload a binary image or video to Karix RCS media storage (gRBM).
-    Returns the generated fileName string from Karix.
+    Returns Karix's fileName; every upload uses a distinct multipart filename.
     """
     import io
 
@@ -190,6 +191,8 @@ def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str
     else:
         mime_type = "image/png"
         clean_filename += ".png"
+    stem, extension = os.path.splitext(clean_filename)
+    clean_filename = f"{stem}_{uuid4().hex}{extension}"
 
     resp = requests.post(
         KARIX_RCS_MEDIA_UPLOAD_URL,
@@ -218,6 +221,14 @@ def upload_rcs_media(image_data: bytes, filename: str = "image.png", client: str
     if file_name is None:
         raise RuntimeError("RCS media upload response missing fileName")
     return file_name
+
+
+def _validate_rcs_carousel_media_names(cards: list[dict]) -> None:
+    """Karix forbids a provider fileName appearing on multiple carousel cards."""
+    names = [card.get("fileName") or card.get("file_name") for card in cards]
+    names = [name for name in names if name]
+    if len(names) != len(set(names)):
+        raise ValueError("RCS carousel cards require unique provider fileNames; original image bytes are needed to upload duplicate media separately")
 
 
 def _extract_and_number_rcs_variables(text: str, start_index: int = 1) -> tuple[str, list[str], int]:
@@ -469,9 +480,11 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str | None = Non
         result.bot_id = data_payload["viTemplate"]["botId"]
         headers = get_rcs_auth_headers(c)
         from rcs_loader import check_rcs_image_aspect_ratio
-        images = [(payload.image_bytes, payload.file_name, data_payload["viTemplate"].get("standaloneCard"), payload)] if payload.image_bytes else []
+        entries = [data_payload["viTemplate"].get("standaloneCard")]
+        images = [(payload.image_bytes, payload.file_name, entries[0], payload)] if payload.image_bytes else []
         if data_payload["viTemplate"]["type"] == "carousel":
-            images = [(card.get("image_bytes"), card.get("fileName"), entry, card) for card, entry in zip(payload.carousel_cards, data_payload["viTemplate"]["carouselCard"], strict=True) if card.get("image_bytes")]
+            entries = data_payload["viTemplate"]["carouselCard"]
+            images = [(card.get("image_bytes"), entry.get("fileName"), entry, card) for card, entry in zip(payload.carousel_cards, entries, strict=True) if card.get("image_bytes")]
         for image, _, entry, _ in images:
             if entry is None:
                 raise ValueError("Embedded RCS media requires a rich card or carousel")
@@ -482,19 +495,23 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str | None = Non
                 result.approval_status = "blocked_aspect_ratio"
                 result.error = reason or f"RCS media exceeds {maximum} bytes"
                 return result
-        uploaded = {}
+        image_entries = {id(entry) for _, _, entry, _ in images}
+        used_names = {entry["fileName"] for entry in entries if entry and entry.get("fileName") and id(entry) not in image_entries}
         for image, existing, entry, original in images:
-            if not existing:
+            if not existing or existing in used_names:
                 source_name = (original.get("image_filename") if isinstance(original, dict) else original.image_filename) or "image.png"
-                if image not in uploaded:
-                    uploaded[image] = upload_rcs_media(image, filename=source_name, client=c)
-                file_name = uploaded[image]
+                file_name = upload_rcs_media(image, filename=source_name, client=c)
+                if file_name in used_names:
+                    raise ValueError("RCS media upload returned a duplicate provider fileName")
                 entry.pop("mediaUrl", None)
                 entry["fileName"] = file_name
                 if isinstance(original, dict):
                     original["fileName"] = file_name
                 else:
                     original.file_name = file_name
+            used_names.add(entry["fileName"])
+        if data_payload["viTemplate"]["type"] == "carousel":
+            _validate_rcs_carousel_media_names(entries)
     except (OSError, ValueError, TypeError, RuntimeError, requests.RequestException) as exc:
         result.auth_refused = isinstance(exc, RcsAuthenticationRefused)
         result.error = f"RCS submission not sent: {exc}"

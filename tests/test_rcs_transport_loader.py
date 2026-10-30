@@ -3,9 +3,12 @@ import csv
 import io
 import json
 import threading
+from email import policy
+from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import pytest
 import requests
@@ -48,10 +51,11 @@ def provider(monkeypatch):
     class Handler(BaseHTTPRequestHandler):
         routes = {
             "/save": (200, {"status": "success", "templateId": "local-provider-ref"}),
-            "/upload": (200, {"fileName": "local-provider-media.png"}),
+            "/upload": (200, None),
             "/inventory": (200, {"templateInfo": []}),
         }
         calls = []
+        media = []
         def do_GET(self):
             self.send_response(405)
             self.end_headers()
@@ -61,6 +65,20 @@ def provider(monkeypatch):
             body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
             self.calls.append((self.path, body, dict(self.headers)))
             status, payload = self.routes[self.path]
+            if self.path == "/upload":
+                message = BytesParser(policy=policy.default).parsebytes(
+                    b"Content-Type: " + self.headers["Content-Type"].encode() + b"\r\n\r\n" + body
+                )
+                part = next(part for part in message.iter_parts() if part.get_param("name", header="content-disposition") == "file")
+                filename, content = part.get_filename(), part.get_payload(decode=True)
+                self.media.append((filename, content))
+                if payload is None:
+                    payload = {"fileName": filename}
+            elif self.path == "/save":
+                cards = json.loads(body)["viTemplate"].get("carouselCard", [])
+                names = [card["fileName"] for card in cards if card.get("fileName")]
+                if len(names) != len(set(names)):
+                    status, payload = 400, {"error": "Media files provided in form-data must have unique names"}
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -339,10 +357,14 @@ def test_truncated_image_header_is_not_a_valid_image(provider):
     assert not provider.calls
 
 
-def test_excel_embedded_media_uploads_once_not_a_local_provider_filename(provider, tmp_path):
+@pytest.mark.parametrize("upload_media", [False, True])
+def test_excel_identical_carousel_media_has_distinct_provider_filenames(provider, tmp_path, monkeypatch, upload_media):
     import openpyxl
     from openpyxl.drawing.image import Image as SheetImage
 
+    identifiers = [UUID(int=1), UUID(int=2)]
+    upload_ids = iter(identifiers)
+    monkeypatch.setattr(rcs_client, "uuid4", lambda: next(upload_ids))
     with SAMPLE.open(newline="") as stream:
         sample_rows = list(csv.DictReader(stream))
     row = sample_rows[0]
@@ -355,18 +377,67 @@ def test_excel_embedded_media_uploads_once_not_a_local_provider_filename(provide
         sheet.add_image(SheetImage(io.BytesIO(image_bytes())), cell)
     path = tmp_path / "actual_sample_embedded.xlsx"
     workbook.save(path)
-    submissions = load_rcs_from_excel(str(path), client="tcl_promo", upload_media=False)
+    submissions = load_rcs_from_excel(str(path), client="tcl_promo", upload_media=upload_media)
     submission = submissions[0]
     assert len(submission.carousel_cards) == 2
-    assert not provider.calls
-    assert all(not card.get("fileName") for card in submission.carousel_cards)
+    assert [call[0] for call in provider.calls] == (["/upload", "/upload"] if upload_media else [])
+    assert all(bool(card.get("fileName")) is upload_media for card in submission.carousel_cards)
     assert all(card["image_bytes"] == image_bytes() for card in submission.carousel_cards)
     result = rcs_client.submit_rcs_template(submission)
     assert result.status == RcsSubmissionStatus.SUBMITTED
-    assert [call[0] for call in provider.calls] == ["/upload", "/save"]
+    assert [call[0] for call in provider.calls] == ["/upload", "/upload", "/save"]
+    assert [content for _, content in provider.media] == [image_bytes(), image_bytes()]
+    uploaded_names = [name for name, _ in provider.media]
+    assert len(set(uploaded_names)) == 2
+    assert all(name.endswith(f"_{identifier.hex}.png") for name, identifier in zip(uploaded_names, identifiers, strict=True))
     save = json.loads(provider.calls[-1][1])
-    assert all(card["fileName"] == "local-provider-media.png" for card in save["viTemplate"]["carouselCard"])
+    assert [card["fileName"] for card in save["viTemplate"]["carouselCard"]] == uploaded_names
     assert all("mediaUrl" not in card for card in save["viTemplate"]["carouselCard"])
+
+
+@pytest.mark.parametrize("image_cards", [(), (0,), (1,), (0, 1)])
+@pytest.mark.parametrize("name_key", ["fileName", "file_name"])
+def test_duplicate_existing_carousel_filenames_require_separate_media(provider, image_cards, name_key):
+    cards = [{name_key: "existing-provider.png", "cardTitle": str(index)} for index in range(2)]
+    for index in image_cards:
+        cards[index].update(image_bytes=image_bytes(), image_filename="unchanged.png")
+    sub = RcsTemplateSubmission(
+        template_name="existing_media", template_type="carousel", client="tcl_promo", carousel_cards=cards,
+    )
+    result = rcs_client.submit_rcs_template(sub)
+    if not image_cards:
+        with pytest.raises(ValueError, match="unique provider fileNames"):
+            _upload_and_bind_rcs_images([], [sub], client="tcl_promo")
+        assert result.status == RcsSubmissionStatus.FAILED
+        assert "unique provider fileNames" in result.error
+        assert not provider.calls
+        return
+    assert result.status == RcsSubmissionStatus.SUBMITTED
+    assert [call[0] for call in provider.calls] == ["/upload", "/save"]
+    assert provider.media[0][1] == image_bytes()
+    emitted = json.loads(provider.calls[-1][1])["viTemplate"]["carouselCard"]
+    assert {card["fileName"] for card in emitted} == {"existing-provider.png", provider.media[0][0]}
+    assert all(sub.carousel_cards[index]["image_bytes"] == image_bytes() for index in image_cards)
+
+
+@pytest.mark.parametrize("upload_now", [False, True])
+def test_provider_duplicate_media_response_never_reaches_save(provider, upload_now):
+    provider.routes["/upload"] = (200, {"fileName": "reused-provider-name.png"})
+    sub = RcsTemplateSubmission(
+        template_name="duplicate_response", template_type="carousel", client="tcl_promo",
+        carousel_cards=[{"cardTitle": "First"}, {"cardTitle": "Second"}],
+    )
+    media = [("same.png", image_bytes()), ("same.png", image_bytes())]
+    if upload_now:
+        with pytest.raises(ValueError, match="unique provider fileNames"):
+            _upload_and_bind_rcs_images(media, [sub], client="tcl_promo")
+    else:
+        _upload_and_bind_rcs_images(media, [sub], client="tcl_promo", upload_now=False)
+        result = rcs_client.submit_rcs_template(sub)
+        assert result.status == RcsSubmissionStatus.FAILED
+        assert "duplicate provider fileName" in result.error
+    assert [call[0] for call in provider.calls] == ["/upload", "/upload"]
+    assert [content for _, content in provider.media] == [image_bytes(), image_bytes()]
 
 
 def test_cached_previews_do_not_collide_for_same_template_name():
