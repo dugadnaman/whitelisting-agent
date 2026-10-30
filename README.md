@@ -27,6 +27,13 @@ Tata's Karix WhatsApp/RCS sub-accounts and Bajaj do not inherit this connection.
    `template_type`, `category_id`, `header_id`, `header`, `brand_id`,
    `message_type`, `sample_message`, `service_type`. No phone numbers are needed.
    Choose missing category/header/type fields from live portal options.
+   **Native client brief workbooks:** Alternatively, upload multi-sheet `.xlsx` or `.xls`
+   campaign briefs directly under **Import native client brief**. The parser extracts
+   only SMS / SMS-retargeting rows across personas, product blocks and language columns;
+   skips planner and non-SMS channels; detects script mismatches; and presents each
+   candidate with its sheet/cell provenance. Select between 1 and 500 candidates, then
+   decide every placeholder as literal text or a typed variable with explicit samples
+   before confirming registration.
 5. Alternatively, in **Jira Briefs → SMS**, select drafts and choose **Review
    selected SMS for DLT whitelisting**. The same DLT editor and confirmation
    are used; edits are retained in the current tab until cleared or the

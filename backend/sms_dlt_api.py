@@ -1,9 +1,11 @@
 """Authenticated Tata-only VILPOWER session and draft review endpoints."""
 
 import asyncio
+import tempfile
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 
 from activity_tracker import log_activity
@@ -41,6 +43,39 @@ class SubmitBatch(DraftBatch):
     expected_channel: Literal["sms"]
     skip_duplicates: bool = True
     user: str | None = None
+
+
+@router.post("/brief")
+async def import_brief(
+    file: UploadFile = File(...),
+    account: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Extract client copy for explicit source selection; never access the portal."""
+    try:
+        _authorize(account, current_user)
+        filename = Path((file.filename or "").replace("\\", "/")).name
+        suffix = Path(filename).suffix.lower()
+        if suffix not in {".xlsx", ".xls"}:
+            raise HTTPException(status_code=400, detail="Upload a client brief as XLSX or XLS.")
+        from sms_brief import parse_brief
+
+        with tempfile.TemporaryDirectory(prefix="sms-brief-") as directory:
+            path = Path(directory) / ("brief" + suffix)
+            size = 0
+            with path.open("wb") as target:
+                while chunk := await file.read(1024 * 1024):
+                    size += len(chunk)
+                    if size > 20 * 1024 * 1024:
+                        raise HTTPException(status_code=413, detail="Client briefs must not exceed 20 MiB.")
+                    target.write(chunk)
+            if not size:
+                raise HTTPException(status_code=400, detail="Uploaded brief is empty.")
+            return await asyncio.to_thread(parse_brief, str(path), filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    finally:
+        await file.close()
 
 
 @router.get("/session")

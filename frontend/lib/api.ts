@@ -800,6 +800,53 @@ export function getSampleCsvUrl(channel: Channel = "whatsapp"): string {
   return getApiUrl(`/api/sample-csv?channel=${channel}`);
 }
 
+export type SmsBriefSource = {
+  sheet: string;
+  cell: string;
+  campaign: string;
+  segment: string;
+  language: string;
+};
+export type SmsBriefDecision = {
+  token: string;
+  kind: '' | 'literal' | 'num' | 'alp' | 'urg' | 'uro' | 'cbn' | 'eml';
+  sample: string;
+};
+export type SmsBriefReview = {
+  original_text: string;
+  sources: SmsBriefSource[];
+  warnings: string[];
+  variables: SmsBriefDecision[];
+  acknowledged: boolean;
+};
+export type SmsBriefCandidate = SmsBriefSource & {
+  id: string;
+  text: string;
+  scope: string;
+  source_kind: string;
+  suggested_template_name: string;
+  suggested_template_type: '' | '1' | '2' | '3';
+  warnings: string[];
+  variables: string[];
+};
+export type SmsBriefExtraction = {
+  filename: string;
+  sheets: { name: string; candidate_count: number }[];
+  warnings: string[];
+  candidates: SmsBriefCandidate[];
+};
+export async function parseSmsDltBrief(file: File, account: string): Promise<SmsBriefExtraction> {
+  if (account !== 'tata') throw new Error('Client brief import is supported only for Tata Capital.');
+  const body = new FormData();
+  body.append('file', file);
+  const qs = new URLSearchParams({ account });
+  const res = await fetchWithRetry(getApiUrl(`/api/sms-dlt/brief?${qs}`), {
+    method: 'POST', body,
+  }, 0, 800, 180000);
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return res.json();
+}
+
 export type SmsDltDraft = {
   template_name: string;
   text: string;
@@ -811,6 +858,9 @@ export type SmsDltDraft = {
   message_type: '' | '1' | '2';
   sample_message: string;
   service_type?: string;
+  source_ref?: string;
+  source_file?: string;
+  brief?: SmsBriefReview;
 };
 export type SmsDltOption = { id: string; text: string };
 export type SmsDltOptions = {

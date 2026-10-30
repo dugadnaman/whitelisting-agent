@@ -64,6 +64,13 @@ def draft_from_row(row: dict, account: str = "tata") -> dict:
     draft = {key: str(row[key]) if row.get(key) is not None else "" for key in DRAFT_FIELDS}
     draft["text"] = str(next((row[key] for key in ("text", "body", "message", "template_message")
                               if row.get(key) is not None), ""))
+    for field in ("source_ref", "source_file"):
+        if field in row:
+            if not isinstance(row[field], str):
+                raise ValueError(f"{field} must be text.")
+            draft[field] = row[field]
+    if "brief" in row:
+        draft["brief"] = row["brief"]
     draft["template_name"] = draft["template_name"].strip()
     draft["template_type"] = draft["template_type"] or "1"
     draft["message_type"] = draft["message_type"] or ("1" if draft["text"].isascii() else "2")
@@ -142,6 +149,10 @@ def stage_batch(rows: list[dict], account: str, user: str, filename: str, skip_d
     if not rows:
         raise ValueError("Select at least one SMS DLT template.")
     drafts = [draft_from_row(row, account) for row in rows]
+    for index, draft in enumerate(drafts, 1):
+        errors = validate_sms_template(draft)
+        if errors:
+            raise ValueError(f"Row {index} ({draft['template_name']}): {'; '.join(errors)}")
     # A failed provider read must not turn every existing template into a new registration.
     inventory = _inventory(account, commonprefix([draft["template_name"].casefold() for draft in drafts]))
     by_name = {}
@@ -150,27 +161,26 @@ def stage_batch(rows: list[dict], account: str, user: str, filename: str, skip_d
     tasks = []
     seen = {}
     for index, draft in enumerate(drafts, 1):
-        errors = validate_sms_template(draft)
-        if errors:
-            raise ValueError(f"Row {index} ({draft['template_name']}): {'; '.join(errors)}")
         key = draft["template_name"].casefold()
         candidates = by_name.get(key, [])
         exact = [item for item in candidates if item.get("template_message") == draft["text"] and item.get("header") == draft["header"]]
         exact.sort(key=lambda item: item.get("status") != "approved")
         live = exact[0] if exact else None
         payload = {**draft, "client": account, "channel": "sms", "provider": "vilpower",
-                   "source_ref": draft["template_name"], "submitted_by": user, "source_file": filename,
+                   "source_ref": draft.get("source_ref") or draft["template_name"], "submitted_by": user,
+                   "source_file": draft.get("source_file") or filename,
                    "category": {"1": "PROMOTIONAL", "2": "TRANSACTIONAL", "3": "SERVICE"}[draft["template_type"]],
                    "language": "en" if draft["message_type"] == "1" else "regional"}
         if candidates and not live:
             raise ValueError(f"Row {index}: '{draft['template_name']}' already exists with different DLT content or a different header. Use a distinct name; registered copy is never overwritten.")
-        if key in seen and seen[key] != draft:
+        fields = tuple(draft[field] for field in DRAFT_FIELDS)
+        if key in seen and seen[key] != fields:
             raise ValueError(f"Row {index}: duplicate name has different SMS DLT fields. Use a distinct name.")
         if (live and skip_duplicates) or key in seen:
             payload.update(status="DUPLICATE", approval_status=live.get("status", "unknown") if live else "unknown",
                            provider_ref_id=live.get("template_id") if live else None,
                            error="Already registered on VILPOWER." if live else "Duplicate name within this batch.")
-        seen[key] = draft
+        seen[key] = fields
         tasks.append(payload)
     return create_job_with_tasks(account, "sms", filename, user, tasks)
 

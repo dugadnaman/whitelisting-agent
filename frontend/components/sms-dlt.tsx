@@ -5,11 +5,12 @@ import { useApp } from '@/lib/context';
 import { useTabState, setTabState, clearTabState } from '@/lib/tab-state';
 import {
   fetchSmsDltSession, saveSmsDltSession, fetchSmsDltOptions, previewSmsDltDrafts,
-  submitSmsDltDrafts, previewFile, getSampleCsvUrl, fetchJob, identifyTemplates,
+  submitSmsDltDrafts, previewFile, getSampleCsvUrl, fetchJob, identifyTemplates, parseSmsDltBrief,
   type SmsDltDraft, type SmsDltOptions, type SmsDltSession, type SmsDltSubmission,
-  type TemplatePreview, type JobTask, type IdentificationReport,
+  type TemplatePreview, type JobTask, type IdentificationReport, type SmsBriefExtraction, type SmsBriefDecision,
 } from '@/lib/api';
 import { formatError } from '@/lib/format';
+import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft } from '@/lib/sms-brief';
 import KarixAuthSync from '@/components/KarixAuthSync';
 
 const inputClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs disabled:bg-gray-100';
@@ -109,9 +110,33 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
     && (!draft.brand_id || options.brands.some((option) => option.id === draft.brand_id))
     && (draft.template_type !== '3' || !options.service_types?.length || Boolean(draft.service_type && options.service_types.some((option) => option.id === draft.service_type)));
   useEffect(() => { onReady(valid, options.categories.find((option) => option.id === draft.category_id)?.text || ''); }, [valid, onReady, options.categories, draft.category_id]);
-  function update(patch: Partial<SmsDltDraft>) { onChange({ ...draft, ...patch }); }
+  function update(patch: Partial<SmsDltDraft>) { onChange(editSmsBriefDraft(draft, patch)); }
   return <fieldset disabled={disabled} className="rounded-xl border border-gray-200 p-4 space-y-3">
     <legend className="px-1 text-xs font-bold">{draft.template_name || 'Unnamed template'}</legend>
+    {draft.brief && <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
+      <p className="font-bold">Client brief provenance · {draft.source_file}</p>
+      <p className="break-words">{draft.source_ref}</p>
+      {draft.brief.sources.map((source, index) => <div key={index} className="space-y-2 border-t border-amber-200 pt-2">
+        <p className="font-semibold">{source.sheet}!{source.cell}</p>
+        <div className="grid gap-2 sm:grid-cols-3">{(['campaign', 'segment', 'language'] as const).map((field) => <label key={field} className="capitalize">{field}<input className={`${inputClass} mt-1`} value={source[field]} onChange={(event) => update({ brief: { ...draft.brief!, sources: draft.brief!.sources.map((item, idx) => idx === index ? { ...item, [field]: event.target.value } : item) } })} /></label>)}</div>
+      </div>)}
+      {draft.brief.warnings.map((warning, index) => <p key={index} className="text-amber-900">{warning}</p>)}
+      <p className="font-semibold">Immutable original client copy</p>
+      <pre className="whitespace-pre-wrap break-words font-mono">{draft.brief.original_text}</pre>
+      <p>Decide each occurrence independently. Bracketed text may be literal. Samples must be supplied by you; applying decisions changes only these occurrences, never the surrounding copy.</p>
+      {draft.brief.variables.map((decision, index) => <div key={index} className="grid gap-2 rounded border border-amber-200 p-2 sm:grid-cols-3">
+        <p className="break-words font-mono">Occurrence {index + 1}: {decision.token}</p>
+        <label>Interpretation<select className={`${inputClass} mt-1`} value={decision.kind} onChange={(event) => update({ brief: { ...draft.brief!, variables: draft.brief!.variables.map((item, idx) => idx === index ? { ...item, kind: event.target.value as SmsBriefDecision['kind'] } : item) } })}>
+          <option value="">Choose literal or variable</option><option value="literal">Keep exact literal text</option><option value="num">num · number</option><option value="alp">alp · alphanumeric text</option><option value="urg">urg · URL</option><option value="uro">uro · URL</option><option value="cbn">cbn · callback number</option><option value="eml">eml · email</option>
+        </select></label>
+        {decision.kind && decision.kind !== 'literal' && <label>Explicit sample value<input className={`${inputClass} mt-1`} value={decision.sample} onChange={(event) => update({ brief: { ...draft.brief!, variables: draft.brief!.variables.map((item, idx) => idx === index ? { ...item, sample: event.target.value } : item) } })} /></label>}
+      </div>)}
+      <button type="button" className={buttonClass} disabled={!applySmsBriefDecisions(draft.brief)} onClick={() => {
+        const generated = applySmsBriefDecisions(draft.brief!);
+        if (generated && (draft.text === draft.brief!.original_text || window.confirm('Apply decisions from the immutable original? This replaces the current edited body and sample.'))) update(generated);
+      }}>Apply occurrence decisions to body and sample</button>
+      <p>You may edit the final body and sample below. The original and every matching source remain visible; review again after any edit. Encoding is only a suggestion based on the exact original copy.</p>
+    </div>}
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="text-xs font-semibold">Template name<input className={`${inputClass} mt-1`} value={draft.template_name} onChange={(e) => update({ template_name: e.target.value })} /></label>
       <label className="text-xs font-semibold">Template type<select className={`${inputClass} mt-1`} value={draft.template_type} onChange={(e) => update({ template_type: e.target.value as SmsDltDraft['template_type'], category_id: '', header_id: '', header: '', brand_id: '', service_type: '' })}><option value="">Choose template type</option>{Object.entries(typeLabels).map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label>
@@ -124,6 +149,7 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
     <label className="block text-xs font-semibold">Exact DLT template body<textarea rows={4} className={`${inputClass} mt-1 font-mono`} value={draft.text} onChange={(e) => update({ text: e.target.value })} /></label>
     <p className="text-[11px] text-gray-500">Text is preserved exactly. Use VILPOWER typed variables only: {'{#num#}, {#alp#}, {#urg#}, {#uro#}, {#cbn#}, {#eml#}'} (maximum 15). Replace Jira/WhatsApp placeholders yourself; no normalization or grammar correction is applied.</p>
     <label className="block text-xs font-semibold">Sample message (required when the body has typed variables)<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
+    {draft.brief && <label className="flex gap-2 text-xs font-semibold"><input type="checkbox" checked={draft.brief.acknowledged} disabled={!applySmsBriefDecisions(draft.brief)} onChange={(event) => onChange({ ...draft, brief: { ...draft.brief!, acknowledged: event.target.checked } })} />I reviewed every source, campaign, language, warning and token decision, and the exact final body and explicit sample. These selected sources are intended for SMS; no month or approval status was inferred.</label>}
     {loading && <p role="status" className="text-xs text-gray-500">Loading Tata portal options…</p>}
     {error && <p role="alert" className="text-xs text-red-700">{error} <a href="/settings" className="underline">Refresh the Tata SMS portal session in Settings</a>. <button type="button" className="underline" onClick={() => setRevision((value) => value + 1)}>Retry options</button></p>}
     {!loading && !error && !valid && <p className="text-xs text-amber-800">Choose valid portal category, header and service type (if applicable) before review. Imported IDs must match current Tata options.</p>}
@@ -146,16 +172,18 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const [jobStatus, setJobStatus] = useState('');
   const [pollRevision, setPollRevision] = useState(0);
   const active = useRef(true);
+  const requestVersion = useRef(0);
   const signature = JSON.stringify(drafts);
   const scope = useRef({ account, channel, signature });
   scope.current = { account, channel, signature };
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  useEffect(() => { requestVersion.current++; setBusy(false); setReviewed(null); }, [account, channel]);
   const destinationValid = account === 'tata' && channel === 'sms';
   const reviewedCurrent = reviewed?.signature === signature;
   const hasErrors = reviewed?.previews.some((preview) => preview.compliance_warnings?.some((warning) => warning.severity === 'error'));
-  const fieldsValid = drafts.length > 0 && drafts.every((draft, index) => ready[index]
+  const fieldsValid = drafts.length > 0 && drafts.length <= 500 && drafts.every((draft, index) => ready[index]
     && draft.template_type && draft.message_type && draft.template_name.trim() && draft.text.trim()
-    && (!draft.text.includes('{#') || draft.sample_message.trim()));
+    && (!draft.text.includes('{#') || draft.sample_message.trim()) && smsBriefReady(draft));
   useEffect(() => { setConfirmed(false); }, [signature, account, channel]);
   useEffect(() => {
     if (!batch?.job_id || !destinationValid) return;
@@ -176,25 +204,27 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   async function review() {
     if (!destinationValid || !fieldsValid || busy) return;
     const requested = signature;
+    const version = ++requestVersion.current;
     setBusy(true); setError(''); setConfirmed(false);
     try {
       const previews = await previewSmsDltDrafts(account, drafts);
-      if (!active.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
+      if (!active.current || version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
       if (previews.length !== drafts.length) throw new Error('The preview did not return every draft. Nothing has been submitted.');
       setReviewed({ signature: requested, previews });
-    } catch (err) { if (active.current) setError(formatError(err)); }
-    finally { if (active.current) setBusy(false); }
+    } catch (err) { if (active.current && version === requestVersion.current) setError(formatError(err)); }
+    finally { if (active.current && version === requestVersion.current) setBusy(false); }
   }
   async function submit() {
     if (!destinationValid || !fieldsValid || !reviewedCurrent || !confirmed || hasErrors || busy || batch) return;
     const requested = signature;
+    const version = ++requestVersion.current;
     setBusy(true); setError('');
     try {
       const result = await submitSmsDltDrafts(account, drafts, user);
-      if (!active.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
+      if (!active.current || version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
       setBatch(result); setJobStatus(result.status);
-    } catch (err) { if (active.current) { setError(`${formatError(err)} Drafts are retained. If the request timed out, check History before retrying: the queue may already contain this batch.`); setConfirmed(false); } }
-    finally { if (active.current) setBusy(false); }
+    } catch (err) { if (active.current && version === requestVersion.current) { setError(`${formatError(err)} Drafts are retained. If the request timed out, check History before retrying: the queue may already contain this batch.`); setConfirmed(false); } }
+    finally { if (active.current && version === requestVersion.current) setBusy(false); }
   }
   if (!destinationValid) return <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">SMS DLT whitelisting requires the explicit Tata Capital (tata) · SMS destination. Select it in Whitelisting for. Other accounts are not integrated and cannot use Tata credentials.</p>;
   return <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
@@ -212,6 +242,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
         {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-lg border border-blue-100 bg-white p-3 text-xs">
           <p className="font-bold">{draft.template_name} · {draft.template_type ? typeLabels[draft.template_type] : ''}</p>
           <p>Header: {draft.header} (ID {draft.header_id}) · Category: {categoryLabels[index]} (ID {draft.category_id}) · Encoding: {draft.message_type === '1' ? 'ASCII' : 'Regional'}{draft.service_type ? ` · Service type: ${draft.service_type}` : ''}{draft.brand_id ? ` · Brand ID: ${draft.brand_id}` : ''}</p>
+          {draft.brief && <div className="space-y-1"><p className="font-semibold">Sources: {draft.source_file} · {draft.source_ref}</p>{draft.brief.sources.map((source, idx) => <p key={idx}>{source.sheet}!{source.cell} · Campaign: {source.campaign || 'Not specified'} · Segment: {source.segment || 'Not specified'} · Language: {source.language || 'Not specified'}</p>)}{draft.brief.warnings.map((warning, idx) => <p key={idx} className="text-amber-800">{warning}</p>)}</div>}
           <p className="font-semibold">Exact body</p><pre className="whitespace-pre-wrap break-words font-mono">{draft.text}</pre>
           <p className="font-semibold">Sample message</p><pre className="whitespace-pre-wrap break-words font-mono">{draft.sample_message || '(No variables; no sample supplied)'}</pre>
           {reviewed.previews[index]?.already_exists_on_waba && <p className="text-amber-800">Already registered; duplicate skipping is enabled.</p>}
@@ -239,12 +270,31 @@ export function SmsDltUpload() {
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useTabState('submit_sms_dlt_revision', 0);
   const [identification, setIdentification] = useTabState<IdentificationReport | null>('submit_sms_dlt_identification', null);
+  const [brief, setBrief] = useTabState<SmsBriefExtraction | null>('submit_sms_dlt_brief', null);
+  const [selectedSources, setSelectedSources] = useTabState<string[]>('submit_sms_dlt_brief_selected', []);
+  const [sheetFilter, setSheetFilter] = useTabState('submit_sms_dlt_brief_sheet', '');
+  const [scopeFilter, setScopeFilter] = useTabState('submit_sms_dlt_brief_scope', '');
+  const [campaignFilter, setCampaignFilter] = useTabState('submit_sms_dlt_brief_campaign', '');
   const scope = useRef({ account, channel });
   scope.current = { account, channel };
   const requestVersion = useRef(0);
   useEffect(() => () => { requestVersion.current++; }, []);
+  useEffect(() => { requestVersion.current++; setBusy(false); setError(''); }, [account, channel]);
+  async function uploadBrief(file: File) {
+    if (account !== 'tata' || channel !== 'sms' || busy || drafts) return;
+    const version = ++requestVersion.current;
+    setBusy(true); setError('');
+    try {
+      if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error('Choose a native .xlsx or .xls client workbook. Flat DLT files use the separate upload.');
+      if (file.size > 20 * 1024 * 1024) throw new Error('Client workbooks must be no larger than 20 MiB.');
+      const result = await parseSmsDltBrief(file, account);
+      if (version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms') return;
+      setBrief(result); setSelectedSources([]); setSheetFilter(''); setScopeFilter(''); setCampaignFilter('');
+    } catch (err) { if (version === requestVersion.current) setError(formatError(err)); }
+    finally { if (version === requestVersion.current) setBusy(false); }
+  }
   async function upload(file: File) {
-    if (account !== 'tata' || channel !== 'sms') return;
+    if (account !== 'tata' || channel !== 'sms' || busy || drafts) return;
     const version = ++requestVersion.current;
     setBusy(true); setError('');
     try {
@@ -267,11 +317,51 @@ export function SmsDltUpload() {
     } catch (err) { if (version === requestVersion.current) setError(formatError(err)); }
     finally { if (version === requestVersion.current) setBusy(false); }
   }
-  if (account !== 'tata') return <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">SMS DLT whitelisting is available only for Tata Capital (tata). Select Tata Capital · SMS in Whitelisting for. This account is not integrated; Tata credentials cannot be reused.</div>;
+  if (account !== 'tata' || channel !== 'sms') return <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">SMS DLT whitelisting is available only for Tata Capital (tata) · SMS. Select it in Whitelisting for. Other accounts are not integrated; Tata credentials cannot be reused.</div>;
   return <div className="space-y-5">
     <div className="flex flex-wrap justify-between gap-3"><div><h1 className="text-2xl font-bold">Tata SMS DLT Whitelisting</h1><p className="mt-1 text-xs text-gray-600">VILPOWER portal · exact template registration, not SMS sending</p></div><a href={getSampleCsvUrl('sms')} download className="text-xs font-semibold text-blue-700 underline">Download SMS DLT sample CSV</a></div>
     <p className="text-xs text-gray-600">Connect your <a href="/settings" className="text-blue-700 underline">Tata VILPOWER session in Settings</a>. Upload CSV or Excel with template_name and text plus any DLT fields; choose missing fields during review. No phone numbers, grammar correction, or placeholder substitution.</p>
     {!drafts && <label className="block rounded-xl border-2 border-dashed border-gray-300 bg-white p-8 text-sm font-semibold">Upload DLT CSV / Excel<input type="file" accept=".csv,.xlsx,.xls" disabled={busy} className="mt-3 block text-xs" onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ''; }} /></label>}
+    {!drafts && <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
+      <h2 className="text-sm font-bold">Import native client brief · choose SMS source candidates</h2>
+      <p className="text-xs text-gray-600">Upload the original multi-sheet .xlsx / .xls workbook without reshaping it. Extraction is offline: no portal session, registration or SMS sending. Historical and matching sources stay visible; nothing is selected automatically, and neither current month nor approval is inferred.</p>
+      <label className="block text-xs font-semibold">Upload client brief workbook<input type="file" accept=".xlsx,.xls" disabled={busy} className="mt-2 block" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadBrief(file); event.target.value = ''; }} /></label>
+      {brief && <>
+        <p className="text-xs font-semibold">Workbook: {brief.filename} · {brief.candidates.length} candidates · {selectedSources.length} selected (maximum 500)</p>
+        {brief.warnings.map((warning, index) => <p key={index} role="status" className="text-xs text-amber-900">{warning}</p>)}
+        <p className="text-xs text-gray-600">{brief.sheets.map((sheet) => `${sheet.name}: ${sheet.candidate_count}`).join(' · ')}</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="text-xs">Sheet<select className={`${inputClass} mt-1`} disabled={busy} value={sheetFilter} onChange={(event) => setSheetFilter(event.target.value)}><option value="">All sheets</option>{brief.sheets.map((sheet) => <option key={sheet.name} value={sheet.name}>{sheet.name} ({sheet.candidate_count})</option>)}</select></label>
+          <label className="text-xs">Campaign scope<select className={`${inputClass} mt-1`} disabled={busy} value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}><option value="">All scopes</option>{[...new Set(brief.candidates.map((candidate) => candidate.scope).filter(Boolean))].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+          <label className="text-xs">Campaign<select className={`${inputClass} mt-1`} disabled={busy} value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)}><option value="">All campaigns</option>{[...new Set(brief.candidates.map((candidate) => candidate.campaign).filter(Boolean))].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
+        </div>
+        <p className="text-xs text-gray-600">Filters do not change selections. Only explicitly selected, exact-body duplicates with compatible type hints are grouped; all selected references and warnings are retained.</p>
+        <button type="button" className="text-xs underline" disabled={busy || !selectedSources.length} onClick={() => setSelectedSources([])}>Clear all source selections</button>
+        <div className="max-h-[36rem] space-y-3 overflow-y-auto">
+          {brief.candidates.filter((candidate) => (!sheetFilter || candidate.sheet === sheetFilter) && (!scopeFilter || candidate.scope === scopeFilter) && (!campaignFilter || candidate.campaign === campaignFilter)).map((candidate) => <label key={candidate.id} className="flex gap-3 rounded-lg border border-gray-200 p-3 text-xs">
+            <input type="checkbox" className="mt-1" checked={selectedSources.includes(candidate.id)} disabled={busy || (selectedSources.length >= 500 && !selectedSources.includes(candidate.id))} onChange={(event) => {
+              const checked = event.target.checked;
+              setSelectedSources((previous) => checked ? (previous.includes(candidate.id) || previous.length >= 500 ? previous : [...previous, candidate.id]) : previous.filter((id) => id !== candidate.id));
+            }} />
+            <div className="min-w-0 space-y-2"><p className="font-semibold">{candidate.sheet}!{candidate.cell} · {candidate.source_kind || 'SMS candidate'}</p>
+              <p>Scope: {candidate.scope || 'Not specified'} · Campaign: {candidate.campaign || 'Not specified'} · Segment: {candidate.segment || 'Not specified'} · Language: {candidate.language || 'Not specified'}</p>
+              <p>Source template type hint: {candidate.suggested_template_type ? typeLabels[candidate.suggested_template_type] : 'None; choose explicitly during review'}</p>
+              <pre className="whitespace-pre-wrap break-words font-mono">{candidate.text}</pre>
+              {candidate.warnings.map((warning, index) => <p key={index} className="text-amber-900">{warning}</p>)}
+            </div>
+          </label>)}
+        </div>
+        <button type="button" className={buttonClass} disabled={busy || !selectedSources.length || selectedSources.length > 500} onClick={() => {
+          if (account !== 'tata' || channel !== 'sms') return;
+          try {
+            const prepared = prepareSmsBriefDrafts(brief.candidates, selectedSources, brief.filename);
+            requestVersion.current++;
+            setDrafts(prepared); setFilename(brief.filename); setRevision((value) => value + 1); setError('');
+            setTabState('submit_state', { step: 'previewed', previews: [] });
+          } catch (err) { setError(formatError(err)); }
+        }}>Prepare DLT review from {selectedSources.length} selected source candidates</button>
+      </>}
+    </section>}
     {busy && <p role="status" className="text-xs">Reading DLT templates…</p>}
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
     {drafts && <><p className="text-xs font-semibold">Source file: {filename}</p><SmsDltReview key={revision} initialDrafts={drafts} storageKey={`submit_sms_dlt_${revision}`} onClose={() => { if (!window.confirm('Clear this review? Any queued batch remains available in History.')) return; clearTabState(`submit_sms_dlt_${revision}`); setDrafts(null); setTabState('submit_state', { step: 'idle' }); }} /></>}

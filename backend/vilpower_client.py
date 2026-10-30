@@ -408,6 +408,10 @@ def validate_sms_template(draft: dict) -> list[str]:
             errors.append("sample_message must preserve the exact template text and replace every typed variable with a valid example")
     elif not variables and sample and sample != body:
         errors.append("Without variables, sample_message must equal the exact template text")
+    if "brief" in draft:
+        from sms_brief import validate_brief_review
+
+        errors.extend(validate_brief_review(draft["brief"], body))
     return errors
 
 
