@@ -845,6 +845,11 @@ def test_sms_cookie_only_inventory_capture_and_worker_recovery(scoped_browser):
     flow = scoped_browser
     flow.pair()
     flow.pair("tata", "sms")
+    assert flow.message("KARIX_EXTENSION_SELECT")["ok"]
+    flow.popup.reload()
+    sms_label = flow.popup.locator("#target option").filter(has_text="SMS").inner_text(timeout=2000)
+    flow.popup.select_option("#target", label=sms_label)
+    flow.wait_status("tata", "sms", capture_active=True)
     flow.context.add_cookies([{
         "name": "portal_session", "value": "sms-request-cookie", "domain": "www.vilpower.in",
         "path": "/", "secure": True, "httpOnly": True, "sameSite": "Strict",

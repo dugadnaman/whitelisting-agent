@@ -35,7 +35,7 @@ const SYNC_ERRORS: Record<string, string> = {
   identity_conflict: 'The captured identity conflicts with this configured target. Select its exact bot, WABA, MoEngage workspace, or VILPOWER principal entity and reload its inventory.',
   provider_validation_failed: 'The provider did not validate the captured session. Reload this exact target’s inventory in the already logged-in portal, then retry. If the inventory works but sync still fails, ask your administrator to check provider validation. Re-pairing or repeating OTP is not required just to retry.',
   incomplete_session: 'The captured session is incomplete. Reload this exact target’s inventory in the already logged-in portal to capture all required headers together.',
-  schema_rejected: 'The agent rejected the captured session format or size. Update to extension 2.0.5 and reload this exact target’s inventory. Credentials are never truncated; contact your administrator if this repeats.',
+  schema_rejected: 'The agent rejected the captured session format or size. Update Auth Sync from this site’s extension download and reload this exact target’s inventory. Credentials are never truncated; contact your administrator if this repeats.',
   capture_invalid: 'The matching request had incomplete, conflicting, or oversized authentication. Reload this exact target’s inventory in the already logged-in portal. Supported lengths: bearer/refresh 16000, session 1000, user 300, cookie 32000, bot 200 characters.',
   inventory_failed: 'The inventory request was not a fresh successful response. Check the portal connection and reload this exact target’s inventory. Sign in only if the portal session itself has expired.',
   network_error: 'Could not reach the agent. Check your connection and retry the captured session.',
@@ -142,7 +142,7 @@ function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' 
         ? 'Retry was not confirmed in time. Refresh browser capture status before retrying; the existing device was preserved.'
         : type === 'KARIX_EXTENSION_SELECT'
           ? 'The capture switch was not confirmed in time. Refresh browser capture status before trying again; saved sessions were not changed.'
-          : 'Auth Sync 2.0.5 did not respond. Install or reload this site’s extension and reload Settings.'));
+          : 'Auth Sync did not respond. Install or reload this site’s extension and reload Settings.'));
   }, type === 'KARIX_EXTENSION_PAIR' || type === 'KARIX_EXTENSION_RETRY' || type === 'KARIX_EXTENSION_SELECT' ? 45000 : 2500);
   window.addEventListener('message', onMessage);
   signal.addEventListener('abort', onAbort, { once: true });
@@ -172,7 +172,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const readBrowserStatus = useCallback(async (signal: AbortSignal) => {
     try {
       const next = await extensionMessage('KARIX_EXTENSION_SCOPED_STATUS', signal, { account, integration });
-      if (!isBrowserStatus(next, { account, integration })) throw new Error('Reload Auth Sync 2.0.5 and Settings to read current browser capture status.');
+      if (!isBrowserStatus(next, { account, integration })) throw new Error('Reload Auth Sync and Settings to read current browser capture status.');
       signal.throwIfAborted();
       setBrowserStatus(next);
       setInstalled(true);
@@ -424,7 +424,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
         </dl>
         <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2" role="status" aria-live="polite">
           <p className="font-semibold text-gray-700">Current browser · {accountTitle} · {integrationTitle}</p>
-          <p>{!browserStatus ? 'Current browser capture unavailable. Reload Auth Sync 2.0.5 and this Settings page.' : !browserStatus.paired ? 'This browser is not paired for this account and integration.' : browserStatus.syncing ? 'Captured session is being validated by the backend.' : browserStatus.pending ? 'Matching session captured and pending sync. Retry below without reconnecting.' : 'This browser is paired; no captured session is waiting to sync.'}</p>
+          <p>{!browserStatus ? 'Current browser capture unavailable. Reload Auth Sync and this Settings page.' : !browserStatus.paired ? 'This browser is not paired for this account and integration.' : browserStatus.syncing ? 'Captured session is being validated by the backend.' : browserStatus.pending ? 'Matching session captured and pending sync. Retry below without reconnecting.' : 'This browser is paired; no captured session is waiting to sync.'}</p>
           {!statusError && status?.paired && browserStatus && !browserStatus.paired && <p className="text-amber-800">The server has an active device registration, but this browser has no active pairing for this scope. Connect this browser separately; another device’s session is not adopted.</p>}
           {browserStatus?.paired && !browserStatus.capture_active && <p className="text-amber-800">This target is not active for capture. Use this target below, then reload its matching portal inventory. Saved credentials for other targets stay separate.</p>}
           {browserStatus?.last_synced_at && <p className="text-gray-500">This browser’s last validated sync: {new Date(browserStatus.last_synced_at * 1000).toLocaleString()} (historical).</p>}

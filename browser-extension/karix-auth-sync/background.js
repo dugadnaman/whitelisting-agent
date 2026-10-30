@@ -21,7 +21,7 @@ const ERROR_MESSAGES = {
   identity_conflict: 'The captured identity does not match this target’s configured identity. Select its exact configured bot, WABA, or MoEngage workspace and reload its inventory.',
   provider_validation_failed: 'The provider did not validate the captured session. Reload the matching inventory in your already logged-in portal and retry. If that inventory works but sync still fails, ask your administrator to check provider validation; do not re-pair or repeat OTP just to retry.',
   incomplete_session: 'The captured session is incomplete. Reload this exact target’s inventory in the already logged-in portal to capture all required headers together.',
-  schema_rejected: 'The agent rejected the captured session format or size. Use extension 2.0.5 and reload this target’s inventory. Credentials are never truncated; ask your administrator if this repeats.',
+  schema_rejected: 'The agent rejected the captured session format or size. Update Auth Sync from this site’s extension download and reload this target’s inventory. Credentials are never truncated; ask your administrator if this repeats.',
   capture_invalid: 'The matching request had incomplete, conflicting, or oversized authentication. Reload this exact target’s inventory in the already logged-in portal. Limits: bearer/refresh 16000, session 1000, user 300, cookie 32000, bot 200 characters.',
   inventory_failed: 'The inventory request did not complete with a fresh successful response. Check the portal connection and reload this exact target’s inventory; sign in only if the portal session itself has expired.',
   network_error: 'Could not reach the agent. Check your connection and retry the captured session.',

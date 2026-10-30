@@ -16,7 +16,7 @@ Promotional/Transactional or other Karix sub-account. The picker no longer assum
 SMS support for accounts without channel metadata; changing channels never
 silently redirects credentials or submissions to another account.
 
-1. Open **Settings → VILPOWER · SMS DLT**. Download Auth Sync **2.0.5**, unzip it,
+1. Open **Settings → VILPOWER · SMS DLT**. Download Auth Sync **2.0.6**, unzip it,
    load the folder in Chrome's **Load unpacked**, then reload Settings.
 2. **Detect extension → Connect extension** for Tata Capital / SMS. Sign into
    VILPOWER normally, including CAPTCHA/mobile OTP when required. Verify the
@@ -300,16 +300,19 @@ Deploy/restart the updated backend and frontend together. Choose an account and 
    a fresh provider validation check. Historical backend validation and this browser's pairing
    are shown separately.
 
-**Updating an unpacked extension:** use version **2.0.5**, replace its files in the same folder, then click
+**Updating an unpacked extension:** use version **2.0.6**, replace its files in the same folder, then click
 its reload icon in `chrome://extensions` and reload Settings and the provider inventory. Keeping the
 same unpacked folder preserves device pairings. The downloaded ZIP retains the exact Karix frontend
 permission (`https://rcmui.instaalerts.zone/*`) as well as the API host: Chrome requires both.
-Version 2.0.5 also requires the exact VILPOWER host permission
+Version 2.0.5 and later require the exact VILPOWER host permission
 (`https://www.vilpower.in/*`) for Tata SMS. Grant the updated permission, reload
 Settings, and select the Tata/SMS target before reloading Content Templates.
 Only its successful inventory POST is captured; login, CAPTCHA, OTP and template
 registration requests are excluded. The backend verifies the real principal
 entity even though the request itself has no entity ID.
+Version 2.0.6 labels the popup's Tata target **SMS DLT · VILPOWER** and shows
+SMS-specific active/inactive capture guidance. It does not change the stored
+pairing scope or transfer sessions between SMS and MoEngage.
 The MV3 worker preserves the first matching request while restoring stored pairings.
 Capture switches wait for an in-flight provider check rather than timing out after 2.5 seconds
 while the extension is busy. Scoped status reads remain available while validation is running.

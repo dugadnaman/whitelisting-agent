@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Karix, MoEngage & VILPOWER Auth Sync",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Sync manually authenticated Karix, MoEngage and Tata VILPOWER sessions to their individually paired account integrations.",
   "minimum_chrome_version": "124",
   "permissions": ["storage", "webRequest"],
