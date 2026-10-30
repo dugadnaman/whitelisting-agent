@@ -277,14 +277,20 @@ backend. The application handles this for autonomous remediation flows.
 
 Deploy/restart the updated backend and frontend together. Choose an account and delivery channel using **Whitelisting for → Change** at the top of the app, then open **Settings → Connections**. Manage the selected Karix channel or open the separate **MoEngage integration** panel; neither opening Settings nor viewing an integration activates extension capture or changes your whitelisting destination. Unsaved connection edits require confirmation before changing destination or integration. **Team & administration** is collapsed below the connection controls.
 
-1. Click **Download extension ZIP** and unzip it into a permanent local folder.
+The connection card shows the last verified session state, this browser's auto-sync
+state, and one next-step action. **Setup help** contains installation instructions;
+**Advanced connection details** contains diagnostics, manual checks, and disconnect.
+A verified saved session does not imply this browser is paired or guarantee that
+the provider session is still valid now.
+
+1. Click **Download extension** (or **Setup help → Download extension ZIP**) and unzip it into a permanent local folder.
 2. Open `chrome://extensions` in Chrome 124 or newer, enable **Developer mode**, click
    **Load unpacked**, and select the folder containing `manifest.json`.
-3. Reload Settings, click **Detect extension**, then **Connect extension** for the selected account and integration.
+3. Reload Settings and click **Connect this browser** for the selected account and integration. **Detect extension** remains available under **Setup help**.
    Each account/integration is paired separately with a five-minute single-use code.
-4. For a previously paired scope, click **Use this target in browser** to switch capture without
-   reconnecting or opening the popup. Use **Open Karix/MoEngage portal** if needed, or reload the
-   existing logged-in provider tab. Login/OTP is needed only if that session has expired;
+4. For a previously paired scope, click **Enable auto-sync here** when this browser is
+   capturing another account; reconnecting is not required. When prompted, choose
+   **Open [provider] to sync**, or reload the existing logged-in provider tab. Login/OTP is needed only if that session has expired;
    installing or pairing the extension does not replay requests made earlier.
    - **WhatsApp (Karix)**: Open or reload the matching template list (`/getAllTemplates`).
      The extension requires the exact WABA; Karix's WhatsApp-only `esmeaddr: 0` inventory sentinel is
@@ -298,9 +304,9 @@ Deploy/restart the updated backend and frontend together. Choose an account and 
      dashboard. The backend verifies `/dash/auth/listApps` and binds via `/changeApp`;
      it never guesses account-to-workspace mappings from a login.
 5. Settings automatically refreshes backend status after a newly validated browser sync.
-   **Refresh capabilities / status** also refreshes it manually; **Check saved session** performs
-   a fresh provider validation check. Historical backend validation and this browser's pairing
-   are shown separately.
+   **Check connection** performs a fresh provider validation check.
+   **Advanced connection details → Refresh status** refreshes capabilities and saved status
+   without a provider check; **Check saved session** also remains available there.
 
 **Updating an unpacked extension:** use version **2.0.6**, replace its files in the same folder, then click
 its reload icon in `chrome://extensions` and reload Settings and the provider inventory. Keeping the

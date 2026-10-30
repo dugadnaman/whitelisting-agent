@@ -372,76 +372,97 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const browser = target?.mode === 'browser';
   const validated = browser && !statusError && status?.validation_state === 'valid';
   const invalid = !statusError && status?.validation_state === 'invalid';
-  const statusLabel = statusError ? 'Status unavailable' : !target ? 'Loading capabilities'
-    : target.mode === 'unsupported' ? 'Not integrated' : target.mode === 'setup_required' ? 'Setup required'
-      : !status ? 'Loading saved session status'
-        : status.validation_state === 'valid' ? 'Saved session · last check passed'
-          : status.validation_state === 'invalid' ? 'Saved session · last check failed' : 'No validated saved session';
+  const statusLabel = statusError ? 'Unable to check' : !target || (browser && !status) ? 'Checking…'
+    : target.mode === 'unsupported' ? 'Not available' : target.mode === 'setup_required' ? 'Setup needed'
+      : validated ? 'Session verified' : invalid ? 'Login needs updating' : 'Not verified yet';
   const buttonClass = 'px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
   const portal = integration === 'moengage' ? 'MoEngage' : integration === 'sms' ? 'VILPOWER' : 'Karix';
   const moeOrigin = typeof target?.identity.base_url === 'string' && /^https:\/\/dashboard(?:-\d{2})?\.moengage\.com\/?$/.test(target.identity.base_url)
     ? target.identity.base_url.replace(/\/$/, '') : null;
   const portalUrl = integration === 'moengage' ? moeOrigin && `${moeOrigin}/v4/campaigns/all?view=all`
     : integration === 'sms' ? 'https://www.vilpower.in/content_templates/contentIndex/'
-      : 'https://www.karix.solutions/lounge/LoungePage/index.php';
+      : integration === 'rcs' ? 'https://rcmui.instaalerts.zone/bot_builder_gui/#/campaign-management/templates-list'
+        : 'https://www.karix.solutions/lounge/LoungePage/index.php';
+
+  const primaryClass = 'px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
+  const refreshStatus = () => { void perform('refresh', refresh); };
+  let primary = { label: 'Refresh status', onClick: refreshStatus };
+  if (browser && !statusError) {
+    if (installed !== true) primary = { label: 'Download extension', onClick: downloadExtension };
+    else if (!browserStatus?.paired) primary = { label: 'Connect this browser', onClick: connect };
+    else if (browserStatus.pending) primary = { label: 'Retry sync', onClick: retryCapturedSession };
+    else if (!browserStatus.capture_active) primary = { label: 'Enable auto-sync here', onClick: selectTarget };
+    else primary = { label: 'Check connection', onClick: checkSession };
+  }
+  const openPortal = browser && !statusError && installed === true && browserStatus?.paired &&
+    browserStatus.capture_active && !browserStatus.pending && !browserStatus.syncing && !validated && portalUrl;
 
   return (
-    <section aria-labelledby={titleId} aria-busy={disabled} className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-4">
+    <section aria-labelledby={titleId} aria-busy={disabled} className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 id={titleId} className="text-sm font-bold text-gray-900">{accountTitle} · {integrationTitle} Auth Sync</h3>
-          <p className="mt-1 text-xs text-gray-600">Credentials and device pairing are isolated to this account and integration.</p>
+          <h3 id={titleId} className="text-base font-bold text-gray-900">{portal} connection</h3>
+          <p className="mt-1 text-xs text-gray-500">{accountTitle} · {integrationTitle}</p>
         </div>
-        <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${validated ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : invalid ? 'border-red-200 bg-red-50 text-red-700' : 'border-gray-200 bg-white text-gray-600'}`}>{statusLabel}</span>
+        <span role="status" className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${validated ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : invalid ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>{statusLabel}</span>
       </div>
-      {target && <p className="text-xs text-gray-700">{target.message}</p>}
-      <p className="text-xs text-gray-600">Service/API tokens and encryption keys require one-time setup from your provider or administrator and are saved securely on the server. The browser cannot create these keys; Auth Sync only transfers renewable browser sessions. Blank secret fields preserve saved values.</p>
-      {target?.mode === 'setup_required' && <p className="text-xs text-amber-800">Configure the required account identity below (or ask your administrator) and save it, then refresh capabilities. Unknown WABAs, bots, and MoEngage workspaces are never adopted automatically.</p>}
-      {target?.mode === 'setup_required' && status?.paired && <p className="text-xs text-amber-800">You still have paired devices for this scope. You can revoke them below even while identity setup is incomplete.</p>}
-      {integration === 'sms' && target?.identity.entity_id && <p className="text-xs text-gray-700">Expected principal entity: TATA CAPITAL LIMITED · {target.identity.entity_id}. The backend verifies the live portal profile before saving the captured cookie. This connection registers templates; it never sends SMS.</p>}
-      {browser && <>
-        <details open={installed !== true} className="rounded-lg border border-blue-100 bg-white/70 p-3">
-          <summary className="cursor-pointer text-xs font-semibold text-blue-800">Installation, login and account-switching steps</summary>
+
+      {browser && <div className="text-sm text-gray-600 space-y-1">
+        <p>{validated
+          ? `Saved session last verified${status?.last_validated_at ? ` ${new Date(status.last_validated_at * 1000).toLocaleString()}` : ''}.`
+          : invalid ? `Open ${portal}, sign in if needed, and reload this account’s template list to update the session.`
+            : `Connect this browser, then open this account’s ${integration === 'moengage' ? 'workspace' : 'template list'} in ${portal} to sync your login.`}</p>
+        <p className="text-xs text-gray-500">{installed === null ? 'Checking the browser extension…'
+          : !installed ? 'For automatic updates, install the extension and reload this page.'
+            : !browserStatus?.paired ? 'This browser is not connected for automatic updates.'
+              : browserStatus.syncing ? 'Syncing and verifying your session…'
+                : browserStatus.pending ? 'A session is waiting to sync. Retry without reconnecting.'
+                  : !browserStatus.capture_active ? 'Auto-sync is set to another account. Enable it here to switch.'
+                    : 'Auto-sync is enabled for this account in this browser.'}</p>
+      </div>}
+      {target && !browser && <p className="text-sm text-gray-600">{target.message}{target.mode === 'setup_required' && ' Ask your administrator to complete the account settings below.'}</p>}
+
+      {target?.mode !== 'unsupported' && <div>
+        {openPortal ? <a href={portalUrl!} target="_blank" rel="noopener noreferrer" className={`${primaryClass} inline-block`}>Open {portal} to sync</a>
+          : <button type="button" onClick={primary.onClick} disabled={disabled || (browser && !statusError && (!status || installed === null || Boolean(browserStatus?.syncing)))} className={primaryClass}>{disabled ? 'Working…' : primary.label}</button>}
+      </div>}
+      {statusError && <p role="alert" className="text-sm text-red-700">{statusError}</p>}
+      {browserStatus?.error && <p role="alert" className="text-sm text-red-700">{syncError(browserStatus.error)}</p>}
+      {feedback && <p role={feedback.type === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-xs ${feedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{feedback.message}</p>}
+
+      {browser && <details className="border-t border-gray-100 pt-3">
+        <summary className="cursor-pointer text-xs font-semibold text-gray-600">Setup help</summary>
         <ol className="mt-3 list-decimal pl-5 text-xs text-gray-600 space-y-2">
-          <li>Download this site’s extension ZIP and unzip it. In <code>chrome://extensions</code>, enable Developer mode, choose Load unpacked, and select the folder containing <code>manifest.json</code>.</li>
-          <li>Reload Settings, detect the extension, then connect this account and integration. Pairing sends a single-use code, never your app login token.</li>
-          <li>Open the configured {integration === 'rcs' ? 'RCS bot' : integration === 'whatsapp' ? 'WhatsApp WABA' : integration === 'sms' ? 'Tata principal entity’s Content Templates' : 'MoEngage workspace'} in {portal} and reload its inventory. If already paired, use “Use this target in browser” below to switch capture without reconnecting.</li>
+          <li>Download and unzip the extension. Open <code>chrome://extensions</code>, enable Developer mode, choose <strong>Load unpacked</strong>, and select the folder containing <code>manifest.json</code>.</li>
+          <li>Reload this page and choose <strong>Connect this browser</strong>. Each account and channel needs its own connection.</li>
+          <li>In {portal}, select this account’s {integration === 'rcs' ? 'configured Sender ID' : integration === 'whatsapp' ? 'configured WABA' : integration === 'sms' ? 'Content Templates' : 'configured workspace'} and reload its {integration === 'moengage' ? 'dashboard' : 'template list'}. Sign in manually, including OTP, only if the portal asks.</li>
         </ol>
-        <p className="mt-3 text-xs text-gray-600">Sign in manually only if the provider portal session has expired; mobile OTP is not repeated just to sync. Only same-request credentials matching this configured target are transferred. Each account/channel is paired separately; an RCS popup target does not connect MoEngage.</p>
-        </details>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={downloadExtension} disabled={disabled} className={buttonClass}>{action === 'download' ? 'Downloading...' : 'Download extension ZIP'}</button>
-          <button type="button" onClick={detectExtension} disabled={disabled} className={buttonClass}>{action === 'detect' ? 'Detecting...' : 'Detect extension'}</button>
-          <button type="button" onClick={connect} disabled={disabled || installed !== true || Boolean(statusError)} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">{action === 'connect' ? 'Connecting...' : 'Connect extension'}</button>
+        {integration === 'sms' && target?.identity.entity_id && <p className="mt-3 text-xs text-gray-600">Expected entity: TATA CAPITAL LIMITED · {target.identity.entity_id}. This connection registers templates; it never sends SMS.</p>}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={downloadExtension} disabled={disabled} className={buttonClass}>Download extension ZIP</button>
+          <button type="button" onClick={detectExtension} disabled={disabled} className={buttonClass}>Detect extension</button>
           {portalUrl && <a href={portalUrl} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open {portal} portal</a>}
         </div>
-        <p className="text-[11px] text-gray-500" role="status">{installed === null ? 'Detect the extension after installing this site’s download.' : installed ? 'Extension detected. Pairing and session validation are shown separately below.' : 'Extension not detected. Install this site’s download, reload Settings, then detect again.'}</p>
-        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-gray-200 bg-white p-3 text-xs">
-          <div><dt className="font-semibold text-gray-500">Backend device registrations</dt><dd className="mt-1 text-gray-800">{statusError ? 'Could not confirm pairing' : status?.paired ? 'At least one active device for this scope (not necessarily this browser)' : 'No confirmed active devices'}</dd></div>
-          <div><dt className="font-semibold text-gray-500">Saved backend session</dt><dd className={`mt-1 ${invalid ? 'text-red-700' : 'text-gray-800'}`}>{statusError ? 'Could not confirm validation' : status?.validation_state === 'valid' ? 'Passed last backend check' : status?.validation_state === 'invalid' ? 'Last validation failed — reload the matching logged-in inventory and sync again' : 'Not validated yet'}</dd></div>
-          <div><dt className="font-semibold text-gray-500">Last successful sync</dt><dd className="mt-1 text-gray-800">{status?.last_synced_at ? new Date(status.last_synced_at * 1000).toLocaleString() : 'No successful sync yet'}</dd></div>
-          <div><dt className="font-semibold text-gray-500">Last validation</dt><dd className="mt-1 text-gray-800">{status?.last_validated_at ? new Date(status.last_validated_at * 1000).toLocaleString() : 'Not checked yet'}</dd></div>
-        </dl>
-        <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2" role="status" aria-live="polite">
-          <p className="font-semibold text-gray-700">Current browser · {accountTitle} · {integrationTitle}</p>
-          <p>{!browserStatus ? 'Current browser capture unavailable. Reload Auth Sync and this Settings page.' : !browserStatus.paired ? 'This browser is not paired for this account and integration.' : browserStatus.syncing ? 'Captured session is being validated by the backend.' : browserStatus.pending ? 'Matching session captured and pending sync. Retry below without reconnecting.' : 'This browser is paired; no captured session is waiting to sync.'}</p>
-          {!statusError && status?.paired && browserStatus && !browserStatus.paired && <p className="text-amber-800">The server has an active device registration, but this browser has no active pairing for this scope. Connect this browser separately; another device’s session is not adopted.</p>}
-          {browserStatus?.paired && !browserStatus.capture_active && <p className="text-amber-800">This target is not active for capture. Use this target below, then reload its matching portal inventory. Saved credentials for other targets stay separate.</p>}
-          {browserStatus?.last_synced_at && <p className="text-gray-500">This browser’s last validated sync: {new Date(browserStatus.last_synced_at * 1000).toLocaleString()} (historical).</p>}
-          {browserStatus?.error && <p className="text-red-700" role="alert">{syncError(browserStatus.error)}</p>}
-          {browserStatus?.paired && !browserStatus.capture_active && <button type="button" onClick={selectTarget} disabled={disabled || browserStatus.syncing} className={buttonClass}>{action === 'select' ? 'Switching capture...' : 'Use this target in browser'}</button>}
-          {browserStatus?.pending && browserStatus.paired && <button type="button" onClick={retryCapturedSession} disabled={disabled || browserStatus.syncing} className={buttonClass}>{action === 'retry' ? 'Retrying captured session...' : 'Retry captured session'}</button>}
+      </details>}
+
+      <details className="border-t border-gray-100 pt-3">
+        <summary className="cursor-pointer text-xs font-semibold text-gray-600">Advanced connection details</summary>
+        <div className="mt-3 space-y-3">
+          {browser && <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div><dt className="font-semibold text-gray-500">Saved session</dt><dd className="mt-1 text-gray-800">{statusError ? 'Unable to check' : status?.validation_state === 'valid' ? 'Passed last check (not a live guarantee)' : status?.validation_state === 'invalid' ? 'Last check failed' : 'Not checked yet'}</dd></div>
+            <div><dt className="font-semibold text-gray-500">This browser</dt><dd className="mt-1 text-gray-800">{!browserStatus ? 'Extension unavailable' : !browserStatus.paired ? 'Not connected for this account' : browserStatus.capture_active ? 'Connected · capture active' : 'Connected · capture inactive'}</dd></div>
+            <div><dt className="font-semibold text-gray-500">Last successful sync</dt><dd className="mt-1 text-gray-800">{status?.last_synced_at ? new Date(status.last_synced_at * 1000).toLocaleString() : 'No successful sync yet'}</dd></div>
+            <div><dt className="font-semibold text-gray-500">Registered devices</dt><dd className="mt-1 text-gray-800">{statusError ? 'Unable to check' : status?.paired ? 'At least one device (may be another browser)' : 'No confirmed devices'}</dd></div>
+          </dl>}
+          <p className="text-xs text-gray-500">Connections are separate for each account and channel. API tokens and encryption keys require administrator setup; the extension only syncs browser sessions. Blank secret fields below keep their saved values.</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={refreshStatus} disabled={disabled} className={buttonClass}>Refresh status</button>
+            {browser && <button type="button" onClick={checkSession} disabled={disabled} className={buttonClass}>Check saved session</button>}
+            {target && target.mode !== 'unsupported' && <button type="button" onClick={disconnect} disabled={disabled} className={`${buttonClass} text-red-700`}>Disconnect my devices</button>}
+          </div>
+          {target && target.mode !== 'unsupported' && <p className="text-xs text-gray-500">Disconnect removes only your device connections for this account and channel. It does not remove the saved session or affect other users.</p>}
         </div>
-        {!statusError && status?.message && <p className="text-xs text-gray-600">{status.message}</p>}
-      </>}
-      {statusError && <p role="alert" className="text-xs text-red-700">{statusError} Any displayed timestamps are last known values.</p>}
-      {feedback && <p role={feedback.type === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-xs ${feedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-blue-200 bg-white text-blue-800'}`}>{feedback.message}</p>}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => { void perform('refresh', async (signal) => { await refresh(signal); return 'Capabilities and scoped status refreshed.'; }); }} disabled={disabled} className={buttonClass}>{action === 'refresh' ? 'Refreshing...' : 'Refresh capabilities / status'}</button>
-        {browser && <button type="button" onClick={checkSession} disabled={disabled} className={buttonClass}>{action === 'check' ? 'Validating...' : 'Check saved session'}</button>}
-        {target && target.mode !== 'unsupported' && <button type="button" onClick={disconnect} disabled={disabled} className={`${buttonClass} text-red-700`}>{action === 'disconnect' ? 'Revoking...' : 'Disconnect my scoped devices'}</button>}
-      </div>
-      {target && target.mode !== 'unsupported' && <p className="text-[11px] text-gray-500">Status refreshes when you return to this window. Disconnect affects only your devices and pending codes for this account and integration, not other users or the saved session.</p>}
+      </details>
     </section>
   );
 }
