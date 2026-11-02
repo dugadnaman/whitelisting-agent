@@ -10,6 +10,35 @@ Flow: brief → explicit destination → workspace-scoped template/sender/audien
 
 Verification before release: **99 focused tests passed**, including two token-partitioned workspace stores, overlapping names, mixed batches, body/variable matching, altered destinations and same-source duplicate protection. Targeted Ruff checks and a clean Next.js production build passed. The Tata production portal session was refreshed through the existing encrypted credential endpoint and bound to its actual portal ID; each routed request obtains its own target-bound session without saving cross-workspace mutations.
 
+### Multi-campaign production and adversarial acceptance (2026-11-02)
+
+User-authorized production batch `bd009a60-6ce2-401f-afc5-d6d24b9dd826` created **four verified WhatsApp drafts**, not four staging records. Independent workspace-bound native reads confirmed exact audiences, sender/template selections and placeholder values, plus Drafts membership. Native Services_TC Drafts search displayed its two campaigns. Replaying the batch preserved all four IDs without another create.
+
+| Workspace | Content | Real campaign ID |
+| --- | --- | --- |
+| Tata Capital | Static approved template | `6ae866f122d1aa59c3d9aa55` |
+| Tata Capital | Two body variables | `6ae8670b7afcd785566e8dc4` |
+| Services_TC | Static approved template | `6ae86720854ea0ddda567c55` |
+| Services_TC | Two body variables | `6ae86736854ea0ddda567c58` |
+
+Variable values included Unicode, quotes, a line break and an HTTPS URL with query parameters. Tata Capital used saved test segment `Test_FSTP_Pranav_1602`; Services_TC used its own saved `swcm189_Customer_Base_Oct2026_Test_v1_24092026`, never the Capital segment ID.
+
+Repairs from adversarial testing:
+
+- Unknown or ambiguous audience names now block; they never borrow the first catalog segment ID. Explicit sender selection scopes rendered-body template matching before ambiguity checks.
+- Variable values must cover exactly the selected template's numbered slots, be nonblank strings, and agree with a supplied rendered brief. Numeric and `{{n}}` key spellings remain supported; duplicate aliases block.
+- Explicit invalid channels and missing/invalid client schedules are no longer replaced with guessed WhatsApp/tomorrow defaults. Excel clock fractions, midnight/noon and seconds are preserved; malformed clocks do not crash the upload.
+- Duplicate/whitespace/nonobject identities, creator isolation, concurrent clicks and concurrent source claims have regression coverage. Workspace display names survive persistence. Compare-and-set claims cannot reuse a stale preview after a known draft ID arrives.
+- Proven pre-write policy/rate failures restore the prior queue state. Historical uppercase preflight `BLOCKED` rows are normalized only when no provider reservation exists; ambiguous attempts remain locked.
+- Malformed/error HTTP envelopes, timeouts, changed approvals/associations and read-back mismatches cannot become successful drafts. Known `CREATED` IDs survive failed read-only rechecks; there is no replacement POST.
+- UI bulk execution is sequential, refreshes durable results and shows progress. It stops on the first HTTP error or unverified result, leaving later rows ready for deliberate resume. Server automation also stops on rate caps and unverified results; an empty eligible set is not a successful creation.
+- The single builder shows real selected template copy and editable body variables; no fake `test_1234` preview or hardcoded Karix provider label remains. Sender-dependent template selection explains its disabled state.
+- The wider MoEngage suite exposed a missing Ops workspace-normalization export. The existing account-filter implementation was restored without migrating unrelated local Ops changes.
+
+The portal draft transport does **not** configure send-time delivery. Uploaded schedule values are planning metadata in the review queue; the UI explicitly requires the human publisher to confirm delivery settings in MoEngage. WhatsApp `VERIFIED` confirms saved draft fields and membership, not a publish/send validation. Media headers and button-specific completion still require human dashboard review. No draft was published, scheduled for send, or sent as a test.
+
+Regression result: **662 passed, 1 deselected**, using `python3 -m pytest tests/test_moengage*.py -q`. The Next.js production build passed. Targeted Ruff passed with only inherited database import-order diagnostics excluded. Failure injection uses local HTTP provider stores for authentication failures, HTTP 429/5xx, malformed bodies, changed metadata and uncertain writes; production provider failures are not deliberately induced.
+
 ### Earlier repair and smoke history
 
 **Current correction (2026-11-02):** Historical rollout claims below are not evidence that the previous WhatsApp automation created verified drafts. A synthetic `WA-…` reference, staged row, create acknowledgement or template approval is not proof of a saved draft. Initial inspection triggered delayed portal autosave: an existing draft's name was restored to `rrgweahth`, with original audience, sender, template, placeholders and UTM settings verified; its modification timestamp and empty tracking metadata changed. A separate accidental `CONTRACT_CAPTURE_NOT_SAVED` draft (`6ae83ce83ffeeef67c3d7e96`) was subsequently deleted, and its absence plus the original draft's presence were checked. The explicitly authorized live acceptance below created one retained test draft. Nothing was published or sent.

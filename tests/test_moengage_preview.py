@@ -333,9 +333,8 @@ def test_jira_brief_without_segment_override_blocks_only_audience():
 
 def test_whatsapp_body_template_matching_and_placeholder_extraction(monkeypatch):
     from template_identifier import (
-        extract_variables_from_template_body,
-        match_whatsapp_template_and_variables,
         _CACHED_MOENGAGE_WHATSAPP_TEMPLATES,
+        match_whatsapp_template_and_variables,
     )
     sample_tpl = {
         "id": "6a9a6585f5b9b18f8c972b54",
@@ -380,8 +379,6 @@ def test_whatsapp_body_template_matching_and_placeholder_extraction(monkeypatch)
 
 
 def test_google_sheets_export_with_trailing_empty_columns_and_auxiliary_sheets():
-    from openpyxl import Workbook
-    import io
 
     wb = Workbook()
     ws1 = wb.active
@@ -411,3 +408,117 @@ def test_google_sheets_export_with_trailing_empty_columns_and_auxiliary_sheets()
     # Verify trailing empty headers were stripped and not assigned
     assert None not in row
     assert "" not in row
+
+
+@pytest.mark.parametrize("segment_name", ["DOES_NOT_EXIST", "VIP"])
+def test_unknown_or_ambiguous_named_audience_never_uses_another_segment_id(segment_name):
+    catalog = copy.deepcopy(CATALOG)
+    catalog["segments"].append({"id": "seg-other", "name": "VIP"})
+    item = preview([{**BASE, "segment_id": "", "segment_name": segment_name}], catalog)["items"][0]
+    assert item["status"] == "blocked"
+    assert item["candidate_v5_payload"] is None
+
+
+def whatsapp_variable_preview(placeholders, **overrides):
+    catalog = {**CATALOG,
+               "whatsapp_senders": [{"sender_id": "sender", "sender_name": "Test", "provider": "KARIX"}],
+               "whatsapp_templates": [{"id": "template", "name": "template", "provider": "KARIX",
+                                       "sender_ids": ["sender"],
+                                       "body": "Dear {{1}}, ref {{2}}. Thank you {{1}}."}]}
+    row = {key: BASE[key] for key in (
+        "account", "source_ref", "row_id", "campaign_name", "segment_id", "scheduled_at", "timezone",
+    )}
+    row.update(channel="WHATSAPP", whatsapp_sender_id="sender", whatsapp_template_id="template",
+               whatsapp_placeholders=placeholders, **overrides)
+    return preview([row], catalog)["items"][0]
+
+
+@pytest.mark.parametrize("placeholders", [
+    None, "{}", '{"{{1}}":"Alice"}', '{"{{1}}":"Alice","{{2}}":"REF","{{3}}":"extra"}',
+    '{"{{1}}":"","{{2}}":"REF"}', '{"{{1}}":"Alice","{{2}}":"  "}',
+    '{"1":"Alice","{{1}}":"Alice","{{2}}":"REF"}', '{"name":"Alice","2":"REF"}',
+    False, [], '{"{{1}}":7,"{{2}}":"REF"}',
+])
+def test_required_whatsapp_variables_cannot_be_missing_extra_ambiguous_or_empty(placeholders):
+    item = whatsapp_variable_preview(placeholders)
+    assert item["status"] == "blocked"
+    assert item["candidate_v5_payload"] is None
+
+
+@pytest.mark.parametrize("placeholders", [
+    '{"{{1}}":"Alice","{{2}}":"REF"}', '{"1":"Alice","2":"REF"}',
+])
+def test_explicit_whatsapp_variables_must_agree_with_rendered_brief(placeholders):
+    matching = whatsapp_variable_preview(placeholders, body="Dear Alice, ref REF. Thank you Alice.")
+    assert matching["status"] == "preview_ready"
+    conflicting = whatsapp_variable_preview(placeholders, body="Dear Bob, ref REF. Thank you Bob.")
+    assert conflicting["status"] == "blocked"
+    assert conflicting["candidate_v5_payload"] is None
+
+
+def test_rendered_whatsapp_brief_infers_required_repeated_variables():
+    item = whatsapp_variable_preview(None, body="Dear Alice, ref REF. Thank you Alice.")
+    assert item["status"] == "preview_ready"
+    assert item["candidate_v5_payload"]["campaign_content"]["content"]["whatsapp"]["body_placeholders"] == {
+        "{{1}}": "Alice", "{{2}}": "REF",
+    }
+
+
+def test_explicit_unsupported_channel_and_missing_schedule_are_not_invented():
+    rows = rows_from_file(
+        "whatsapp.csv", b"channel,campaign_name,segment_id\nFAX,Wrong channel,seg-vip\nWHATSAPP,No date,seg-vip\n",
+        "tata",
+    )
+    assert rows[0]["channel"] == "FAX"
+    assert not rows[1].get("scheduled_at")
+
+
+def test_rendered_body_template_matching_is_scoped_by_explicit_sender():
+    catalog = {**CATALOG,
+               "whatsapp_senders": [
+                   {"sender_id": "sender-a", "sender_name": "A", "provider": "KARIX"},
+                   {"sender_id": "sender-b", "sender_name": "B", "provider": "OTHER"},
+               ],
+               "whatsapp_templates": [
+                   {"id": "template-a", "name": "shared", "body": "Hello {{1}}.",
+                    "sender_ids": ["sender-a"], "provider": "KARIX"},
+                   {"id": "template-b", "name": "shared", "body": "Hello {{1}}.",
+                    "sender_ids": ["sender-b"], "provider": "OTHER"},
+               ]}
+    row = {key: BASE[key] for key in (
+        "account", "source_ref", "row_id", "campaign_name", "segment_id", "scheduled_at", "timezone",
+    )}
+    row.update(channel="WHATSAPP", whatsapp_sender_id="sender-b", body="Hello Alice.")
+    item = preview([row], catalog)["items"][0]
+    assert item["status"] == "preview_ready"
+    whatsapp = item["candidate_v5_payload"]["campaign_content"]["content"]["whatsapp"]
+    assert (whatsapp["sender_id"], whatsapp["template_id"], whatsapp["provider"]) == (
+        "sender-b", "template-b", "OTHER",
+    )
+
+
+@pytest.mark.parametrize("day,clock", [
+    ("2026-11-03", ""), ("not-a-date", "11:30 AM"), ("2026-11-03", "24:00"),
+    ("2026-11-03", "13:15 PM"), ("2026-11-03", "11:99 AM"), ("2026-11-03", "11:30 junk"),
+    ("2026-11-03", "-0.2"), ("2026-11-03", "1.5"), ("1e309", "11:30 AM"),
+])
+def test_client_date_fields_never_invent_a_schedule_for_invalid_inputs(day, clock):
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Date of Trigger", "Time of Trigger"])
+    writer.writerow([day, clock])
+    row = rows_from_file("whatsapp.csv", buffer.getvalue().encode(), "tata")[0]
+    assert not row.get("scheduled_at")
+
+
+@pytest.mark.parametrize("clock,expected", [
+    ("00:00", "00:00:00"), ("12:00 AM", "00:00:00"), ("12:00 PM", "12:00:00"),
+    ("11:30:59", "11:30:59"), ("0.625", "15:00:00"),
+])
+def test_client_clock_preserves_midnight_noon_seconds_and_excel_fraction(clock, expected):
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Date of Trigger", "Time of Trigger"])
+    writer.writerow(["2026-11-03", clock])
+    row = rows_from_file("whatsapp.csv", buffer.getvalue().encode(), "tata")[0]
+    assert row["scheduled_at"] == f"2026-11-03T{expected}+05:30"

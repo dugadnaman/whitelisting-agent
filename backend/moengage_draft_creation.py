@@ -24,6 +24,10 @@ class RateLimitError(Exception):
     """A local workspace create cap was reached; no provider call was made."""
 
 
+class DraftPreflightError(PermissionError):
+    """A known policy rejection before reservation or any provider write."""
+
+
 def load_server_catalog(account: str) -> dict[str, Any]:
     """Load the account/workspace catalog owned by this deployment, not the caller."""
     prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
@@ -232,9 +236,29 @@ class DraftCreation:
             )
 
 
+    def _preflight_blocked(self, item: dict[str, Any], issues: list[Any]) -> dict[str, Any]:
+        source_ref, row_id = item["source_ref"], item["row_id"]
+        if item.get("channel") == "WHATSAPP":
+            init_database()
+            with self._db() as conn:
+                stored = conn.execute(
+                    "SELECT state,campaign_id,issue FROM moengage_draft_attempts "
+                    "WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
+                    (self.account, self.catalog["workspace_id"], source_ref, row_id),
+                ).fetchone()
+            if stored and stored["state"] == "CREATED" and stored["campaign_id"]:
+                return self._result(source_ref, row_id, "CREATED", stored["campaign_id"],
+                                    "readback_preflight_unavailable")
+            if stored and stored["state"] in ("MAYBE_SENT", "UNCERTAIN", "NEEDS_REVIEW"):
+                state = "UNCERTAIN" if stored["state"] == "MAYBE_SENT" else stored["state"]
+                return self._result(source_ref, row_id, state, stored["campaign_id"], stored["issue"])
+        return {"state": "BLOCKED", "issues": issues, "source_ref": source_ref,
+                "row_id": row_id, "campaign_id": None}
+
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         """Never reissue an attempted POST, including after timeout or process crash."""
-        if str(row.get("channel", "")).upper() == "WHATSAPP":
+        channel = str(row.get("channel", "")).strip().upper()
+        if channel == "WHATSAPP":
             workspace_id = str(row.get("workspace_id") or "").strip()
             workspace_name = str(row.get("workspace") or "").strip()
             if not workspace_id and not workspace_name:
@@ -248,29 +272,30 @@ class DraftCreation:
         if self.approved_live_rows is not None and not self.allow_all_rows:
             selected = self.approved_live_rows.get((row.get("source_ref"), row.get("row_id")))
             if (selected is None or (selected[1] is not None and row.get("segment_id") != selected[1])
-                    or (selected[0] is not None and row.get("channel") != selected[0])):
-                raise PermissionError("This source row, channel or audience is not approved for the live draft test")
+                    or (selected[0] is not None and channel != selected[0])):
+                raise DraftPreflightError("This source row, channel or audience is not approved for the live draft test")
         preview = prepare_batch([row], self.account, self.catalog, self.user["email"], source_type="server_catalog")
         item = preview["items"][0]
         if item["status"] != "preview_ready":
-            return {"state": "BLOCKED", "issues": item["issues"], "source_ref": item["source_ref"],
-                    "row_id": item["row_id"], "campaign_id": None}
+            return self._preflight_blocked(item, item["issues"])
         payload = item["candidate_v5_payload"]
         whatsapp = payload.get("channel") == "WHATSAPP"
         writer = self.writer
         if writer is None:
-            if whatsapp:
-                from moengage_whatsapp_worker import WhatsAppDraftWriter
+            try:
+                if whatsapp:
+                    from moengage_whatsapp_worker import WhatsAppDraftWriter
 
-                writer = WhatsAppDraftWriter(self.account, self.catalog["workspace_id"])
-            else:
-                writer = DraftWriter(self.account, self.user)
+                    writer = WhatsAppDraftWriter(self.account, self.catalog["workspace_id"])
+                else:
+                    writer = DraftWriter(self.account, self.user)
+            except (PermissionError, ValueError) as exc:
+                raise DraftPreflightError(str(exc)) from exc
         if whatsapp and hasattr(writer, "prepare"):
             try:
                 payload = writer.prepare(payload)
             except (ValueError, PermissionError, RuntimeError) as exc:
-                return {"state": "BLOCKED", "issues": [str(exc)], "source_ref": item["source_ref"],
-                        "row_id": item["row_id"], "campaign_id": None}
+                return self._preflight_blocked(item, [str(exc)])
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         source_ref, row_id = item["source_ref"], item["row_id"]
         stored, fresh = self._reserve(source_ref, row_id, digest)
@@ -312,15 +337,16 @@ class DraftCreation:
                         if key in wa
                     }}},
                 }
+            content_matches = isinstance(readback, dict) and _matches(readback, expected)
             exact_content = True
-            if whatsapp and isinstance(readback, dict):
-                saved_wa = readback.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
+            if whatsapp and content_matches:
+                saved_wa = readback["campaign_content"]["content"]["whatsapp"]
                 exact_content = (
-                    saved_wa.get("body_placeholders") == wa["body_placeholders"]
-                    and readback.get("segmentation_details") == payload["segmentation_details"]
+                    saved_wa["body_placeholders"] == wa["body_placeholders"]
+                    and readback["segmentation_details"] == payload["segmentation_details"]
                 )
-            if (not isinstance(readback, dict) or str(readback.get("status", "")).upper() != "DRAFT"
-                    or readback.get("id") != campaign_id or not exact_content or not _matches(readback, expected)):
+            if (not content_matches or str(readback.get("status", "")).upper() != "DRAFT"
+                    or readback.get("id") != campaign_id or not exact_content):
                 self._record(source_ref, row_id, "NEEDS_REVIEW", campaign_id=campaign_id, issue="readback_mismatch_or_not_draft")
                 return self._result(source_ref, row_id, "NEEDS_REVIEW", campaign_id, "readback_mismatch_or_not_draft")
             self._record(source_ref, row_id, "VERIFIED")

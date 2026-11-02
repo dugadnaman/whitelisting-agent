@@ -123,7 +123,7 @@ def portal(tmp_path, monkeypatch):
             else:
                 self.send_error(404)
                 return
-            encoded = json.dumps({"status": "success", **result}).encode()
+            encoded = json.dumps({"status": "success", **result, **state.get("envelope", {})}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(encoded)))
@@ -403,3 +403,183 @@ def test_email_and_push_keep_base_catalog_even_when_brief_names_whatsapp_workspa
     assert all("base-segment" in json.dumps(item["candidate_v5_payload"]) for item in staged["items"])
     assert portal["sessions"] == []
     assert portal["requests"] == []
+
+
+def test_workspace_display_names_survive_stage_reload_and_create(portal):
+    creators = {workspace_id: creator(workspace_id) for workspace_id in INVENTORIES}
+    batch_queue = queue(creators)
+    briefs = [row(SERVICES, row_id="services"), row(CAPITAL, row_id="capital")]
+    staged = batch_queue.stage(briefs, briefs[0]["source_ref"])
+    expected = [INVENTORIES[key]["name"] for key in (SERVICES, CAPITAL)]
+    assert [item["workspace_name"] for item in staged["items"]] == expected
+    reloaded = queue(creators).get(staged["batch_id"])
+    assert [item["workspace_name"] for item in reloaded["items"]] == expected
+    created = batch_queue.create_row(staged["batch_id"], "services")
+    assert [item["workspace_name"] for item in created["items"]] == expected
+    assert created["workspace_id"] == V5_KEY
+
+
+def test_padded_whatsapp_channel_still_routes_explicit_portal_workspace(portal):
+    brief = {**row(SERVICES), "channel": " whatsapp "}
+    batch_queue = queue(creator(SERVICES))
+    staged = batch_queue.stage([brief], brief["source_ref"])
+    assert staged["ready"] == 1
+    assert staged["items"][0]["workspace_id"] == SERVICES
+    result = batch_queue.create_row(staged["batch_id"], brief["row_id"])
+    assert result["items"][0]["status"] == "VERIFIED"
+    assert [request[0] for request in writes(portal)] == [SERVICES]
+
+
+def test_duplicate_row_ids_across_destinations_are_not_ambiguously_selectable(portal):
+    batch_queue = queue({workspace_id: creator(workspace_id) for workspace_id in INVENTORIES})
+    briefs = [row(SERVICES), row(CAPITAL)]
+    staged = batch_queue.stage(briefs, briefs[0]["source_ref"])
+    assert (staged["ready"], staged["blocked"]) == (0, 2)
+    with pytest.raises(ValueError, match="Duplicate row_id"):
+        batch_queue.create_row(staged["batch_id"], briefs[0]["row_id"])
+    assert not writes(portal)
+
+
+def _created_batch(portal, monkeypatch):
+    service = creator(SERVICES)
+    batch_queue = queue(service)
+    brief = row(SERVICES)
+    staged = batch_queue.stage([brief], brief["source_ref"])
+    original_get = service.writer.get
+
+    def unavailable(campaign_id):
+        raise TimeoutError("Draft readback temporarily unavailable")
+
+    monkeypatch.setattr(service.writer, "get", unavailable)
+    created = batch_queue.create_row(staged["batch_id"], brief["row_id"])
+    assert created["items"][0]["status"] == "CREATED"
+    assert created["items"][0]["campaign_id"] in portal["drafts"][SERVICES]
+    monkeypatch.setattr(service.writer, "get", original_get)
+    return batch_queue, service, brief, created
+
+
+def test_created_row_recheck_is_readonly_and_preserves_real_id(portal, monkeypatch):
+    batch_queue, service, brief, created = _created_batch(portal, monkeypatch)
+    result = batch_queue.create_row(created["batch_id"], brief["row_id"])
+    assert result["items"][0]["status"] == "VERIFIED"
+    assert result["items"][0]["campaign_id"] == created["items"][0]["campaign_id"]
+    assert len(writes(portal)) == 1
+    assert len(portal["drafts"][SERVICES]) == 1
+
+
+@pytest.mark.parametrize("failure", ["preflight_blocked", "unexpected_error", "rate_limit"])
+def test_created_recheck_failure_never_loses_known_draft_or_reposts(portal, monkeypatch, failure):
+    batch_queue, service, brief, created = _created_batch(portal, monkeypatch)
+    if failure == "preflight_blocked":
+        service.catalog = {**service.catalog, "segments": []}
+    else:
+        error = creation.RateLimitError("local cap") if failure == "rate_limit" else RuntimeError("recheck failed")
+
+        def fail(row):
+            raise error
+
+        monkeypatch.setattr(service, "create", fail)
+    if failure == "rate_limit":
+        with pytest.raises(creation.RateLimitError):
+            batch_queue.create_row(created["batch_id"], brief["row_id"])
+        result = batch_queue.get(created["batch_id"])
+    else:
+        result = batch_queue.create_row(created["batch_id"], brief["row_id"])
+    assert result["items"][0]["status"] == "CREATED"
+    assert result["items"][0]["campaign_id"] == created["items"][0]["campaign_id"]
+    assert len(writes(portal)) == 1
+
+
+def test_created_row_without_matching_durable_attempt_cannot_post_again(portal, monkeypatch):
+    batch_queue, service, brief, created = _created_batch(portal, monkeypatch)
+    with db.get_db() as conn:
+        conn.execute("DELETE FROM moengage_draft_attempts")
+    result = batch_queue.create_row(created["batch_id"], brief["row_id"])
+    assert result["items"][0]["status"] == "CREATED"
+    assert result["items"][0]["campaign_id"] == created["items"][0]["campaign_id"]
+    assert len(writes(portal)) == 1
+
+
+def test_stale_preview_click_cannot_claim_a_newer_created_result(portal, monkeypatch):
+    service = creator(SERVICES)
+    active_queue = queue(service)
+    brief = row(SERVICES)
+    staged = active_queue.stage([brief], brief["source_ref"])
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    real_create = service.create
+
+    def track(row):
+        calls.append(row["row_id"])
+        return real_create(row)
+
+    monkeypatch.setattr(service, "create", track)
+
+    class PausedCreators(dict):
+        def __getitem__(self, key):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("Test did not release creator selection")
+            return super().__getitem__(key)
+
+    stale_queue = queue(PausedCreators({SERVICES: service}))
+    results = []
+    errors = []
+
+    def stale_click():
+        try:
+            results.append(stale_queue.create_row(staged["batch_id"], brief["row_id"]))
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=stale_click)
+    thread.start()
+    try:
+        assert entered.wait(5)
+
+        def unavailable(campaign_id):
+            raise TimeoutError("Readback unavailable")
+
+        monkeypatch.setattr(service.writer, "get", unavailable)
+        created = active_queue.create_row(staged["batch_id"], brief["row_id"])
+        assert created["items"][0]["status"] == "CREATED"
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert results[0]["items"][0]["status"] == "CREATED"
+    assert calls == [brief["row_id"]]
+    assert len(writes(portal)) == 1
+
+
+def test_live_template_disappearing_after_stage_blocks_without_consuming_identity(portal):
+    service = creator(SERVICES)
+    batch_queue = queue(service)
+    brief = row(SERVICES)
+    first = batch_queue.stage([brief], brief["source_ref"])
+    assert first["ready"] == 1
+    templates = portal["templates"][SERVICES]
+    portal["templates"][SERVICES] = []
+    rejected = batch_queue.create_row(first["batch_id"], brief["row_id"])
+    assert rejected["items"][0]["status"] == "blocked"
+    assert rejected["items"][0]["candidate_v5_payload"] is None
+    assert not writes(portal)
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM moengage_draft_attempts").fetchone()["n"] == 0
+    portal["templates"][SERVICES] = templates
+    second = batch_queue.stage([brief], brief["source_ref"])
+    result = batch_queue.create_row(second["batch_id"], brief["row_id"])
+    assert result["items"][0]["status"] == "VERIFIED"
+    assert len(writes(portal)) == 1
+
+
+@pytest.mark.parametrize("envelope", [{"status": False}, {"status": 1}, {"success": False}])
+def test_http_success_with_failed_metadata_envelope_cannot_stage_a_live_row(portal, envelope):
+    portal["envelope"] = envelope
+    brief = row(CAPITAL)
+    staged = queue().stage([brief], brief["source_ref"])
+    assert staged["ready"] == 0
+    assert staged["items"][0]["status"] == "blocked"
+    assert staged["items"][0]["candidate_v5_payload"] is None
+    assert not writes(portal)

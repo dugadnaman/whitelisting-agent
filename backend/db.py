@@ -846,6 +846,17 @@ def init_database(conn: DBConnection | None = None, force: bool = False) -> None
             if "requested_tenant_id" not in {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}:
                 conn.execute("ALTER TABLE users ADD COLUMN requested_tenant_id TEXT")
         _upgrade_auth_sync(conn)
+        # Old preflight rejections used an attempted-state spelling. Release only
+        # identities with no provider reservation; ambiguous writes stay locked.
+        conn.execute(
+            "UPDATE moengage_draft_batch_rows SET status='blocked',candidate_json=NULL "
+            "WHERE status='BLOCKED' AND campaign_id IS NULL AND NOT EXISTS ("
+            "SELECT 1 FROM moengage_draft_attempts AS attempt "
+            "WHERE attempt.account=moengage_draft_batch_rows.account "
+            "AND attempt.workspace_id=moengage_draft_batch_rows.workspace_id "
+            "AND attempt.source_ref=moengage_draft_batch_rows.source_ref "
+            "AND attempt.row_id=moengage_draft_batch_rows.row_id)"
+        )
         conn.commit()
         key = _target_key(conn)
         if key is not None:

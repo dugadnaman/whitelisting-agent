@@ -116,11 +116,6 @@ def _audience(row: dict[str, Any], catalog: dict[str, Any], errors: list[str]) -
         return {"included_filters": {"filter_operator": "and", "filters": [
             {"filter_type": "custom_segments", "name": segment["name"], "id": segment["id"]}
         ]}}
-    if segment_name:
-        default_seg_id = (_items(catalog, "segments")[0].get("id") if _items(catalog, "segments") else "65cf4af4d4c88174e5ad186e")
-        return {"included_filters": {"filter_operator": "and", "filters": [
-            {"filter_type": "custom_segments", "name": segment_name, "id": default_seg_id}
-        ]}}
     errors.append("segment must match exactly one account catalog entry")
     return None
 
@@ -244,15 +239,46 @@ def _match_whatsapp_body(body: str, template: str) -> dict[str, str] | None:
     return {f"{{{{{number}}}}}": matched.group(f"p{number}") for number in seen} if matched else None
 
 
+def _whatsapp_placeholder_values(placeholders: Any, template_body: str | None) -> dict[str, str]:
+    """Compare numbered slots without rewriting the provider's accepted key spelling."""
+    if (not isinstance(placeholders, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str) or not value.strip()
+                   for key, value in placeholders.items())):
+        raise ValueError("WhatsApp body placeholders must contain nonempty string values")
+    normalized = {}
+    for key, value in placeholders.items():
+        match = re.fullmatch(r"(?:\{\{(\d+)\}\}|(\d+))", key)
+        if match is None:
+            raise ValueError("WhatsApp body placeholder keys must be numbered variables")
+        number = match.group(1) or match.group(2)
+        if number in normalized:
+            raise ValueError("WhatsApp body placeholder aliases are ambiguous")
+        normalized[number] = value
+    if template_body is not None and set(normalized) != set(re.findall(r"\{\{(\d+)\}\}", template_body)):
+        raise ValueError("WhatsApp body placeholders must match the live template variables")
+    return normalized
+
+
 def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: list[str]) -> dict[str, Any]:
     sender_name = _text(row, "whatsapp_sender")
     sender_id = _text(row, "whatsapp_sender_id")
     template_id = _text(row, "whatsapp_template_id")
     senders, templates = _items(catalog, "whatsapp_senders"), _items(catalog, "whatsapp_templates")
+    requested_senders = [
+        sender for sender in senders
+        if (not sender_name or sender_name in (sender.get("sender_name"), sender.get("sender_id"), sender.get("id")))
+        and (not sender_id or sender_id == (sender.get("sender_id") or sender.get("id")))
+    ]
     body = next((_text(row, key) for key in ("Message Body", "whatsapp_message", "body", "message") if _text(row, key)), "")
     candidates = []
     for item in templates:
         if template_id and template_id not in (item.get("id"), item.get("name"), item.get("display_name")):
+            continue
+        if (sender_name or sender_id) and not any(
+            (not item.get("sender_ids") or (sender.get("sender_id") or sender.get("id")) in item["sender_ids"])
+            and (not item.get("provider") or str(sender.get("provider", "")).upper() == str(item["provider"]).upper())
+            for sender in requested_senders
+        ):
             continue
         inferred = None
         if body and item.get("body"):
@@ -266,10 +292,8 @@ def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: l
     if template is None:
         errors.append("WhatsApp template must match exactly one approved template in the selected workspace")
     possible = [
-        sender for sender in senders
-        if (not sender_name or sender_name in (sender.get("sender_name"), sender.get("sender_id"), sender.get("id")))
-        and (not sender_id or sender_id == (sender.get("sender_id") or sender.get("id")))
-        and (not template or not template.get("sender_ids") or (sender.get("sender_id") or sender.get("id")) in template["sender_ids"])
+        sender for sender in requested_senders
+        if (not template or not template.get("sender_ids") or (sender.get("sender_id") or sender.get("id")) in template["sender_ids"])
         and (not template or not template.get("provider") or str(sender.get("provider", "")).upper() == str(template["provider"]).upper())
     ]
     # A template can identify its sole approved sender; never choose the first sender.
@@ -279,11 +303,19 @@ def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: l
     catalog_sender_id = (sender.get("sender_id") or sender.get("id")) if sender else None
     ph_raw = row.get("whatsapp_placeholders")
     try:
-        body_placeholders = json.loads(ph_raw) if isinstance(ph_raw, str) and ph_raw else ph_raw or inferred or {}
-    except (TypeError, ValueError):
+        if ph_raw is None or ph_raw == "":
+            body_placeholders = inferred if inferred is not None else {}
+        else:
+            body_placeholders = json.loads(ph_raw) if isinstance(ph_raw, str) else ph_raw
+        values = _whatsapp_placeholder_values(body_placeholders, template.get("body") if template else None)
+        if inferred is not None and {
+            key: " ".join(value.split()) for key, value in values.items()
+        } != {key[2:-2]: " ".join(value.split()) for key, value in inferred.items()}:
+            errors.append("WhatsApp placeholders disagree with the rendered brief body")
+    except (TypeError, ValueError) as exc:
         body_placeholders = None
-    if not isinstance(body_placeholders, dict) or any(not isinstance(value, str) for value in body_placeholders.values()):
-        errors.append("whatsapp_placeholders must be a JSON object of strings")
+        errors.append(str(exc) if isinstance(exc, ValueError) and not isinstance(exc, json.JSONDecodeError)
+                      else "whatsapp_placeholders must be a JSON object of strings")
 
     return {
         "basic_details": {"name": name},
@@ -436,7 +468,7 @@ def _parse_date_and_time_to_iso(d_val: Any, t_val: Any) -> str | None:
             num = float(s)
             if num > 30000:
                 d_part = (excel_epoch + timedelta(days=num)).date()
-        except ValueError:
+        except (ValueError, OverflowError):
             pass
         if not d_part:
             for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
@@ -450,38 +482,37 @@ def _parse_date_and_time_to_iso(d_val: Any, t_val: Any) -> str | None:
         t_part = t_val
     elif isinstance(t_val, (int, float)):
         try:
-            total_sec = int(float(t_val) * 86400)
-            hr = (total_sec // 3600) % 24
-            mn = (total_sec % 3600) // 60
-            sc = total_sec % 60
-            t_part = time(hr, mn, sc)
+            fraction = float(t_val)
+            if 0 <= fraction < 1:
+                total_sec = round(fraction * 86400)
+                t_part = time(total_sec // 3600, (total_sec % 3600) // 60, total_sec % 60)
         except Exception:
             pass
     elif isinstance(t_val, str) and t_val.strip():
         s = t_val.strip()
         try:
             num = float(s)
-            if 0 <= num <= 1:
-                total_sec = int(num * 86400)
-                t_part = time((total_sec // 3600) % 24, (total_sec % 3600) // 60, total_sec % 60)
+            if 0 <= num < 1:
+                total_sec = round(num * 86400)
+                t_part = time(total_sec // 3600, (total_sec % 3600) // 60, total_sec % 60)
         except ValueError:
             pass
         if not t_part:
-            m = re.search(r"(\d{1,2}):(\d{2})\s*(am|pm)?", s, re.IGNORECASE)
-            if m:
-                hr = int(m.group(1))
-                mn = int(m.group(2))
-                ampm = (m.group(3) or "").lower()
-                if ampm == "pm" and hr < 12:
-                    hr += 12
-                elif ampm == "am" and hr == 12:
-                    hr = 0
-                t_part = time(hr, mn, 0)
+            match = re.fullmatch(r"(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?", s, re.IGNORECASE)
+            if match:
+                hour, minute, second = int(match[1]), int(match[2]), int(match[3] or "0")
+                ampm = (match[4] or "").lower()
+                if ampm and not 1 <= hour <= 12:
+                    return None
+                if ampm:
+                    hour = hour % 12 + (12 if ampm == "pm" else 0)
+                try:
+                    t_part = time(hour, minute, second)
+                except ValueError:
+                    return None
 
-    if not d_part:
-        d_part = (datetime.now() + timedelta(days=1)).date()
-    if not t_part:
-        t_part = time(11, 0, 0)
+    if d_part is None or t_part is None:
+        return None
 
     comb = datetime.combine(d_part, t_part)
     return comb.strftime("%Y-%m-%dT%H:%M:%S+05:30")
@@ -489,7 +520,7 @@ def _parse_date_and_time_to_iso(d_val: Any, t_val: Any) -> str | None:
 
 def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet: str, account: str) -> dict[str, Any]:
     # 1. Infer channel
-    if not row.get("channel") or row["channel"].upper() not in ("EMAIL", "PUSH", "WHATSAPP"):
+    if not _text(row, "channel"):
         lower_fn = f"{filename} {sheet}".lower()
         if any(k in lower_fn for k in ("whatsapp", "wa")):
             row["channel"] = "WHATSAPP"
@@ -502,7 +533,7 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
         else:
             row["channel"] = "WHATSAPP"
     else:
-        row["channel"] = row["channel"].upper()
+        row["channel"] = _text(row, "channel").upper()
 
     # 2. Infer segment (File Name on FileZilla is segment name)
     filezilla_val = None
@@ -564,10 +595,6 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
             sched = _parse_date_and_time_to_iso(d_val, t_val)
             if sched:
                 row["scheduled_at"] = sched
-
-        if not row.get("scheduled_at"):
-            tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%dT11:00:00+05:30")
-            row["scheduled_at"] = tomorrow
 
     if not row.get("timezone"):
         row["timezone"] = "Asia/Kolkata"

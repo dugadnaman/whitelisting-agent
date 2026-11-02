@@ -14,8 +14,9 @@ from typing import Any
 import requests
 
 from moengage_draft_batches import DraftBatchQueue
-from moengage_draft_creation import load_server_catalog
+from moengage_draft_creation import RateLimitError, load_server_catalog
 from moengage_drafts import authorize_draft_account
+from moengage_preview import _whatsapp_placeholder_values
 from moengage_workspaces import _approved_templates, _sender_inventory, portal_session
 
 _CAMPAIGN_ID = re.compile(r"[0-9a-fA-F]{24}\Z")
@@ -52,8 +53,12 @@ class WhatsAppDraftWriter:
             raise RuntimeError("MoEngage WhatsApp request outcome unconfirmed") from exc
         if response.status_code not in (200, 201):
             raise ValueError(f"MoEngage WhatsApp request failed (HTTP {response.status_code})")
-        data = response.json()
-        if (not isinstance(data, dict) or data.get("status") not in ("success", True)
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ValueError("MoEngage WhatsApp response unconfirmed") from exc
+        if (not isinstance(data, dict) or (data.get("status") != "success" and data.get("status") is not True)
+                or data.get("success") is False
                 or ("code" in data and str(data["code"]) not in ("200", "201"))):
             raise ValueError("MoEngage WhatsApp response unconfirmed")
         return data
@@ -85,6 +90,7 @@ class WhatsAppDraftWriter:
                           ("id", "name", "display_name"), "template")
         if not _CAMPAIGN_ID.fullmatch(str(template.get("id") or "")):
             raise ValueError("MoEngage returned no real WhatsApp template ID")
+        _whatsapp_placeholder_values(wa.get("body_placeholders"), template.get("body"))
         wa.update(sender_id=sender["id"], sender_name=sender["sender_name"],
                   provider=sender["provider"].upper(), phone_number=sender["phone_number"],
                   template_id=template["id"], template_name=template.get("name") or template.get("display_name"))
@@ -93,6 +99,8 @@ class WhatsAppDraftWriter:
     def create(self, payload: dict[str, Any], *, idempotency_key: str) -> dict[str, Any]:
         # The portal has no documented idempotency guarantee. DraftCreation's durable
         # reservation, not a speculative retry header, prevents a second POST.
+        if self.prepare(payload) != payload:
+            raise ValueError("WhatsApp selections changed before draft creation")
         wa = payload["campaign_content"]["content"]["whatsapp"]
         sender = _exact(self._senders(), wa["sender_id"], ("id",), "sender")
         body = {"campaign_data": {
@@ -115,7 +123,9 @@ class WhatsAppDraftWriter:
         if not isinstance(campaign_id, str) or not _CAMPAIGN_ID.fullmatch(campaign_id):
             raise ValueError("Invalid WhatsApp campaign ID")
         envelope = self._request("GET", f"/draft/campaigns/get/{campaign_id}?api=1")
-        draft = envelope.get("data", {}).get("campaign_draft", {}).get("draft")
+        data = envelope.get("data")
+        saved = data.get("campaign_draft") if isinstance(data, dict) else None
+        draft = saved.get("draft") if isinstance(saved, dict) else None
         if not isinstance(draft, dict) or not draft.get("campaignName"):
             raise ValueError("MoEngage returned no saved WhatsApp draft")
         # The GET response's inner _id differs from the route's draft ID, and it
@@ -140,7 +150,12 @@ class WhatsAppDraftWriter:
                 break
         if listed is None:
             raise ValueError("Campaign is not confirmed in MoEngage Drafts; reconcile manually")
-        wa = draft.get("whatsapp_data", {})
+        if (("channel" in draft and draft["channel"] != listed.get("channel"))
+                or ("delivery_type" in draft and draft["delivery_type"] != listed.get("delivery_type"))):
+            raise ValueError("Saved WhatsApp draft scope differs from Drafts membership")
+        wa = draft.get("whatsapp_data")
+        if not isinstance(wa, dict):
+            raise ValueError("MoEngage returned no saved WhatsApp content")
         sender = _exact(self._senders(), wa.get("sender_id"), ("id",), "saved sender")
         return {
             "id": campaign_id, "status": "DRAFT", "channel": listed.get("channel"),
@@ -160,19 +175,41 @@ def automate_whatsapp_draft_batch(batch_id: str, account: str, user: dict[str, A
     authorize_draft_account(account, user)
     queue = DraftBatchQueue(account, user, load_server_catalog(account))
     batch = queue.get(batch_id)
-    rows = [row for row in batch["items"] if row["channel"] == "WHATSAPP" and row["status"] == "preview_ready"]
+    rows = [row for row in batch["items"] if row["channel"] == "WHATSAPP" and (
+        row["status"] == "preview_ready"
+        or (row["status"] == "CREATED" and _CAMPAIGN_ID.fullmatch(row.get("campaign_id") or ""))
+    )]
+    if not rows:
+        return {"ok": False, "total": 0, "created": 0, "failed": 0, "results": [],
+                "error": "No eligible WhatsApp draft rows"}
     results = []
-    for row in rows:
+    rate_limited = False
+    for index, row in enumerate(rows):
         try:
             updated = queue.create_row(batch_id, row["row_id"])
             result = next(item for item in updated["items"] if item["row_id"] == row["row_id"])
             results.append({"row_id": row["row_id"], "status": result["status"],
                             "id": result.get("campaign_id"), "error": result.get("issue")})
+        except RateLimitError as exc:
+            # This is the local pre-POST cap, not an ambiguous provider response.
+            # Stop this run; retain every remaining row for deliberate later action.
+            rate_limited = True
+            results.append({"row_id": row["row_id"], "status": "RATE_LIMITED", "error": str(exc)})
+            results.extend({"row_id": pending["row_id"], "status": "NOT_ATTEMPTED",
+                            "error": "Not attempted after workspace draft-create rate cap"}
+                           for pending in rows[index + 1:])
+            break
         except (PermissionError, ValueError) as exc:
             results.append({"row_id": row["row_id"], "status": "BLOCKED", "error": str(exc)})
         except Exception:
             # A failed response/persistence step can follow a successful POST.
             results.append({"row_id": row["row_id"], "status": "UNCERTAIN", "error": "Draft state unavailable; reconcile manually"})
+        if (results[-1]["status"] != "VERIFIED"
+                or not _CAMPAIGN_ID.fullmatch(results[-1].get("id") or "")):
+            results.extend({"row_id": pending["row_id"], "status": "NOT_ATTEMPTED",
+                            "error": "Stopped after an unverified result; inspect stored state before continuing"}
+                           for pending in rows[index + 1:])
+            break
     created = sum(row["status"] == "VERIFIED" and bool(_CAMPAIGN_ID.fullmatch(row.get("id") or "")) for row in results)
     return {"ok": created == len(rows), "total": len(rows), "created": created,
-            "failed": len(rows) - created, "results": results}
+            "failed": len(rows) - created, "results": results, "rate_limited": rate_limited}

@@ -645,6 +645,17 @@ def get_date_range_bounds(
     return last_monday, last_sunday
 
 
+def normalize_ops_workspace_filter(workspace_filter: str | None) -> str | None:
+    """Canonicalize the dashboard vertical selection and reject unknown scopes."""
+    value = (workspace_filter or "").strip().casefold()
+    if value in ("", "all", "all accounts", "all workspaces"):
+        return None
+    verticals = {v.casefold(): v for v in ("TCL", "Services", "Wealth", "TCHFL", "Moneyfy", "Collections")}
+    if value not in verticals:
+        raise ValueError("Unknown MoEngage Ops workspace")
+    return verticals[value]
+
+
 def compute_ops_dashboard_metrics(
     records: list[NormalizedOpsRecord],
     mode: str = "last_week",

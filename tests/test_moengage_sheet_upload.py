@@ -89,43 +89,54 @@ def test_xlsx_push_preview_keeps_worksheet_row_and_channel_specific_content(tmp_
     assert payload["segmentation_details"]["included_filters"]["filters"][0]["id"] == "seg-vip"
     assert payload["campaign_content"]["content"]["push"]["android"]["basic_details"]["message"] == "Review your offer"
 
-def test_client_whatsapp_spreadsheet_auto_normalization(tmp_path, monkeypatch, provision_user):
-    """Verify client spreadsheets with custom columns (Date/Time of Trigger, File Name on FileZilla) parse to 100% ready."""
+def test_client_whatsapp_workbook_resolves_only_explicit_workspace_audiences(tmp_path, monkeypatch, provision_user):
+    workspace = "6516b0db87ee0c3c4499dc68"
+    sender = "111111111111111111111111"
+    template = "222222222222222222222222"
     catalog = {
-        **CATALOG,
-        "whatsapp_senders": [{"sender_name": "Tata Capital Financial Services Limited", "provider": "KARIX"}],
-        "whatsapp_templates": [{"id": "test_1234", "name": "test_1234"}],
-        "segments": [{"id": "65cf4af4d4c88174e5ad186e", "name": "Test_FSTP_Pranav_1602"}],
+        "account": "tata", "workspace_id": workspace, "workspace_name": "Tata Capital",
+        "whatsapp_workspaces": [{"id": workspace, "name": "Tata Capital"}],
+        "whatsapp_senders": [{"sender_id": sender, "sender_name": "Tata test sender", "provider": "KARIX"}],
+        "whatsapp_templates": [{"id": template, "name": "training", "body": "Dear Colleague, attend {{1}}",
+                                "provider": "KARIX", "sender_ids": [sender]}],
+        "segments": [{"id": "segment-training", "name": "TTA_BATCH04_09102026"},
+                     {"id": "segment-session", "name": "TTA_BATCH05_09102026"}],
     }
     catalog_path = tmp_path / "account-catalog.json"
     catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
     monkeypatch.setenv("MOENGAGE_DRAFT_TATA_CATALOG_FILE", str(catalog_path))
-    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_WORKSPACE_ID", CATALOG["workspace_id"])
+    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_WORKSPACE_ID", workspace)
+    monkeypatch.setattr("moengage_workspaces.workspace_catalog", lambda *_: catalog)
 
     book = Workbook()
     sheet = book.active
     sheet.title = "Sheet1"
-    sheet.append(["Sr. No", "Message Body", "File Name on FileZilla", "Emp Count", "Date of Trigger", "Time of Trigger", "Teams Link"])
-    sheet.append([1, "Dear Colleague, attend training", "TTA_BATCH04_09102026", 109, "46303", "0.625", "https://teams.microsoft.com/meet/123"])
-    sheet.append([2, "Dear Colleague, attend session", "TTA_BATCH05_09102026", 32, "46304", "0.45486", "https://teams.microsoft.com/meet/456"])
-
+    sheet.append(["workspace_id", "Sr. No", "Message Body", "File Name on FileZilla",
+                  "Date of Trigger", "Time of Trigger"])
+    sheet.append([workspace, 1, "Dear Colleague, attend training", "TTA_BATCH04_09102026", "46303", "0.625"])
+    sheet.append([workspace, 2, "Dear Colleague, attend session", "TTA_BATCH05_09102026", "46304", "0.45486"])
+    sheet.append([workspace, 3, "Dear Colleague, attend training", "UNKNOWN_AUDIENCE", "46304", "0.625"])
     buffer = io.BytesIO()
     book.save(buffer)
     _, headers = provision_user(tenant="tata", email=USER["email"])
-    client = TestClient(app, headers=headers)
-    result = client.post(
-        "/api/moengage/drafts/preview-upload",
-        data={"account": "tata"},
-        files={"file": ("Whatsapp message - File_BL&D_OCT.xlsx", buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    response = TestClient(app, headers=headers).post(
+        "/api/moengage/drafts/preview-upload", data={"account": "tata"},
+        files={"file": ("Whatsapp message.xlsx", buffer.getvalue(),
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )
-    assert result.status_code == 200, result.text
-    data = result.json()
-    assert (data["ready"], data["blocked"]) == (2, 0)
-    item1 = data["items"][0]
-    assert item1["status"] == "preview_ready"
-    assert item1["channel"] == "WHATSAPP"
-    assert item1["source_fields"]["campaign_name"] == "TTA_BATCH04_09102026_1"
-    assert item1["source_fields"]["segment_name"] == "TTA_BATCH04_09102026"
-    assert item1["source_fields"]["Emp Count"] == "109"
-    assert "2026-10-08T15:00:00" in item1["source_fields"]["scheduled_at"]
-    assert item1["candidate_v5_payload"]["campaign_delivery_type"] == "ONE_TIME"
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert (result["ready"], result["blocked"]) == (2, 1)
+    for item, audience, value, clock in zip(
+        result["items"][:2], ("segment-training", "segment-session"), ("training", "session"),
+        ("15:00:00", "10:55:00"), strict=True,
+    ):
+        payload = item["candidate_v5_payload"]
+        assert item["workspace_id"] == workspace
+        assert payload["segmentation_details"]["included_filters"]["filters"][0]["id"] == audience
+        whatsapp = payload["campaign_content"]["content"]["whatsapp"]
+        assert (whatsapp["sender_id"], whatsapp["template_id"], whatsapp["body_placeholders"]) == (
+            sender, template, {"{{1}}": value},
+        )
+        assert payload["scheduling_details"]["start_time"].endswith(clock)
+    assert result["items"][2]["candidate_v5_payload"] is None

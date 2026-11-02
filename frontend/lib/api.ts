@@ -1635,11 +1635,18 @@ function moEngageDraftForm(file: File, account: string): FormData {
   return form;
 }
 
+export class MoEngageDraftRequestError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "MoEngageDraftRequestError";
+  }
+}
+
 async function moEngageDraftRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!getAuthToken()) throw new Error("Sign in to access MoEngage drafts.");
   // A timed-out write may still have reached MoEngage: never retry POSTs automatically.
   const res = await fetchWithRetry(getApiUrl(path), init, 0);
-  if (!res.ok) throw new Error(await getErrorMessage(res));
+  if (!res.ok) throw new MoEngageDraftRequestError(await getErrorMessage(res), res.status);
   return res.json() as Promise<T>;
 }
 
@@ -1671,17 +1678,6 @@ export function createMoEngageDraftRow(batchId: string, rowId: string, account: 
     { method: "POST", body: form }
   );
 }
-export function automateMoEngageWhatsAppBatch(
-  batchId: string,
-  account: string
-): Promise<{ ok: boolean; total: number; created: number; failed: number; message?: string }> {
-  const form = new FormData();
-  form.append("account", account);
-  return moEngageDraftRequest(
-    `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}/automate-whatsapp`,
-    { method: "POST", body: form }
-  );
-}
 export function createMoEngageDraft(account: string, row: Record<string, unknown>): Promise<{
   account: string;
   workspace_id: string;
@@ -1703,7 +1699,7 @@ export type MoEngageCatalogEmailSender = { from_address: string; sender_name: st
 export type MoEngageCatalogPushPlatform = { platform: string; notification_channel?: string };
 export type MoEngageWorkspace = { id: string; name: string };
 export type MoEngageCatalogWhatsAppSender = { sender_id: string; name: string; number: string; provider: string };
-export type MoEngageCatalogWhatsAppTemplate = { id: string; name: string; sender_ids: string[]; provider: string };
+export type MoEngageCatalogWhatsAppTemplate = { id: string; name: string; display_name?: string; body?: string; sender_ids: string[]; provider: string };
 
 export type MoEngageCatalog = {
   account: string;

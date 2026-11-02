@@ -168,10 +168,10 @@ def _metadata_request(session: dict[str, Any], method: str, path: str) -> dict[s
     except (requests.RequestException, ValueError):
         raise ValueError("MoEngage workspace metadata unavailable; reconnect this workspace session") from None
     if (not isinstance(data, dict) or data.get("success") is False
-            or data.get("status") in ("failure", "failed", "error")
+            or ("status" in data and data["status"] != "success" and data["status"] is not True)
             or ("code" in data and str(data["code"]) != "200")
             or (data.get("loggedIn") is False and not (
-                str(data.get("code")) == "200" and data.get("status") in ("success", True)))):
+                str(data.get("code")) == "200" and (data.get("status") == "success" or data.get("status") is True)))):
         raise ValueError("MoEngage returned invalid workspace metadata")
     return data
 

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 import db
 from api import app
-from moengage_draft_creation import DraftCreation, RateLimitError
+from moengage_draft_creation import DraftCreation, DraftPreflightError, RateLimitError
 
 USER = {"sub": "operator-1", "tenant_id": "tata", "role": "operator", "email": "owner@example.com"}
 CATALOG = {
@@ -367,3 +367,25 @@ def test_multi_operator_and_whatsapp_rows_in_live_test_config(offline_db, tmp_pa
         prod_wildcard = ProductionDraftCreation.from_environment("tata", unlisted)
         assert prod_wildcard.approved_live_rows is not None
 
+
+
+def test_changed_approval_is_typed_preflight_rejection_before_provider_write(offline_db):
+    writer = FakeWriter()
+    worker = DraftCreation(
+        "tata", USER, CATALOG, writer, allow_sqlite_for_tests=True,
+        approved_live_rows={(ROW["source_ref"], ROW["row_id"]): ("EMAIL", "other-segment")},
+    )
+    with pytest.raises(DraftPreflightError, match="not approved") as rejected:
+        worker.create(ROW)
+    assert isinstance(rejected.value, PermissionError)
+    assert writer.calls == []
+
+
+@pytest.mark.parametrize("live_enabled", ["false", "true"])
+def test_lazy_writer_configuration_failure_is_typed_preflight(offline_db, monkeypatch, live_enabled):
+    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_LIVE_ENABLED", live_enabled)
+    for field in ("WORKSPACE_ID", "API_KEY", "DATA_CENTER"):
+        monkeypatch.delenv("MOENGAGE_DRAFT_TATA_" + field, raising=False)
+    with patch("requests.request", side_effect=AssertionError("No provider call allowed")):
+        with pytest.raises(DraftPreflightError):
+            service(None).create(ROW)

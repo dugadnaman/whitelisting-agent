@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clearTabState, setTabState, useTabState } from '@/lib/tab-state';
 import { useApp } from '@/lib/context';
 import {
-  automateMoEngageWhatsAppBatch,
+  MoEngageDraftRequestError,
   createMoEngageDraftRow,
   fetchMoEngageCatalog,
   fetchMoEngageDraftWorkspaces,
@@ -309,7 +309,7 @@ export default function MoEngageCampaignsPage() {
   const formCatalog = singleChannel === 'WHATSAPP' ? waCatalog : catalog;
   const [singleName, setSingleName] = useTabState<string>('moe_single_name', '');
   const [singleSegment, setSingleSegment] = useTabState<string>('moe_single_segment', '');
-  const [singleDate, setSingleDate] = useTabState<string>('moe_single_date', '2026-10-15T10:30');
+  const [singleDate, setSingleDate] = useTabState<string>('moe_single_date', '');
   const [singleTimezone, setSingleTimezone] = useTabState<string>('moe_single_timezone', 'Asia/Kolkata');
   // Email fields
   const [singleEmailSender, setSingleEmailSender] = useTabState<string>('moe_single_email_sender', '');
@@ -324,6 +324,19 @@ export default function MoEngageCampaignsPage() {
   // WhatsApp fields
   const [singleWaSender, setSingleWaSender] = useTabState<string>('moe_single_wa_sender', '');
   const [singleWaTemplate, setSingleWaTemplate] = useTabState<string>('moe_single_wa_template', '');
+  const [singleWaPlaceholders, setSingleWaPlaceholders] = useState<Record<string, string>>({});
+  const selectedWaSender = waCatalog?.workspace_id === waWorkspace
+    ? waCatalog.whatsapp_senders?.find((sender) => sender.sender_id === singleWaSender)
+    : undefined;
+  const selectedWaTemplate = selectedWaSender
+    ? waCatalog?.whatsapp_templates?.find((template) => template.id === singleWaTemplate && template.sender_ids.includes(singleWaSender))
+    : undefined;
+  const selectedWaSlots = [...new Set(
+    Array.from((selectedWaTemplate?.body || '').matchAll(/\{\{\d+\}\}/g), (match) => match[0])
+  )];
+  useEffect(() => {
+    setSingleWaPlaceholders({});
+  }, [account, waWorkspace, singleWaSender, singleWaTemplate]);
   // Batch & Spreadsheet state
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<MoEngageDraftPreview | null>(null);
@@ -515,12 +528,20 @@ export default function MoEngageCampaignsPage() {
     setError('');
     setNotice('');
     try {
+      localStorage.setItem(`moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`, '1');
       const result = await createMoEngageDraftRow(batch.batch_id, row.row_id, account);
+      if (result.batch_id !== batch.batch_id) throw new Error('Returned batch identity does not match the requested batch.');
       showBatch(result, storageKey);
-      const returnedRow = result.items.find((item) => item.row_id === row.row_id && item.source_ref === row.source_ref);
+      const returnedRow = result.items.find((item) => item.row_id === row.row_id && item.source_ref === row.source_ref && item.workspace_id === row.workspace_id);
       if (returnedRow && isCompletedDraft(returnedRow)) {
+        localStorage.removeItem(`moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`);
         setNotice(`Draft ${returnedRow.campaign_id} completed with state ${returnedRow.status}. Human review is required before publishing.`);
       } else {
+        if (returnedRow && !['preview_ready', 'UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(returnedRow.status)) {
+          localStorage.removeItem(`moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`);
+        } else {
+          setUncertainRows((rows) => [...new Set([...rows, row.row_id])]);
+        }
         const issues = returnedRow
           ? [...(returnedRow.issues || []), ...(returnedRow.issue ? [returnedRow.issue] : []), ...validationMessages(returnedRow.validation_errors)]
           : ['The requested row was not returned. Refresh stored state and reconcile before any further create.'];
@@ -528,13 +549,14 @@ export default function MoEngageCampaignsPage() {
       }
     } catch (cause) {
       const errStr = cause instanceof Error ? cause.message : String(cause);
-      const isTimeout = errStr.includes('504') || errStr.toLowerCase().includes('timeout') || errStr.toLowerCase().includes('network');
-      if (isTimeout) {
+      const ambiguous = !(cause instanceof MoEngageDraftRequestError) || cause.status >= 500 || cause.status === 408;
+      if (ambiguous) {
         const marker = `moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`;
         localStorage.setItem(marker, '1');
         setUncertainRows((rows) => [...rows, row.row_id]);
         setError(`Create result uncertain for row ${row.row_id}: ${errStr}. Re-read the batch to confirm state.`);
       } else {
+        localStorage.removeItem(`moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`);
         setError(`Create failed for row ${row.row_id}: ${errStr}`);
       }
     } finally {
@@ -558,38 +580,70 @@ export default function MoEngageCampaignsPage() {
   }, [batch, currentUser, account]);
   const handleAutomateWhatsApp = async () => {
     if (!batch || batchScope !== storageKey || busy || automatingWa || createInFlight.current) return;
-    if (batch.items.some((r) => r.channel?.toUpperCase() === 'WHATSAPP' && r.status === 'preview_ready' && uncertainRows.includes(r.row_id))) {
-      setError('Bulk creation is blocked by an unconfirmed prior attempt. Refresh stored state and manually reconcile it in MoEngage before continuing.');
-      return;
-    }
-    const pendingWa = batch.items.filter(
-      (r) => r.channel?.toUpperCase() === 'WHATSAPP' && r.status === 'preview_ready' && !r.campaign_id && !uncertainRows.includes(r.row_id)
-    );
-    if (pendingWa.length === 0) return;
+    const eligible = (row: MoEngageDraftRow) => row.channel?.toUpperCase() === 'WHATSAPP' &&
+      row.status === 'preview_ready' && !row.campaign_id &&
+      !uncertainRows.includes(row.row_id) &&
+      localStorage.getItem(`moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`) !== '1';
+    const pendingWa = batch.items.filter(eligible);
+    if (!pendingWa.length || !window.confirm(
+      `Create up to ${pendingWa.length} ready WhatsApp drafts sequentially for ${account.toUpperCase()}?\n\nEach row uses its explicit destination workspace. Only VERIFIED drafts count as completed. The batch stops on the first HTTP error or unverified result. Remaining rows stay ready for a deliberate resume. No publishing, scheduling sends or customer messages.`
+    )) return;
 
-    if (
-      !window.confirm(
-        `Start automated creation of ${pendingWa.length} WhatsApp drafts in MoEngage?
-
-The server will request draft-only creation for eligible rows with the selected audience, sender and template, then read back each saved campaign. Only matching VERIFIED drafts count as completed. No publish or send is requested; human review and publishing remain in MoEngage.`
-      )
-    )
-      return;
-
+    createInFlight.current = true;
+    setBusy(true);
     setAutomatingWa(true);
     setError('');
     setNotice('');
+    let verified = 0;
+    let attemptedRow: MoEngageDraftRow | null = null;
     try {
-      const res = await automateMoEngageWhatsAppBatch(batch.batch_id, account);
-      showBatch(await fetchMoEngageDraftBatch(batch.batch_id, account), storageKey);
-      if (res.failed > 0) {
-        setError(`${res.created} WhatsApp drafts verified; ${res.failed} rows had issues. Review the returned states below. Do not retry uncertain rows.`);
-      } else {
-        setNotice(`${res.created} WhatsApp drafts verified. Review the stored states below; human review is required before publishing.`);
+      let latest = await fetchMoEngageDraftBatch(batch.batch_id, account);
+      showBatch(latest, storageKey);
+      for (const row of pendingWa) {
+        const current = latest.items.find((item) => item.row_id === row.row_id &&
+          item.source_ref === row.source_ref && item.workspace_id === row.workspace_id);
+        if (!current || !eligible(current)) continue;
+        setNotice(`Creating WhatsApp draft ${verified + 1} of up to ${pendingWa.length} · Row ${row.row_id}. ${verified} verified this run. Results are stored below.`);
+        attemptedRow = row;
+        const marker = `moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${row.row_id}`;
+        // Persist before writing so reload/navigation cannot silently enable a replay.
+        localStorage.setItem(marker, '1');
+        latest = await createMoEngageDraftRow(batch.batch_id, row.row_id, account);
+        if (latest.batch_id !== batch.batch_id) throw new Error('Returned batch identity does not match the requested batch.');
+        showBatch(latest, storageKey);
+        const returned = latest.items.find((item) => item.row_id === row.row_id &&
+          item.source_ref === row.source_ref && item.workspace_id === row.workspace_id);
+        if (!returned || !isCompletedDraft(returned)) {
+          if (returned && !['preview_ready', 'UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(returned.status)) {
+            localStorage.removeItem(marker);
+            attemptedRow = null;
+          } else {
+            setUncertainRows((rows) => [...new Set([...rows, row.row_id])]);
+          }
+          throw new Error(`Row ${row.row_id} returned ${returned?.status || 'no matching stored result'}. Review this row before continuing; CREATED drafts may be rechecked read-only.`);
+        }
+        localStorage.removeItem(marker);
+        attemptedRow = null;
+        verified += 1;
       }
-    } catch (err) {
-      setError(`WhatsApp automation error: ${err instanceof Error ? err.message : String(err)}`);
+      setNotice(`${verified} WhatsApp drafts VERIFIED this run. Stored results are shown below. No publishing or sending was requested.`);
+    } catch (cause) {
+      if (attemptedRow && cause instanceof MoEngageDraftRequestError &&
+          cause.status < 500 && cause.status !== 408) {
+        localStorage.removeItem(`moengage_draft_uncertain:${currentUser?.id}:${account}:${batch.batch_id}:${attemptedRow.row_id}`);
+      } else if (attemptedRow) {
+        setUncertainRows((rows) => [...new Set([...rows, attemptedRow!.row_id])]);
+      }
+      setNotice(`${verified} WhatsApp drafts VERIFIED this run before stopping.`);
+      setError(`Bulk creation stopped: ${cause instanceof Error ? cause.message : String(cause)}. No later rows were attempted. Refresh stored state; resume ready rows deliberately after resolving the issue.`);
+      try {
+        showBatch(await fetchMoEngageDraftBatch(batch.batch_id, account), storageKey);
+      } catch {
+        // Keep the last persisted response and local uncertainty markers visible.
+      }
     } finally {
+      createInFlight.current = false;
+      setBusy(false);
       setAutomatingWa(false);
     }
   };
@@ -604,6 +658,11 @@ The server will request draft-only creation for eligible rows with the selected 
         !waCatalog.whatsapp_senders?.some((sender) => sender.sender_id === singleWaSender) ||
         !waCatalog.whatsapp_templates?.some((template) => template.id === singleWaTemplate && template.sender_ids.includes(singleWaSender)))) {
       setError('Select a WhatsApp workspace, audience, sender and approved template before staging.');
+      return;
+    }
+    if (!singleDate || (singleChannel === 'WHATSAPP' &&
+        selectedWaSlots.some((slot) => !singleWaPlaceholders[slot]?.trim()))) {
+      setError('Choose a planning date and fill every required WhatsApp template variable.');
       return;
     }
 
@@ -631,6 +690,7 @@ The server will request draft-only creation for eligible rows with the selected 
         'whatsapp_sender',
         'whatsapp_template_id',
         'workspace_id',
+        'whatsapp_placeholders',
       ];
 
       // Format ISO datetime with timezone
@@ -654,6 +714,9 @@ The server will request draft-only creation for eligible rows with the selected 
         singleChannel === 'WHATSAPP' ? singleWaSender : '',
         singleChannel === 'WHATSAPP' ? singleWaTemplate : '',
         singleChannel === 'WHATSAPP' ? waWorkspace : '',
+        singleChannel === 'WHATSAPP' ? JSON.stringify(Object.fromEntries(
+          selectedWaSlots.map((slot) => [slot, singleWaPlaceholders[slot]])
+        )) : '',
       ];
 
       const csvContent = `${headers.join(',')}\n${values.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')}`;
@@ -837,7 +900,7 @@ The server will request draft-only creation for eligible rows with the selected 
 
             <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg shadow-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              {singleChannel === 'WHATSAPP' ? `WhatsApp destination: ${waCatalog?.workspace_name || 'Select workspace'}${waCatalog ? ` (${waCatalog.workspace_id})` : ''}` : `Connected: ${catalog?.workspace_id || 'Loading account catalog'}`}
+              {singleChannel === 'WHATSAPP' ? `WhatsApp destination: ${waWorkspaces.find((workspace) => workspace.id === waWorkspace)?.name || waCatalog?.workspace_name || 'Select workspace'}${waWorkspace ? ` (${waWorkspace})` : ''}` : `Connected: ${catalog?.workspace_name || catalog?.workspace_id || 'Loading account catalog'}`}
             </div>
           </div>
         </div>
@@ -927,7 +990,7 @@ The server will request draft-only creation for eligible rows with the selected 
                 >
                   <div className="text-2xl mb-1">💬</div>
                   <div className="font-bold text-sm text-gray-900">WhatsApp</div>
-                  <div className="text-xs text-gray-500 mt-0.5">Karix BSP Templates</div>
+                  <div className="text-xs text-gray-500 mt-0.5">Workspace-approved Templates</div>
                 </button>
 
                 <button
@@ -967,7 +1030,7 @@ The server will request draft-only creation for eligible rows with the selected 
               {singleChannel === 'WHATSAPP' && (
                 <div>
                   <label className="block text-xs font-semibold text-gray-700 mb-1">WhatsApp destination workspace *</label>
-                  <select value={waWorkspace} onChange={(e) => setWaWorkspace(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                  <select value={waWorkspace} onChange={(e) => { setWaWorkspace(e.target.value); setWaCatalog(null); setSingleSegment(''); setSingleWaSender(''); setSingleWaTemplate(''); }} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
                     <option value="">Select destination — required</option>
                     {waWorkspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.id})</option>)}
                   </select>
@@ -1009,6 +1072,7 @@ The server will request draft-only creation for eligible rows with the selected 
                     onChange={(e) => setSingleDate(e.target.value)}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
                   />
+                  <p className="text-xs text-gray-500 mt-1">Planning time only. Confirm delivery settings in MoEngage before publishing.</p>
                 </div>
               </div>
             </section>
@@ -1020,9 +1084,10 @@ The server will request draft-only creation for eligible rows with the selected 
               {singleChannel === 'WHATSAPP' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">WhatsApp Sender (Karix)</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">WhatsApp Sender{selectedWaSender?.provider ? ` (${selectedWaSender.provider})` : ''}</label>
                     <select
                       value={singleWaSender}
+                      disabled={!waCatalog || waCatalog.workspace_id !== waWorkspace}
                       onChange={(e) => { setSingleWaSender(e.target.value); setSingleWaTemplate(''); }}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
                     >
@@ -1037,14 +1102,28 @@ The server will request draft-only creation for eligible rows with the selected 
 
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">Approved WhatsApp Template ID</label>
-                    <select value={singleWaTemplate} onChange={(e) => setSingleWaTemplate(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                    <select value={singleWaTemplate} disabled={!selectedWaSender} onChange={(e) => setSingleWaTemplate(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500">
                       <option value="">Select an approved sender template</option>
                       {waCatalog?.whatsapp_templates?.filter((template) => template.sender_ids.includes(singleWaSender)).map((template) => (
                         <option key={template.id} value={template.id}>{template.name} ({template.id})</option>
                       ))}
                     </select>
-                    <p className="text-xs text-gray-500 mt-1">Templates and sender IDs belong only to the selected workspace.</p>
+                    <p className="text-xs text-gray-500 mt-1">{!selectedWaSender ? 'Select a workspace and sender first: approved templates are scoped to that sender.' : 'Only approved templates available to this workspace and sender are shown.'}</p>
                   </div>
+                  {selectedWaSlots.map((slot) => (
+                    <div key={slot}>
+                      <label htmlFor={`wa-variable-${slot.replace(/\D/g, '')}`} className="block text-xs font-semibold text-gray-700 mb-1">
+                        Template variable {slot} *
+                      </label>
+                      <textarea
+                        id={`wa-variable-${slot.replace(/\D/g, '')}`}
+                        value={singleWaPlaceholders[slot] || ''}
+                        onChange={(event) => setSingleWaPlaceholders((values) => ({ ...values, [slot]: event.target.value }))}
+                        rows={2}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -1175,24 +1254,24 @@ The server will request draft-only creation for eligible rows with the selected 
             {singleChannel === 'WHATSAPP' && (
               <div className="rounded-3xl border-4 border-gray-800 bg-[#EFEAE2] p-4 shadow-xl max-w-sm mx-auto overflow-hidden">
                 <div className="bg-[#075E54] text-white px-3 py-2 rounded-t-xl flex items-center gap-2 -m-4 mb-4">
-                  <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">TC</div>
+                  <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">WA</div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold truncate">Tata Capital</div>
-                    <div className="text-[10px] text-emerald-200">Official Business Account</div>
+                    <div className="text-xs font-bold truncate">{selectedWaSender?.name || 'Select a WhatsApp sender'}</div>
+                    <div className="text-[10px] text-emerald-200">{selectedWaSender?.provider || 'Workspace-scoped preview'}</div>
                   </div>
                 </div>
 
                 <div className="bg-white rounded-lg p-3 shadow-xs space-y-2 text-xs text-gray-800 relative max-w-[90%]">
-                  <div className="font-semibold text-gray-900">
-                    {singleName || 'Tata Capital Notification'}
-                  </div>
-                  <p className="text-gray-700 whitespace-pre-wrap">
-                    Template: <code className="bg-gray-100 px-1 py-0.5 rounded text-[11px] font-mono">{singleWaTemplate || 'test_1234'}</code>
-                  </p>
-                  <p className="text-[11px] text-gray-600">
-                    Thank you for banking with Tata Capital. Your transaction details and verification alerts will be sent through this channel.
-                  </p>
-                  <div className="text-[10px] text-gray-400 text-right">05:16 PM ✓✓</div>
+                  {selectedWaTemplate ? (
+                    <>
+                      <div className="font-semibold text-gray-900">{selectedWaTemplate.display_name || selectedWaTemplate.name}</div>
+                      <p className="text-gray-700">Template: <code className="bg-gray-100 px-1 py-0.5 rounded text-[11px] font-mono">{selectedWaTemplate.id}</code></p>
+                      <p className="text-[11px] text-gray-600 whitespace-pre-wrap">{selectedWaTemplate.body?.replace(/\{\{\d+\}\}/g, (slot) => singleWaPlaceholders[slot] || slot) || 'The live template has no body text available for preview.'}</p>
+                      <p className="text-[10px] text-gray-400">Live template copy · Preview only, not sent</p>
+                    </>
+                  ) : (
+                    <p className="text-gray-500">Select a workspace, sender and approved template to preview its actual message body. No template selected.</p>
+                  )}
                 </div>
               </div>
             )}
@@ -1350,7 +1429,7 @@ The server will request draft-only creation for eligible rows with the selected 
                       onClick={() => void handleAutomateWhatsApp()}
                       className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-xs font-bold disabled:opacity-50 transition-colors shadow-xs flex items-center gap-1.5"
                     >
-                      {automatingWa ? 'Creating & Reading Back Drafts…' : 'Create Eligible WhatsApp Drafts'}
+                      {automatingWa ? 'Creating Sequentially & Verifying…' : 'Create Ready WhatsApp Drafts Sequentially'}
                     </button>
                   )}
                   <button
@@ -1425,7 +1504,7 @@ The server will request draft-only creation for eligible rows with the selected 
               >
                 <div className="text-2xl mb-1">💬</div>
                 <div className="font-bold text-sm text-emerald-900">WhatsApp Only</div>
-                <div className="text-xs text-emerald-700 mt-1">Karix BSP Senders</div>
+                <div className="text-xs text-gray-500 mt-1">Workspace-approved Senders</div>
               </button>
 
               <button
@@ -1503,7 +1582,7 @@ The server will request draft-only creation for eligible rows with the selected 
                     <td className="p-2.5 font-mono">whatsapp_template_id</td>
                     <td className="p-2.5">WhatsApp</td>
                     <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">e.g. <code>test_1234</code></td>
+                    <td className="p-2.5">Exact approved template ID from the selected workspace</td>
                   </tr>
                   <tr>
                     <td className="p-2.5 font-mono">from_address</td>

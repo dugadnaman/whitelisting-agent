@@ -1,8 +1,8 @@
 """Durable, account-owned staging and single-row handoff for V5 draft creation.
 
-A row is claimed as UNCERTAIN in shared storage *before* calling DraftCreation.
-An interrupted process can therefore leave a row uncertain, but cannot cause a
-second provider POST. UNCERTAIN rows require manual investigation, not retry.
+A new row is claimed as UNCERTAIN in shared storage *before* calling DraftCreation.
+Only explicit pre-POST rejections release that claim. Interrupted creates cannot
+cause another provider POST; known CREATED drafts may resume readback only.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from db import get_database_url, get_db, init_database
-from moengage_draft_creation import DraftCreation, RateLimitError
+from moengage_draft_creation import DraftCreation, DraftPreflightError, RateLimitError
 from moengage_drafts import authorize_draft_account
 from moengage_preview import prepare_batch
 from moengage_workspaces import catalog_for_row
@@ -28,14 +28,18 @@ def prepare_routed_batch(
     authorize_draft_account(account, user)
     if not rows:
         raise ValueError("At least one campaign row is required")
-    duplicates = Counter((row.get("source_ref"), row.get("row_id")) for row in rows if isinstance(row, dict))
+    duplicates = Counter(
+        tuple(row.get(field, "").strip() if isinstance(row.get(field), str) else ""
+              for field in ("source_ref", "row_id"))
+        for row in rows if isinstance(row, dict)
+    )
     catalogs: dict[tuple[str, str], dict[str, Any]] = {}
     items = []
-    for row in rows:
+    for index, row in enumerate(rows, 1):
         selected = catalog
         issue = None
         normalized = row
-        if isinstance(row, dict) and str(row.get("channel", "")).upper() == "WHATSAPP":
+        if isinstance(row, dict) and str(row.get("channel", "")).strip().upper() == "WHATSAPP":
             try:
                 key = (str(row.get("workspace_id") or ""), str(row.get("workspace") or ""))
                 if key not in catalogs:
@@ -45,13 +49,18 @@ def prepare_routed_batch(
             except (ValueError, PermissionError, RuntimeError) as exc:
                 issue = str(exc)
         item = prepare_batch([normalized], account, selected, user["email"], source_type=source_type)["items"][0]
-        if isinstance(row, dict) and duplicates[(row.get("source_ref"), row.get("row_id"))] > 1:
+        if not isinstance(row, dict):
+            item.update(row_id=f"row:{index}", channel="", source_fields={})
+        if isinstance(row, dict) and duplicates[(item["source_ref"], item["row_id"])] > 1:
             issue = "Duplicate source_ref/row_id in batch"
         if issue:
             item.update(status="blocked", candidate_v5_payload=None, issues=[issue])
         item["workspace_id"] = selected["workspace_id"] if not issue else str(row.get("workspace_id") or "") if isinstance(row, dict) else ""
+        if item["channel"] == "WHATSAPP":
+            item["source_fields"].pop("workspace_name", None)
         if selected.get("workspace_name"):
             item["workspace_name"] = selected["workspace_name"]
+            item["source_fields"]["workspace_name"] = selected["workspace_name"]
         items.append(item)
     return {
         "account": account, "workspace_id": catalog["workspace_id"], "source_type": source_type,
@@ -182,6 +191,9 @@ class DraftBatchQueue:
                   "status": row["status"], "issues": json.loads(row["issues_json"]),
                   "campaign_id": row["campaign_id"], "issue": row["issue"],
                   "validation_errors": json.loads(row["validation_json"]), "updated_at": row["updated_at"]} for row in rows]
+        for item in items:
+            if item["channel"] == "WHATSAPP" and item["source_fields"].get("workspace_name"):
+                item["workspace_name"] = item["source_fields"]["workspace_name"]
         return {"batch_id": batch_id, "account": batch["account"], "workspace_id": batch["workspace_id"],
                 "source_ref": batch["source_ref"], "created_at": batch["created_at"], "items": items,
                 "ready": sum(item["status"] == "preview_ready" for item in items),
@@ -190,11 +202,16 @@ class DraftBatchQueue:
     def create_row(self, batch_id: str, row_id: str) -> dict[str, Any]:
         """Claim one selected row once; replay only reads its persisted result."""
         with self._db() as conn:
-            self._batch_row(conn, batch_id)
+            batch = self._batch_row(conn, batch_id)
             matches = conn.execute(
                 "SELECT * FROM moengage_draft_batch_rows WHERE batch_id=? AND row_id=? ORDER BY position",
                 (batch_id, row_id),
             ).fetchall()
+        # Non-object rows have display-only synthetic IDs and no source_ref.
+        # They must not shadow a real row in this batch's durable source.
+        source_matches = [row for row in matches if row["source_ref"] == batch["source_ref"].strip()]
+        if source_matches:
+            matches = source_matches
         if not matches:
             raise LookupError("Draft row not found")
         if len(matches) != 1:
@@ -230,10 +247,20 @@ class DraftBatchQueue:
             ).fetchone()
             if claimed_elsewhere is not None:
                 raise ValueError("Source row already attempted in another batch")
+            if resumable:
+                # A known remote draft must never become a fresh provider POST if
+                # its lower-level durable reservation is missing or inconsistent.
+                attempt = conn.execute(
+                    "SELECT campaign_id FROM moengage_draft_attempts WHERE account=? AND workspace_id=? "
+                    "AND source_ref=? AND row_id=?",
+                    (self.account, target, current["source_ref"], row_id),
+                ).fetchone()
+                if attempt is None or attempt["campaign_id"] != current["campaign_id"]:
+                    return self.get(batch_id)
             claimed = conn.execute(
                 "UPDATE moengage_draft_batch_rows SET status='UNCERTAIN',issue='create_result_unconfirmed',updated_at=? "
-                "WHERE batch_id=? AND position=? AND (status='preview_ready' OR (channel='WHATSAPP' AND status='CREATED' AND campaign_id IS NOT NULL))",
-                (time.time(), batch_id, current["position"]),
+                "WHERE batch_id=? AND position=? AND status=? AND updated_at=?",
+                (time.time(), batch_id, current["position"], current["status"], current["updated_at"]),
             ).rowcount
             if claimed != 1:
                 return self.get(batch_id)
@@ -261,26 +288,40 @@ class DraftBatchQueue:
             issue = result.get("issue")
             if issue is not None and not isinstance(issue, str):
                 raise ValueError("Draft create issue unconfirmed")
-        except RateLimitError:
-            # DraftCreation raises this only from its local pre-POST reservation.
-            # No external attempt occurred; preserve the preview row for a later
-            # deliberate operator action and let the API report the rate cap.
+            if state == "BLOCKED":
+                if resumable:
+                    state, campaign_id, issue = "CREATED", current["campaign_id"], "readback_preflight_blocked"
+                else:
+                    # BLOCKED is an explicit pre-POST result, not an attempted
+                    # identity. Keep it consistent with blocked staging rows.
+                    state = "blocked"
+        except (RateLimitError, DraftPreflightError):
+            # These types explicitly guarantee no provider POST occurred.
+            # Restore the prior state, including a known CREATED readback target.
             with self._db() as conn:
                 conn.execute(
-                    "UPDATE moengage_draft_batch_rows SET status='preview_ready',issue=NULL,updated_at=? "
+                    "UPDATE moengage_draft_batch_rows SET status=?,issue=?,updated_at=? "
                     "WHERE batch_id=? AND position=? AND status='UNCERTAIN'",
-                    (time.time(), batch_id, current["position"]),
+                    (current["status"], current["issue"], time.time(), batch_id, current["position"]),
                 )
             raise
         except Exception:
             # A creator may have POSTed just before crashing or before a persistence
             # failure. No subsequent request may invoke it again for this source row.
+            if resumable:
+                with self._db() as conn:
+                    conn.execute(
+                        "UPDATE moengage_draft_batch_rows SET status='CREATED',issue=?,updated_at=? "
+                        "WHERE batch_id=? AND position=? AND status='UNCERTAIN'",
+                        (current["issue"], time.time(), batch_id, current["position"]),
+                    )
             return self.get(batch_id)
         with self._db() as conn:
             conn.execute(
-                "UPDATE moengage_draft_batch_rows SET status=?,issues_json=?,campaign_id=?,issue=?,validation_json=?,updated_at=? "
+                "UPDATE moengage_draft_batch_rows SET status=?,issues_json=?,campaign_id=?,issue=?,validation_json=?,"
+                "candidate_json=CASE WHEN ?='blocked' THEN NULL ELSE candidate_json END,updated_at=? "
                 "WHERE batch_id=? AND position=? AND status='UNCERTAIN'",
-                (state, json.dumps(issues), campaign_id, issue, json.dumps(validation), time.time(),
+                (state, json.dumps(issues), campaign_id, issue, json.dumps(validation), state, time.time(),
                  batch_id, current["position"]),
             )
         return self.get(batch_id)

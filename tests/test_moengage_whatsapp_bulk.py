@@ -2,7 +2,7 @@
 
 import copy
 import json
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import openpyxl
 import pytest
@@ -249,6 +249,78 @@ def test_bulk_reports_readback_failure_as_not_created(isolated_db):
     assert row["campaign_id"] == "000000000000000000000001"
 
 
+@pytest.mark.parametrize("items", [
+    [],
+    [{"channel": "EMAIL", "status": "preview_ready", "row_id": "email-only"}],
+    [{"channel": "WHATSAPP", "status": "blocked", "row_id": "blocked-wa"}],
+    [{"channel": "WHATSAPP", "status": "VERIFIED", "row_id": "already-verified"}],
+])
+def test_automate_empty_eligible_scope_is_not_success(items):
+    batch_queue = Mock()
+    batch_queue.get.return_value = {"items": items}
+    with patch("moengage_whatsapp_worker.DraftBatchQueue", return_value=batch_queue), \
+         patch("moengage_whatsapp_worker.load_server_catalog", return_value=CATALOG_WA):
+        result = automate_whatsapp_draft_batch("batch", "tata", USER)
+    assert result["ok"] is False
+    assert (result["total"], result["created"], result["failed"]) == (0, 0, 0)
+    assert result["error"] == "No eligible WhatsApp draft rows"
+    batch_queue.create_row.assert_not_called()
+
+
+def test_automate_rate_cap_stops_without_marking_unattempted_rows_uncertain(isolated_db):
+    writer = WhatsAppWriter()
+    batch_queue = queue(writer)
+    staged = batch_queue.stage([
+        {**ROW_WA, "row_id": f"cap-{index}", "campaign_name": f"Cap {index}"} for index in range(7)
+    ], ROW_WA["source_ref"])
+    create_row = Mock(wraps=batch_queue.create_row)
+    batch_queue.create_row = create_row
+    with patch("moengage_whatsapp_worker.DraftBatchQueue", return_value=batch_queue), \
+         patch("moengage_whatsapp_worker.load_server_catalog", return_value=CATALOG_WA):
+        result = automate_whatsapp_draft_batch(staged["batch_id"], "tata", USER)
+    assert result["ok"] is False
+    assert result["rate_limited"] is True
+    assert (result["total"], result["created"], result["failed"]) == (7, 5, 2)
+    assert [item["status"] for item in result["results"]] == ["VERIFIED"] * 5 + ["RATE_LIMITED", "NOT_ATTEMPTED"]
+    assert create_row.call_count == 6
+    assert [name for name, _ in writer.calls].count("create") == 5
+    persisted = batch_queue.get(staged["batch_id"])["items"]
+    assert [item["status"] for item in persisted] == ["VERIFIED"] * 5 + ["preview_ready"] * 2
+    assert all(item["campaign_id"] is None and item["issue"] is None for item in persisted[5:])
+
+
+def test_automate_resumes_partial_readback_without_another_post(isolated_db):
+    writer = WhatsAppWriter(readback_error=True)
+    batch_queue = queue(writer)
+    staged = batch_queue.stage([ROW_WA], ROW_WA["source_ref"])
+    with patch("moengage_whatsapp_worker.DraftBatchQueue", return_value=batch_queue), \
+         patch("moengage_whatsapp_worker.load_server_catalog", return_value=CATALOG_WA):
+        first = automate_whatsapp_draft_batch(staged["batch_id"], "tata", USER)
+        assert first["results"][0]["status"] == "CREATED"
+        writer.readback_error = False
+        resumed = automate_whatsapp_draft_batch(staged["batch_id"], "tata", USER)
+    assert resumed["ok"] is True
+    assert resumed["created"] == 1
+    assert resumed["results"][0]["id"] == first["results"][0]["id"]
+    assert [name for name, _ in writer.calls] == ["create", "get", "get"]
+
+
+@pytest.mark.parametrize("path,value", [
+    (("campaign_content",), None),
+    (("campaign_content", "content"), []),
+    (("campaign_content", "content", "whatsapp"), None),
+])
+def test_malformed_nested_readback_requires_review_and_preserves_real_id(isolated_db, path, value):
+    writer = WhatsAppWriter(mismatch=(path, value))
+    batch_queue = queue(writer)
+    staged = batch_queue.stage([ROW_WA], ROW_WA["source_ref"])
+    result = batch_queue.create_row(staged["batch_id"], ROW_WA["row_id"])["items"][0]
+    assert result["status"] == "NEEDS_REVIEW"
+    assert result["campaign_id"] == "000000000000000000000001"
+    assert service(writer).create(ROW_WA)["state"] == "NEEDS_REVIEW"
+    assert [name for name, _ in writer.calls] == ["create", "get"]
+
+
 def test_parse_spreadsheet_csv_filtering(tmp_path):
     path = tmp_path / "campaigns.csv"
     path.write_text(
@@ -297,3 +369,49 @@ def test_parse_spreadsheet_empty_xlsx(tmp_path):
     path = tmp_path / "empty.xlsx"
     openpyxl.Workbook().save(path)
     assert parse_spreadsheet(str(path)) == []
+
+
+@pytest.mark.parametrize("field", ["segmentation_details", "body_placeholders"])
+def test_readback_extra_audience_or_placeholder_values_require_review(isolated_db, field):
+    writer = WhatsAppWriter()
+    original_get = writer.get
+    def get(campaign_id):
+        result = original_get(campaign_id)
+        target = (result["segmentation_details"] if field == "segmentation_details"
+                  else result["campaign_content"]["content"]["whatsapp"]["body_placeholders"])
+        target["unexpected"] = "extra value"
+        return result
+    writer.get = get
+    result = service(writer).create(ROW_WA)
+    assert result["state"] == "NEEDS_REVIEW"
+    assert result["campaign_id"] == "000000000000000000000001"
+    assert [name for name, _ in writer.calls] == ["create", "get"]
+
+
+def test_changed_preflight_does_not_hide_durable_uncertain_attempt(isolated_db):
+    writer = WhatsAppWriter(create_error=TimeoutError("ambiguous create"))
+    worker = service(writer)
+    first = worker.create(ROW_WA)
+    assert first["state"] == "UNCERTAIN"
+    worker.catalog = {**copy.deepcopy(CATALOG_WA), "whatsapp_templates": []}
+    repeated = worker.create(ROW_WA)
+    assert repeated["state"] == "UNCERTAIN"
+    assert repeated["campaign_id"] is None
+    assert len(writer.calls) == 1
+
+
+def test_automate_stops_after_ambiguous_write_and_leaves_later_rows_ready(isolated_db):
+    writer = WhatsAppWriter(create_error=TimeoutError("accepted but response lost"))
+    batch_queue = queue(writer)
+    staged = batch_queue.stage(
+        [{**ROW_WA, "row_id": str(index)} for index in range(3)], ROW_WA["source_ref"],
+    )
+    with patch("moengage_whatsapp_worker.DraftBatchQueue", return_value=batch_queue), \
+            patch("moengage_whatsapp_worker.load_server_catalog", return_value=CATALOG_WA):
+        result = automate_whatsapp_draft_batch(staged["batch_id"], "tata", USER)
+    assert result["ok"] is False
+    assert [row["status"] for row in result["results"]] == ["UNCERTAIN", "NOT_ATTEMPTED", "NOT_ATTEMPTED"]
+    assert [row["status"] for row in batch_queue.get(staged["batch_id"])["items"]] == [
+        "UNCERTAIN", "preview_ready", "preview_ready",
+    ]
+    assert [name for name, _ in writer.calls] == ["create"]
