@@ -147,8 +147,16 @@ def test_compute_ops_dashboard_metrics():
     assert v_breakdown["Collections"]["in_account_total"] is False
 
 
-def test_export_ops_dashboard_excel():
-    """Verify live export into Master Data sheet of MoEngage_Ops_Dashboard.xlsx."""
+def test_export_ops_workbook_clears_stale_reporting_rows_and_keeps_numeric_flags(tmp_path):
+    from openpyxl import Workbook, load_workbook
+
+    template = tmp_path / "report-template.xlsx"
+    book = Workbook()
+    book.active.title = "Master Data"
+    book.active.cell(8, 1, "Stale vertical")
+    book.active.cell(8, 7, 1)
+    book.save(template)
+    book.close()
     records = [
         NormalizedOpsRecord(
             vertical="Moneyfy",
@@ -167,14 +175,20 @@ def test_export_ops_dashboard_excel():
 
     out_file = export_ops_dashboard_excel(
         records=records,
-        template_path="MoEngage_Ops_Dashboard.xlsx",
-        output_path="test_moengage_ops_output.xlsx",
+        template_path=str(template),
+        output_path=str(tmp_path / "report.xlsx"),
     )
 
-    p = Path(out_file)
-    assert p.exists()
-    assert p.stat().st_size > 5000
-    p.unlink()
+    book = load_workbook(out_file)
+    try:
+        sheet = book["Master Data"]
+        row = [sheet.cell(6, column).value for column in range(1, 10)]
+        assert row == ["Moneyfy", "Campaign", "Push", "2026-08-25", "2026-08-24",
+                       "2026-08", 1, 0, "Moneyfy / Campaign"]
+        assert type(row[6]) is int and type(row[7]) is int
+        assert all(sheet.cell(8, column).value is None for column in range(1, 10))
+    finally:
+        book.close()
 
 
 @pytest.mark.live_moengage

@@ -29,6 +29,8 @@ After deploying repair `fa1f8bf`, the actual builder uploaded, previewed and sta
 
 Browser-only fault injection (no provider request) verified HTTP 429 stops after one row request and leaves ready controls resumable; HTTP 503 stops, persists uncertainty through reload and makes no automatic replay; a known `CREATED` ID exposes only read-back recheck, not a new-create action. Real catalog interactions verified sender-dependent selection, live previews, two editable variables, and sender/workspace reset behavior. A single-form round trip staged the exact Unicode and multiline values into local batch `8ab214ef-7953-4480-b782-5f087bac9a18` with zero row-create requests.
 
+A later read-only retry confirmed that both stored batches and all six verified IDs survived the newer PowerPoint/RCS releases. Fresh native verification was denied because Chrome was then signed into Apparel, not Tata; the account-scoped saved Tata catalog endpoint also returned HTTP 423 requiring reconnection. Reconnect Tata through Auth Sync before another live operation. The retry did not create, publish or send anything, and did not copy Apparel credentials into Tata.
+
 The production UI smoke also caught ID-only sender selections incorrectly displaying “Not supplied”, and local audit times incorrectly labeled UTC. Review cards now display resolved sender/provider/template IDs and actual variable values, use explicit UTC formatting, and label WhatsApp times as planning metadata rather than configured sends.
 
 Repairs from adversarial testing:
@@ -37,7 +39,7 @@ Repairs from adversarial testing:
 - Variable values must cover exactly the selected template's numbered slots, be nonblank strings, and agree with a supplied rendered brief. Numeric and `{{n}}` key spellings remain supported; duplicate aliases block.
 - Explicit invalid channels and missing/invalid client schedules are no longer replaced with guessed WhatsApp/tomorrow defaults. Excel clock fractions, midnight/noon and seconds are preserved; malformed clocks do not crash the upload.
 - Duplicate/whitespace/nonobject identities, creator isolation, concurrent clicks and concurrent source claims have regression coverage. Workspace display names survive persistence. Compare-and-set claims cannot reuse a stale preview after a known draft ID arrives.
-- Proven pre-write policy/rate failures restore the prior queue state. Historical uppercase preflight `BLOCKED` rows are normalized only when no provider reservation exists; ambiguous attempts remain locked.
+- Proven pre-write policy/rate failures restore the prior queue state. Historical uppercase preflight `BLOCKED` rows are normalized only when no provider reservation exists; ambiguous attempts remain locked. Direct creation also rejects a returned SQLite connection when PostgreSQL is configured, matching the batch guard and the shared adapter's strict default.
 - Malformed/error HTTP envelopes, timeouts, changed approvals/associations and read-back mismatches cannot become successful drafts. Known `CREATED` IDs survive failed read-only rechecks; there is no replacement POST.
 - UI bulk execution is sequential, refreshes durable results and shows progress. It stops on the first HTTP error or unverified result, leaving later rows ready for deliberate resume. Server automation also stops on rate caps and unverified results; an empty eligible set is not a successful creation.
 - The single builder shows real selected template copy and editable body variables; no fake `test_1234` preview or hardcoded Karix provider label remains. Sender-dependent template selection explains its disabled state.
@@ -45,7 +47,7 @@ Repairs from adversarial testing:
 
 The portal draft transport does **not** configure send-time delivery. Uploaded schedule values are planning metadata in the review queue; the UI explicitly requires the human publisher to confirm delivery settings in MoEngage. WhatsApp `VERIFIED` confirms saved draft fields and membership, not a publish/send validation. Media headers and button-specific completion still require human dashboard review. No draft was published, scheduled for send, or sent as a test.
 
-Regression result: **662 passed, 1 deselected**, using `python3 -m pytest tests/test_moengage*.py -q`. The Next.js production build passed. Targeted Ruff passed with only inherited database import-order diagnostics excluded. Failure injection uses local HTTP provider stores for authentication failures, HTTP 429/5xx, malformed bodies, changed metadata and uncertain writes; production provider failures are not deliberately induced.
+Regression result on current main: **689 passed, 1 deselected**, using `python3 -m pytest tests/test_moengage*.py -q`; this preserves the newer PowerPoint/RCS changes. The Next.js production build and targeted Ruff passed. A real refused PostgreSQL connection failed closed before draft transport, with no provider request. A brittle XLSX byte-size assertion was removed and replaced with a consumer regression for stale-row removal and numeric reporting flags. Failure injection uses local HTTP provider stores for authentication failures, HTTP 429/5xx, malformed bodies, changed metadata and uncertain writes; production provider failures are not deliberately induced.
 
 ### Earlier repair and smoke history
 

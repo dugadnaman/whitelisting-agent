@@ -389,3 +389,17 @@ def test_lazy_writer_configuration_failure_is_typed_preflight(offline_db, monkey
     with patch("requests.request", side_effect=AssertionError("No provider call allowed")):
         with pytest.raises(DraftPreflightError):
             service(None).create(ROW)
+
+
+@pytest.mark.parametrize("whatsapp", [False, True])
+def test_configured_postgres_outage_cannot_create_through_an_allowed_sqlite_fallback(offline_db, monkeypatch, whatsapp):
+    from tests.test_moengage_whatsapp_bulk import CATALOG_WA, ROW_WA
+
+    writer = FakeWriter()
+    worker = (DraftCreation("tata", USER, CATALOG_WA, writer, allow_sqlite_for_tests=True)
+              if whatsapp else service(writer))
+    # The adapter returned SQLite despite a configured shared database.
+    monkeypatch.setattr("moengage_draft_creation.get_database_url", lambda: "postgresql://configured-but-unavailable")
+    with pytest.raises(PermissionError, match="Shared PostgreSQL"):
+        worker.create(ROW_WA if whatsapp else ROW)
+    assert writer.calls == []
