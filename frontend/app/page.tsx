@@ -11,9 +11,8 @@ import {
   deleteTemplatesFromFile,
   syncKarixRcsToMoEngage,
   syncRcsTemplateToMoEngage,
-  fetchRcsSyncWorkspaces,
 } from '@/lib/api';
-import type { Stats, Template, ActivityLog, ActivityStats, RcsSyncWorkspace } from '@/lib/api';
+import type { Stats, Template, ActivityLog, ActivityStats } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import { formatChannel, formatDate, formatError, relativeTime, truncate } from '@/lib/format';
 
@@ -109,50 +108,14 @@ export default function DashboardPage() {
   const [syncRcsFeedback, setSyncRcsFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [syncingSingleRcs, setSyncingSingleRcs] = useState<Record<string, boolean>>({});
   const [syncedSingleRcs, setSyncedSingleRcs] = useState<Record<string, string>>({});
-  const [syncWorkspaces, setSyncWorkspaces] = useState<RcsSyncWorkspace[]>([]);
-  const [syncWorkspaceId, setSyncWorkspaceId] = useState('');
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [workspaceRevision, setWorkspaceRevision] = useState(0);
-  const selectedWorkspace = syncWorkspaces.find((workspace) => workspace.id === syncWorkspaceId);
-  const syncDestinationReady = account !== 'apparel' || Boolean(selectedWorkspace);
-  const syncBusy = syncingRcs || Object.values(syncingSingleRcs).some(Boolean);
-  const syncDestinationLabel = account === 'apparel' ? selectedWorkspace?.name || 'Select workspace' : 'MoEngage';
-  const syncScope = `${account}:${syncWorkspaceId}`;
-  const syncScopeRef = useRef(syncScope);
-  syncScopeRef.current = syncScope;
-
-  useEffect(() => {
-    let ignore = false;
-    setSyncWorkspaces([]);
-    setSyncWorkspaceId('');
-    setWorkspaceError(null);
-    if (account !== 'apparel' || !mounted) return;
-    setWorkspaceLoading(true);
-    fetchRcsSyncWorkspaces(account).then((workspaces) => {
-      if (!ignore) setSyncWorkspaces(workspaces);
-    }).catch((err) => {
-      if (!ignore) setWorkspaceError(formatError(err));
-    }).finally(() => {
-      if (!ignore) setWorkspaceLoading(false);
-    });
-    return () => { ignore = true; };
-  }, [account, mounted, workspaceRevision]);
-
-  useEffect(() => {
-    setSyncedSingleRcs({});
-    setSyncRcsFeedback(null);
-  }, [syncScope]);
 
   const handleSyncSingleRcsToMoEngage = async (t: Template) => {
-    if (!syncDestinationReady || syncBusy) return;
     const tName = t.template_name;
     const isCarousel = (t.template_type || '').toLowerCase().includes('carousel') || Boolean(t.carousel_cards?.length);
     try {
       setSyncingSingleRcs((prev) => ({ ...prev, [tName]: true }));
       const res = await syncRcsTemplateToMoEngage({
         account,
-        workspace_id: account === 'apparel' ? syncWorkspaceId : undefined,
         template_name: tName,
         template_id: tName,
         card_title: t.card_title || tName,
@@ -160,20 +123,18 @@ export default function DashboardPage() {
         media_url: t.media_url,
         cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
         cta_url: t.cta_url,
-        sender_id: t.sender_ids?.[0],
+        sender_id: account === 'apparel' ? 'RB RCS' : t.sender_ids?.[0],
         template_type: isCarousel ? 'carousel' : 'card',
         carousel_cards: t.carousel_cards || undefined,
         width: t.width,
         height: t.height,
       });
-      if (syncScopeRef.current !== syncScope) return;
       setSyncedSingleRcs((prev) => ({ ...prev, [tName]: res.moengage_id }));
       setSyncRcsFeedback({
-        message: `Template '${tName}' created in ${syncDestinationLabel} (MoEngage ID: ${res.moengage_id}).`,
+        message: `Template '${tName}' successfully created in MoEngage Settings (MoEngage ID: ${res.moengage_id}). It is now available in MoEngage RCS campaigns.`,
         type: 'success',
       });
     } catch (err) {
-      if (syncScopeRef.current !== syncScope) return;
       setSyncRcsFeedback({
         message: `MoEngage Sync failed for '${tName}': ${err instanceof Error ? err.message : String(err)}`,
         type: 'error',
@@ -184,22 +145,19 @@ export default function DashboardPage() {
   };
 
   const handleSyncRcsToMoEngage = async () => {
-    if (!syncDestinationReady || syncBusy) return;
     try {
       setSyncingRcs(true);
       setSyncRcsFeedback(null);
-      const res = await syncKarixRcsToMoEngage(account, account === 'apparel' ? syncWorkspaceId : undefined);
-      if (syncScopeRef.current !== syncScope) return;
+      const res = await syncKarixRcsToMoEngage(account);
       if (!res.ok) {
         setSyncRcsFeedback({ message: res.error || 'Sync failed', type: 'error' });
         return;
       }
       setSyncRcsFeedback({
-        message: `Synced ${res.created_count} RCS template(s) to ${syncDestinationLabel} · ${res.skipped_count} skipped (already present/not approved)${res.error_count ? ` · ${res.error_count} failed` : ''}.`,
+        message: `Synced ${res.created_count} RCS template(s) to MoEngage · ${res.skipped_count} skipped (already present/not approved)${res.error_count ? ` · ${res.error_count} failed` : ''}.`,
         type: 'success',
       });
     } catch (err) {
-      if (syncScopeRef.current !== syncScope) return;
       setSyncRcsFeedback({
         message: err instanceof Error ? err.message : 'Failed to sync RCS templates to MoEngage',
         type: 'error',
@@ -209,7 +167,7 @@ export default function DashboardPage() {
     }
   };
   const handleSyncSelectedRcsToMoEngage = async () => {
-    if (selectedTemplates.size === 0 || !syncDestinationReady || syncBusy) return;
+    if (selectedTemplates.size === 0) return;
     try {
       setSyncingRcs(true);
       setSyncRcsFeedback(null);
@@ -220,11 +178,9 @@ export default function DashboardPage() {
 
       for (const t of targets) {
         try {
-          if (syncScopeRef.current !== syncScope) break;
           const isCarousel = (t.template_type || '').toLowerCase().includes('carousel') || Boolean(t.carousel_cards?.length);
           await syncRcsTemplateToMoEngage({
             account,
-            workspace_id: account === 'apparel' ? syncWorkspaceId : undefined,
             template_name: t.template_name,
             template_id: t.template_name,
             card_title: t.card_title || t.template_name,
@@ -232,13 +188,12 @@ export default function DashboardPage() {
             media_url: t.media_url,
             cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
             cta_url: t.cta_url,
-            sender_id: t.sender_ids?.[0],
+            sender_id: account === 'apparel' ? 'RB RCS' : t.sender_ids?.[0],
             template_type: isCarousel ? 'carousel' : 'card',
             carousel_cards: t.carousel_cards || undefined,
             width: t.width,
             height: t.height,
           });
-          if (syncScopeRef.current !== syncScope) return;
           setSyncedSingleRcs((prev) => ({ ...prev, [t.template_name]: 'synced' }));
           successCount++;
         } catch (itemErr) {
@@ -248,10 +203,9 @@ export default function DashboardPage() {
         }
       }
 
-      if (syncScopeRef.current !== syncScope) return;
       const errDetail = errors.length > 0 ? ` (${errors.join('; ')})` : '';
       setSyncRcsFeedback({
-        message: `Successfully synced ${successCount} selected RCS template(s) to ${syncDestinationLabel}${failCount > 0 ? ` (${failCount} failed${errDetail})` : ''}.`,
+        message: `Successfully synced ${successCount} selected RCS template(s) to MoEngage Settings${failCount > 0 ? ` (${failCount} failed${errDetail})` : ''}.`,
         type: successCount > 0 ? 'success' : 'error',
       });
       setSelectedTemplates(new Set());
@@ -602,7 +556,7 @@ export default function DashboardPage() {
           {channel === 'rcs' && (
             <button
               onClick={handleSyncRcsToMoEngage}
-              disabled={syncBusy || !syncDestinationReady}
+              disabled={syncingRcs}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition-colors disabled:opacity-50"
               title="Pull approved RCS templates from Karix and register them in MoEngage Settings"
             >
@@ -656,39 +610,14 @@ export default function DashboardPage() {
                 Apparel Brand — Karix RCS to MoEngage Sync Hub
               </h2>
               <p className="text-xs text-purple-200 max-w-2xl leading-relaxed">
-                Pull approved RCS rich cards from Karix into the MoEngage workspace you select below. Duplicate detection and sender mapping use that destination only.
+                This account is dedicated exclusively to pulling approved RCS rich cards from Karix and syncing them directly into your Apparel MoEngage workspace with automated attribute mapping and semantic duplicate detection.
               </p>
             </div>
 
-            <div className="flex flex-col gap-3 shrink-0">
-              <label className="text-xs font-semibold text-purple-100" htmlFor="rcs-sync-workspace">
-                Destination MoEngage workspace
-              </label>
-              <select
-                id="rcs-sync-workspace"
-                value={syncWorkspaceId}
-                onChange={(event) => setSyncWorkspaceId(event.target.value)}
-                disabled={workspaceLoading || syncBusy}
-                className="rounded-lg border border-purple-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:opacity-60"
-              >
-                <option value="">{workspaceLoading ? 'Loading workspaces…' : 'Select workspace…'}</option>
-                {syncWorkspaces.map((workspace) => (
-                  <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-                ))}
-              </select>
-              {workspaceError ? (
-                <div role="alert" className="max-w-sm text-xs text-red-200">
-                  {workspaceError}
-                  <button type="button" onClick={() => setWorkspaceRevision((value) => value + 1)} className="ml-2 underline">
-                    Retry workspaces
-                  </button>
-                </div>
-              ) : !workspaceLoading && syncWorkspaces.length === 0 ? (
-                <p className="max-w-sm text-xs text-purple-200">No active workspaces available. Check MoEngage connection settings.</p>
-              ) : null}
+            <div className="flex items-center gap-3 shrink-0">
               <button
                 onClick={handleSyncRcsToMoEngage}
-                disabled={syncBusy || !syncDestinationReady}
+                disabled={syncingRcs}
                 className="px-5 py-3 rounded-xl text-xs font-bold bg-white text-purple-900 hover:bg-purple-50 shadow-lg transition-all flex items-center gap-2 active:scale-95 disabled:opacity-60 cursor-pointer"
               >
                 {syncingRcs ? (
@@ -704,7 +633,7 @@ export default function DashboardPage() {
                     <svg className="w-4 h-4 text-purple-900" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    <span>Sync Approved RCS to {syncDestinationLabel}</span>
+                    <span>Sync Approved RCS to MoEngage</span>
                   </>
                 )}
               </button>
@@ -940,7 +869,7 @@ export default function DashboardPage() {
                   <button
                     type="button"
                     onClick={handleSyncSelectedRcsToMoEngage}
-                    disabled={syncBusy || !syncDestinationReady}
+                    disabled={syncingRcs}
                     className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 shadow-sm transition-all cursor-pointer disabled:opacity-50"
                   >
                     {syncingRcs ? (
@@ -1201,7 +1130,7 @@ export default function DashboardPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleSyncSingleRcsToMoEngage(t)}
-                                    disabled={syncBusy || !syncDestinationReady}
+                                    disabled={syncingSingleRcs[t.template_name]}
                                     className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition flex items-center gap-1 cursor-pointer ${
                                       syncedSingleRcs[t.template_name]
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
@@ -1286,7 +1215,7 @@ export default function DashboardPage() {
                                           e.stopPropagation();
                                           handleSyncSingleRcsToMoEngage(t);
                                         }}
-                                        disabled={syncBusy || !syncDestinationReady}
+                                        disabled={syncingSingleRcs[t.template_name]}
                                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto ${
                                           syncedSingleRcs[t.template_name]
                                             ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
