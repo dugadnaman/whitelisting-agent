@@ -170,11 +170,14 @@ report endpoints remain separate Karix message-sending functionality.
 4. **Phase 4 — Apparel Multi-Channel Attribution Reporting**:
    - Dedicated `/apparel/attribution` portal under the Apparel account scope.
    - Multi-channel support (WhatsApp, SMS, RCS) with campaign date-range filtering, preview validation, and warnings.
-   - Integrates with an isolated worker service deployed on Railway with dedicated persistent MoEngage Chromium browser.
-   - Browser attribution waits for the current MoEngage page's `load` event before opening a saved Behavior report. Navigating at `DOMContentLoaded` can interrupt dashboard startup and leave the report stuck in its navigation shell, even when the workspace label is visible.
+   - Runs inside the main application (including the main Render service) using MoEngage's captured behavior HTTP contract: submit `/api/analytics/v4/behavior`, poll query status, then fetch daily results. No Playwright, CDP, separate worker service or hosted browser is used for attribution.
+   - Uses only Apparel's encrypted Auth Sync session / `APPAREL_MOENGAGE_*` settings. Authorizes the Apparel organization and the selected workspace before querying. Human session renewal is still required when MoEngage expires credentials.
    - Strict tenant isolation: Karix users from Tata or Bajaj cannot access Apparel attribution; authentication is fail-closed.
    - Login offers Bajaj Finserv, Tata Capital, and Apparel, with automatic organization selection retained as the default. An explicit choice must match an assigned user's organization (or platform-superadmin access); mismatches clear the returned token and stay on login. Apparel sign-ins open `/apparel/attribution` directly. Pending users sign in to `/signup` to request company access; the selector itself never grants permissions.
    - Overwrite protection (off by default) ensures existing completed attribution figures are never overwritten unintentionally.
+   - Rechecks campaign identity and current metrics immediately before writing. Retries retain the original campaigns and overwrite choice; moved/edited rows fail rather than receiving another campaign's results. Do not rearrange or edit source rows during a running job: Google Sheets does not provide an atomic compare-and-set for these writes.
+   - Preserves the existing daily-sum semantics for customer counts; Overall adds online and offline results, not a cross-day/cross-channel deduplicated person count. Revenue is `Sale_Array.Order_Net_Val`; delivery filters use each campaign's readable ID and the existing 120-day lookback.
+   - Crocs remains blocked until its missing `Txn_Channel` classification has a confirmed replacement. Incomplete results fail instead of being written as zero. See [attribution runtime and verification notes](docs/APPAREL_ATTRIBUTION_PAUSED.md).
 ---
 
 ## 📁 Repository Directory Structure
@@ -232,7 +235,7 @@ karix/
 
 ### Apparel on a local Windows laptop — no Docker
 
-Install [Git](https://git-scm.com/downloads/win), [Python 3.12](https://www.python.org/downloads/windows/), [Node.js 22+](https://nodejs.org/en/download), and [Google Chrome](https://www.google.com/chrome/) once. Open **PowerShell normally, not as administrator**, and run:
+Install [Git](https://git-scm.com/downloads/win), [Python 3.12](https://www.python.org/downloads/windows/) and [Node.js 22+](https://nodejs.org/en/download). Open **PowerShell normally, not as administrator**, and run:
 
 ```powershell
 git clone https://github.com/dugadnaman/whitelisting-agent.git
@@ -241,15 +244,15 @@ py -3.12 scripts/apparel_local.py setup
 py -3.12 scripts/apparel_local.py start
 ```
 
-Setup installs both Python dependency sets and the frontend, creates private local secrets, and asks for the first Apparel administrator's name, email and password. Password entry is hidden. Do not copy someone else's `.env`, browser profile or Bajaj/Tata credentials. The launcher must be committed and pushed before another laptop can clone it.
+Setup installs the Python dependencies and frontend, creates a private JWT secret, and asks for the first Apparel administrator's name, email and hidden password. Do not copy someone else's `.env` or Bajaj/Tata credentials. Changes must be committed and pushed before another laptop can clone them.
 
-Start opens the portal in a **separate Apparel Chrome window** and runs the API, worker and frontend in one terminal. It uses installed Chrome; it does not download Chromium or require Docker/WSL. Keep the terminal open; **Ctrl+C** stops only this launcher's services and preserves its accounts, Google key and browser profile.
+Start runs the main API and frontend in one terminal. Open the displayed `/apparel/attribution` URL in your normal browser; no dedicated Chrome process, CDP endpoint, Docker or WSL is required. **Ctrl+C** stops only this launcher's services and preserves accounts and uploaded keys.
 
 One-time administrator steps in the portal:
 
 1. Sign in using the account created during setup; select **Apparel**.
-2. Upload the authorized Google service-account JSON key in **Admin setup**. Share the approved sheet with that service account as an editor, then click **Connect approved sheet**. Report mappings and `Mastersheet` are already bundled.
-3. Click **Start login**, complete corporate MoEngage sign-in/MFA in the dedicated window, then refresh status.
+2. Install the authorized Google service-account JSON in **Admin setup**. Share the approved sheet with that account as Editor. Save the approved worksheet and reconnect it; Apparel workspace mappings are bundled.
+3. In **Settings → MoEngage**, configure the Apparel dashboard URL/workspace and connect **Apparel Auth Sync** (or supply Apparel's bearer token, refresh token and cookie). Return to attribution and refresh status. No server-side corporate-browser login is needed.
 4. Create marketing accounts in **Settings → Organization Team Directory → Add Colleague**, using **Operator**. Operators do not see Admin setup.
 
 For later use:
@@ -259,13 +262,21 @@ cd ~/whitelisting-agent
 py -3.12 scripts/apparel_local.py start
 ```
 
-Local state lives under `%LOCALAPPDATA%/Karix/Apparel/<checkout-id>`; secrets remain in the checkout's private `.env`. Use a local filesystem supporting Windows ACLs, such as NTFS, not FAT/exFAT. This is a per-device setup, not a public hosted service. Do not process the same shared-sheet rows from multiple laptops simultaneously. Browser sessions may require renewed human login.
+Local state lives under `%LOCALAPPDATA%/Karix/Apparel/<checkout-id>`; the JWT secret remains in the checkout's private `.env`. Use a filesystem supporting Windows ACLs, such as NTFS, not FAT/exFAT. This is per-device setup, not public hosting. Do not process the same shared-sheet rows from multiple laptops simultaneously. Expired MoEngage sessions require renewed Apparel Auth Sync.
 
-PowerShell uses `cd "C:\path\to\checkout"` (not Command Prompt's `cd /d`). Keep each Python invocation on one logical line, including the path after `--data-dir` and the final `setup` or `start`. If using a custom `--data-dir`, reuse it for both commands to retain the same accounts, secrets and browser profile.
+PowerShell uses `cd "C:\path\to\checkout"` (not Command Prompt's `cd /d`). Keep each Python invocation on one logical line. If using a custom `--data-dir`, reuse it for both commands to retain the same accounts, secrets and Google configuration.
 
 The launcher accepts its exact state marker with LF or Windows CRLF line endings and writes it as LF bytes, so Windows-created state can be reopened. Missing or unrecognized markers in nonempty state folders are still refused; do not create a marker for an unknown folder or delete existing state to bypass that protection.
 
-Verification: isolated native startup, hidden-password onboarding, SSO start and real operator UI exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
+### Apparel on the main Render service
+
+The root Docker image includes the attribution module and Google dependencies. Deploy that image on the existing main service; do not provision an attribution browser or worker service. Run one backend process/replica: job admission and job history are process-local, with a storage lock guarding a shared attribution directory.
+
+Keep the existing persistent `JWT_SECRET` and credential database. For durable file-based setup/key uploads, point `APPAREL_ATTRIBUTION_STORAGE_DIR` at a persistent disk directory. Without a disk, use `APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON`, `APPAREL_GOOGLE_SPREADSHEET_URL` and `APPAREL_GOOGLE_WORKSHEET_NAME` as deployment configuration; uploaded keys/setup on an ephemeral filesystem do not survive redeployment. Environment-installed Google keys are sealed against portal replacement.
+
+Connect only Apparel's MoEngage session through Settings/Auth Sync. On restart, reconnect the sheet and rerun with overwrite off: sheet results persist, but in-memory job history/CSV downloads do not. The browser-free cutover is locally verified; that does not claim a new Render deployment has already been released.
+
+Verification: production frontend build, real main-app HTTP attribution/sheet writes, restart recovery, and the browser-free native launcher were exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
 
 ### 1. Environment Configuration
 

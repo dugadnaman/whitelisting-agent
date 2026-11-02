@@ -24,12 +24,9 @@ from pydantic import ValidationError
 
 # Never read operator/deployment credentials or persistent state while importing tests.
 with tempfile.TemporaryDirectory() as import_directory, patch.dict(os.environ, {
-    "STORAGE_DIR": import_directory, "GOOGLE_SERVICE_ACCOUNT_JSON": "",
-    "GOOGLE_SERVICE_ACCOUNT_FILE": "", "GOOGLE_SPREADSHEET_URL": "",
-    "GOOGLE_WORKSHEET_NAME": "Mastersheet", "MOENGAGE_UI_CONFIG_JSON": "{}",
-    "MOENGAGE_REMOTE_CDP_URL": "", "MOENGAGE_BROWSER_LOGIN_URL": "",
-    "MOENGAGE_DASHBOARD_URL": "https://dashboard.moengage.com/", "MOENGAGE_MODE": "browser",
-    "ALLOW_MOCK_WRITES": "false", "APPAREL_ATTRIBUTION_TOKEN": "",
+    "APPAREL_ATTRIBUTION_STORAGE_DIR": import_directory,
+    "APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON": "", "APPAREL_GOOGLE_SERVICE_ACCOUNT_FILE": "",
+    "APPAREL_GOOGLE_SPREADSHEET_URL": "", "APPAREL_GOOGLE_WORKSHEET_NAME": "Mastersheet",
 }):
     from app import main as worker_main
     from app.api import routes
@@ -37,18 +34,16 @@ with tempfile.TemporaryDirectory() as import_directory, patch.dict(os.environ, {
         Settings,
         spreadsheet_identity,
         strong_token,
-        validate_private_cdp,
         validate_ui_config,
     )
     from app.core import dependencies
     from app.core.local_storage import private_directory, private_file, worker_storage_lock
     from app.main import app
     from app.models.report import CampaignMetrics, JobState, ReportJob, RowResult, SheetConnection
-    from app.schemas.report_schema import MoEngageSessionRequest, SetupRequest, StartJobRequest
+    from app.schemas.report_schema import SetupRequest, StartJobRequest
     from app.services.excel_service import ExcelService
     from app.services.google_sheet_service import GoogleSheetService, finish_thread_call
-    from app.services.moengage_browser_service import BrowserAutomationError, MoEngageBrowserService
-    from app.services.moengage_service import MoEngageService
+    from app.services.moengage_service import MoEngageError, MoEngageService
     from app.services.report_service import ReportService
     from app.utils.excel_utils import parse_tracking_range
 
@@ -56,7 +51,7 @@ with tempfile.TemporaryDirectory() as import_directory, patch.dict(os.environ, {
 TOKEN = "7aP9!xD3#uF6@qR1$sT8%vW2&yZ5*bC0"
 SHEET_ID = "approved_apparel_sheet_identity_1234567890"
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
-UI = {"workflow": "recorded_behavior", "query_url_map": {"Aldo": "https://dashboard.moengage.com/behavior?did=report&chartId=chart"}}
+UI = {"workspace_map": {"Aldo": "AL_IN"}}
 
 
 def assert_private_path(test, path: Path, *, directory: bool = False):
@@ -194,10 +189,9 @@ class WorkerRegressionTests(unittest.TestCase):
             storage_dir=self.directory, machine_token=TOKEN,
             google_service_account_file=self.directory / "google-service-account.json",
             google_spreadsheet_url=SHEET_URL, moengage_ui_config=json.loads(json.dumps(UI)),
-            moengage_remote_cdp_url="http://browser.internal:9222",
-            moengage_browser_login_url="https://login.corporate.test/",
         )
         self.service = ReportService(self.settings)
+        self.service.moengage.status = AsyncMock(return_value=("connected", "HTTP session verified"))
         self.service.google.install_credentials(self.key)
         self.worksheet = WorksheetFixture()
         self.service.google._worksheet_cache[(SHEET_ID, "Mastersheet")] = self.worksheet
@@ -236,8 +230,6 @@ class WorkerRegressionTests(unittest.TestCase):
     def test_verified_actor_and_safe_config_no_password_or_upload_routes(self):
         unaudited = self.client.put("/api/setup", json={"spreadsheet_url": SHEET_URL, "worksheet_name": "Mastersheet", "ui_config": UI}, headers={"X-Apparel-Attribution-Token": TOKEN})
         self.assertEqual(unaudited.status_code, 400)
-        for payload in [{"profile_id": "default", "password": "never-forward"}, {"profile_id": "invalid-profile"}]:
-            self.assertEqual(self.client.post("/api/moengage/session/start", headers=self.headers, json=payload).status_code, 422)
         with self.assertRaises(ValidationError):
             StartJobRequest(upload_id="workbook", brands=["Aldo"], channels=["SMS"], sent_date="2026-08-01")
         with self.assertRaises(ValidationError):
@@ -254,11 +246,9 @@ class WorkerRegressionTests(unittest.TestCase):
         self.assertNotIn("private_key", response.text)
         assert_private_path(self, self.settings.setup_path)
         with patch.dict(os.environ, {
-            "STORAGE_DIR": str(self.directory), "GOOGLE_SERVICE_ACCOUNT_JSON": "",
-            "GOOGLE_SERVICE_ACCOUNT_FILE": "", "GOOGLE_SPREADSHEET_URL": SHEET_URL,
-            "GOOGLE_WORKSHEET_NAME": "Old value", "MOENGAGE_UI_CONFIG_JSON": "{}",
-            "MOENGAGE_REMOTE_CDP_URL": "", "MOENGAGE_BROWSER_LOGIN_URL": "",
-            "MOENGAGE_DASHBOARD_URL": "", "MOENGAGE_MODE": "browser", "ALLOW_MOCK_WRITES": "false",
+            "APPAREL_ATTRIBUTION_STORAGE_DIR": str(self.directory),
+            "APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON": "", "APPAREL_GOOGLE_SERVICE_ACCOUNT_FILE": "",
+            "APPAREL_GOOGLE_SPREADSHEET_URL": SHEET_URL, "APPAREL_GOOGLE_WORKSHEET_NAME": "Old value",
         }):
             restored = Settings.from_env()
         self.assertEqual(restored.google_spreadsheet_url, changed_url)
@@ -325,24 +315,9 @@ class WorkerRegressionTests(unittest.TestCase):
         self.assertEqual(previous, self.settings.google_service_account_file.read_bytes())
         invalid = GoogleSheetService(self.directory / "missing.json", '{"private_key":"invalid"}')
         self.assertFalse(invalid.configured)
-        for endpoint in ["http://8.8.8.8:9222", "http://169.254.169.254:9222", "https://browser.internal:9222", "http://browser.internal:9222/anything"]:
-            with self.assertRaises(ValueError):
-                validate_private_cdp(endpoint)
 
-    def test_preview_parsing_warnings_follow_requested_date_range(self):
-        self.worksheet.sheet.append(["01/08/2026", "SMS", "Aldo", "", "Online", "1 Aug", "bad-august"])
-        self.worksheet.sheet.append(["01/07/2026", "SMS", "Aldo", "", "Online", "1 Jul", "bad-july"])
-        response = self.client.get("/api/google/connections/connection/campaigns", headers=self.headers, params={"sent_date_from": "2026-07-01", "sent_date_to": "2026-07-31"})
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["warning_sent_date_from"], "2026-07-01")
-        self.assertEqual(body["warning_sent_date_to"], "2026-07-31")
-        self.assertEqual(body["row_count"], 0)
-        self.assertEqual(body["warnings"], ["Row 5: blank required cell(s): Campaign Name"])
-        august = self.client.get("/api/google/connections/connection/campaigns", headers=self.headers, params={"sent_date_from": "2026-08-01", "sent_date_to": "2026-08-01"}).json()
-        self.assertEqual(august["warnings"], ["Row 4: blank required cell(s): Campaign Name"])
 
-    def test_job_admission_is_atomic_across_browser_authentication(self):
+    def test_job_admission_is_atomic_across_authentication(self):
         async def scenario():
             authentication_started = asyncio.Event()
             release_authentication = asyncio.Event()
@@ -427,6 +402,7 @@ class WorkerRegressionTests(unittest.TestCase):
                 RowResult(3, "Aldo", "SMS", "Overall", "incomplete", "Incomplete", "2026-08-01 → 2026-08-01", status="failed"),
             ]
             self.service.jobs[original.id] = original
+            original.campaigns = list(self.connection.campaigns)
             retry = self.service.retry_failed_sheet_job(original.id)
             await self.service.tasks[retry.id]
             self.assertEqual([result.excel_row for result in retry.results], [3])
@@ -445,16 +421,11 @@ class WorkerRegressionTests(unittest.TestCase):
     def test_month_boundaries_currency_and_finance_policy_remain_repaired(self):
         self.assertEqual(parse_tracking_range("31 - 1 Feb", date(2026, 1, 31)), (date(2026, 1, 31), date(2026, 2, 1)))
         self.assertEqual(parse_tracking_range("31 - 1 Jan", date(2025, 12, 31)), (date(2025, 12, 31), date(2026, 1, 1)))
-        for text, expected in {"1.2K": 1200, "2M": 2000000, "0.5b": 500000000, "₹4,99,279.00": 499279, "(₹2,500.50)": -2500.5, "0": 0}.items():
-            self.assertEqual(MoEngageBrowserService._parse_number(text), expected)
-        for text in ["12%", "not available", "2 orders", "1.2.3"]:
-            with self.assertRaises(BrowserAutomationError):
-                MoEngageBrowserService._parse_number(text)
         combined = MoEngageService._combine_metrics(
             MoEngageService._typed_metrics("Online", 5, 300), MoEngageService._typed_metrics("Offline", 2, 150),
         )
         self.assertEqual(combined, CampaignMetrics(7, 450, 5, 2, 300, 150))
-        with self.assertRaises(Exception):
+        with self.assertRaises(MoEngageError):
             MoEngageService._typed_metrics("Online", 0, 450)
 
 

@@ -1,4 +1,4 @@
-"""Worker-only application. The native Karix portal is its sole browser caller."""
+"""Internal attribution module; its lifespan is owned by the main Karix app."""
 import os
 from contextlib import asynccontextmanager
 
@@ -13,7 +13,7 @@ from app.core.local_storage import worker_storage_lock
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     if not strong_token(settings.machine_token):
-        raise RuntimeError("A strong APPAREL_ATTRIBUTION_TOKEN must be configured before worker startup")
+        raise RuntimeError("The main application must initialize attribution's internal authentication")
     if os.name != "nt":
         os.umask(0o077)
     with worker_storage_lock(settings.storage_dir):

@@ -73,6 +73,7 @@ class SheetConnectRequest(BaseModel):
 
 class SheetConnectionResponse(BaseModel):
     connection_id: str
+    spreadsheet_url: str
     spreadsheet_title: str
     worksheet_title: str
     row_count: int
@@ -95,25 +96,10 @@ class CampaignPreviewResponse(BaseModel):
 
 
 class MoEngageSessionResponse(BaseModel):
-    status: Literal["connected", "waiting_for_login", "disconnected", "not_configured"]
+    status: Literal["connected", "disconnected", "not_configured"]
     message: str
-    profile_id: str = "default"
-    profiles: list[str] = Field(default_factory=list)
-    login_url: str | None = None
 
 
-class MoEngageSessionRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    profile_id: str = Field(default="default", min_length=1, max_length=120)
-
-    @field_validator("profile_id")
-    @classmethod
-    def validate_profile(cls, value):
-        import re
-        value = value.strip()
-        if value != "default" and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value):
-            raise ValueError("Use default or the corporate email login hint")
-        return value
 
 
 class RowResultResponse(BaseModel):
@@ -171,4 +157,3 @@ class SetupResponse(BaseModel):
     ui_config: dict[str, Any]
     google_configured: bool
     service_account_email: str | None
-    browser_login_url: str | None

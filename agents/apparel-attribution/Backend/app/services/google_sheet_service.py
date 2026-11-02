@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import gspread
-from dateutil import parser as date_parser
 from google.oauth2.service_account import Credentials
 from openpyxl.utils.cell import get_column_letter
 
@@ -17,6 +16,7 @@ from app.utils.excel_utils import (
     normalize_campaign_type,
     normalize_channel,
     parse_optional_number,
+    parse_campaign_date,
     parse_tracking_range,
 )
 
@@ -32,6 +32,20 @@ def previous_completed_week(reference_date: date | None = None) -> tuple[date, d
     reference_date = reference_date or date.today()
     start = reference_date - timedelta(days=reference_date.weekday() + 7)
     return start, start + timedelta(days=6)
+
+def campaign_identity(row: CampaignRow) -> tuple:
+    return (row.campaign_date, row.brand.casefold(), row.channel, row.campaign_type,
+            row.campaign_id, row.campaign_name, row.start_date, row.end_date)
+
+
+def has_complete_metrics(row: CampaignRow) -> bool:
+    required = [row.existing_unique_users, row.existing_revenue]
+    if row.campaign_type in {"Online", "Overall"}:
+        required.extend((row.existing_online_unique_users, row.existing_online_revenue))
+    if row.campaign_type in {"Offline", "Overall"}:
+        required.extend((row.existing_offline_unique_users, row.existing_offline_revenue))
+    return row.campaign_type in {"Online", "Offline", "Overall"} and all(value is not None for value in required)
+
 
 async def finish_thread_call(function, *arguments):
     """A cancelled Google RPC must finish before another job may write."""
@@ -132,6 +146,7 @@ class GoogleSheetService:
         else:
             credentials = Credentials.from_service_account_file(self.credential_file, scopes=SCOPES)
         self._client_instance = gspread.authorize(credentials)
+        self._client_instance.set_timeout((10, 45))
         return self._client_instance
 
     def _worksheet(self, spreadsheet_id: str, worksheet_name: str):
@@ -212,6 +227,12 @@ class GoogleSheetService:
         warning_sent_date_to: date | None = None,
     ) -> tuple[list[CampaignRow], list[str]]:
         values = worksheet.get("A:AF", value_render_option="FORMATTED_VALUE")
+        return self._parse_values(values, warning_sent_date_from, warning_sent_date_to)
+
+    def _parse_values(
+        self, values, warning_sent_date_from: date | None = None,
+        warning_sent_date_to: date | None = None, *, start_row: int = 2,
+    ) -> tuple[list[CampaignRow], list[str]]:
         if not values:
             raise WorkbookValidationError("Google Sheet is empty")
         headers = self._headers(values[0])
@@ -221,7 +242,7 @@ class GoogleSheetService:
             index = headers[header] - 1
             return row[index] if index < len(row) else ""
 
-        for row_number, row in enumerate(values[1:], start=2):
+        for row_number, row in enumerate(values[1:], start=start_row):
             input_values = {
                 header: str(cell(row, header) or "").strip()
                 for header in self.INPUT_HEADERS
@@ -232,7 +253,7 @@ class GoogleSheetService:
             warning_in_scope = True
             if warning_sent_date_from and warning_sent_date_to:
                 try:
-                    warning_date = date_parser.parse(raw_date, dayfirst=True).date()
+                    warning_date = parse_campaign_date(raw_date)
                     warning_in_scope = (
                         warning_sent_date_from
                         <= warning_date
@@ -254,7 +275,7 @@ class GoogleSheetService:
                 continue
             campaign_id = input_values["Campaign ID"]
             try:
-                campaign_date = date_parser.parse(raw_date, dayfirst=True).date()
+                campaign_date = parse_campaign_date(raw_date)
                 brand = input_values["Brand"]
                 channel = normalize_channel(cell(row, "Channel"))
                 campaign_type = normalize_campaign_type(cell(row, "Campaign Channel Type"))
@@ -295,7 +316,11 @@ class GoogleSheetService:
             return self._read_worksheet(sheet, warning_sent_date_from, warning_sent_date_to)
         return await finish_thread_call(read)
 
-    async def write_metrics(self, spreadsheet_id: str, worksheet_name: str, row: CampaignRow, metrics: CampaignMetrics):
+    async def write_metrics(
+        self, spreadsheet_id: str, worksheet_name: str, row: CampaignRow, metrics: CampaignMetrics,
+        *, overwrite_existing: bool = False,
+    ) -> CampaignRow | None:
+        """Return a preserved row, or None after writing. Recheck inputs immediately before the write."""
         values = ExcelService.metric_values(row.campaign_type, metrics)
         def write():
             worksheet = self._worksheet(spreadsheet_id, worksheet_name)
@@ -303,6 +328,14 @@ class GoogleSheetService:
             if not header_rows:
                 raise WorkbookValidationError("Google Sheet is empty")
             headers = self._headers(header_rows[0])
+            current_values = worksheet.get(f"A{row.excel_row}:AF{row.excel_row}", value_render_option="FORMATTED_VALUE")
+            if len(current_values) != 1:
+                raise WorkbookValidationError("The campaign row moved or was deleted; reconnect and preview before rerunning")
+            current, _ = self._parse_values([header_rows[0], current_values[0]], start_row=row.excel_row)
+            if len(current) != 1 or campaign_identity(current[0]) != campaign_identity(row):
+                raise WorkbookValidationError("Campaign inputs changed during attribution; no metrics were written. Reconnect and preview again")
+            if not overwrite_existing and has_complete_metrics(current[0]):
+                return current[0]
             worksheet.batch_update(
                 [
                     {"range": f"{get_column_letter(headers[header])}{row.excel_row}", "values": [[value]]}
@@ -310,4 +343,4 @@ class GoogleSheetService:
                 ],
                 value_input_option="USER_ENTERED",
             )
-        await finish_thread_call(write)
+        return await finish_thread_call(write)

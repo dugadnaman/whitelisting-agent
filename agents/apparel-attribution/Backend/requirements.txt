@@ -7,4 +7,3 @@ python-multipart==0.0.32
 uvicorn==0.51.0
 google-auth==2.56.0
 gspread==6.2.1
-playwright==1.61.0

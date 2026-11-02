@@ -20,7 +20,7 @@ def get_report_service() -> ReportService:
 
 async def require_machine(request: Request) -> None:
     if not strong_token(settings.machine_token):
-        raise HTTPException(status_code=503, detail="Configure a strong APPAREL_ATTRIBUTION_TOKEN before using this private worker")
+        raise HTTPException(status_code=503, detail="Attribution internal authentication is unavailable; restart the main application")
     supplied = request.headers.get("X-Apparel-Attribution-Token", "")
     if not supplied or not hmac.compare_digest(supplied.encode(), settings.machine_token.encode()):
         raise HTTPException(status_code=401, detail="Invalid worker authentication")

@@ -62,6 +62,21 @@ def _clean_date_text(value: str) -> str:
     return text
 
 
+def parse_campaign_date(value: object) -> date:
+    """ISO dates are year-first even when other sheet dates are day-first."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    iso = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
+    if iso:
+        return date(*map(int, iso.groups()))
+    if re.match(r"^\d{4}-\d{2}-\d{2}[ T]", text):
+        return datetime.fromisoformat(text).date()
+    return date_parser.parse(text, dayfirst=True).date()
+
+
 def parse_tracking_range(value: object, campaign_date: date) -> tuple[date, date]:
     """Parse the workbook's human-entered goal ranges, using Column A as context."""
     if isinstance(value, datetime):
@@ -75,6 +90,12 @@ def parse_tracking_range(value: object, campaign_date: date) -> tuple[date, date
     text = _clean_date_text(str(value))
     # Normalize separators while avoiding hyphens inside ISO dates.
     text = re.sub(r"\s+(?:to|till|until)\s+", " - ", text)
+    iso_range = re.fullmatch(r"(\d{4}-\d{1,2}-\d{1,2})\s*[-–]\s*(\d{4}-\d{1,2}-\d{1,2})", text)
+    if iso_range:
+        start, end = (parse_campaign_date(part) for part in iso_range.groups())
+        if start > end:
+            raise ValueError("Goal date range ends before it starts")
+        return start, end
     iso = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})(?: 00:00:00)?", text)
     if iso:
         parsed = date(*map(int, iso.groups()))

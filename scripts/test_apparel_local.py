@@ -27,7 +27,6 @@ class NativeLauncherTests(unittest.TestCase):
             self.assertTrue(content.startswith(prefix))
             self.assertTrue(first == second)
             self.assertTrue(path.read_bytes() == content)
-            self.assertTrue(first["JWT_SECRET"] != first["APPAREL_ATTRIBUTION_TOKEN"])
             launcher.validate_env(first)
             if os.name != "nt":
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
@@ -42,7 +41,7 @@ class NativeLauncherTests(unittest.TestCase):
             self.assertNotIn("synthetic-weak-value", str(failure.exception))
             self.assertTrue(path.read_bytes() == content)
 
-    def test_secrets_and_foreign_account_settings_stay_out_of_frontend_and_worker(self):
+    def test_foreign_credentials_and_backend_secrets_stay_out_of_frontend(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = launcher.make_runtime(Path(directory), 10000)
             values = {key: secrets.token_urlsafe(48) for key in launcher.SECRET_KEYS}
@@ -53,17 +52,13 @@ class NativeLauncherTests(unittest.TestCase):
                          "NEXT_PUBLIC_APPAREL_ATTRIBUTION_TOKEN": "synthetic-client-secret"}
             with patch.dict(os.environ, inherited, clear=True):
                 backend = launcher.environment(runtime, "api", values)
-                worker = launcher.environment(runtime, "worker", values)
                 portal = launcher.environment(runtime, "portal", values)
-                chrome = launcher.environment(runtime, "chrome", values)
-            for env in (backend, worker, portal, chrome):
+            for env in (backend, portal):
                 for key in ("DATABASE_URL", "BAJAJ_AUTH_TOKEN", "TATA_WABA_AUTH_TOKEN",
                             "GOOGLE_SERVICE_ACCOUNT_JSON", "NEXT_PUBLIC_APPAREL_ATTRIBUTION_TOKEN"):
                     self.assertNotIn(key, env)
-            self.assertTrue(backend["APPAREL_ATTRIBUTION_TOKEN"] == worker["APPAREL_ATTRIBUTION_TOKEN"])
-            self.assertNotIn("JWT_SECRET", worker)
-            for env in (portal, chrome):
-                self.assertTrue(not any(key in env for key in launcher.SECRET_KEYS))
+            self.assertIn("JWT_SECRET", backend)
+            self.assertTrue(not any(key in portal for key in launcher.SECRET_KEYS))
             self.assertTrue(runtime["state"] in Path(backend["KARIX_DB_PATH"]).parents)
             self.assertTrue(runtime["env_file"] != launcher.ROOT / ".env")
 
@@ -89,6 +84,31 @@ class NativeLauncherTests(unittest.TestCase):
             self.assertEqual(unrelated.read_text(), "keep")
             self.assertFalse((runtime["state"] / ".apparel-local-state").exists())
 
+    def test_windows_marker_reopens_state_without_changing_existing_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = launcher.make_runtime(Path(directory))
+            runtime["state"].mkdir()
+            marker = runtime["state"] / ".apparel-local-state"
+            marker.write_bytes(b"karix-apparel-local-v1\r\n")
+            saved = runtime["state"] / "accounts.db"
+            saved.write_bytes(b"synthetic-existing-account-data")
+            launcher.prepare_state(runtime)
+            self.assertEqual(marker.read_bytes(), b"karix-apparel-local-v1\n")
+            launcher.prepare_state(runtime)
+            self.assertEqual(saved.read_bytes(), b"synthetic-existing-account-data")
+
+    def test_invalid_marker_is_refused_without_rewriting_it(self):
+        for content in (b"", b"karix-apparel-local-v2\n",
+                        b"karix-apparel-local-v1\nextra", b"karix-apparel-local-v1"):
+            with self.subTest(content=content), tempfile.TemporaryDirectory() as directory:
+                runtime = launcher.make_runtime(Path(directory))
+                runtime["state"].mkdir()
+                marker = runtime["state"] / ".apparel-local-state"
+                marker.write_bytes(content)
+                with self.assertRaises(launcher.LocalError):
+                    launcher.prepare_state(runtime)
+                self.assertEqual(marker.read_bytes(), content)
+
     def test_port_refusal_leaves_existing_listener_running(self):
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -98,7 +118,7 @@ class NativeLauncherTests(unittest.TestCase):
                 launcher.check_ports({"api": port})
             self.assertEqual(listener.getsockname()[1], port)
             self.assertNotEqual(listener.fileno(), -1)
-        for offset in (-1, 56314):
+        for offset in (-1, 57536):
             with self.assertRaises(launcher.LocalError):
                 launcher.make_runtime(port_offset=offset)
 
@@ -137,7 +157,7 @@ class NativeLauncherTests(unittest.TestCase):
             command = [sys.executable, "-c", "import time; time.sleep(60)"]
             unrelated = subprocess.Popen(command)
             try:
-                children.launch("owned", command, runtime["state"], launcher.environment(runtime, "chrome", {}))
+                children.launch("owned", command, runtime["state"], launcher.environment(runtime, "api", {}))
                 owned = children.processes[0][1]
                 children.close()
                 self.assertIsNotNone(owned.poll())

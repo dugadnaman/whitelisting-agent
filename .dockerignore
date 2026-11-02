@@ -23,6 +23,8 @@ activity_log.jsonl
 *.pdf
 **/.env*
 **/google-service-account.json
+# The standalone Attributics app has its own build context and private state.
+agents/leave-management/
 agents/apparel-attribution/backend/storage/
 agents/apparel-attribution/backend/credentials/
 agents/apparel-attribution/data/

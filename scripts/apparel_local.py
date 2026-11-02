@@ -19,15 +19,14 @@ import time
 from functools import lru_cache
 from pathlib import Path
 from urllib.error import URLError
-from urllib.parse import quote, urlparse
 from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "agents" / "apparel-attribution" / "Backend"
 FRONTEND = ROOT / "frontend"
 STATE_MARKER = "karix-apparel-local-v1\n"
-BASE_PORTS = {"portal": 3000, "api": 8000, "worker": 8001, "chrome": 9222}
-SECRET_KEYS = ("JWT_SECRET", "APPAREL_ATTRIBUTION_TOKEN")
+BASE_PORTS = {"portal": 3000, "api": 8000}
+SECRET_KEYS = ("JWT_SECRET",)
 SOURCE_NAMES = (
     "app", "components", "lib", "public", "pages", "styles", "middleware.ts", "middleware.js",
     "next.config.mjs", "next.config.js", "next.config.ts", "postcss.config.mjs", "postcss.config.js",
@@ -121,7 +120,7 @@ def initialize_env(path: Path) -> dict[str, str]:
 
 def make_runtime(data_dir: Path | None = None, port_offset: int = 0) -> dict:
     if not 0 <= port_offset <= 65535 - max(BASE_PORTS.values()):
-        raise LocalError("--port-offset must be between 0 and 56313.")
+        raise LocalError("--port-offset is outside the supported TCP port range.")
     if data_dir is None:
         checkout = hashlib.sha256(str(ROOT).encode("utf-8")).hexdigest()[:12]
         base = (Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "Karix/Apparel"
@@ -144,14 +143,16 @@ def prepare_state(runtime: dict) -> None:
     if state.exists():
         if not state.is_dir():
             raise LocalError("The Apparel state path is not a directory. Choose another --data-dir.")
-        if marker.is_symlink() or not marker.is_file() or marker.read_bytes() != STATE_MARKER.encode("ascii"):
+        if marker.is_symlink() or not marker.is_file() or marker.read_bytes() not in (
+            STATE_MARKER.encode("ascii"), STATE_MARKER.replace("\n", "\r\n").encode("ascii")
+        ):
             if any(state.iterdir()):
                 raise LocalError("Refusing an existing unmarked Apparel state folder. Choose an empty --data-dir; existing files were not changed.")
     storage = private_storage()
     storage.private_directory(state)
     storage.private_file(marker)
-    marker.write_text(STATE_MARKER, encoding="utf-8")
-    for name in ("backend", "worker", "chrome-profile", "frontend", "logs"):
+    marker.write_bytes(STATE_MARKER.encode("ascii"))
+    for name in ("backend", "worker", "frontend", "logs"):
         storage.private_directory(state / name)
 
 
@@ -159,7 +160,7 @@ def environment(runtime: dict, service: str, values: dict[str, str]) -> dict[str
     allowed = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "HOME", "USERPROFILE",
                "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL",
                "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "NODE_EXTRA_CA_CERTS"}
-    if service in {"api", "worker"}:
+    if service == "api":
         allowed.update({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "CURL_CA_BUNDLE"})
     result = {key: value for key, value in os.environ.items() if key.upper() in allowed}
     result.update(PYTHONUTF8="1", PYTHONUNBUFFERED="1", PYTHONDONTWRITEBYTECODE="1")
@@ -168,18 +169,12 @@ def environment(runtime: dict, service: str, values: dict[str, str]) -> dict[str
         result.update(values)
         result.update(PYTHONPATH=os.pathsep.join((str(ROOT / "backend"), str(ROOT))),
                       KARIX_DB_PATH=str(state / "backend/karix_store.db"),
-                      APPAREL_ATTRIBUTION_WORKER_URL=f"http://127.0.0.1:{ports['worker']}",
+                      APPAREL_ATTRIBUTION_STORAGE_DIR=str(state / "worker"),
                       ALLOWED_ORIGINS=f"http://127.0.0.1:{ports['portal']}")
-    elif service == "worker":
-        result.update(APPAREL_ATTRIBUTION_TOKEN=values["APPAREL_ATTRIBUTION_TOKEN"],
-                      STORAGE_DIR=str(state / "worker"), MOENGAGE_MODE="browser",
-                      MOENGAGE_REMOTE_CDP_URL=f"http://127.0.0.1:{ports['chrome']}",
-                      MOENGAGE_DASHBOARD_URL="https://dashboard-03.moengage.com/",
-                      MOENGAGE_BROWSER_LOGIN_URL="https://dashboard-03.moengage.com/")
     elif service == "portal":
         result.update(BACKEND_INTERNAL_URL=f"http://127.0.0.1:{ports['api']}",
                       NODE_ENV="development", NEXT_TELEMETRY_DISABLED="1")
-    elif service != "chrome":
+    elif service != "portal":
         raise ValueError("Unknown local service")
     return result
 
@@ -208,33 +203,7 @@ def quiet_run(command, *, cwd: Path, env: dict | None = None, failure: str) -> N
         raise LocalError(failure)
 
 
-def find_chrome() -> Path:
-    candidates = []
-    if os.name == "nt":
-        import winreg
-        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            try:
-                with winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe") as key:
-                    candidates.append(Path(winreg.QueryValueEx(key, None)[0].strip('"')))
-            except OSError:
-                pass
-        for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            if os.environ.get(name):
-                candidates.append(Path(os.environ[name]) / "Google/Chrome/Application/chrome.exe")
-    elif sys.platform == "darwin":
-        candidates.extend((Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-                           Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
-    for name in ("google-chrome", "google-chrome-stable", "chrome"):
-        executable = shutil.which(name)
-        if executable:
-            candidates.append(Path(executable))
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    raise LocalError("Install Google Chrome from google.com/chrome, then run this command again. No browser will be downloaded by this helper.")
-
-
-def prerequisites() -> tuple[str, str, Path]:
+def prerequisites() -> tuple[str, str]:
     if sys.version_info < (3, 11):
         raise LocalError("Install Python 3.12 from python.org (enable Add Python to PATH), reopen Git Bash, and run: py -3.12 scripts/apparel_local.py setup")
     node, npm = shutil.which("node"), shutil.which("npm.cmd" if os.name == "nt" else "npm")
@@ -247,7 +216,7 @@ def prerequisites() -> tuple[str, str, Path]:
         raise LocalError("Node could not report its version. Reinstall Node.js 22 LTS or newer and reopen Git Bash.") from None
     if major < 22:
         raise LocalError("Node.js 22 LTS or newer is required. Update Node from nodejs.org, reopen Git Bash, and rerun this command.")
-    return node, npm, find_chrome()
+    return node, npm
 
 
 def require_venv() -> Path:
@@ -302,7 +271,7 @@ def provision_admin(runtime: dict, python: Path, values: dict[str, str]) -> None
 
 
 def setup(runtime: dict) -> None:
-    node, npm, _ = prerequisites()
+    node, npm = prerequisites()
     print("Installing local dependencies (existing .venv and npm cache are reused)…", flush=True)
     if not venv_python().is_file():
         if (ROOT / ".venv").exists():
@@ -429,8 +398,7 @@ class Children:
         path = self.runtime["state"] / "logs" / f"{name}.log"
         private_storage().private_file(path)
         if os.name == "nt":
-            # Gate actual startup until the broker belongs to our job. Assigning
-            # an already-running Chrome can otherwise miss its first descendants.
+            # Gate startup until the child broker belongs to our Windows job.
             broker = ("import json, subprocess, sys\n"
                       "if sys.stdin.buffer.read(1) != b'\\n': sys.exit(1)\n"
                       "sys.exit(subprocess.call(json.loads(sys.argv[1]), stdin=subprocess.DEVNULL))\n")
@@ -494,17 +462,17 @@ class Children:
                 pass
 
 
-def http_json(url: str, *, headers: dict | None = None, method: str = "GET") -> dict:
+def http_json(url: str, *, headers: dict | None = None, method: str = "GET", timeout: float = 3) -> dict:
     # Never send local debugger/token requests through an inherited corporate proxy.
     opener = build_opener(ProxyHandler({}))
-    with opener.open(Request(url, headers=headers or {}, method=method), timeout=3) as response:
+    with opener.open(Request(url, headers=headers or {}, method=method), timeout=timeout) as response:
         payload = json.load(response)
     if not isinstance(payload, dict):
         raise ValueError("Local service did not return a JSON object")
     return payload
 
 
-def wait_ready(children: Children, name: str, check, *, timeout: float = 120) -> None:
+def wait_ready(children: Children, name: str, check, *, timeout: float = 180) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         children.require_alive()
@@ -518,16 +486,6 @@ def wait_ready(children: Children, name: str, check, *, timeout: float = 120) ->
     raise LocalError(f"{name} did not become ready. See its private log in {children.runtime['state'] / 'logs'}; check company security policy and rerun start.")
 
 
-def chrome_ready(runtime: dict) -> bool:
-    port = runtime["ports"]["chrome"]
-    payload = http_json(f"http://127.0.0.1:{port}/json/version")
-    debugger, browser = payload.get("webSocketDebuggerUrl"), payload.get("Browser")
-    if not isinstance(debugger, str) or not isinstance(browser, str):
-        return False
-    endpoint = urlparse(debugger)
-    return ("Chrome/" in browser and endpoint.scheme == "ws"
-            and endpoint.hostname in {"127.0.0.1", "localhost", "::1"} and endpoint.port == port
-            and endpoint.path.startswith("/devtools/browser/"))
 
 
 def login_ready(url: str) -> bool:
@@ -536,55 +494,35 @@ def login_ready(url: str) -> bool:
 
 
 def start(runtime: dict) -> None:
-    node, _, chrome = prerequisites()
+    node, _ = prerequisites()
     python = require_venv()
     check_ports(runtime["ports"])
     prepare_state(runtime)
     env_file = runtime["env_file"]
     if not env_file.is_file():
-        raise LocalError("Private .env is missing. Run setup with the same --data-dir (if supplied), then start again.")
+        raise LocalError("Private .env is missing. Run setup with the same --data-dir, then start again.")
     private_storage().private_file(env_file)
     values = read_env(env_file)
     validate_env(values)
-    # Independent launcher ownership also prevents simultaneous source staging/profile use.
     with private_storage().worker_storage_lock(runtime["state"]):
         frontend = stage_frontend(runtime)
         children = Children(runtime)
         ports, state = runtime["ports"], runtime["state"]
         portal_url = f"http://127.0.0.1:{ports['portal']}"
         api_url = f"http://127.0.0.1:{ports['api']}"
-        worker_url = f"http://127.0.0.1:{ports['worker']}"
-        cdp_url = f"http://127.0.0.1:{ports['chrome']}"
         try:
-            print("Starting dedicated Apparel Chrome and local services…", flush=True)
-            children.launch("chrome", [str(chrome), f"--user-data-dir={state / 'chrome-profile'}",
-                                       "--remote-debugging-address=127.0.0.1", f"--remote-debugging-port={ports['chrome']}",
-                                       "--no-first-run", "--no-default-browser-check", "--new-window", "about:blank"],
-                            state, environment(runtime, "chrome", values))
-            wait_ready(children, "Chrome", lambda: chrome_ready(runtime))
-            children.launch("worker", [str(python), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
-                                       "--port", str(ports["worker"]), "--loop", "asyncio", "--no-access-log"],
-                            WORKER, environment(runtime, "worker", values))
+            print("Starting Apparel portal and main API; attribution uses direct HTTP…", flush=True)
             children.launch("api", [str(python), "-m", "uvicorn", "api:app", "--host", "127.0.0.1",
                                     "--port", str(ports["api"]), "--loop", "asyncio", "--no-access-log"],
                             state / "backend", environment(runtime, "api", values))
             wait_ready(children, "API", lambda: http_json(api_url + "/healthz").get("service") == "karix-whitelisting-api")
-            def worker_ready():
-                payload = http_json(worker_url + "/api/health", headers={"X-Apparel-Attribution-Token": values["APPAREL_ATTRIBUTION_TOKEN"]})
-                return payload.get("status") == "ok" and payload.get("moengage_mode") == "browser" and payload.get("mock_writes_enabled") is False
-            wait_ready(children, "worker", worker_ready)
             children.launch("portal", [node, str(FRONTEND / "node_modules/next/dist/bin/next"), "dev", str(frontend),
                                        "--hostname", "127.0.0.1", "--port", str(ports["portal"])],
                             frontend, environment(runtime, "portal", values))
-            wait_ready(children, "portal", lambda: http_json(portal_url + "/api/health").get("service") == "karix-whitelisting-api")
+            wait_ready(children, "portal", lambda: http_json(portal_url + "/api/health", timeout=30).get("service") == "karix-whitelisting-api", timeout=240)
             wait_ready(children, "portal sign-in", lambda: login_ready(portal_url))
-            tab = http_json(cdp_url + "/json/new?" + quote(portal_url + "/apparel/attribution", safe=""), method="PUT")
-            if not tab.get("id"):
-                raise LocalError(f"Services are ready, but Chrome could not open the portal. Open {portal_url} in the dedicated Apparel window.")
-            with build_opener(ProxyHandler({})).open(cdp_url + "/json/activate/" + quote(tab["id"], safe=""), timeout=3):
-                pass
-            print(f"Ready: {portal_url} — keep this terminal open; Ctrl+C stops only these local services.")
-            print("Sign in to MoEngage only in the dedicated Apparel Chrome window. Start login in the portal brings that window forward for SSO/MFA.")
+            print(f"Ready: {portal_url}/apparel/attribution — Ctrl+C stops these local services.")
+            print("Connect Apparel Auth Sync in Settings > MoEngage. No dedicated Chrome or hosted browser is needed.")
             while True:
                 children.require_alive()
                 time.sleep(0.5)
@@ -600,10 +538,10 @@ def start(runtime: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Native Apparel: one setup command, then one start command. Requires Python 3.11+ (3.12 recommended), Node.js 22+, and installed Google Chrome.")
+    parser = argparse.ArgumentParser(description="Native Apparel setup/start. Requires Python 3.11+ and Node.js 22+; no browser automation.")
     parser.add_argument("command", choices=("setup", "start"))
-    parser.add_argument("--port-offset", type=int, default=0, help="Add to portal 3000, API 8000, worker 8001 and private Chrome CDP 9222; refuses busy ports.")
-    parser.add_argument("--data-dir", type=Path, help="Use a separate apparel-local subfolder and its own .env/accounts/profile; never changes project .env.")
+    parser.add_argument("--port-offset", type=int, default=0, help="Add to portal 3000 and main API 8000; refuses busy ports.")
+    parser.add_argument("--data-dir", type=Path, help="Use a separate apparel-local folder and private accounts/configuration.")
     args = parser.parse_args()
     if os.name != "nt":
         os.umask(0o077)
@@ -614,7 +552,7 @@ def main() -> int:
         runtime = make_runtime(args.data_dir, args.port_offset)
         (setup if args.command == "setup" else start)(runtime)
     except KeyboardInterrupt:
-        print("\nStopped. Your Apparel accounts, profile and uploaded key are preserved.")
+        print("\nStopped. Your Apparel accounts and uploaded Google key are preserved.")
         return 130
     except LocalError as exc:
         print(f"Apparel: {exc}", file=sys.stderr)

@@ -12,10 +12,9 @@ from app.core.dependencies import get_report_service, require_machine
 from app.models.report import ReportJob
 from app.schemas.report_schema import (
     CampaignPreviewResponse, HealthResponse, HistoryResponse, JobResponse,
-    MoEngageSessionRequest, MoEngageSessionResponse, SetupRequest, SetupResponse,
+    MoEngageSessionResponse, SetupRequest, SetupResponse,
     SheetConnectRequest, SheetConnectionResponse, StartJobRequest, StartJobResponse,
 )
-from app.services.moengage_browser_service import BrowserAutomationError
 from app.services.moengage_service import MoEngageError
 from app.services.report_service import ReportService
 
@@ -51,16 +50,9 @@ def setup_response(service: ReportService) -> SetupResponse:
         ui_config=service.settings.moengage_ui_config,
         google_configured=service.google.configured,
         service_account_email=service.google.service_account_email(),
-        browser_login_url=service.settings.moengage_browser_login_url or None,
     )
 
 
-def session_response(service: ReportService, status: str, message: str) -> MoEngageSessionResponse:
-    return MoEngageSessionResponse(
-        status=status, message=message, profile_id=service.moengage.active_profile,
-        profiles=service.moengage.available_profiles(),
-        login_url=service.settings.moengage_browser_login_url or None,
-    )
 
 
 def job_response(job: ReportJob, include_results: bool = True) -> JobResponse:
@@ -77,9 +69,9 @@ def job_response(job: ReportJob, include_results: bool = True) -> JobResponse:
 
 @router.get("/health", response_model=HealthResponse)
 async def health(service: ReportService = Depends(get_report_service)):
-    status, _ = await service.moengage.browser.status()
+    status, _ = await service.moengage.status()
     return HealthResponse(
-        status="ok", moengage_mode="browser", configured_brands=service.moengage.configured_brands(),
+        status="ok", moengage_mode="api", configured_brands=service.moengage.configured_brands(),
         google_configured=service.google.configured, moengage_connected=status == "connected",
         mock_writes_enabled=False,
     )
@@ -104,9 +96,7 @@ async def update_setup(payload: SetupRequest, service: ReportService = Depends(g
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except OSError as exc:
-            raise HTTPException(status_code=503, detail="Could not persist setup on the worker /data volume") from exc
-        await service.moengage.browser.close()
-        service.moengage.browser.ui = service.settings.moengage_ui_config
+            raise HTTPException(status_code=503, detail="Could not persist attribution setup in its configured storage directory") from exc
         service.sheet_connections.clear()
         service.google._worksheet_cache.clear()
         return setup_response(service)
@@ -119,7 +109,7 @@ async def upload_google_credentials(
     async with service.admission_lock:
         ensure_no_active_job(service)
         if service.settings.sealed_google_credentials:
-            raise HTTPException(status_code=409, detail="Google credentials are sealed by deployment configuration. Remove GOOGLE_SERVICE_ACCOUNT_JSON/GOOGLE_SERVICE_ACCOUNT_FILE and restart before installing a durable uploaded key.")
+            raise HTTPException(status_code=409, detail="Google credentials are sealed by deployment configuration. Remove APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON/APPAREL_GOOGLE_SERVICE_ACCOUNT_FILE and restart before installing a durable uploaded key.")
         if not (credential.filename or "").lower().endswith(".json"):
             raise HTTPException(status_code=422, detail="Choose a .json service-account key")
         try:
@@ -151,6 +141,7 @@ async def connect_google_sheet(payload: SheetConnectRequest, service: ReportServ
             raise HTTPException(status_code=422, detail="Could not connect to the approved sheet. Verify sharing, the worksheet title and required headers.") from exc
         return SheetConnectionResponse(
             connection_id=connection.id, spreadsheet_title=connection.spreadsheet_title,
+            spreadsheet_url=connection.spreadsheet_url,
             worksheet_title=connection.worksheet_title, row_count=connection.row_count,
             brands=connection.brands, channels=connection.channels, campaign_types=connection.campaign_types,
             sent_dates=connection.sent_dates, preview=connection.preview, warnings=connection.warnings,
@@ -189,40 +180,14 @@ async def preview_google_sheet_campaigns(
 
 @router.get("/moengage/session", response_model=MoEngageSessionResponse)
 async def moengage_session(service: ReportService = Depends(get_report_service)):
-    status, message = await service.moengage.browser.status()
-    return session_response(service, status, message)
-
-
-async def open_session(payload: MoEngageSessionRequest, service: ReportService, reset: bool):
-    async with service.admission_lock:
-        ensure_no_active_job(service)
-        if not service.settings.moengage_remote_cdp_url or not service.settings.moengage_browser_login_url:
-            raise HTTPException(status_code=503, detail="Configure private Chromium and its protected HTTPS login URL before opening login")
-        try:
-            if reset:
-                await service.moengage.reset_profile(payload.profile_id)
-            else:
-                await service.moengage.select_profile(payload.profile_id)
-            message = await service.moengage.browser.start_login(payload.profile_id)
-        except BrowserAutomationError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return session_response(service, "waiting_for_login", message)
-
-
-@router.post("/moengage/session/start", response_model=MoEngageSessionResponse)
-async def start_moengage_session(payload: MoEngageSessionRequest, service: ReportService = Depends(get_report_service)):
-    return await open_session(payload, service, False)
-
-
-@router.post("/moengage/session/reset", response_model=MoEngageSessionResponse)
-async def reset_moengage_session(payload: MoEngageSessionRequest, service: ReportService = Depends(get_report_service)):
-    return await open_session(payload, service, True)
+    status, message = await service.moengage.status()
+    return MoEngageSessionResponse(status=status, message=message)
 
 
 def ensure_execution(service: ReportService, brands: list[str], target: str | None):
     ensure_google(service)
     if not service.moengage.execution_configured():
-        raise HTTPException(status_code=503, detail="Configure private Chromium and genuine MoEngage report mappings before running attribution")
+        raise HTTPException(status_code=503, detail="Configure Apparel workspace mappings before running attribution")
     supported = {brand.casefold() for brand in service.moengage.configured_brands()}
     missing = [brand for brand in brands if brand.casefold() not in supported]
     if missing:
@@ -235,7 +200,7 @@ def ensure_execution(service: ReportService, brands: list[str], target: str | No
 @router.post("/jobs", response_model=StartJobResponse, status_code=202)
 async def start_job(payload: StartJobRequest, service: ReportService = Depends(get_report_service)):
     # One lock spans awaited authentication and task creation. A second request
-    # cannot observe idle state while the first is still checking the browser.
+    # cannot observe idle state while the first is still checking authentication.
     async with service.admission_lock:
         ensure_no_active_job(service)
         ensure_execution(service, payload.brands, payload.agipl_attribution_brand)
@@ -254,7 +219,7 @@ async def start_job(payload: StartJobRequest, service: ReportService = Depends(g
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except (BrowserAutomationError, MoEngageError) as exc:
+        except MoEngageError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return StartJobResponse(job_id=job.id, status=job.state.value)
 
@@ -292,7 +257,7 @@ async def retry_failed_job(job_id: str, service: ReportService = Depends(get_rep
             if not connection:
                 raise KeyError("Google Sheet connection not found or server was restarted")
             failed = {result.excel_row for result in original.results if result.status == "failed"}
-            selected = [row.brand for row in connection.campaigns if row.excel_row in failed]
+            selected = [row.brand for row in original.campaigns if row.excel_row in failed]
             ensure_execution(service, selected, original.agipl_attribution_brand)
             await service.moengage.ensure_authenticated()
             job = service.retry_failed_sheet_job(job_id)
@@ -300,7 +265,7 @@ async def retry_failed_job(job_id: str, service: ReportService = Depends(get_rep
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except (BrowserAutomationError, MoEngageError) as exc:
+        except MoEngageError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return StartJobResponse(job_id=job.id, status=job.state.value)
 

@@ -14,12 +14,10 @@ from app.models.report import (
     RowResult,
     SheetConnection,
 )
-from app.services.google_sheet_service import GoogleSheetService, previous_completed_week
-from app.services.moengage_service import MoEngageService
-from app.services.moengage_browser_service import (
-    BrowserAuthenticationError,
-    BrowserUnavailableError,
+from app.services.google_sheet_service import (
+    GoogleSheetService, campaign_identity, has_complete_metrics, previous_completed_week,
 )
+from app.services.moengage_service import MoEngageAuthenticationError, MoEngageService
 
 
 logger = logging.getLogger(__name__)
@@ -123,6 +121,7 @@ class ReportService:
             upload_id=connection_id,
             filename=connection.spreadsheet_title,
             agipl_attribution_brand=agipl_attribution_brand,
+            overwrite_existing=overwrite_existing,
         )
         self.jobs[job_id] = job
         self._prune_memory()
@@ -145,6 +144,9 @@ class ReportService:
         }
         if not failed_rows:
             raise ValueError("This run has no failed campaigns to retry")
+        expected = {row.excel_row: row for row in original.campaigns if row.excel_row in failed_rows}
+        if len(expected) != len(failed_rows):
+            raise ValueError("The original campaign snapshot is unavailable; reconnect and preview before rerunning")
         connection = self.sheet_connections.get(original.upload_id)
         if not connection:
             raise KeyError("Google Sheet connection not found or server was restarted")
@@ -157,14 +159,15 @@ class ReportService:
             upload_id=original.upload_id,
             filename=f"{original.filename} · failed retry",
             agipl_attribution_brand=original.agipl_attribution_brand,
+            overwrite_existing=original.overwrite_existing,
         )
         self.jobs[retry_id] = retry
         self._prune_memory()
         self.tasks[retry_id] = asyncio.create_task(
             self._process_sheet(
-                retry, connection, True, None,
+                retry, connection, original.overwrite_existing, None,
                 agipl_attribution_brand=original.agipl_attribution_brand,
-                row_numbers=failed_rows,
+                expected_campaigns=expected,
             )
         )
         return retry
@@ -181,7 +184,7 @@ class ReportService:
         sent_date_from: date | None = None,
         sent_date_to: date | None = None,
         agipl_attribution_brand: str | None = None,
-        row_numbers: set[int] | None = None,
+        expected_campaigns: dict[int, CampaignRow] | None = None,
     ):
         job.state = JobState.PROCESSING
         job.started_at = datetime.now(timezone.utc)
@@ -190,21 +193,22 @@ class ReportService:
             campaigns = self._filter_campaigns(
                 campaigns, brands, channels, sent_date, sent_date_from, sent_date_to
             )
-            if row_numbers is not None:
-                campaigns = [
-                    campaign for campaign in campaigns
-                    if campaign.excel_row in row_numbers
-                ]
+            if expected_campaigns is not None:
+                campaigns = [campaign for campaign in campaigns if campaign.excel_row in expected_campaigns]
+                if len(campaigns) != len(expected_campaigns) or any(
+                    campaign_identity(campaign) != campaign_identity(expected_campaigns[campaign.excel_row])
+                    for campaign in campaigns
+                ):
+                    raise ValueError("Campaign inputs moved or changed since the failed run; reconnect and preview before rerunning")
             if row_limit:
                 campaigns = campaigns[:row_limit]
             job.total_rows = len(campaigns)
-            requires_browser = any(
-                overwrite or not self._has_complete_existing_metrics(campaign)
+            job.campaigns = list(campaigns)
+            requires_query = any(
+                overwrite or not has_complete_metrics(campaign)
                 for campaign in campaigns
             )
-            if requires_browser:
-                # Do not create failed row results while Chromium is restarting.
-                # A failed preflight leaves the entire job safely retryable.
+            if requires_query:
                 await self.moengage.ensure_authenticated()
             for campaign in campaigns:
                 if job.state == JobState.CANCELLED:
@@ -223,24 +227,32 @@ class ReportService:
                 )
                 job.results.append(result)
                 authentication_expired = False
-                if not overwrite and self._has_complete_existing_metrics(campaign):
+                if not overwrite and has_complete_metrics(campaign):
                     result.status, result.message = "skipped", "Existing Google Sheet values preserved"
                     self._copy_existing_metrics(result, campaign)
                     job.skipped_rows += 1
                 else:
                     try:
-                        metrics = await self._fetch_metrics_with_browser_recovery(query_campaign)
-                        await self.google.write_metrics(connection.spreadsheet_id, connection.worksheet_title, campaign, metrics)
-                        result.status = "success"
-                        self._copy_metrics(result, metrics)
-                        job.successful_rows += 1
-                    except BrowserAuthenticationError as exc:
+                        metrics = await self.moengage.fetch_metrics(query_campaign)
+                        preserved = await self.google.write_metrics(
+                            connection.spreadsheet_id, connection.worksheet_title, campaign, metrics,
+                            overwrite_existing=overwrite,
+                        )
+                        if preserved is not None:
+                            result.status, result.message = "skipped", "Completed sheet values appeared during the query and were preserved"
+                            self._copy_existing_metrics(result, preserved)
+                            job.skipped_rows += 1
+                        else:
+                            result.status = "success"
+                            self._copy_metrics(result, metrics)
+                            job.successful_rows += 1
+                    except MoEngageAuthenticationError as exc:
                         result.status, result.message = "failed", str(exc)
                         job.failed_rows += 1
                         job.state = JobState.FAILED
                         job.error = (
-                            "MoEngage login expired. Automation stopped immediately; "
-                            "remaining campaigns were not processed. Complete login and rerun "
+                            "Apparel MoEngage session expired. Automation stopped immediately; "
+                            "remaining campaigns were not processed. Reconnect Apparel Auth Sync and rerun "
                             "the same filters with overwrite disabled."
                         )
                         authentication_expired = True
@@ -271,33 +283,11 @@ class ReportService:
             self.tasks.pop(job.id, None)
 
 
-    async def _fetch_metrics_with_browser_recovery(
-        self,
-        campaign: CampaignRow,
-    ):
-        """Retry a read-only campaign query after a transient Chromium restart."""
-        attempts = max(1, self.settings.moengage_max_retries + 1)
-        for attempt in range(attempts):
-            try:
-                return await self.moengage.fetch_metrics(campaign)
-            except BrowserUnavailableError:
-                if attempt + 1 >= attempts:
-                    raise
-                logger.warning(
-                    "Railway Chromium unavailable for row %s; waiting before attempt %s/%s",
-                    campaign.excel_row,
-                    attempt + 2,
-                    attempts,
-                )
-                await self.moengage.wait_until_ready()
-        raise AssertionError("Browser recovery loop ended unexpectedly")
-
     async def shutdown(self) -> None:
-        """Finish background cancellation before disconnecting from Chromium."""
+        """Wait for pending sheet writes and job cancellation before shutdown."""
         async with self.admission_lock:
             for job_id in list(self.tasks):
                 await self.cancel_job(job_id)
-            await self.moengage.browser.close()
 
     async def cancel_job(self, job_id: str) -> ReportJob:
         job = self.get_job(job_id)
@@ -346,28 +336,6 @@ class ReportService:
         result.online_revenue = campaign.existing_online_revenue
         result.offline_revenue = campaign.existing_offline_revenue
 
-    @staticmethod
-    def _has_complete_existing_metrics(campaign) -> bool:
-        if campaign.existing_unique_users is None or campaign.existing_revenue is None:
-            return False
-        if campaign.campaign_type == "Overall":
-            return all(value is not None for value in (
-                campaign.existing_online_unique_users,
-                campaign.existing_offline_unique_users,
-                campaign.existing_online_revenue,
-                campaign.existing_offline_revenue,
-            ))
-        if campaign.campaign_type == "Online":
-            return (
-                campaign.existing_online_unique_users is not None
-                and campaign.existing_online_revenue is not None
-            )
-        if campaign.campaign_type == "Offline":
-            return (
-                campaign.existing_offline_unique_users is not None
-                and campaign.existing_offline_revenue is not None
-            )
-        return False
 
     @staticmethod
     def _filter_brands(campaigns, brands: list[str] | None):

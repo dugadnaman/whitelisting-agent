@@ -8,8 +8,8 @@ import {
   ATTRIBUTION_CHANNELS, AttributionApiError, canManageApparelAttribution, canUseApparelAttribution,
   cancelAttributionJob, connectAttributionSheet, downloadAttributionCsv, fetchAttributionGoogleConfig,
   fetchAttributionHealth, fetchAttributionJob, fetchAttributionJobs, fetchAttributionPreview,
-  fetchAttributionSession, fetchAttributionSetup, isAttributionJobActive, resetAttributionSession,
-  retryFailedAttributionJob, saveAttributionSetup, startAttributionJob, startAttributionSession,
+  fetchAttributionSession, fetchAttributionSetup, isAttributionJobActive,
+  retryFailedAttributionJob, saveAttributionSetup, startAttributionJob,
   uploadAttributionGoogleKey,
 } from '@/lib/apparel-attribution';
 import type {
@@ -76,7 +76,6 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
   const [setupWorksheet, setSetupWorksheet] = useState('');
   const [reportJson, setReportJson] = useState('');
   const [credential, setCredential] = useState<File | null>(null);
-  const [profileId, setProfileId] = useState('default');
   const live = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
   const pendingRef = useRef(false);
@@ -111,6 +110,14 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
     if (googleResult.status === 'fulfilled') {
       const gValue = googleResult.value;
       setGoogle(gValue);
+      if (connectionRef.current && (
+        connectionRef.current.spreadsheet_url !== gValue.spreadsheet_url ||
+        connectionRef.current.worksheet_title !== gValue.worksheet_name
+      )) {
+        connectionRef.current = null;
+        setConnection(null);
+        setPreview(null);
+      }
       if (!connectionRef.current && gValue?.configured && gValue.spreadsheet_url && gValue.worksheet_name) {
         try {
           const connValue = await connectAttributionSheet({
@@ -123,13 +130,12 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
             setBrands((old) => (old.length ? old.filter((brand) => connValue.brands.includes(brand)) : connValue.brands));
           }
         } catch (err) {
-          console.warn('Auto-connect Google Sheet failed:', err);
+          errors.google = `Could not connect the approved sheet: ${err instanceof Error ? err.message : String(err)}`;
         }
       }
     } else { setGoogle(null); errors.google = String(googleResult.reason?.message || googleResult.reason); }
     if (sessionResult.status === 'fulfilled') {
       setSession(sessionResult.value);
-      if (!setupLoaded.current) setProfileId(sessionResult.value.profile_id || 'default');
     } else { setSession(null); errors.session = String(sessionResult.reason?.message || sessionResult.reason); }
     if (jobsResult.status === 'fulfilled') {
       const history = jobsResult.value.jobs;
@@ -164,21 +170,27 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
     void refreshDashboard();
     return () => { live.current = false; controller.abort(); };
   }, [refreshDashboard]);
-  // Auto-poll MoEngage session while waiting for login or disconnected
+  // Poll only session readiness; query execution happens over HTTP on the server.
   useEffect(() => {
     if (session?.status === 'connected') return;
-    const timer = setInterval(async () => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    const poll = async () => {
       try {
-        const s = await fetchAttributionSession();
-        if (live.current) {
-          setSession(s);
-          if (s.status === 'connected') {
-            void refreshDashboard();
-          }
-        }
-      } catch {}
-    }, 3000);
-    return () => clearInterval(timer);
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]);
+        const next = await fetchAttributionSession(signal);
+        if (controller.signal.aborted || !live.current) return;
+        setSession(next);
+        setResourceErrors((old) => { const errors = { ...old }; delete errors.session; return errors; });
+        if (next.status === 'connected') { void refreshDashboard(); return; }
+      } catch (error) {
+        if (controller.signal.aborted || !live.current) return;
+        setResourceErrors((old) => ({ ...old, session: error instanceof Error ? error.message : String(error) }));
+      }
+      timer = window.setTimeout(poll, 3000);
+    };
+    timer = window.setTimeout(poll, 3000);
+    return () => { controller.abort(); clearTimeout(timer); };
   }, [session?.status, refreshDashboard]);
 
   const loseJob = useCallback((jobId: string) => {
@@ -190,6 +202,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       setSelectedJob(null);
     }
     setConnection(null);
+    connectionRef.current = null;
     setPreview(null);
     setPollError('');
     setRequiresRefresh(true);
@@ -256,7 +269,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       if (error instanceof AttributionApiError && error.status === 404) {
         if ((name === 'retry' || name === 'cancel') && selectedRef.current) loseJob(selectedRef.current);
         else if (name === 'run' || name === 'connect') {
-          setConnection(null); setPreview(null);
+          setConnection(null); connectionRef.current = null; setPreview(null);
           setNotice('The approved sheet connection is unavailable. Reconnect the sheet and preview again before running.');
         }
       }
@@ -284,12 +297,11 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
   if (!channels.length) selectionErrors.push('Select at least one channel.');
   if (!dateFrom || !dateTo) selectionErrors.push('Choose both sent-date bounds.');
   else if (dateFrom > dateTo) selectionErrors.push('The end date must be on or after the start date.');
+  else if ((Date.parse(dateTo) - Date.parse(dateFrom)) / 86400000 > 366) selectionErrors.push('Choose a sent-date range no longer than 366 days.');
   if (rowLimit && (!Number.isInteger(Number(rowLimit)) || Number(rowLimit) < 1 || Number(rowLimit) > 10000)) selectionErrors.push('Row limit must be a whole number from 1 to 10,000, or left blank.');
   if (hasAgipl && !targetBrands.includes(agiplTarget)) selectionErrors.push('Choose a supported attribution brand for AGIPL, excluding AGIPL itself.');
   const locked = loading || Boolean(pending || pollingId || requiresRefresh || resourceErrors.jobs);
-  const ready = Boolean(health && health.worker_configured !== false && health.moengage_mode === 'browser' && google?.configured && session?.status === 'connected' && !resourceErrors.health && !resourceErrors.google && !resourceErrors.session);
-  const safeBrowserUrl = isAdmin && (session?.login_url || setup?.browser_login_url);
-  const browserUrl = typeof safeBrowserUrl === 'string' && /^https:\/\//i.test(safeBrowserUrl) ? safeBrowserUrl : null;
+  const ready = Boolean(health && health.moengage_mode === 'api' && google?.configured && session?.status === 'connected' && !resourceErrors.health && !resourceErrors.google && !resourceErrors.session);
   const approvedUrl = google?.spreadsheet_url && /^https:\/\/docs\.google\.com\/spreadsheets\//i.test(google.spreadsheet_url) ? google.spreadsheet_url : null;
 
   async function connectSheet() {
@@ -314,7 +326,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
         if (live.current) setPreview({ key: selectionKey, data: value });
       } catch (error) {
         if (live.current && error instanceof AttributionApiError && error.status === 404) {
-          setConnection(null); setPreview(null);
+          setConnection(null); connectionRef.current = null; setPreview(null);
           setNotice('The sheet connection was lost, possibly after a worker restart. Reconnect the approved sheet and preview again.');
         }
         throw error;
@@ -368,7 +380,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       setSetupUrl(value.spreadsheet_url);
       setSetupWorksheet(value.worksheet_name);
       setReportJson(JSON.stringify(value.ui_config, null, 2));
-      setConnection(null); setPreview(null); setBrands([]); setAgiplTarget('');
+      setConnection(null); connectionRef.current = null; setPreview(null); setBrands([]); setAgiplTarget('');
       setNotice('Approved source and report configuration saved. Reconnect the sheet and preview before running.');
       await refreshDashboard();
     });
@@ -394,7 +406,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       <section aria-label="Integration status" className="grid gap-4 md:grid-cols-3">
         <div className={panel}>
           <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-semibold text-gray-900">Attribution worker</h2><StatusBadge value={health ? health.worker_configured === false ? 'not_configured' : health.status : resourceErrors.health ? 'unavailable' : 'checking'} /></div>
-          {health ? <><p className="text-sm text-gray-600">Report mode: <strong>{health.moengage_mode}</strong></p><p className="mt-1 text-xs text-gray-500">Configured reports: {supportedBrands.length ? supportedBrands.join(', ') : 'None'}</p>{health.moengage_mode !== 'browser' && <p className="mt-2 text-sm text-red-700">Real browser reporting must be configured by the deployment administrator. Mock and API metrics are not supported here.</p>}{!supportedBrands.length && <p className="mt-2 text-sm text-amber-800">{isAdmin ? 'Add the actual MoEngage report mapping in Admin setup below.' : 'Ask an Apparel admin to add the actual MoEngage report mapping.'}</p>}</> : <p className="text-sm text-gray-500">{resourceErrors.health ? 'The worker is not reachable. Ask the deployment administrator to configure or restore the Apparel worker connection.' : 'Waiting for a live response.'}</p>}
+          {health ? <><p className="text-sm text-gray-600">Report mode: <strong>Direct MoEngage HTTP</strong></p><p className="mt-1 text-xs text-gray-500">Configured brands: {supportedBrands.length ? supportedBrands.join(', ') : 'None'}</p>{!supportedBrands.length && <p className="mt-2 text-sm text-amber-800">Ask an Apparel admin to configure the workspace mappings.</p>}</> : <p className="text-sm text-gray-500">{resourceErrors.health ? 'Attribution is unavailable in the main application. Refresh status or contact an administrator.' : 'Waiting for a live response.'}</p>}
         </div>
         <div className={panel}>
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -405,10 +417,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
             <>
               <p className="text-sm font-semibold text-gray-900 truncate">{connection.spreadsheet_title}</p>
               <p className="text-xs text-gray-600 mt-0.5">Tab: <strong>{connection.worksheet_title}</strong> · {connection.row_count.toLocaleString()} campaigns loaded</p>
-              <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
-                <span>🟢</span>
-                <span>Permanently saved &amp; auto-connected</span>
-              </div>
+              <p className="mt-2 text-xs text-gray-500">Setup is saved server-side. Reconnect after an application restart.</p>
             </>
           ) : (
             <>
@@ -427,9 +436,8 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
         </div>
         <div className={panel}>
           <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-semibold text-gray-900">MoEngage</h2><StatusBadge value={session?.status || (resourceErrors.session ? 'unavailable' : 'checking')} /></div>
-          <p className="text-sm text-gray-600">{session?.message || 'Waiting for the live browser session response.'}</p>
-          {session && <p className="mt-2 text-xs text-gray-500">Profile: {session.profile_id}</p>}
-          {session && session.status !== 'connected' && <p className="mt-2 text-sm text-amber-800">{isAdmin ? 'Start the corporate login below and finish Google/MoEngage sign-in and MFA in the protected browser. Then refresh status.' : 'Ask an Apparel admin to complete the corporate login in the protected browser. Then refresh status.'}</p>}
+          <p className="text-sm text-gray-600">{session?.message || 'Checking the Apparel MoEngage HTTP session.'}</p>
+          {session && session.status !== 'connected' && <p className="mt-2 text-sm text-amber-800">{isAdmin ? 'Connect Apparel Auth Sync or refresh the Apparel session in Settings → MoEngage, then refresh status.' : 'Ask an Apparel admin to reconnect Apparel Auth Sync, then refresh status.'}</p>}
         </div>
       </section>
 
@@ -462,7 +470,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
           <button className={button} disabled={locked || Boolean(selectionErrors.length) || !google?.configured} onClick={() => void previewCampaigns()}>{pending === 'preview' ? 'Loading preview…' : 'Preview selected campaigns'}</button>
           <button className={primary} disabled={locked || !ready || Boolean(selectionErrors.length) || !currentPreview?.row_count} onClick={() => void runJob()}>{pending === 'run' ? 'Starting…' : 'Run attribution'}</button>
           {pollingId && <span className="text-xs text-amber-800">One job is active. Selection, setup and new runs are locked until it finishes or is cancelled.</span>}
-          {!ready && !loading && <span className="text-xs text-gray-500">Running requires the live browser worker, configured Google credentials, and a connected MoEngage session.</span>}
+          {!ready && !loading && <span className="text-xs text-gray-500">Running requires configured Google credentials and a verified Apparel MoEngage HTTP session. No hosted browser is used.</span>}
         </div>
       </section>
 
@@ -513,85 +521,33 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
 
       {isAdmin && (
         <section className={panel} aria-labelledby="setup-heading">
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100">
-            <div>
-              <h2 id="setup-heading" className="text-lg font-semibold text-gray-900">Workspace Status &amp; MoEngage Session</h2>
-              <p className="mt-0.5 text-xs text-gray-500">Google Sheets, service account keys and brand mappings are permanently saved and auto-connected.</p>
-            </div>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-              Configurations Locked &amp; Active
-            </span>
-          </div>
-
+          <h2 id="setup-heading" className="text-lg font-semibold text-gray-900">Admin setup</h2>
+          <p className="mt-1 text-sm text-gray-500">Attribution runs in the main application using Apparel-only credentials. Server files and the credential database need durable storage across deployments.</p>
           <div className="mt-5 grid gap-6 md:grid-cols-2">
-            {/* Saved Configuration Summary */}
-            <div className="space-y-3 bg-gray-50/70 border border-gray-200/80 rounded-xl p-4 text-xs">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">Permanent Configuration</h3>
-              <div className="space-y-2 text-gray-600">
-                <div>
-                  <span className="font-semibold text-gray-900">Google Sheet: </span>
-                  <span className="break-all">{setupUrl || google?.spreadsheet_url || 'Configured in worker'}</span>
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900">Worksheet Tab: </span>
-                  <span>{setupWorksheet || google?.worksheet_name || 'Mastersheet'}</span>
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900">Service Account: </span>
-                  <span className="break-all font-mono text-[11px] text-gray-700">{google?.service_account_email || 'Installed in worker'}</span>
-                </div>
-                <div>
-                  <span className="font-semibold text-gray-900">Configured Brands ({supportedBrands.length || 8}): </span>
-                  <span className="text-gray-800">{supportedBrands.length ? supportedBrands.join(', ') : 'AGIPL, Aldo, BBW, CIS, CK, Crocs, R&B, VS'}</span>
-                </div>
-              </div>
+            <div className="space-y-4">
+              <label className="block text-sm font-medium text-gray-700">Approved Google Sheet URL<input value={setupUrl} onChange={(event) => setSetupUrl(event.target.value)} disabled={locked} className={`${input} mt-1`} /></label>
+              <label className="block text-sm font-medium text-gray-700">Worksheet title<input value={setupWorksheet} onChange={(event) => setSetupWorksheet(event.target.value)} disabled={locked} className={`${input} mt-1`} /></label>
+              <label className="block text-sm font-medium text-gray-700">Apparel workspace mappings<textarea value={reportJson} onChange={(event) => setReportJson(event.target.value)} disabled={locked} rows={10} className={`${input} mt-1 font-mono text-xs`} /></label>
+              <button className={primary} disabled={locked || !setup} onClick={() => void saveSetup()}>{pending === 'setup' ? 'Saving…' : 'Save approved setup'}</button>
             </div>
-
-            {/* MoEngage Browser Login */}
-            <div className="space-y-3 p-1">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-700">Corporate MoEngage Session</h3>
-              <p className="text-xs text-gray-500 leading-relaxed">
-                Sign in to Google/MoEngage inside the dedicated Chrome window. As soon as you log in, this dashboard automatically detects the session and turns green.
-              </p>
-              <div className="flex flex-wrap items-center gap-2 pt-2">
-                <button
-                  type="button"
-                  className={primary}
-                  disabled={locked || !session}
-                  onClick={() => void perform('session-start', async () => {
-                    const value = await startAttributionSession(profileId.trim() || 'default');
-                    if (live.current) {
-                      setSession(value);
-                      setNotice('Dedicated MoEngage login window brought forward. Complete sign-in; status connects automatically.');
-                    }
-                  })}
-                >
-                  {pending === 'session-start' ? 'Launching…' : 'Start / Focus Login Window'}
-                </button>
-                <button
-                  type="button"
-                  className={button}
-                  disabled={locked || !session}
-                  onClick={() => {
-                    if (!window.confirm('Reset this corporate browser profile? You will need to sign in and complete MFA again.')) return;
-                    void perform('session-reset', async () => {
-                      const value = await resetAttributionSession(profileId.trim() || 'default');
-                      if (live.current) {
-                        setSession(value);
-                        setNotice('Browser profile reset. Click Start Login to sign in again.');
-                      }
-                    });
-                  }}
-                >
-                  {pending === 'session-reset' ? 'Resetting…' : 'Reset Session'}
-                </button>
-                {browserUrl && (
-                  <a href={browserUrl} target="_blank" rel="noopener noreferrer" className={button}>
-                    Open Dedicated Browser ↗
-                  </a>
-                )}
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <h3 className="font-semibold text-gray-900">Google service account</h3>
+                <p className="break-all text-xs text-gray-500">{google?.service_account_email || 'No service account configured'}. Share the approved sheet with this account as Editor.</p>
+                <input aria-label="Google service-account JSON" type="file" accept=".json,application/json" disabled={locked} onChange={(event) => setCredential(event.target.files?.[0] || null)} className="block w-full text-sm" />
+                <button className={button} disabled={locked || !credential} onClick={() => void perform('credentials', async () => {
+                  if (!credential) return;
+                  await uploadAttributionGoogleKey(credential);
+                  if (live.current) { setCredential(null); setConnection(null); connectionRef.current = null; setPreview(null); }
+                  await refreshDashboard();
+                })}>{pending === 'credentials' ? 'Installing…' : 'Install Google key'}</button>
               </div>
+              <div className="space-y-3">
+                <h3 className="font-semibold text-gray-900">Apparel MoEngage session</h3>
+                <p className="text-sm text-gray-500">Use the existing Apparel Auth Sync connection, or update its bearer token, refresh token and cookie in Settings → MoEngage. Sessions can expire; no browser server or CDP configuration is required.</p>
+                <Link href="/settings" className="inline-block text-sm font-semibold text-blue-600">Open Apparel settings →</Link>
+              </div>
+              <p className="text-xs text-amber-800">Crocs still requires a confirmed replacement for its missing Txn_Channel classification. Missing splits fail explicitly; they are not written as zero.</p>
             </div>
           </div>
         </section>

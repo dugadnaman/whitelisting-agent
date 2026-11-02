@@ -129,7 +129,7 @@ def worker_storage_lock(directory: Path):
             except OSError as exc:
                 if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
                     raise
-                raise RuntimeError("Only one worker process may use this storage directory and browser") from exc
+                raise RuntimeError("Only one worker process may use this attribution storage directory") from exc
             try:
                 yield
             finally:
@@ -141,7 +141,7 @@ def worker_storage_lock(directory: Path):
             try:
                 fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
-                raise RuntimeError("Only one worker process may use this storage directory and browser") from exc
+                raise RuntimeError("Only one worker process may use this attribution storage directory") from exc
             try:
                 yield
             finally:

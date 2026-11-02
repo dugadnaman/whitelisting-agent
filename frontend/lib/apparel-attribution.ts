@@ -55,6 +55,7 @@ export type CampaignPreview = {
 
 export type SheetConnection = CampaignPreview & {
   connection_id: string;
+  spreadsheet_url: string;
   spreadsheet_title: string;
   worksheet_title: string;
   brands: string[];
@@ -64,11 +65,8 @@ export type SheetConnection = CampaignPreview & {
 };
 
 export type MoEngageSession = {
-  status: 'connected' | 'waiting_for_login' | 'disconnected' | 'not_configured';
+  status: 'connected' | 'disconnected' | 'not_configured';
   message: string;
-  profile_id: string;
-  profiles: string[];
-  login_url?: string | null;
 };
 
 export type AttributionSetup = {
@@ -77,7 +75,6 @@ export type AttributionSetup = {
   ui_config: Record<string, unknown>;
   google_configured: boolean;
   service_account_email: string | null;
-  browser_login_url?: string | null;
 };
 
 export type AttributionSetupRequest = Pick<AttributionSetup, 'spreadsheet_url' | 'worksheet_name' | 'ui_config'>;
@@ -185,21 +182,6 @@ export async function fetchAttributionSession(signal?: AbortSignal): Promise<MoE
   return res.json();
 }
 
-export async function startAttributionSession(profileId: string): Promise<MoEngageSession> {
-  const res = await fetchWithRetry(getApiUrl(`${PREFIX}/moengage/session/start`), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: profileId }),
-  }, 0);
-  if (!res.ok) throw new AttributionApiError(await getErrorMessage(res), res.status);
-  return res.json();
-}
-
-export async function resetAttributionSession(profileId: string): Promise<MoEngageSession> {
-  const res = await fetchWithRetry(getApiUrl(`${PREFIX}/moengage/session/reset`), {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: profileId }),
-  }, 0);
-  if (!res.ok) throw new AttributionApiError(await getErrorMessage(res), res.status);
-  return res.json();
-}
 
 export async function fetchAttributionJobs(signal?: AbortSignal): Promise<{ jobs: AttributionJob[] }> {
   const res = await fetchWithRetry(getApiUrl(`${PREFIX}/jobs`), { signal, cache: 'no-store' });

@@ -1,14 +1,15 @@
-"""Authenticated, fixed-route broker for the isolated Apparel attribution worker."""
+"""Authenticated Apparel attribution routes embedded in the main application."""
 from __future__ import annotations
-
-import ipaddress
+import secrets
 import json
-import os
 import re
 from datetime import date
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 from urllib.parse import urlsplit
 
+import logging
+logger = logging.getLogger(__name__)
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -17,7 +18,21 @@ from starlette.datastructures import UploadFile
 
 from auth import get_current_user
 
-router = APIRouter(prefix="/api/apparel/attribution", tags=["Apparel attribution"])
+@asynccontextmanager
+async def attribution_lifespan(_app):
+    _app.state.attribution_error = None
+    async with AsyncExitStack() as stack:
+        try:
+            attribution = get_internal_worker_app()
+            await stack.enter_async_context(attribution.router.lifespan_context(attribution))
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            # A damaged attribution setup must not stop unrelated main-app routes.
+            logger.error("Attribution setup unavailable (%s); correct its private configuration and restart", type(exc).__name__)
+            _app.state.attribution_error = "Attribution configuration is unavailable. Ask an administrator to correct its private setup and restart the application."
+        yield
+
+
+router = APIRouter(prefix="/api/apparel/attribution", tags=["Apparel attribution"], lifespan=attribution_lifespan)
 WORKER_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=15.0, pool=5.0)
 ID_PATTERN = r"^[A-Za-z0-9_-]{1,128}$"
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
@@ -43,14 +58,6 @@ class SetupRequest(SheetRequest):
     ui_config: dict[str, Any]
 
 
-class SessionRequest(StrictRequest):
-    profile_id: str = Field(default="default", min_length=1, max_length=120)
-
-    @model_validator(mode="after")
-    def validate_profile(self):
-        if self.profile_id != "default" and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", self.profile_id):
-            raise ValueError("Choose default or a corporate email profile")
-        return self
 
 
 class JobRequest(StrictRequest):
@@ -102,37 +109,6 @@ def sheet_id(value: str) -> str:
         raise ValueError("Choose a valid HTTPS Google Sheets URL") from None
 
 
-def worker_configuration() -> tuple[str, str]:
-    url = os.environ.get("APPAREL_ATTRIBUTION_WORKER_URL", "")
-    token = os.environ.get("APPAREL_ATTRIBUTION_TOKEN", "")
-    try:
-        if (len(token) < 32 or len(set(token)) < 10 or not token.isascii()
-                or any(char.isspace() or ord(char) < 33 or ord(char) > 126 for char in token)
-                or re.search(r"change.?me|placeholder|replace.?me|your[-_ ]|example|default", token, re.I)
-                or any(token == (token[:n] * ((len(token) + n - 1) // n))[:len(token)] for n in range(1, len(token) // 2 + 1))):
-            raise ValueError
-        parsed = urlsplit(url)
-        host = parsed.hostname or ""
-        if (not host or parsed.scheme not in {"http", "https"}
-                or parsed.username is not None or parsed.password is not None
-                or "?" in url or "#" in url or parsed.path not in {"", "/"}
-                or any(char.isspace() for char in url) or "\\" in url
-                or (parsed.port is not None and not 1 <= parsed.port <= 65535)):
-            raise ValueError
-        try:
-            address = ipaddress.ip_address(host)
-            private = address.is_loopback or (address.is_private and not (
-                address.is_unspecified or address.is_multicast or address.is_link_local or address.is_reserved
-            ))
-        except ValueError:
-            if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", host):
-                raise ValueError
-            private = host == "localhost" or host.endswith(".internal")
-        if parsed.scheme == "http" and not private:
-            raise ValueError
-        return url.rstrip("/"), token
-    except (ValueError, TypeError):
-        raise HTTPException(503, "Apparel attribution worker is not configured securely") from None
 
 
 async def apparel_identity(user: dict = Depends(get_current_user)) -> dict:
@@ -152,9 +128,6 @@ async def apparel_admin(user: dict = Depends(apparel_identity)) -> dict:
     return user
 
 
-def worker_transport():
-    """Default HTTP transport; dependency injection keeps router tests offline."""
-    return None
 
 
 class Gateway:
@@ -178,7 +151,7 @@ class Gateway:
             raise HTTPException(502, "Apparel attribution worker returned an unexpected redirect")
         return upstream
 
-    def safe_json(self, upstream: httpx.Response, *, session=False, redactions=()):
+    def safe_json(self, upstream: httpx.Response, *, redactions=()):
         try:
             payload = upstream.json()
         except ValueError:
@@ -190,10 +163,7 @@ class Gateway:
                 for key, item in value.items():
                     if key.casefold() in {"password", "private_key", "private_key_id", "credentials", "token", "access_token", "refresh_token"}:
                         continue
-                    if not self.admin and key in {"login_url", "browser_login_url"}:
-                        result[key] = None
-                    else:
-                        result[key] = clean(item, key)
+                    result[key] = clean(item, key)
                 return result
             if isinstance(value, list):
                 return [clean(item, key) for item in value]
@@ -203,31 +173,56 @@ class Gateway:
                     if secret:
                         value = value.replace(secret, "[redacted]")
                 value = re.sub(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", "[redacted private key]", value, flags=re.DOTALL)
-                # Login links can appear in messages/errors, not just login_url.
-                if not self.admin and (session or key in {"message", "error", "detail"}):
+                if not self.admin and key in {"message", "error", "detail"}:
                     value = URL_PATTERN.sub("[redacted URL]", value)
                 return value
             return value
 
         return clean(payload)
 
-    def response(self, upstream: httpx.Response, *, session=False):
-        return JSONResponse(self.safe_json(upstream, session=session), status_code=upstream.status_code)
+    def response(self, upstream: httpx.Response):
+        return JSONResponse(self.safe_json(upstream), status_code=upstream.status_code)
+
+
+_internal_worker_app = None
+_internal_token = secrets.token_urlsafe(48)
+
+
+def get_internal_worker_app():
+    global _internal_worker_app
+    if _internal_worker_app is None:
+        import sys
+        from pathlib import Path
+        module_dir = Path(__file__).resolve().parent.parent / "agents" / "apparel-attribution" / "Backend"
+        if str(module_dir) not in sys.path:
+            sys.path.insert(0, str(module_dir))
+        from app.config.settings import settings
+        settings.machine_token = _internal_token
+        from app.main import app as attribution_app
+        _internal_worker_app = attribution_app
+    return _internal_worker_app
+
+
 
 
 async def gateway(
+    request: Request,
     user: dict = Depends(apparel_identity),
-    transport=Depends(worker_transport),
 ):
-    url, token = worker_configuration()
+    if getattr(request.app.state, "attribution_error", None):
+        raise HTTPException(503, request.app.state.attribution_error)
     actor = str(user.get("sub") or user.get("id") or user.get("email"))
     if not actor.isascii() or len(actor) > 254 or any(ord(char) < 32 or ord(char) == 127 for char in actor):
         raise HTTPException(401, "Verified identity is invalid")
+
+    app = get_internal_worker_app()
     async with httpx.AsyncClient(
-        base_url=url + "/api/", headers={"X-Apparel-Attribution-Token": token, "X-Apparel-Actor": actor},
-        timeout=WORKER_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://attribution.internal/api/",
+        headers={"X-Apparel-Attribution-Token": _internal_token, "X-Apparel-Actor": actor},
+        timeout=WORKER_TIMEOUT, follow_redirects=False, trust_env=False,
     ) as client:
-        yield Gateway(client, user, token)
+        yield Gateway(client, user, _internal_token)
 
 
 @router.get("/health")
@@ -284,17 +279,9 @@ async def campaigns(
 
 @router.get("/moengage/session")
 async def session(worker: Gateway = Depends(gateway)):
-    return worker.response(await worker.request("GET", "moengage/session"), session=True)
+    return worker.response(await worker.request("GET", "moengage/session"))
 
 
-@router.post("/moengage/session/start", dependencies=[Depends(apparel_admin)])
-async def session_start(payload: SessionRequest, worker: Gateway = Depends(gateway)):
-    return worker.response(await worker.request("POST", "moengage/session/start", json=payload.model_dump()), session=True)
-
-
-@router.post("/moengage/session/reset", dependencies=[Depends(apparel_admin)])
-async def session_reset(payload: SessionRequest, worker: Gateway = Depends(gateway)):
-    return worker.response(await worker.request("POST", "moengage/session/reset", json=payload.model_dump()), session=True)
 
 
 @router.get("/jobs")
