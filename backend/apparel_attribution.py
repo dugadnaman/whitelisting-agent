@@ -9,8 +9,6 @@ from datetime import date
 from typing import Any
 from urllib.parse import urlsplit
 
-import logging
-logger = logging.getLogger(__name__)
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -217,52 +215,14 @@ class Gateway:
         return JSONResponse(self.safe_json(upstream, session=session), status_code=upstream.status_code)
 
 
-INTERNAL_TOKEN = "7aP9!xD3#uF6@qR1$sT8%vW2&yZ5*bC0_internal"
-_internal_worker_app = None
-
-
-def get_internal_worker_app():
-    global _internal_worker_app
-    if _internal_worker_app is None:
-        import sys
-        from pathlib import Path
-        worker_dir = Path(__file__).resolve().parent.parent / "agents" / "apparel-attribution" / "Backend"
-        if str(worker_dir) not in sys.path:
-            sys.path.insert(0, str(worker_dir))
-        from app.config.settings import settings
-        if not settings.machine_token:
-            settings.machine_token = os.environ.get("APPAREL_ATTRIBUTION_TOKEN") or INTERNAL_TOKEN
-        from app.main import app as worker_app
-        _internal_worker_app = worker_app
-    return _internal_worker_app
-
-
 async def gateway(
     user: dict = Depends(apparel_identity),
     transport=Depends(worker_transport),
 ):
+    url, token = worker_configuration()
     actor = str(user.get("sub") or user.get("id") or user.get("email"))
     if not actor.isascii() or len(actor) > 254 or any(ord(char) < 32 or ord(char) == 127 for char in actor):
         raise HTTPException(401, "Verified identity is invalid")
-
-    mode = os.environ.get("APPAREL_ATTRIBUTION_MODE", "").strip().lower()
-    url = os.environ.get("APPAREL_ATTRIBUTION_WORKER_URL", "").strip()
-    if mode in {"direct", "local", "in_process", "analytics"} or (transport is None and (not url or url == "http://localhost:8001")):
-        app = get_internal_worker_app()
-        token = os.environ.get("APPAREL_ATTRIBUTION_TOKEN") or INTERNAL_TOKEN
-        from app.config.settings import settings
-        if not settings.machine_token:
-            settings.machine_token = token
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://testserver/api/",
-            headers={"X-Apparel-Attribution-Token": token, "X-Apparel-Actor": actor},
-            timeout=WORKER_TIMEOUT,
-        ) as client:
-            yield Gateway(client, user, token)
-        return
-
-    url, token = worker_configuration()
     async with httpx.AsyncClient(
         base_url=url + "/api/", headers={"X-Apparel-Attribution-Token": token, "X-Apparel-Actor": actor},
         timeout=WORKER_TIMEOUT, follow_redirects=False, trust_env=False, transport=transport,
