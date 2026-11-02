@@ -95,7 +95,8 @@ def portal(tmp_path, monkeypatch):
                                            "whatsapp_business_no": "+919876543210"},
                 }}}
             elif method == "GET" and path == "/template_metadata":
-                result = {"data": state["templates"][workspace_id]}
+                # Live metadata carries loggedIn=false even on a successful authenticated response.
+                result = {"data": state["templates"][workspace_id], "status": True, "code": 200, "loggedIn": False}
             elif method == "POST" and path == "/v2/custom-segments/dashboard":
                 result = {"custom_segments": [{"id": inventory["segment"], "name": "Shared Audience",
                                                "deleted": False, "archived": False}]}

@@ -171,7 +171,7 @@ def _metadata_request(session: dict[str, Any], method: str, path: str) -> dict[s
             or data.get("status") in ("failure", "failed", "error")
             or ("code" in data and str(data["code"]) != "200")
             or (data.get("loggedIn") is False and not (
-                str(data.get("code")) == "200" and data.get("status") == "success"))):
+                str(data.get("code")) == "200" and data.get("status") in ("success", True)))):
         raise ValueError("MoEngage returned invalid workspace metadata")
     return data
 
