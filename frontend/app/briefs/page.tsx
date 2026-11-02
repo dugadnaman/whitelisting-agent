@@ -13,6 +13,7 @@ import {
   reportJiraValidation,
   uploadJiraCreative,
   fetchMoEngageCatalog,
+  fetchMoEngageDraftWorkspaces,
   stageMoEngageDraftBatch,
   createMoEngageDraft,
   type MoEngageCatalog,
@@ -223,14 +224,16 @@ export default function JiraBriefsPage() {
   });
   // MoEngage Campaign Staging State
   const [moeCatalog, setMoeCatalog] = useState<MoEngageCatalog | null>(null);
+  const [moeWorkspaces, setMoeWorkspaces] = useState<{ id: string; name: string }[]>([]);
+  const [moeWorkspace, setMoeWorkspace] = useState('');
   const [loadingCatalog, setLoadingCatalog] = useState<boolean>(false);
   const [moeCampaignName, setMoeCampaignName] = useState<string>('');
   const [moeChannel, setMoeChannel] = useState<'WHATSAPP' | 'EMAIL' | 'PUSH'>('WHATSAPP');
-  const [moeSegmentId, setMoeSegmentId] = useState<string>('Test_FSTP_Pranav_1602');
+  const [moeSegmentId, setMoeSegmentId] = useState<string>('');
   const [moeScheduledAt, setMoeScheduledAt] = useState<string>('');
   const [moeTimezone, setMoeTimezone] = useState<string>('Asia/Kolkata');
   const [moeWaTemplateId, setMoeWaTemplateId] = useState<string>('');
-  const [moeWaSender, setMoeWaSender] = useState<string>('Tata Capital Limited');
+  const [moeWaSender, setMoeWaSender] = useState<string>('');
   const [moeEmailFrom, setMoeEmailFrom] = useState<string>('contact@tatacapital.com');
   const [moeEmailSubject, setMoeEmailSubject] = useState<string>('');
   const [moeEmailContent, setMoeEmailContent] = useState<string>('<p>Exclusive Offer from Tata Capital</p>');
@@ -243,49 +246,97 @@ export default function JiraBriefsPage() {
   const [moeBatchId, setMoeBatchId] = useState<string | null>(null);
   const [moeError, setMoeError] = useState<string | null>(null);
   const [moeBusy, setMoeBusy] = useState<boolean>(false);
+  const [moeCreateAttempted, setMoeCreateAttempted] = useState(false);
+  const [moeRemoteState, setMoeRemoteState] = useState('');
 
   useEffect(() => {
-    if (activeTab === 'moengage' && !moeCatalog && targetAccount) {
-      setLoadingCatalog(true);
-      fetchMoEngageCatalog(targetAccount)
-        .then((cat) => {
-          setMoeCatalog(cat);
-          if (cat.segments && cat.segments.length > 0 && !moeSegmentId) {
-            setMoeSegmentId(cat.segments[0].id);
-          }
-          if (cat.whatsapp_senders && cat.whatsapp_senders.length > 0 && !moeWaSender) {
-            setMoeWaSender(cat.whatsapp_senders[0].sender_name);
-          }
-          if (cat.email_senders && cat.email_senders.length > 0 && !moeEmailFrom) {
-            setMoeEmailFrom(cat.email_senders[0].from_address);
-          }
-        })
-        .catch((err) => {
-          console.warn('Could not load MoEngage catalog:', err);
-        })
-        .finally(() => setLoadingCatalog(false));
+    let active = true;
+    setMoeWorkspace('');
+    setMoeCatalog(null);
+    setMoeWorkspaces([]);
+    if (targetAccount) fetchMoEngageDraftWorkspaces(targetAccount).then((result) => {
+      if (active) setMoeWorkspaces(result.workspaces);
+    }).catch((err) => { if (active) setMoeError(formatError(err)); });
+    return () => { active = false; };
+  }, [targetAccount]);
+
+  useEffect(() => {
+    const explicit = brief?.moengage_campaign?.workspace_id || brief?.moengage_campaign?.workspace;
+    setMoeWorkspace(explicit ? moeWorkspaces.find((item) => item.id === explicit || item.name === explicit)?.id || '' : '');
+  }, [brief, moeWorkspaces]);
+
+  useEffect(() => {
+    let active = true;
+    setMoeCatalog(null);
+    setMoeSegmentId('');
+    setMoeWaSender('');
+    setMoeWaTemplateId('');
+    setMoeBatchId(null);
+    setMoeStagingStatus('DRAFT');
+    setLoadingCatalog(false);
+    if (activeTab !== 'moengage' || !targetAccount || (moeChannel === 'WHATSAPP' && !moeWorkspace)) return;
+    setLoadingCatalog(true);
+    fetchMoEngageCatalog(targetAccount, moeChannel === 'WHATSAPP' ? moeWorkspace : undefined).then((cat) => {
+      if (active) {
+        setMoeCatalog(cat);
+        if (moeChannel !== 'WHATSAPP') {
+          if (cat.segments?.[0]) setMoeSegmentId(cat.segments[0].id);
+          if (cat.email_senders?.[0] && !moeEmailFrom) setMoeEmailFrom(cat.email_senders[0].from_address);
+        }
+      }
+    }).catch((err) => { if (active) setMoeError(formatError(err)); })
+      .finally(() => { if (active) setLoadingCatalog(false); });
+    return () => { active = false; };
+  }, [activeTab, targetAccount, moeChannel, moeWorkspace]);
+
+  const requireMoeWorkspace = () => {
+    if (moeChannel !== 'WHATSAPP') return;
+    if (!moeWorkspace || !moeCatalog || moeCatalog.workspace_id !== moeWorkspace ||
+        !moeCatalog.segments.some((segment) => segment.id === moeSegmentId) ||
+        !moeCatalog.whatsapp_senders?.some((sender) => sender.sender_id === moeWaSender) ||
+        !moeCatalog.whatsapp_templates?.some((template) => template.id === moeWaTemplateId && template.sender_ids.includes(moeWaSender))) {
+      throw new Error('Review an explicit WhatsApp workspace and select its audience, sender and approved template before staging or creating.');
     }
-  }, [activeTab, targetAccount, moeCatalog, moeSegmentId, moeWaSender, moeEmailFrom]);
+  };
+
+  const moeSchedule = () => {
+    if (!moeScheduledAt) return new Date(Date.now() + 86400000).toISOString();
+    if (/(?:Z|[+-]\d{2}:\d{2})$/i.test(moeScheduledAt)) return moeScheduledAt;
+    if (moeTimezone !== 'Asia/Kolkata') throw new Error('A schedule without an offset requires Asia/Kolkata; supply an explicit ISO offset for another timezone.');
+    return `${moeScheduledAt.length === 16 ? `${moeScheduledAt}:00` : moeScheduledAt}+05:30`;
+  };
+
+  const moeBriefWhatsAppFields = (): Record<string, string> => {
+    const template = moeCatalog?.whatsapp_templates?.find((item) => item.id === moeWaTemplateId);
+    const draft = waTemplates.find((item) => item.template_name === template?.name) || (waTemplates.length === 1 ? waTemplates[0] : undefined);
+    if (!draft?.body) throw new Error('Select a template matching one unambiguous WhatsApp brief body before staging or creating.');
+    const fields: Record<string, string> = { whatsapp_message: draft.body };
+    if (draft.whatsapp_placeholders) fields.whatsapp_placeholders = JSON.stringify(draft.whatsapp_placeholders);
+    return fields;
+  };
 
   const handleMoeStageBatch = async () => {
     if (!brief) return;
     try {
+      requireMoeWorkspace();
       setMoeBusy(true);
       setMoeError(null);
       setMoeStagingStatus('STAGING');
-      const scheduledVal = moeScheduledAt || new Date(Date.now() + 86400000).toISOString().slice(0, 19);
+      const scheduledVal = moeSchedule();
 
       const rowDict: Record<string, string> = {
         campaign_name: moeCampaignName || `${brief.issue_key} Campaign`,
         channel: moeChannel,
-        segment_id: moeSegmentId || 'Test_FSTP_Pranav_1602',
+        segment_id: moeChannel === 'WHATSAPP' ? moeSegmentId : moeSegmentId || 'Test_FSTP_Pranav_1602',
         scheduled_at: scheduledVal,
         timezone: moeTimezone || 'Asia/Kolkata',
       };
 
       if (moeChannel === 'WHATSAPP') {
-        rowDict.whatsapp_sender = moeWaSender || 'Tata Capital Limited';
-        rowDict.whatsapp_template_id = moeWaTemplateId || (waTemplates[0]?.template_name || 'test_1234');
+        rowDict.workspace_id = moeWorkspace;
+        rowDict.whatsapp_sender = moeWaSender;
+        rowDict.whatsapp_template_id = moeWaTemplateId;
+        Object.assign(rowDict, moeBriefWhatsAppFields());
       } else if (moeChannel === 'EMAIL') {
         rowDict.from_address = moeEmailFrom || 'contact@tatacapital.com';
         rowDict.subject = moeEmailSubject || brief.summary || 'Exclusive Offer';
@@ -305,10 +356,12 @@ export default function JiraBriefsPage() {
 
       const batch = await stageMoEngageDraftBatch(file, targetAccount);
       setMoeBatchId(batch.batch_id);
-      setMoeStagingStatus('STAGED');
+      setMoeStagingStatus(batch.ready > 0 && batch.blocked === 0 ? 'STAGED' : 'ERROR');
+      const stageIssues = batch.items.flatMap((item) => item.issues || []).join('; ');
+      if (batch.blocked > 0) setMoeError(stageIssues || 'Staged rows require correction before creation.');
       setFeedback({
-        message: `Campaign staged in MoEngage batch queue (Batch ${batch.batch_id}). Ready to create remote draft.`,
-        type: 'success',
+        message: `Batch ${batch.batch_id} staged: ${batch.ready} ready, ${batch.blocked} blocked.${stageIssues ? ` ${stageIssues}` : ''} Review the queue before creating.`,
+        type: batch.blocked > 0 ? 'error' : 'success',
       });
     } catch (err) {
       const msg = formatError(err);
@@ -321,12 +374,13 @@ export default function JiraBriefsPage() {
   };
 
   const handleMoeCreateDraft = async () => {
-    if (!brief) return;
+    if (!brief || moeBusy || moeCreateAttempted) return;
     try {
+      requireMoeWorkspace();
       setMoeBusy(true);
       setMoeError(null);
       setMoeStagingStatus('CREATING');
-      const scheduledVal = moeScheduledAt || new Date(Date.now() + 86400000).toISOString().slice(0, 19);
+      const scheduledVal = moeSchedule();
 
       const rowDict: Record<string, any> = {
         account: targetAccount,
@@ -334,14 +388,16 @@ export default function JiraBriefsPage() {
         row_id: '1',
         channel: moeChannel,
         campaign_name: moeCampaignName || `${brief.issue_key} Campaign`,
-        segment_id: moeSegmentId || 'Test_FSTP_Pranav_1602',
+        segment_id: moeChannel === 'WHATSAPP' ? moeSegmentId : moeSegmentId || 'Test_FSTP_Pranav_1602',
         scheduled_at: scheduledVal,
         timezone: moeTimezone || 'Asia/Kolkata',
       };
 
       if (moeChannel === 'WHATSAPP') {
-        rowDict.whatsapp_sender = moeWaSender || 'Tata Capital Limited';
-        rowDict.whatsapp_template_id = moeWaTemplateId || (waTemplates[0]?.template_name || 'test_1234');
+        rowDict.workspace_id = moeWorkspace;
+        rowDict.whatsapp_sender = moeWaSender;
+        rowDict.whatsapp_template_id = moeWaTemplateId;
+        Object.assign(rowDict, moeBriefWhatsAppFields());
       } else if (moeChannel === 'EMAIL') {
         rowDict.from_address = moeEmailFrom || 'contact@tatacapital.com';
         rowDict.subject = moeEmailSubject || brief.summary || 'Exclusive Offer';
@@ -354,25 +410,23 @@ export default function JiraBriefsPage() {
         rowDict.push_message = moePushBody || brief.summary || 'Click to explore offer';
       }
 
+      setMoeCreateAttempted(true);
+      setMoeRemoteState('UNKNOWN');
       const res = await createMoEngageDraft(targetAccount, rowDict);
-      if (res.campaign_id) {
-        setMoeResultCampaignId(res.campaign_id);
-        setMoeStagingStatus('CREATED');
-        setFeedback({
-          message: `Successfully created MoEngage draft (Campaign ID: ${res.campaign_id})!`,
-          type: 'success',
-        });
-      } else if (res.state === 'BLOCKED' || (res.validation_errors && res.validation_errors.length > 0)) {
-        const issues = res.validation_errors.map(e => `${e.field || ''}: ${e.issue || ''}`).join(', ');
-        throw new Error(issues || res.issue || 'Draft creation blocked');
-      } else {
-        throw new Error(res.issue || 'Draft creation unconfirmed');
+      setMoeRemoteState(res.state);
+      if (res.campaign_id) setMoeResultCampaignId(res.campaign_id);
+      const confirmed = /^[a-f0-9]{24}$/i.test(res.campaign_id || '') && res.state === (moeChannel === 'WHATSAPP' ? 'VERIFIED' : 'VALIDATED');
+      if (!confirmed) {
+        const issues = (res.validation_errors || []).map((issue) => `${issue.field || ''}: ${issue.issue || ''}`).join('; ');
+        throw new Error(`Draft state ${res.state || 'UNKNOWN'}${res.campaign_id ? ` (${res.campaign_id})` : ''}: ${issues || res.issue || 'Creation not confirmed'}. Do not create again; reconcile the existing attempt in MoEngage.`);
       }
+      setMoeStagingStatus('CREATED');
+      setFeedback({ message: `Draft ${res.campaign_id} confirmed ${res.state}. Human review is required before publishing.`, type: 'success' });
     } catch (err) {
       const msg = formatError(err);
       setMoeError(msg);
       setMoeStagingStatus('ERROR');
-      setFeedback({ message: `Failed to create draft in MoEngage: ${msg}`, type: 'error' });
+      setFeedback({ message: `Draft request not confirmed: ${msg} If a request was submitted, reconcile it in MoEngage rather than creating again.`, type: 'error' });
     } finally {
       setMoeBusy(false);
     }
@@ -502,7 +556,7 @@ export default function JiraBriefsPage() {
         setMoeScheduledAt(data.moengage_campaign.scheduled_date || '');
         if (waList.length > 0) {
           setMoeChannel('WHATSAPP');
-          setMoeWaTemplateId(waList[0].template_name || '');
+          setMoeWaTemplateId('');
         } else if (data.is_email_campaign || (data.email_templates?.length || 0) > 0) {
           setMoeChannel('EMAIL');
           setMoeEmailSubject(data.moengage_campaign?.email_subject || data.summary || '');
@@ -513,6 +567,8 @@ export default function JiraBriefsPage() {
           setMoeChannel('PUSH');
         }
         setMoeResultCampaignId(null);
+        setMoeCreateAttempted(false);
+        setMoeRemoteState('');
         setMoeBatchId(null);
         setMoeError(null);
       }
@@ -3233,13 +3289,13 @@ export default function JiraBriefsPage() {
                         <div className="p-4 rounded-xl border border-emerald-300 bg-emerald-50/90 text-emerald-900 space-y-2 shadow-2xs">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <span className="text-base">🎉</span>
+                              <span className="text-base">{moeStagingStatus === 'CREATED' ? '✓' : '⚠'}</span>
                               <span className="text-xs font-bold uppercase tracking-wider">
-                                Draft Created in MoEngage Workspace!
+                                {moeStagingStatus === 'CREATED' ? 'Draft confirmed in MoEngage' : 'Draft attempt requires reconciliation'}
                               </span>
                             </div>
                             <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-200 text-emerald-800">
-                              CONFIRMED
+                              {moeRemoteState || 'UNKNOWN'}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 text-xs">
@@ -3348,6 +3404,16 @@ export default function JiraBriefsPage() {
                               <option value="PUSH">📱 Push Notification</option>
                             </select>
                           </div>
+                          {moeChannel === 'WHATSAPP' && (
+                            <div>
+                              <label className="block text-gray-600 font-medium mb-1">WhatsApp destination workspace (required):</label>
+                              <select value={moeWorkspace} onChange={(e) => setMoeWorkspace(e.target.value)} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs">
+                                <option value="">Select and review destination — no default</option>
+                                {moeWorkspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.id})</option>)}
+                              </select>
+                              <p className="text-xs text-gray-500 mt-1">Only explicit brief workspace fields are carried forward. Review this destination before staging or creating; the queued CSV retains its workspace ID.</p>
+                            </div>
+                          )}
 
                           {/* Target Audience / Segment */}
                           <div>
@@ -3360,6 +3426,7 @@ export default function JiraBriefsPage() {
                                 onChange={(e) => setMoeSegmentId(e.target.value)}
                                 className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
                               >
+                                <option value="">Select workspace audience</option>
                                 {moeCatalog.segments.map((seg) => (
                                   <option key={seg.id} value={seg.id}>
                                     {seg.name} ({seg.id})
@@ -3397,25 +3464,19 @@ export default function JiraBriefsPage() {
                                 <label className="block text-gray-600 font-medium mb-1">
                                   WhatsApp Template ID:
                                 </label>
-                                <input
-                                  type="text"
-                                  value={moeWaTemplateId}
-                                  onChange={(e) => setMoeWaTemplateId(e.target.value)}
-                                  placeholder="e.g. pl_diwali_promo"
-                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-mono font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
-                                />
+                                <select value={moeWaTemplateId} onChange={(e) => setMoeWaTemplateId(e.target.value)} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs">
+                                  <option value="">Select approved sender template</option>
+                                  {moeCatalog?.whatsapp_templates?.filter((template) => template.sender_ids.includes(moeWaSender)).map((template) => <option key={template.id} value={template.id}>{template.name} ({template.id})</option>)}
+                                </select>
                               </div>
                               <div>
                                 <label className="block text-gray-600 font-medium mb-1">
                                   WhatsApp Sender:
                                 </label>
-                                <input
-                                  type="text"
-                                  value={moeWaSender}
-                                  onChange={(e) => setMoeWaSender(e.target.value)}
-                                  placeholder="e.g. Tata Capital Limited"
-                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
-                                />
+                                <select value={moeWaSender} onChange={(e) => { setMoeWaSender(e.target.value); setMoeWaTemplateId(''); }} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs">
+                                  <option value="">Select workspace sender</option>
+                                  {moeCatalog?.whatsapp_senders?.map((sender) => <option key={sender.sender_id} value={sender.sender_id}>{sender.name} ({sender.number}) · {sender.provider}</option>)}
+                                </select>
                               </div>
                             </>
                           )}
@@ -3517,7 +3578,7 @@ export default function JiraBriefsPage() {
                             <button
                               type="button"
                               onClick={handleMoeCreateDraft}
-                              disabled={moeBusy || !moeCampaignName.trim()}
+                              disabled={moeBusy || moeCreateAttempted || !moeCampaignName.trim()}
                               className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 shadow-2xs transition flex items-center gap-2"
                               title="Create real audited V5 draft in MoEngage Live workspace"
                             >

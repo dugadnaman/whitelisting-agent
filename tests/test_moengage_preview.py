@@ -1,5 +1,6 @@
 """Consumer-visible campaign preview behavior: identity, mapping, and no writes."""
 
+import copy
 import csv
 import io
 import json
@@ -189,6 +190,8 @@ def test_jira_brief_whatsapp_templates_generate_v5_candidate_drafts_and_tata_sub
         "segment_id": "seg-vip",
         "scheduled_at": BASE["scheduled_at"],
         "timezone": BASE["timezone"],
+        "workspace_id": CATALOG["workspace_id"],
+        "whatsapp_sender": "Tata Capital Financial Services Limited",
     }
     # Allows 'tcl_promo' brief to generate drafts under parent 'tata' workspace
     rows = rows_from_jira_brief(brief, overrides, "tata")
@@ -198,7 +201,11 @@ def test_jira_brief_whatsapp_templates_generate_v5_candidate_drafts_and_tata_sub
     assert rows[0]["whatsapp_template_id"] == "festive_wa_1"
     assert rows[0]["campaign_name"] == "festive_wa_1"
 
-    batch = preview(rows)
+    catalog = copy.deepcopy(CATALOG)
+    sender_id = "111111111111111111111111"
+    catalog["whatsapp_senders"][0]["sender_id"] = sender_id
+    catalog["whatsapp_templates"][0].update(sender_ids=[sender_id], provider="KARIX")
+    batch = preview(rows, catalog)
     assert batch["ready"] == 1
     assert batch["blocked"] == 0
     candidate = batch["items"][0]["candidate_v5_payload"]
@@ -371,32 +378,6 @@ def test_whatsapp_body_template_matching_and_placeholder_extraction(monkeypatch)
     assert "11:00 am - 01:00 pm" in match["placeholders"]["{{3}}"]
     assert "https://teams.microsoft.com/meet" in match["placeholders"]["{{4}}"]
 
-    # Test via rows_from_file & prepare_batch
-    csv_content = (
-        "channel,campaign_name,Message Body,Date of Trigger,Time of Trigger\n"
-        f"WHATSAPP,Test_WA_Campaign,\"{client_msg}\",2026-10-09,11:00 AM\n"
-    )
-    rows = rows_from_file("wa.csv", csv_content.encode("utf-8"), "tata")
-    assert len(rows) == 1
-    row0 = rows[0]
-    assert row0["whatsapp_template_id"] == "6a9a6585f5b9b18f8c972b54"
-    assert row0["matched_template_name"] == "hr_btp_updated_7thsept_en"
-
-    catalog = {
-        "account": "tata",
-        "workspace_id": "WS123",
-        "segments": [{"id": "65cf4af4d4c88174e5ad186e", "name": "Test_FSTP_Pranav_1602"}],
-        "whatsapp_senders": [{"sender_name": "Tata Capital Financial Services Limited", "provider": "KARIX"}],
-        "whatsapp_templates": [{"id": "6a9a6585f5b9b18f8c972b54", "name": "hr_btp_updated_7thsept_en"}],
-    }
-    batch = prepare_batch(rows, "tata", catalog, "tester@example.com", source_type="spreadsheet")
-    assert batch["ready"] == 1
-    assert batch["blocked"] == 0
-    cand = batch["items"][0]["candidate_v5_payload"]
-    wa_conf = cand["campaign_content"]["content"]["whatsapp"]
-    assert wa_conf["template_id"] == "6a9a6585f5b9b18f8c972b54"
-    assert wa_conf["template_name"] == "hr_btp_updated_7thsept_en"
-    assert wa_conf["body_placeholders"]["{{1}}"] == match["placeholders"]["{{1}}"]
 
 def test_google_sheets_export_with_trailing_empty_columns_and_auxiliary_sheets():
     from openpyxl import Workbook

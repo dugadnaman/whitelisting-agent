@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from openpyxl import load_workbook
 
 _ROW_FIELDS = frozenset({
-    "account", "workspace_id", "source_ref", "row_id", "channel", "campaign_name",
+    "account", "workspace_id", "workspace", "source_ref", "row_id", "channel", "campaign_name",
     "segment_id", "segment_name", "scheduled_at", "timezone", "created_by",
     "content_type", "subscription_category", "from_address", "reply_to_address", "subject", "html_content",
     "email_template_id", "email_attachment_ids", "push_platform", "push_title",
@@ -229,32 +229,61 @@ def _push(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: list[
             "template_type": "BASIC", "basic_details": basic,
         }}}},
     }
+def _match_whatsapp_body(body: str, template: str) -> dict[str, str] | None:
+    """Exact rendered-template match; only whitespace and numbered variables vary."""
+    body, template = " ".join(body.split()), " ".join(template.split())
+    parts, seen, end = [], set(), 0
+    for match in re.finditer(r"\{\{(\d+)\}\}", template):
+        parts.append(re.escape(template[end:match.start()]))
+        number = match.group(1)
+        parts.append(f"(?P=p{number})" if number in seen else f"(?P<p{number}>.*?)")
+        seen.add(number)
+        end = match.end()
+    parts.append(re.escape(template[end:]))
+    matched = re.fullmatch("".join(parts), body)
+    return {f"{{{{{number}}}}}": matched.group(f"p{number}") for number in seen} if matched else None
+
+
 def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: list[str]) -> dict[str, Any]:
     sender_name = _text(row, "whatsapp_sender")
+    sender_id = _text(row, "whatsapp_sender_id")
     template_id = _text(row, "whatsapp_template_id")
-    senders = _items(catalog, "whatsapp_senders")
-    templates = _items(catalog, "whatsapp_templates")
-    if not sender_name and senders:
-        sender_name = senders[0].get("sender_name", "")
-    if not template_id and templates:
-        template_id = templates[0].get("id", "")
-    sender = _select(senders, "sender_name", sender_name, "whatsapp sender", errors) if (senders and sender_name) else None
-    if not sender_name and not sender:
-        errors.append("whatsapp_sender is required")
-
-    is_live_id = bool(template_id and (len(template_id) == 24 and all(c in "0123456789abcdefABCDEF" for c in template_id)))
-    if is_live_id or row.get("matched_template_id"):
-        template = {"id": template_id, "name": row.get("whatsapp_template_name") or row.get("matched_template_name") or template_id}
-    else:
-        template = _select(templates, "id", template_id, "whatsapp template", errors) if (templates and template_id) else None
-    if not template_id and not template:
-        errors.append("whatsapp_template_id is required")
-
+    senders, templates = _items(catalog, "whatsapp_senders"), _items(catalog, "whatsapp_templates")
+    body = next((_text(row, key) for key in ("Message Body", "whatsapp_message", "body", "message") if _text(row, key)), "")
+    candidates = []
+    for item in templates:
+        if template_id and template_id not in (item.get("id"), item.get("name"), item.get("display_name")):
+            continue
+        inferred = None
+        if body and item.get("body"):
+            inferred = _match_whatsapp_body(body, item["body"])
+            if inferred is None:
+                continue
+        elif not template_id:
+            continue
+        candidates.append((item, inferred))
+    template, inferred = candidates[0] if len(candidates) == 1 else (None, None)
+    if template is None:
+        errors.append("WhatsApp template must match exactly one approved template in the selected workspace")
+    possible = [
+        sender for sender in senders
+        if (not sender_name or sender_name in (sender.get("sender_name"), sender.get("sender_id"), sender.get("id")))
+        and (not sender_id or sender_id == (sender.get("sender_id") or sender.get("id")))
+        and (not template or not template.get("sender_ids") or (sender.get("sender_id") or sender.get("id")) in template["sender_ids"])
+        and (not template or not template.get("provider") or str(sender.get("provider", "")).upper() == str(template["provider"]).upper())
+    ]
+    # A template can identify its sole approved sender; never choose the first sender.
+    sender = possible[0] if len(possible) == 1 and (sender_name or sender_id or (template and template.get("sender_ids"))) else None
+    if sender is None:
+        errors.append("WhatsApp sender must match exactly one sender for the selected template/workspace")
+    catalog_sender_id = (sender.get("sender_id") or sender.get("id")) if sender else None
     ph_raw = row.get("whatsapp_placeholders")
     try:
-        body_placeholders = json.loads(ph_raw) if ph_raw else {}
-    except Exception:
-        body_placeholders = {}
+        body_placeholders = json.loads(ph_raw) if isinstance(ph_raw, str) and ph_raw else ph_raw or inferred or {}
+    except (TypeError, ValueError):
+        body_placeholders = None
+    if not isinstance(body_placeholders, dict) or any(not isinstance(value, str) for value in body_placeholders.values()):
+        errors.append("whatsapp_placeholders must be a JSON object of strings")
 
     return {
         "basic_details": {"name": name},
@@ -263,10 +292,10 @@ def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: l
                 "whatsapp": {
                     "sender_name": sender.get("sender_name") if sender else sender_name,
                     "phone_number": sender.get("phone_number") if sender else "",
-                    "provider": sender.get("provider", "KARIX") if sender else "KARIX",
+                    "provider": str(sender.get("provider") or "").upper() if sender else "",
                     "template_id": template.get("id") if template else template_id,
                     "template_name": template.get("name") if template else (row.get("whatsapp_template_name") or template_id),
-                    "sender_id": row.get("whatsapp_sender_id") or "685a47bfadfdfd854f960ab5",
+                    "sender_id": sender_id or catalog_sender_id or "",
                     "body_placeholders": body_placeholders,
                 }
             }
@@ -498,8 +527,6 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
                 if val and str(val).strip():
                     row["segment_name"] = str(val).strip()
                     break
-        if not row.get("segment_id") and not row.get("segment_name"):
-            row["segment_id"] = "65cf4af4d4c88174e5ad186e"
 
     # 3. Infer campaign name
     if not row.get("campaign_name"):
@@ -546,34 +573,7 @@ def _normalize_client_spreadsheet_row(row: dict[str, Any], filename: str, sheet:
         row["timezone"] = "Asia/Kolkata"
 
     # 5. Channel-specific defaults
-    if row.get("channel") == "WHATSAPP":
-        body_text = str(
-            row.get("Message Body")
-            or row.get("whatsapp_message")
-            or row.get("body")
-            or row.get("message")
-            or ""
-        ).strip()
-        if body_text and not row.get("matched_template_id"):
-            try:
-                from template_identifier import match_whatsapp_template_and_variables
-                matched = match_whatsapp_template_and_variables(body_text, account=account)
-                if matched and matched.get("matched"):
-                    row["whatsapp_template_id"] = matched["template_id"]
-                    row["whatsapp_template_name"] = matched["template_name"]
-                    row["whatsapp_sender_id"] = matched["sender_id"]
-                    row["whatsapp_placeholders"] = json.dumps(matched["placeholders"])
-                    row["matched_template_name"] = matched["template_name"]
-                    row["matched_template_id"] = matched["template_id"]
-                    row["matched_template_confidence"] = f"{int(matched['confidence'] * 100)}%"
-                    for pk, pv in matched.get("placeholders", {}).items():
-                        row[f"param_{pk.strip('{}')}"] = pv
-            except Exception:
-                pass
-
-        row.setdefault("whatsapp_sender", "Tata Capital Financial Services Limited")
-        row.setdefault("whatsapp_template_id", "test_1234")
-    elif row.get("channel") == "EMAIL":
+    if row.get("channel") == "EMAIL":
         row.setdefault("from_address", "contact@tatacapital.com")
         row.setdefault("content_type", "PROMOTIONAL")
         row.setdefault("subscription_category", "Offers")
@@ -683,7 +683,7 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
     is_tata_match = brief_acc in _TATA_SUB_ACCOUNTS and sel_acc in _TATA_SUB_ACCOUNTS
     if brief_acc != sel_acc and not is_tata_match:
         raise ValueError("Jira brief account differs from selected account")
-    if set(overrides) - (_ROW_FIELDS - {"source_ref", "row_id", "account", "workspace_id",
+    if set(overrides) - (_ROW_FIELDS - {"source_ref", "row_id", "account",
                                        "channel", "source_attachments", "_row_error"}):
         raise ValueError("Jira overrides contain unsupported or identity fields")
     attachments = [
@@ -722,6 +722,10 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
                         extracted_kv["email_subject"] = v
                     elif k in ("from email", "from address", "sender email"):
                         extracted_kv["from_address"] = v
+                    elif k in ("moengage workspace", "workspace", "workspace name"):
+                        extracted_kv["workspace"] = v
+                    elif k in ("moengage workspace id", "workspace id", "workspace_id"):
+                        extracted_kv["workspace_id"] = v
         c_meta = extracted_kv
 
     summary = str(brief.get("summary") or "").strip()
@@ -764,6 +768,12 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
             row = {name: value for name, value in overrides.items() if name not in excluded}
             row.update({"account": account, "source_ref": key, "row_id": f"{channel.lower()}:{index}",
                         "channel": channel, "source_attachments": attachments})
+            if channel == "WHATSAPP":
+                destination = brief.get("moengage_campaign") or {}
+                for field in ("workspace_id", "workspace"):
+                    value = c_meta.get(field) or destination.get(field) or brief.get(field)
+                    if value and not row.get(field):
+                        row[field] = value
             if isinstance(item, dict):
                 if channel == "EMAIL":
                     sources = (("campaign_name", "campaign_name"), ("subject", "subject"),
@@ -774,7 +784,8 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
                 elif channel == "WHATSAPP":
                     sources = (("campaign_name", "campaign_name"),
                                ("whatsapp_template_id", "template_name"),
-                               ("whatsapp_template_id", "template_id"))
+                               ("whatsapp_template_id", "template_id"),
+                               ("body", "body"), ("workspace_id", "workspace_id"), ("workspace", "workspace"))
                 else:
                     sources = ()
                 for target, source in sources:
@@ -806,8 +817,6 @@ def rows_from_jira_brief(brief: dict[str, Any], overrides: dict[str, Any], accou
                 else:
                     row["campaign_name"] = ""
 
-            if channel == "WHATSAPP":
-                row.setdefault("whatsapp_sender", overrides.get("whatsapp_sender") or "Tata Capital Financial Services Limited")
             rows.append(row)
     if not rows:
         rows.append({**overrides, "account": account, "source_ref": key, "row_id": "brief:1",

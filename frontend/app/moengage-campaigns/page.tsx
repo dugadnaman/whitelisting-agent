@@ -7,6 +7,7 @@ import {
   automateMoEngageWhatsAppBatch,
   createMoEngageDraftRow,
   fetchMoEngageCatalog,
+  fetchMoEngageDraftWorkspaces,
   fetchMoEngageDraftBatch,
   previewMoEngageDraftFile,
   stageMoEngageDraftBatch,
@@ -19,7 +20,10 @@ import type {
 } from '@/lib/api';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
-const VERIFIED_STATES: Record<string, true> = { VERIFIED: true, VALIDATED: true, NEEDS_FIX: true };
+function isCompletedDraft(row: MoEngageDraftRow): boolean {
+  return Boolean(row.campaign_id && /^[a-f0-9]{24}$/i.test(row.campaign_id)) &&
+    (row.channel?.toUpperCase() === 'WHATSAPP' ? row.status === 'VERIFIED' : row.status === 'VALIDATED');
+}
 
 
 function validationMessages(value: unknown): string[] {
@@ -60,7 +64,7 @@ function RowCard({
   const issues = [...(row.issues || []), ...(row.issue ? [row.issue] : []), ...validationMessages(row.validation_errors)];
   const status = row.status || 'blocked';
   const ready = status === 'preview_ready';
-  const verified = Boolean(VERIFIED_STATES[status]);
+  const verified = isCompletedDraft(row);
   const isWhatsApp = row.channel?.toUpperCase() === 'WHATSAPP';
   const isEmail = row.channel?.toUpperCase() === 'EMAIL';
   const isPush = row.channel?.toUpperCase() === 'PUSH';
@@ -71,6 +75,7 @@ function RowCard({
         <div>
           <div className="text-xs text-gray-500 font-mono">
             Source: {row.source_ref || 'Single Campaign'} · Row {row.row_id}
+            {row.channel?.toUpperCase() === 'WHATSAPP' && <div>WhatsApp destination: {row.workspace_name || source.workspace_name || source.workspace || 'Workspace name not supplied'} · {row.workspace_id || source.workspace_id || 'Workspace ID not supplied — review required'}</div>}
           </div>
           <h3 className="font-semibold text-gray-900 text-base mt-0.5">
             {source.campaign_name || candidate?.basic_details?.name || 'Campaign name missing'}
@@ -189,15 +194,15 @@ function RowCard({
         {isWhatsApp && (
           <>
             <div>
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Sender (Karix BSP)</dt>
+              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Sender</dt>
               <dd className="text-gray-900 mt-0.5 font-medium">
-                💬 {source.whatsapp_sender || 'Tata Capital Financial Services Limited'}
+                💬 {source.whatsapp_sender || 'Not supplied'}
               </dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Template</dt>
               <dd className="text-gray-900 mt-0.5 font-medium flex flex-wrap items-center gap-1.5">
-                <span>📋 {source.matched_template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'test_1234 (EN)'}</span>
+                <span>📋 {source.whatsapp_template_name || source.whatsapp_template_id || 'Not supplied'}</span>
                 {source.matched_template_id && (
                   <span className="text-[11px] font-mono text-gray-500">({source.matched_template_id})</span>
                 )}
@@ -226,57 +231,37 @@ function RowCard({
       {row.campaign_id && (
         <div
           className={`rounded-xl border p-4 text-sm flex flex-wrap items-center justify-between gap-3 shadow-xs ${
-            isWhatsApp
-              ? 'bg-emerald-50/70 border-emerald-300 text-emerald-950'
-              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+            verified
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-amber-50 border-amber-200 text-amber-900'
           }`}
         >
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold">
-                {isWhatsApp ? 'Validated WhatsApp Brief Reference:' : 'Remote MoEngage Campaign ID:'}
+                Reported MoEngage Campaign ID:
               </span>
               <code className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded font-mono font-bold text-xs">
                 {row.campaign_id}
               </code>
             </div>
             <p className="text-xs text-emerald-800 mt-1 max-w-xl">
-              {isWhatsApp
-                ? 'WhatsApp draft created and verified for MoEngage. Click "Automate All WhatsApp Drafts" for bulk studio automation, or open directly in studio below.'
-                : 'Confirmed draft created in your MoEngage Live workspace via V5 API. View under Campaigns → Drafts.'}
+              {verified
+                ? 'Draft read-back completed. Review in MoEngage before any human publish action.'
+                : `State: ${status}. This ID alone does not confirm a verified draft. Review the issues and reconcile in MoEngage before taking further action.`}
             </p>
           </div>
-          {isWhatsApp && (
-            <a
-              href="https://dashboard-03.moengage.com/v4/whatsapp/create/one-time/"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold text-xs hover:bg-emerald-800 transition-colors shadow-sm shrink-0"
-            >
-              Open in MoEngage WhatsApp Studio ↗
-            </a>
-          )}
         </div>
       )}
 
-      {uncertain && !row.campaign_id && (
+      {(uncertain || status === 'UNCERTAIN' || status === 'UNKNOWN') && (
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200">
           <div>
             <span>⚠️ Previous attempt was unconfirmed.</span>
             <p className="text-xs text-amber-700 font-normal mt-0.5">
-              No remote campaign ID was registered yet. You can retry creating this row.
+              Refresh stored state and manually reconcile the campaign in MoEngage with an operator. Do not create it again: the previous request may already have saved a draft.
             </p>
           </div>
-          {batch && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onCreate(row)}
-              className="rounded-lg bg-amber-700 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-amber-800 disabled:opacity-50 transition-colors"
-            >
-              Retry Create…
-            </button>
-          )}
         </div>
       )}
 
@@ -288,6 +273,16 @@ function RowCard({
           className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50 transition-colors shadow-sm"
         >
           Create Only This Draft…
+        </button>
+      )}
+      {batch && isWhatsApp && status === 'CREATED' && row.campaign_id && /^[a-f0-9]{24}$/i.test(row.campaign_id) && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onCreate(row)}
+          className="rounded-lg border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-50 disabled:opacity-50"
+        >
+          Recheck Saved Draft…
         </button>
       )}
     </article>
@@ -303,11 +298,15 @@ export default function MoEngageCampaignsPage() {
 
   const [activeTab, setActiveTab] = useTabState<'batch' | 'single' | 'templates'>('moe_active_tab', 'single');
   const [catalog, setCatalog] = useState<MoEngageCatalog | null>(null);
+  const [waWorkspaces, setWaWorkspaces] = useState<{ id: string; name: string }[]>([]);
+  const [waWorkspace, setWaWorkspace] = useState('');
+  const [waCatalog, setWaCatalog] = useState<MoEngageCatalog | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
   const [automatingWa, setAutomatingWa] = useState(false);
   // Single form builder state
   const [singleChannel, setSingleChannel] = useTabState<'WHATSAPP' | 'EMAIL' | 'PUSH'>('moe_single_channel', 'WHATSAPP');
+  const formCatalog = singleChannel === 'WHATSAPP' ? waCatalog : catalog;
   const [singleName, setSingleName] = useTabState<string>('moe_single_name', '');
   const [singleSegment, setSingleSegment] = useTabState<string>('moe_single_segment', '');
   const [singleDate, setSingleDate] = useTabState<string>('moe_single_date', '2026-10-15T10:30');
@@ -349,15 +348,22 @@ export default function MoEngageCampaignsPage() {
     if (!allowed) return;
     let active = true;
     setCatalogLoading(true);
+    setCatalog(null);
+    setWaWorkspace('');
+    setWaCatalog(null);
+    setWaWorkspaces([]);
+    fetchMoEngageDraftWorkspaces(account).then((result) => {
+      if (active) setWaWorkspaces(result.workspaces);
+    }).catch((err) => { if (active) setError(String(err)); });
+    setSingleSegment('');
+    setSingleWaSender('');
+    setSingleWaTemplate('');
     fetchMoEngageCatalog(account)
       .then((cat) => {
         if (!active) return;
         setCatalog(cat);
-        // Pre-populate sensible defaults
-        if (cat.segments?.[0]) setSingleSegment(cat.segments[0].id);
+        // Keep audience and WhatsApp selections explicit and scoped to this account.
         if (cat.email_senders?.[0]) setSingleEmailSender(cat.email_senders[0].from_address);
-        if (cat.whatsapp_senders?.[0]) setSingleWaSender(cat.whatsapp_senders[0].sender_name);
-        if (cat.whatsapp_templates?.[0]) setSingleWaTemplate(cat.whatsapp_templates[0].id);
       })
       .catch((err) => {
         if (active) console.warn('Could not load server catalog:', err);
@@ -369,6 +375,20 @@ export default function MoEngageCampaignsPage() {
       active = false;
     };
   }, [account, allowed]);
+
+  useEffect(() => {
+    let active = true;
+    setWaCatalog(null);
+    setSingleSegment('');
+    setSingleWaSender('');
+    setSingleWaTemplate('');
+    if (allowed && singleChannel === 'WHATSAPP' && waWorkspace) {
+      fetchMoEngageCatalog(account, waWorkspace).then((cat) => {
+        if (active) setWaCatalog(cat);
+      }).catch((err) => { if (active) setError(String(err)); });
+    }
+    return () => { active = false; };
+  }, [account, allowed, singleChannel, waWorkspace]);
 
   const showBatch = useCallback(
     (result: MoEngageDraftBatch, key: string) => {
@@ -479,21 +499,16 @@ export default function MoEngageCampaignsPage() {
   };
 
   const createRow = async (row: MoEngageDraftRow) => {
-    if (!batch || batchScope !== storageKey || busy || createInFlight.current) return;
-    if (row.status !== 'preview_ready' && row.status !== 'UNCERTAIN') return;
+    if (!batch || batchScope !== storageKey || busy || automatingWa || createInFlight.current) return;
+    const readBackOnly = row.channel?.toUpperCase() === 'WHATSAPP' && row.status === 'CREATED' &&
+      Boolean(row.campaign_id && /^[a-f0-9]{24}$/i.test(row.campaign_id));
+    if (!readBackOnly && (row.status !== 'preview_ready' || row.campaign_id || uncertainRows.includes(row.row_id))) return;
 
-    const isRetry = row.status === 'UNCERTAIN';
     const name = row.source_fields?.campaign_name || row.candidate_v5_payload?.basic_details?.name || 'unnamed campaign';
-    const confirmPrompt = isRetry
-      ? `Retry creating MoEngage ${row.channel} DRAFT for ${account.toUpperCase()}?\n\nCampaign: ${name}\nRow: ${row.row_id}`
-      : `Create MoEngage ${row.channel} DRAFT for ${account.toUpperCase()}?\n\nCampaign: ${name}\nPhysical Row: ${row.row_id}\n\nThis will create a confirmed DRAFT in your MoEngage workspace. It will NOT publish, send, or dispatch messages to customers.`;
-
-    if (!window.confirm(confirmPrompt)) return;
-
-    if (isRetry && currentUser) {
-      localStorage.removeItem(`moengage_draft_uncertain:${currentUser.id}:${account}:${batch.batch_id}:${row.row_id}`);
-      setUncertainRows((rows) => rows.filter((r) => r !== row.row_id));
-    }
+    const prompt = readBackOnly
+      ? `Recheck saved MoEngage draft ${row.campaign_id}?\n\nCampaign: ${name}\n\nThis only reads back the existing draft to verify its configuration and Drafts membership. It will not create another draft, publish or send.`
+      : `Request a MoEngage ${row.channel} DRAFT for ${account.toUpperCase()}?\n\nCampaign: ${name}\nPhysical Row: ${row.row_id}\n\nThis requests draft-only creation and read-back. It does not publish or send. Review the returned state before human publishing in MoEngage.`;
+    if (!window.confirm(prompt)) return;
 
     createInFlight.current = true;
     setBusy(true);
@@ -502,7 +517,15 @@ export default function MoEngageCampaignsPage() {
     try {
       const result = await createMoEngageDraftRow(batch.batch_id, row.row_id, account);
       showBatch(result, storageKey);
-      setNotice(`Created draft successfully! Review the confirmed campaign ID below.`);
+      const returnedRow = result.items.find((item) => item.row_id === row.row_id && item.source_ref === row.source_ref);
+      if (returnedRow && isCompletedDraft(returnedRow)) {
+        setNotice(`Draft ${returnedRow.campaign_id} completed with state ${returnedRow.status}. Human review is required before publishing.`);
+      } else {
+        const issues = returnedRow
+          ? [...(returnedRow.issues || []), ...(returnedRow.issue ? [returnedRow.issue] : []), ...validationMessages(returnedRow.validation_errors)]
+          : ['The requested row was not returned. Refresh stored state and reconcile before any further create.'];
+        setError(`Row ${row.row_id}: ${returnedRow?.status || 'unconfirmed'}. ${issues.join('; ') || 'Draft completion has not been confirmed. Review the stored state and reconcile in MoEngage.'}`);
+      }
     } catch (cause) {
       const errStr = cause instanceof Error ? cause.message : String(cause);
       const isTimeout = errStr.includes('504') || errStr.toLowerCase().includes('timeout') || errStr.toLowerCase().includes('network');
@@ -523,20 +546,24 @@ export default function MoEngageCampaignsPage() {
   useEffect(() => {
     if (!batch || !currentUser) return;
     batch.items.forEach((r) => {
-      if (r.status === 'preview_ready' || r.campaign_id) {
+      if (isCompletedDraft(r)) {
         localStorage.removeItem(`moengage_draft_uncertain:${currentUser.id}:${account}:${batch.batch_id}:${r.row_id}`);
       }
     });
     setUncertainRows(
       batch.items
-        .filter((r) => r.status === 'UNCERTAIN' || localStorage.getItem(`moengage_draft_uncertain:${currentUser.id}:${account}:${batch.batch_id}:${r.row_id}`) === '1')
+        .filter((r) => r.status === 'UNCERTAIN' || r.status === 'UNKNOWN' || localStorage.getItem(`moengage_draft_uncertain:${currentUser.id}:${account}:${batch.batch_id}:${r.row_id}`) === '1')
         .map((r) => r.row_id)
     );
   }, [batch, currentUser, account]);
   const handleAutomateWhatsApp = async () => {
-    if (!batch || busy || automatingWa) return;
+    if (!batch || batchScope !== storageKey || busy || automatingWa || createInFlight.current) return;
+    if (batch.items.some((r) => r.channel?.toUpperCase() === 'WHATSAPP' && r.status === 'preview_ready' && uncertainRows.includes(r.row_id))) {
+      setError('Bulk creation is blocked by an unconfirmed prior attempt. Refresh stored state and manually reconcile it in MoEngage before continuing.');
+      return;
+    }
     const pendingWa = batch.items.filter(
-      (r) => r.channel?.toUpperCase() === 'WHATSAPP' && (!r.campaign_id || r.status !== 'VALIDATED')
+      (r) => r.channel?.toUpperCase() === 'WHATSAPP' && r.status === 'preview_ready' && !r.campaign_id && !uncertainRows.includes(r.row_id)
     );
     if (pendingWa.length === 0) return;
 
@@ -544,7 +571,7 @@ export default function MoEngageCampaignsPage() {
       !window.confirm(
         `Start automated creation of ${pendingWa.length} WhatsApp drafts in MoEngage?
 
-The server's background automation worker will open the MoEngage studio, fill in each campaign name, select your Karix sender and template, and save each draft directly in MoEngage.`
+The server will request draft-only creation for eligible rows with the selected audience, sender and template, then read back each saved campaign. Only matching VERIFIED drafts count as completed. No publish or send is requested; human review and publishing remain in MoEngage.`
       )
     )
       return;
@@ -556,9 +583,9 @@ The server's background automation worker will open the MoEngage studio, fill in
       const res = await automateMoEngageWhatsAppBatch(batch.batch_id, account);
       showBatch(await fetchMoEngageDraftBatch(batch.batch_id, account), storageKey);
       if (res.failed > 0) {
-        setError(`Automated ${res.created} drafts in MoEngage, but ${res.failed} had issues. Check the cards below.`);
+        setError(`${res.created} WhatsApp drafts verified; ${res.failed} rows had issues. Review the returned states below. Do not retry uncertain rows.`);
       } else {
-        setNotice(`Successfully created all ${res.created} WhatsApp drafts in MoEngage! Verified in Drafts.`);
+        setNotice(`${res.created} WhatsApp drafts verified. Review the stored states below; human review is required before publishing.`);
       }
     } catch (err) {
       setError(`WhatsApp automation error: ${err instanceof Error ? err.message : String(err)}`);
@@ -572,8 +599,15 @@ The server's background automation worker will open the MoEngage studio, fill in
       setError('Campaign Name and Target Audience are required.');
       return;
     }
+    if (singleChannel === 'WHATSAPP' && (!waWorkspace || !waCatalog || waCatalog.workspace_id !== waWorkspace ||
+        !waCatalog.segments.some((segment) => segment.id === singleSegment) ||
+        !waCatalog.whatsapp_senders?.some((sender) => sender.sender_id === singleWaSender) ||
+        !waCatalog.whatsapp_templates?.some((template) => template.id === singleWaTemplate && template.sender_ids.includes(singleWaSender)))) {
+      setError('Select a WhatsApp workspace, audience, sender and approved template before staging.');
+      return;
+    }
 
-    // Build a CSV file from the form data and stage/create it
+    // Build a CSV file from the form data for local staging and review.
     setBusy(true);
     setError('');
     setNotice('');
@@ -596,6 +630,7 @@ The server's background automation worker will open the MoEngage studio, fill in
         'click_url',
         'whatsapp_sender',
         'whatsapp_template_id',
+        'workspace_id',
       ];
 
       // Format ISO datetime with timezone
@@ -618,6 +653,7 @@ The server's background automation worker will open the MoEngage studio, fill in
         singleChannel === 'PUSH' ? singleClickUrl : '',
         singleChannel === 'WHATSAPP' ? singleWaSender : '',
         singleChannel === 'WHATSAPP' ? singleWaTemplate : '',
+        singleChannel === 'WHATSAPP' ? waWorkspace : '',
       ];
 
       const csvContent = `${headers.join(',')}\n${values.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')}`;
@@ -627,7 +663,7 @@ The server's background automation worker will open the MoEngage studio, fill in
       const stagedBatch = await stageMoEngageDraftBatch(syntheticFile, account);
       showBatch(stagedBatch, storageKey);
       setActiveTab('batch');
-      setNotice(`Campaign staged in workspace queue. Click "Create Only This Draft…" on Row 2 to create the remote draft.`);
+      setNotice('Campaign staged locally for review; no remote draft has been confirmed. Only preview_ready rows can be selected for draft creation.');
     } catch (err) {
       setError(`Failed to process campaign: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -654,6 +690,8 @@ The server's background automation worker will open the MoEngage studio, fill in
       'click_url',
       'whatsapp_sender',
       'whatsapp_template_id',
+      'workspace',
+      'workspace_id',
     ];
 
     const segId = catalog?.segments?.[0]?.id || '65cf4af4d4c88174e5ad186e';
@@ -662,7 +700,7 @@ The server's background automation worker will open the MoEngage studio, fill in
       rows.push([
         'WHATSAPP',
         'TATA_TEST_DRAFT_WA_OCT01',
-        segId,
+        'REPLACE_WITH_WORKSPACE_SEGMENT_ID',
         '2026-10-15T11:00:00+05:30',
         'Asia/Kolkata',
         '',
@@ -674,8 +712,10 @@ The server's background automation worker will open the MoEngage studio, fill in
         '',
         '',
         '',
-        'Tata Capital Financial Services Limited',
-        'test_1234',
+        'REPLACE_WITH_WORKSPACE_SENDER_ID',
+        'REPLACE_WITH_APPROVED_TEMPLATE_ID',
+        'REQUIRED_EXACT_WORKSPACE_NAME_OR_USE_WORKSPACE_ID',
+        '',
       ]);
     }
     if (type === 'all' || type === 'push') {
@@ -696,6 +736,8 @@ The server's background automation worker will open the MoEngage studio, fill in
         'https://tatacapital.com',
         '',
         '',
+        '',
+        '',
       ]);
     }
     if (type === 'all' || type === 'email') {
@@ -710,6 +752,8 @@ The server's background automation worker will open the MoEngage studio, fill in
         'hello@info.tatacapital.co.in',
         'Tata Capital Verification Test',
         '<p>Test verification draft. Do not publish.</p>',
+        '',
+        '',
         '',
         '',
         '',
@@ -766,7 +810,7 @@ The server's background automation worker will open the MoEngage studio, fill in
               <h1 className="text-2xl font-bold text-gray-900 tracking-tight">MoEngage Campaign Builder</h1>
             </div>
             <p className="text-sm text-gray-500 mt-1">
-              Create and validate WhatsApp, Push & Email drafts in <strong>{account.toUpperCase()}</strong> with zero publishing risk.
+              Prepare and review WhatsApp, Push & Email drafts in <strong>{account.toUpperCase()}</strong>. Publishing remains a human action in MoEngage.
             </p>
           </div>
 
@@ -793,7 +837,7 @@ The server's background automation worker will open the MoEngage studio, fill in
 
             <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg shadow-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              Connected: {catalog?.workspace_id || '0KYUNUW5WODKX5ZFVAGPVL0U'} (DC03)
+              {singleChannel === 'WHATSAPP' ? `WhatsApp destination: ${waCatalog?.workspace_name || 'Select workspace'}${waCatalog ? ` (${waCatalog.workspace_id})` : ''}` : `Connected: ${catalog?.workspace_id || 'Loading account catalog'}`}
             </div>
           </div>
         </div>
@@ -802,7 +846,7 @@ The server's background automation worker will open the MoEngage studio, fill in
         <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 text-xs text-blue-950 flex items-start gap-2.5">
           <span className="text-base select-none">🛡️</span>
           <div>
-            <strong className="font-semibold text-blue-900">Guaranteed Draft-Only Isolation:</strong> All campaigns are created strictly in
+            <strong className="font-semibold text-blue-900">Draft-only workflow:</strong> Creation requests target
             <code className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 font-mono font-bold text-blue-900">DRAFT</code>
             status. The builder never sends messages to customers, never publishes, and never schedules automated sends. Publishing requires manual review and sign-off in the MoEngage dashboard.
           </div>
@@ -920,6 +964,15 @@ The server's background automation worker will open the MoEngage studio, fill in
             <section className="bg-white rounded-2xl border border-gray-200 p-5 shadow-xs space-y-4">
               <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider">2. Campaign Details & Audience</h2>
 
+              {singleChannel === 'WHATSAPP' && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">WhatsApp destination workspace *</label>
+                  <select value={waWorkspace} onChange={(e) => setWaWorkspace(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                    <option value="">Select destination — required</option>
+                    {waWorkspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.id})</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">Campaign Name *</label>
                 <input
@@ -939,14 +992,12 @@ The server's background automation worker will open the MoEngage studio, fill in
                     onChange={(e) => setSingleSegment(e.target.value)}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
                   >
-                    {catalog?.segments?.map((seg) => (
+                    <option value="" disabled>Select an account audience</option>
+                    {formCatalog?.segments?.map((seg) => (
                       <option key={seg.id} value={seg.id}>
                         {seg.name} ({seg.id.slice(0, 8)}…)
                       </option>
                     ))}
-                    <option value="65cf4af4d4c88174e5ad186e">Test_FSTP_Pranav_1602 (Approved Test Base)</option>
-                    <option value="6ab60caace27e15e345f59c1">CUG_UAT_25_Jun_26</option>
-                    <option value="6a201689e6f094a2d031e478">HL_UAT_03_JUN_2026</option>
                   </select>
                 </div>
 
@@ -972,32 +1023,27 @@ The server's background automation worker will open the MoEngage studio, fill in
                     <label className="block text-xs font-semibold text-gray-700 mb-1">WhatsApp Sender (Karix)</label>
                     <select
                       value={singleWaSender}
-                      onChange={(e) => setSingleWaSender(e.target.value)}
+                      onChange={(e) => { setSingleWaSender(e.target.value); setSingleWaTemplate(''); }}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
                     >
-                      {catalog?.whatsapp_senders?.map((s) => (
-                        <option key={s.phone_number} value={s.sender_name}>
-                          {s.sender_name} ({s.phone_number}) · {s.provider}
+                      <option value="" disabled>Select an account sender</option>
+                      {waCatalog?.whatsapp_senders?.map((s) => (
+                        <option key={s.sender_id} value={s.sender_id}>
+                          {s.name} ({s.number}) · {s.provider}
                         </option>
                       ))}
-                      <option value="Tata Capital Financial Services Limited">
-                        Tata Capital Financial Services Limited (919643789719)
-                      </option>
-                      <option value="Tata Capital Wealth">Tata Capital Wealth (918657597116)</option>
-                      <option value="Tata Capital Housing Finance Limited">Tata Capital Housing Finance Limited (919594951475)</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 mb-1">Approved WhatsApp Template ID</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. test_1234"
-                      value={singleWaTemplate}
-                      onChange={(e) => setSingleWaTemplate(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Must be an approved template synced from Karix into MoEngage.</p>
+                    <select value={singleWaTemplate} onChange={(e) => setSingleWaTemplate(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                      <option value="">Select an approved sender template</option>
+                      {waCatalog?.whatsapp_templates?.filter((template) => template.sender_ids.includes(singleWaSender)).map((template) => (
+                        <option key={template.id} value={template.id}>{template.name} ({template.id})</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">Templates and sender IDs belong only to the selected workspace.</p>
                   </div>
                 </div>
               )}
@@ -1114,7 +1160,7 @@ The server's background automation worker will open the MoEngage studio, fill in
                   onClick={() => void handleCreateFromSingleForm()}
                   className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm flex items-center justify-center gap-2"
                 >
-                  {busy ? 'Preparing Draft…' : `Stage & Create ${singleChannel} Draft →`}
+                  {busy ? 'Staging Campaign…' : `Stage ${singleChannel} Campaign for Review →`}
                 </button>
               </div>
             </section>
@@ -1204,7 +1250,7 @@ The server's background automation worker will open the MoEngage studio, fill in
               <div>
                 <h2 className="text-base font-bold text-gray-900">Upload Campaign Spreadsheet</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Upload a <code>.csv</code> or <code>.xlsx</code> file containing campaigns across WhatsApp, Push, and Email.
+                  Upload a <code>.csv</code> or <code>.xlsx</code> file. Every WhatsApp row requires its own exact <code>workspace</code> name or portal <code>workspace_id</code>; review each destination before creating.
                 </p>
               </div>
 
@@ -1239,8 +1285,7 @@ The server's background automation worker will open the MoEngage studio, fill in
                   </h2>
                   <p className="text-xs text-gray-500 mt-0.5">
                     Ready: <strong className="text-emerald-700">{preview.ready}</strong> · Blocked:{' '}
-                    <strong className="text-rose-700">{preview.blocked}</strong> · Workspace:{' '}
-                    <span className="font-mono">{preview.workspace_id}</span>
+                    <strong className="text-rose-700">{preview.blocked}</strong> · WhatsApp destinations are shown per row.
                   </p>
                 </div>
 
@@ -1298,14 +1343,14 @@ The server's background automation worker will open the MoEngage studio, fill in
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {batch.items.some((r) => r.channel?.toUpperCase() === 'WHATSAPP' && (!r.campaign_id || r.status !== 'VALIDATED')) && (
+                  {batch.items.some((r) => r.channel?.toUpperCase() === 'WHATSAPP' && r.status === 'preview_ready' && !r.campaign_id && !uncertainRows.includes(r.row_id)) && (
                     <button
                       type="button"
                       disabled={busy || automatingWa}
                       onClick={() => void handleAutomateWhatsApp()}
                       className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-xs font-bold disabled:opacity-50 transition-colors shadow-xs flex items-center gap-1.5"
                     >
-                      {automatingWa ? '⚡ Automating in MoEngage…' : '⚡ Automate All WhatsApp Drafts in MoEngage'}
+                      {automatingWa ? 'Creating & Reading Back Drafts…' : 'Create Eligible WhatsApp Drafts'}
                     </button>
                   )}
                   <button
@@ -1359,8 +1404,7 @@ The server's background automation worker will open the MoEngage studio, fill in
           <section className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
             <h2 className="text-base font-bold text-gray-900">One-Click Sample CSV Templates</h2>
             <p className="text-sm text-gray-600">
-              Download pre-formatted sample spreadsheets ready to upload. All samples use your approved test segment{' '}
-              <code>Test_FSTP_Pranav_1602</code>.
+              Replace all sample placeholders before upload. Every WhatsApp row requires an explicit workspace and that workspace&apos;s audience, sender and approved template IDs; there is no default destination.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">

@@ -5041,28 +5041,47 @@ async def preview_moengage_drafts_upload_endpoint(
 ):
     """Preview spreadsheet candidates against this deployment's account catalog."""
     from moengage_draft_creation import load_server_catalog
-    from moengage_preview import prepare_batch, rows_from_file
+    from moengage_draft_batches import prepare_routed_batch
+    from moengage_preview import rows_from_file
 
     creator = _authorize_moengage_preview(account, current_user)
     try:
         catalog = load_server_catalog(account)
         rows = rows_from_file(file.filename or "", await file.read(5 * 1024 * 1024 + 1), account)
-        return prepare_batch(rows, account, catalog, creator, source_type="spreadsheet")
+        return prepare_routed_batch(rows, account, current_user, catalog, source_type="spreadsheet")
     except PermissionError as exc:
         raise HTTPException(status_code=423, detail=str(exc)) from exc
     except (ValueError, UnicodeError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+@app.get("/api/moengage/drafts/workspaces")
+def get_moengage_draft_workspaces_endpoint(
+    account: str = Query(...), current_user: dict = Depends(get_current_user),
+):
+    from moengage_workspaces import list_workspace_choices
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return {"workspaces": list_workspace_choices(account, current_user)}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+
+
 @app.get("/api/moengage/drafts/catalog")
 def get_moengage_drafts_catalog_endpoint(
     account: str = Query(...),
     current_user: dict = Depends(get_current_user),
+    workspace: str | None = Query(None),
 ):
     """Return the verified catalog of segments, senders, platforms, and templates for this account."""
     from moengage_draft_creation import load_server_catalog
 
     _authorize_moengage_preview(account, current_user)
     try:
+        if workspace:
+            from moengage_workspaces import workspace_catalog
+
+            return workspace_catalog(account, current_user, workspace)
         return load_server_catalog(account)
     except PermissionError as exc:
         raise HTTPException(status_code=423, detail=str(exc)) from exc
@@ -5150,7 +5169,7 @@ def automate_moengage_whatsapp_batch_endpoint(
     account: str = Form(...),
     current_user: dict = Depends(get_current_user),
 ):
-    """Run server-side headless automation to create all WhatsApp drafts in MoEngage Studio."""
+    """Create explicitly routed WhatsApp drafts and verify saved fields in that workspace."""
     from moengage_whatsapp_worker import automate_whatsapp_draft_batch
 
     _authorize_moengage_preview(account, current_user)
@@ -5179,7 +5198,8 @@ def create_moengage_draft_endpoint(
 
     _authorize_moengage_preview(body.account, current_user)
     try:
-        return DraftCreation.from_environment(body.account, current_user).create(body.row)
+        selector = (body.row.get("workspace_id") or body.row.get("workspace")) if str(body.row.get("channel", "")).upper() == "WHATSAPP" else None
+        return DraftCreation.from_environment(body.account, current_user, workspace_id=selector).create(body.row)
     except RateLimitError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except PermissionError as exc:

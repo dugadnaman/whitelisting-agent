@@ -1219,6 +1219,7 @@ export type JiraWhatsAppDraft = DraftWarnings & {
   button_phone?: string | null;
   variables: string[];
   sample_values?: string[];
+  whatsapp_placeholders?: Record<string, string>;
   buttons?: Array<{ type: string; text: string; url?: string; phone_number?: string }>;
   raw_source: string;
   exists_on_waba?: boolean;
@@ -1287,6 +1288,8 @@ export type JiraBriefData = {
   moengage_campaign: {
     campaign_name: string;
     target_account: string;
+    workspace_id?: string | null;
+    workspace?: string | null;
     scheduled_date?: string | null;
     whatsapp_template?: string | null;
     sms_content?: string | null;
@@ -1562,6 +1565,9 @@ export type MoEngageDraftCandidate = {
 
 export type MoEngageDraftSourceFields = {
   campaign_name?: string;
+  workspace_id?: string;
+  workspace?: string;
+  workspace_name?: string;
   segment_id?: string;
   segment_name?: string;
   scheduled_at?: string;
@@ -1588,6 +1594,8 @@ export type MoEngageDraftRow = {
   source_ref: string;
   row_id: string;
   channel: string;
+  workspace_id?: string;
+  workspace_name?: string;
   status: string;
   issues: string[];
   candidate_v5_payload?: MoEngageDraftCandidate | null;
@@ -1693,12 +1701,15 @@ export function createMoEngageDraft(account: string, row: Record<string, unknown
 export type MoEngageCatalogSegment = { id: string; name: string };
 export type MoEngageCatalogEmailSender = { from_address: string; sender_name: string; connector_type: string; connector_name: string };
 export type MoEngageCatalogPushPlatform = { platform: string; notification_channel?: string };
-export type MoEngageCatalogWhatsAppSender = { sender_name: string; phone_number: string; provider: string };
-export type MoEngageCatalogWhatsAppTemplate = { id: string; name: string };
+export type MoEngageWorkspace = { id: string; name: string };
+export type MoEngageCatalogWhatsAppSender = { sender_id: string; name: string; number: string; provider: string };
+export type MoEngageCatalogWhatsAppTemplate = { id: string; name: string; sender_ids: string[]; provider: string };
 
 export type MoEngageCatalog = {
   account: string;
   workspace_id: string;
+  workspace_name?: string;
+  whatsapp_workspaces?: MoEngageWorkspace[];
   segments: MoEngageCatalogSegment[];
   email_senders: MoEngageCatalogEmailSender[];
   push_platforms: MoEngageCatalogPushPlatform[];
@@ -1707,8 +1718,13 @@ export type MoEngageCatalog = {
   subscription_categories?: string[];
 };
 
-export function fetchMoEngageCatalog(account: string): Promise<MoEngageCatalog> {
-  return moEngageDraftRequest(`/api/moengage/drafts/catalog?account=${encodeURIComponent(account)}`);
+export function fetchMoEngageCatalog(account: string, workspace?: string): Promise<MoEngageCatalog> {
+  const query = new URLSearchParams({ account });
+  if (workspace) query.set("workspace", workspace);
+  return moEngageDraftRequest(`/api/moengage/drafts/catalog?${query}`);
+}
+export function fetchMoEngageDraftWorkspaces(account: string): Promise<{ workspaces: MoEngageWorkspace[] }> {
+  return moEngageDraftRequest(`/api/moengage/drafts/workspaces?${new URLSearchParams({ account })}`);
 }
 export type MoEngageCredentials = {
   ok: boolean;

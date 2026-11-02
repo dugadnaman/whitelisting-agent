@@ -1,473 +1,178 @@
-"""MoEngage WhatsApp Campaign Bulk Automation Worker.
+"""Account-bound WhatsApp draft transport and gated batch creation.
 
-Automates the creation of WhatsApp drafts directly inside the MoEngage Web Studio
-using headless Chromium, enabling bulk spreadsheet processing (50+ campaigns)
-without manual clicking.
+Portal create acknowledgements are not proof of a draft. The lifecycle persists
+real IDs, then reads the saved fields and confirms membership in the Drafts list.
+There is no browser fallback after an ambiguous POST and no synthetic ID path.
 """
 
 from __future__ import annotations
 
-import json
-import logging
-import os
-import time
+import copy
+import re
 from typing import Any
 
 import requests
 
-from db import get_db, init_database
+from moengage_draft_batches import DraftBatchQueue
+from moengage_draft_creation import load_server_catalog
 from moengage_drafts import authorize_draft_account
+from moengage_workspaces import _approved_templates, _sender_inventory, portal_session
 
-logger = logging.getLogger(__name__)
-
-
-def parse_cookie_string(cookie_raw: str, domain: str = ".moengage.com") -> list[dict[str, str]]:
-    """Convert raw Cookie header into Playwright cookie objects."""
-    cookies: list[dict[str, str]] = []
-    for item in cookie_raw.split(";"):
-        if "=" in item:
-            name, val = item.strip().split("=", 1)
-            cookies.append({"name": name, "value": val, "domain": domain, "path": "/"})
-    return cookies
+_CAMPAIGN_ID = re.compile(r"[0-9a-fA-F]{24}\Z")
 
 
-def resolve_moengage_whatsapp_template_id(template_name_or_id: str, account: str = "tata") -> str:
-    """Resolve human template name into 24-character MoEngage template ObjectId."""
-    clean = str(template_name_or_id or "").strip()
-    if len(clean) == 24 and all(c in "0123456789abcdefABCDEF" for c in clean):
-        return clean
-
-    try:
-        from moengage_sync import get_moengage_auth_headers, get_moengage_config
-        headers = get_moengage_auth_headers(account)
-        headers["page"] = "whatsapp/create/one-time"
-        cfg = get_moengage_config(account)
-        url = f"{cfg['base_url']}/template_metadata?template_type=whatsapp"
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.ok:
-            data = resp.json().get("data", [])
-            for item in data:
-                if item.get("name", "").lower() == clean.lower() or item.get("display_name", "").lower() == clean.lower():
-                    return item["id"]
-                if clean.lower() in item.get("name", "").lower():
-                    return item["id"]
-            if data:
-                return data[0]["id"]
-    except Exception:
-        pass
-
-    return "6516c13f43500232b272e627"
+def _exact(items: list[dict[str, Any]], value: str, fields: tuple[str, ...], label: str) -> dict[str, Any]:
+    clean = str(value or "").strip()
+    matches = [item for item in items if clean and any(str(item.get(field, "")).strip() == clean for field in fields)]
+    if len(matches) != 1:
+        raise ValueError(f"Requested WhatsApp {label} is missing or ambiguous")
+    return matches[0]
 
 
-def resolve_moengage_whatsapp_sender_id(sender_name_or_id: str, account: str = "tata") -> tuple[str, str]:
-    """Resolve sender into (sender_id, provider). Default: ('6516baa397c87500027529a3', 'Gupshup')."""
-    clean = str(sender_name_or_id or "").strip()
-    if len(clean) == 24 and all(c in "0123456789abcdefABCDEF" for c in clean):
-        return clean, "Gupshup"
-    return "6516baa397c87500027529a3", "Gupshup"
+class WhatsAppDraftWriter:
+    """Only create and read WhatsApp drafts in an explicitly bound account workspace."""
 
-def _update_row_status(
-    batch_id: str,
-    position: int,
-    account: str,
-    workspace_id: str,
-    source_ref: str,
-    row_id: str,
-    status: str,
-    campaign_id: str | None = None,
-    issue: str | None = None,
-) -> None:
-    now = time.time()
-    with get_db() as conn:
-        conn.execute(
-            "UPDATE moengage_draft_batch_rows SET status='blocked', issue='superseded_by_newer_batch', updated_at=? "
-            "WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=? AND batch_id<>? AND status NOT IN ('preview_ready', 'blocked')",
-            (now, account, workspace_id, source_ref, row_id, batch_id),
-        )
-        conn.execute(
-            "UPDATE moengage_draft_batch_rows SET status=?, campaign_id=?, issue=?, updated_at=? "
-            "WHERE batch_id=? AND position=?",
-            (status, campaign_id, issue, now, batch_id, position),
-        )
+    def __init__(self, account: str, workspace_id: str) -> None:
+        self.account = account
+        self.workspace_id = workspace_id
+        session = portal_session(account, workspace_id)
+        self.base_url = session["base_url"]
+        self.headers = session["headers"].copy()
 
-
-def automate_single_whatsapp_draft_row(
-    name: str,
-    segment: str = "Test_FSTP_Pranav_1602",
-    sender: str = "Tata Capital Financial Services Limited",
-    template: str = "test_1234",
-    account: str = "tata",
-) -> str | None:
-    """Launch headless Chromium, open MoEngage studio, fill fields, and click 'Save as draft'."""
-    prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
-    raw_cookie = (
-        os.environ.get(prefix + "COOKIE")
-        or os.environ.get(f"{account.upper()}_MOENGAGE_COOKIE")
-        or os.environ.get("MOENGAGE_COOKIE")
-        or ""
-    )
-    base_url = (
-        os.environ.get(prefix + "DASHBOARD_URL")
-        or "https://dashboard-03.moengage.com"
-    )
-    if not raw_cookie:
-        logger.warning("No MoEngage cookie found for headless automation")
-        return None
-
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        logger.warning("Playwright is not installed for headless automation")
-        return None
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                ],
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        headers = self.headers.copy()
+        headers["page"] = "whatsapp/create/one-time/"
+        headers["origin"] = self.base_url
+        try:
+            response = requests.request(
+                method, self.base_url + path, headers=headers, json=payload,
+                timeout=25, allow_redirects=False,
             )
-            context = browser.new_context(
-                viewport={"width": 1366, "height": 768},
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            )
-            cookies = parse_cookie_string(raw_cookie, domain=".moengage.com")
-            if cookies:
-                context.add_cookies(cookies)
+        except requests.RequestException as exc:
+            raise RuntimeError("MoEngage WhatsApp request outcome unconfirmed") from exc
+        if response.status_code not in (200, 201):
+            raise ValueError(f"MoEngage WhatsApp request failed (HTTP {response.status_code})")
+        data = response.json()
+        if (not isinstance(data, dict) or data.get("status") not in ("success", True)
+                or ("code" in data and str(data["code"]) not in ("200", "201"))):
+            raise ValueError("MoEngage WhatsApp response unconfirmed")
+        return data
 
-            page = context.new_page()
-            page.goto(f"{base_url}/v4/whatsapp/create/one-time/", timeout=35000)
-            page.wait_for_timeout(3000)
+    def _senders(self) -> list[dict[str, Any]]:
+        return [
+            {"id": sender["sender_id"], "sender_name": sender["name"],
+             "phone_number": sender["number"], "provider": sender["portal_provider"]}
+            for sender in _sender_inventory(self._request("GET", "/whatsapp/settings").get("sender_settings"))
+        ]
 
-            if "/login" in page.url:
-                browser.close()
-                raise PermissionError("MoEngage session expired or invalid. Update MOENGAGE_COOKIE in Settings.")
+    def _templates(self, sender: dict[str, Any]) -> list[dict[str, Any]]:
+        from urllib.parse import urlencode
 
-            name_input = page.locator('input[placeholder*="Campaign Name"]')
-            name_input.wait_for(timeout=15000)
-            name_input.fill(name)
+        query = urlencode({"template_type": "whatsapp", "sender_id": sender["id"]})
+        templates = self._request("GET", f"/template_metadata?{query}").get("data")
+        return _approved_templates(templates, [{"sender_id": sender["id"], "provider": sender["provider"]}])
 
-            segment_btn = page.locator('button:has-text("Custom segment")')
-            if segment_btn.is_visible():
-                segment_btn.click()
-                page.wait_for_timeout(1000)
-                search_box = page.locator('input[placeholder*="Search to select"]')
-                if search_box.is_visible():
-                    search_box.fill(segment[:15])
-                    page.wait_for_timeout(1500)
-                    opt = page.locator(f'*:has-text("{segment}")').last
-                    if opt.is_visible():
-                        opt.click()
+    def prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Resolve exact live selections before reserving or attempting a write."""
+        prepared = copy.deepcopy(payload)
+        wa = prepared["campaign_content"]["content"]["whatsapp"]
+        sender = _exact(self._senders(), wa.get("sender_id") or wa.get("sender_name"),
+                        ("id", "sender_name"), "sender")
+        if ((wa.get("sender_name") and wa["sender_name"] != sender["sender_name"])
+                or (wa.get("provider") and wa["provider"].upper() != sender["provider"].upper())):
+            raise ValueError("Requested WhatsApp sender ID, name and provider disagree")
+        template = _exact(self._templates(sender), wa.get("template_id"),
+                          ("id", "name", "display_name"), "template")
+        if not _CAMPAIGN_ID.fullmatch(str(template.get("id") or "")):
+            raise ValueError("MoEngage returned no real WhatsApp template ID")
+        wa.update(sender_id=sender["id"], sender_name=sender["sender_name"],
+                  provider=sender["provider"].upper(), phone_number=sender["phone_number"],
+                  template_id=template["id"], template_name=template.get("name") or template.get("display_name"))
+        return prepared
 
-            page.wait_for_timeout(1000)
-            page.locator('button:has-text("Next")').click()
-            page.wait_for_timeout(3000)
+    def create(self, payload: dict[str, Any], *, idempotency_key: str) -> dict[str, Any]:
+        # The portal has no documented idempotency guarantee. DraftCreation's durable
+        # reservation, not a speculative retry header, prevents a second POST.
+        wa = payload["campaign_content"]["content"]["whatsapp"]
+        sender = _exact(self._senders(), wa["sender_id"], ("id",), "sender")
+        body = {"campaign_data": {
+            "campaignName": payload["basic_details"]["name"], "action": "create",
+            "channel": "WHATSAPP", "channel_type": "MESSAGING", "delivery_type": "ONE_TIME",
+            "campaignType": "whatsapp", "new_segmentation_data": payload["segmentation_details"],
+            "whatsapp_data": {"sender_id": wa["sender_id"], "sender": sender["provider"],
+                              "template_id": wa["template_id"], "body_placeholders": wa["body_placeholders"],
+                              "bypass_opt_in_preference": False},
+            "stepStatus": True, "is_react": True, "c_s_is_new": True,
+            "delivery": "later", "triggerDelayType": "delay", "utm_params": {"is_enabled": False},
+        }}
+        data = self._request("POST", "/v1.0/campaigns/draft", body).get("data")
+        campaign_id = data.get("id") if isinstance(data, dict) else None
+        if not isinstance(campaign_id, str) or not _CAMPAIGN_ID.fullmatch(campaign_id):
+            raise ValueError("MoEngage returned no real WhatsApp draft ID")
+        return {"id": campaign_id}
 
-            sender_dropdown = page.locator('[data-testid="whatsapp-sender-dropdown"]')
-            if sender_dropdown.is_visible():
-                sender_dropdown.click()
-                page.keyboard.press("ArrowDown")
-                page.keyboard.press("Enter")
-                page.wait_for_timeout(1000)
-
-            template_dropdown = page.locator('[data-testid="whatsapp-template-dropdown"]')
-            if template_dropdown.is_visible():
-                template_dropdown.click()
-                page.keyboard.press("ArrowDown")
-                page.keyboard.press("Enter")
-                page.wait_for_timeout(1000)
-
-            save_btn = page.locator('button:has-text("Save as draft")')
-            if save_btn.is_visible():
-                save_btn.click()
-                page.wait_for_timeout(4000)
-
-            browser.close()
-            import re
-            clean_tag = re.sub(r"[^A-Za-z0-9]", "_", name)[:18].upper()
-            return f"WA-{clean_tag}"
-    except Exception as exc:
-        logger.error("Single row headless WhatsApp automation failed: %s", exc)
-        return None
-
-def automate_whatsapp_draft_batch(
-    batch_id: str,
-    account: str,
-    user: dict[str, Any],
-) -> dict[str, Any]:
-    """Automate creation of all WhatsApp rows in a batch through MoEngage Studio."""
-    authorize_draft_account(account, user)
-    init_database()
-
-    # 1. Fetch all WhatsApp rows for this batch
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM moengage_draft_batch_rows WHERE batch_id=? AND account=? "
-            "ORDER BY position",
-            (batch_id, account),
-        ).fetchall()
-
-    if not rows:
-        raise LookupError("Batch not found")
-
-    wa_rows = [
-        dict(r)
-        for r in rows
-        if r["channel"] == "WHATSAPP"
-        and (r["status"] in ("preview_ready", "UNCERTAIN") or not r["campaign_id"])
-    ]
-
-    if not wa_rows:
-        return {
-            "ok": True,
-            "total": 0,
-            "created": 0,
-            "failed": 0,
-            "message": "No uncreated WhatsApp campaigns found in this batch.",
-        }
-
-    # 2. Resolve MoEngage session cookies
-    prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
-    raw_cookie = (
-        os.environ.get(prefix + "COOKIE")
-        or os.environ.get(f"{account.upper()}_MOENGAGE_COOKIE")
-        or os.environ.get("MOENGAGE_COOKIE")
-        or ""
-    )
-
-    base_url = (
-        os.environ.get(prefix + "DASHBOARD_URL")
-        or "https://dashboard-03.moengage.com"
-    )
-
-    results: list[dict[str, Any]] = []
-    created_count = 0
-    failed_count = 0
-    remaining_rows: list[dict[str, Any]] = []
-
-    # Try fast direct HTTP API first (~200ms per draft)
-    try:
-        from moengage_sync import get_moengage_auth_headers, get_moengage_config
-        headers = get_moengage_auth_headers(account)
-        headers["page"] = "whatsapp/create/one-time"
-        cfg = get_moengage_config(account)
-        headers["origin"] = cfg["base_url"]
-        url = f"{cfg['base_url']}/v1.0/campaigns/draft"
-
-        for r in wa_rows:
-            source_fields = json.loads(r["source_fields_json"]) if r.get("source_fields_json") else {}
-            candidate = json.loads(r["candidate_json"]) if r.get("candidate_json") else {}
-            wa_conf = candidate.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
-            seg = candidate.get("segmentation_details", {}).get("included_filters", {}).get("filters", [{}])[0]
-
-            name = source_fields.get("campaign_name") or f"WA_Campaign_Row_{r['row_id']}"
-            segment_name = seg.get("name") or source_fields.get("segment_name") or "Test_FSTP_Pranav_1602"
-            segment_id = seg.get("id") or source_fields.get("segment_id") or "65cf4af4d4c88174e5ad186e"
-            sender_val = wa_conf.get("sender_name") or source_fields.get("whatsapp_sender") or "6516baa397c87500027529a3"
-            template_val = wa_conf.get("template_id") or source_fields.get("whatsapp_template_id") or "6516c13f43500232b272e627"
-            sender_id, sender_provider = resolve_moengage_whatsapp_sender_id(sender_val, account)
-            template_id = resolve_moengage_whatsapp_template_id(template_val, account)
-            raw_ph = wa_conf.get("body_placeholders")
-            body_placeholders = raw_ph if isinstance(raw_ph, dict) and raw_ph else {"{{1}}": "", "{{2}}": "", "{{3}}": ""}
-            row_id = r["row_id"]
-            position = r["position"]
-            account_val = r.get("account") or account
-            workspace_id = r.get("workspace_id") or "0KYUNUW5WODKX5ZFVAGPVL0U"
-            source_ref = r.get("source_ref") or ""
-            body = {
-                "campaign_data": {
-                    "campaignName": name,
-                    "action": "create",
-                    "channel": "WHATSAPP",
-                    "channel_type": "MESSAGING",
-                    "delivery_type": "ONE_TIME",
-                    "campaignType": "whatsapp",
-                    "new_segmentation_data": {
-                        "included_filters": {
-                            "filter_operator": "and",
-                            "filters": [
-                                {
-                                    "filter_type": "custom_segments",
-                                    "name": segment_name,
-                                    "id": segment_id,
-                                }
-                            ]
-                        }
-                    },
-                    "whatsapp_data": {
-                        "sender_id": sender_id,
-                        "sender": sender_provider,
-                        "template_id": template_id,
-                        "body_placeholders": body_placeholders,
-                        "bypass_opt_in_preference": False,
-                    },
-                    "stepStatus": True,
-                    "is_react": True,
-                    "c_s_is_new": True,
-                    "delivery": "later",
-                    "triggerDelayType": "delay",
-                    "utm_params": {"is_enabled": False},
-                }
-            }
-
-            resp = requests.post(url, headers=headers, json=body, timeout=20)
-            if resp.ok:
-                resp_data = resp.json()
-                cid = resp_data.get("data", {}).get("id")
-                if cid and isinstance(cid, str):
-                    _update_row_status(
-                        batch_id, position, account_val, workspace_id, source_ref, row_id,
-                        "VALIDATED", campaign_id=cid,
-                    )
-                    created_count += 1
-                    results.append({"row_id": row_id, "name": name, "status": "VALIDATED", "id": cid})
-                    continue
-            remaining_rows.append(r)
-    except Exception as exc:
-        logger.info("Direct HTTP WhatsApp creation not available or failed (%s); falling back to Playwright", exc)
-        remaining_rows = wa_rows
-
-    if not remaining_rows:
-        return {
-            "ok": True,
-            "total": len(wa_rows),
-            "created": created_count,
-            "failed": 0,
-            "results": results,
-        }
-
-    # 3. Fallback: Launch Playwright headless browser for any remaining rows
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        raise RuntimeError("Playwright is required for browser-fallback WhatsApp creation.") from exc
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        )
-        context = browser.new_context(
-            viewport={"width": 1366, "height": 768},
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        )
-
-        if raw_cookie:
-            cookies = parse_cookie_string(raw_cookie, domain=".moengage.com")
-            if cookies:
-                context.add_cookies(cookies)
-
-        page = context.new_page()
-
-        for r in remaining_rows:
-            source_fields = json.loads(r["source_fields_json"]) if r.get("source_fields_json") else {}
-            name = source_fields.get("campaign_name") or f"WA_Campaign_Row_{r['row_id']}"
-            segment = (
-                source_fields.get("segment_name")
-                or source_fields.get("segment_id")
-                or "Test_FSTP_Pranav_1602"
-            )
-            sender = source_fields.get("whatsapp_sender") or "Tata Capital Financial Services Limited"
-            template = source_fields.get("whatsapp_template_id") or "test_1234"
-            row_id = r["row_id"]
-            position = r["position"]
-
-            logger.info("Automating WhatsApp draft creation for row %s: %s", row_id, name)
-
-            try:
-                # Step 1: Open creation studio
-                page.goto(f"{base_url}/v4/whatsapp/create/one-time/", timeout=35000)
-                page.wait_for_timeout(3000)
-
-                # Check if redirected to login
-                if "/login" in page.url:
-                    raise PermissionError(
-                        "MoEngage session expired or invalid. Please update the session cookie in Settings -> MoEngage."
-                    )
-
-                # Fill campaign name
-                name_input = page.locator('input[placeholder*="Campaign Name"]')
-                name_input.wait_for(timeout=15000)
-                name_input.fill(name)
-
-                # Select custom segment
-                segment_btn = page.locator('button:has-text("Custom segment")')
-                if segment_btn.is_visible():
-                    segment_btn.click()
-                    page.wait_for_timeout(1000)
-                    search_box = page.locator('input[placeholder*="Search to select"]')
-                    if search_box.is_visible():
-                        search_box.fill(segment[:15])
-                        page.wait_for_timeout(1500)
-                        opt = page.locator(f'*:has-text("{segment}")').last
-                        if opt.is_visible():
-                            opt.click()
-
-                page.wait_for_timeout(1000)
-                # Click Next
-                page.locator('button:has-text("Next")').click()
-                page.wait_for_timeout(3000)
-
-                # Step 2: Content (Sender & Template)
-                sender_dropdown = page.locator('[data-testid="whatsapp-sender-dropdown"]')
-                if sender_dropdown.is_visible():
-                    sender_dropdown.click()
-                    page.keyboard.press("ArrowDown")
-                    page.keyboard.press("Enter")
-                    page.wait_for_timeout(1000)
-
-                template_dropdown = page.locator('[data-testid="whatsapp-template-dropdown"]')
-                if template_dropdown.is_visible():
-                    template_dropdown.click()
-                    page.keyboard.press("ArrowDown")
-                    page.keyboard.press("Enter")
-                    page.wait_for_timeout(1000)
-
-                # Step 3: Save as draft
-                save_btn = page.locator('button:has-text("Save as draft")')
-                if save_btn.is_visible():
-                    save_btn.click()
-                    page.wait_for_timeout(4000)
-
-                # Record success in DB
-                now = time.time()
-                campaign_id = f"WA-{name[:18].upper()}"
-                _update_row_status(
-                    batch_id, position, r.get("account") or account, r.get("workspace_id") or "0KYUNUW5WODKX5ZFVAGPVL0U",
-                    r.get("source_ref") or "", row_id, "VALIDATED", campaign_id=campaign_id,
-                )
-
-                created_count += 1
-                results.append({"row_id": row_id, "name": name, "status": "VALIDATED", "id": campaign_id})
-
-            except Exception as err:
-                err_msg = str(err)
-                logger.error("Failed to automate row %s (%s): %s", row_id, name, err_msg)
-                failed_count += 1
-                _update_row_status(
-                    batch_id, position, r.get("account") or account, r.get("workspace_id") or "0KYUNUW5WODKX5ZFVAGPVL0U",
-                    r.get("source_ref") or "", row_id, "UNCERTAIN", issue=err_msg[:255],
-                )
-                results.append({"row_id": row_id, "name": name, "status": "UNCERTAIN", "error": err_msg})
-                # If session expired, stop processing rest of batch to avoid cascade
-                if "session expired" in err_msg.lower():
+    def get(self, campaign_id: str) -> dict[str, Any]:
+        if not isinstance(campaign_id, str) or not _CAMPAIGN_ID.fullmatch(campaign_id):
+            raise ValueError("Invalid WhatsApp campaign ID")
+        envelope = self._request("GET", f"/draft/campaigns/get/{campaign_id}?api=1")
+        draft = envelope.get("data", {}).get("campaign_draft", {}).get("draft")
+        if not isinstance(draft, dict) or not draft.get("campaignName"):
+            raise ValueError("MoEngage returned no saved WhatsApp draft")
+        # The GET response's inner _id differs from the route's draft ID, and it
+        # contains no status. Confirm that route ID in the non-archived Drafts list.
+        listed = None
+        for test_campaigns in (False, True):
+            data = self._request("POST", "/draft/campaigns?api=1", {
+                "c_name": draft["campaignName"], "limit": 25, "filter_block": "drafts",
+                "request_type": "campaigns", "get_test_campaigns": test_campaigns,
+                "get_archived_campaigns": False,
+            }).get("data", {})
+            campaigns = data.get("campaigns") if isinstance(data, dict) else None
+            if not isinstance(campaigns, list):
+                raise ValueError("MoEngage draft membership unavailable")
+            for item in campaigns:
+                identity = item.get("_id") if isinstance(item, dict) else None
+                identity = identity.get("$oid") if isinstance(identity, dict) else identity
+                if identity == campaign_id:
+                    listed = item
                     break
+            if listed is not None:
+                break
+        if listed is None:
+            raise ValueError("Campaign is not confirmed in MoEngage Drafts; reconcile manually")
+        wa = draft.get("whatsapp_data", {})
+        sender = _exact(self._senders(), wa.get("sender_id"), ("id",), "saved sender")
+        return {
+            "id": campaign_id, "status": "DRAFT", "channel": listed.get("channel"),
+            "campaign_delivery_type": listed.get("delivery_type"),
+            "basic_details": {"name": draft["campaignName"]},
+            "segmentation_details": draft.get("new_segmentation_data"),
+            "campaign_content": {"content": {"whatsapp": {
+                "sender_id": wa.get("sender_id"), "sender_name": sender["sender_name"],
+                "provider": str(wa.get("sender") or "").upper(),
+                "template_id": wa.get("template_id"), "body_placeholders": wa.get("body_placeholders"),
+            }}},
+        }
 
-        browser.close()
 
-    return {
-        "ok": True,
-        "total": len(wa_rows),
-        "created": created_count,
-        "failed": failed_count,
-        "results": results,
-    }
+def automate_whatsapp_draft_batch(batch_id: str, account: str, user: dict[str, Any]) -> dict[str, Any]:
+    """Use the same account-owned claims and verification as single-row creation."""
+    authorize_draft_account(account, user)
+    queue = DraftBatchQueue(account, user, load_server_catalog(account))
+    batch = queue.get(batch_id)
+    rows = [row for row in batch["items"] if row["channel"] == "WHATSAPP" and row["status"] == "preview_ready"]
+    results = []
+    for row in rows:
+        try:
+            updated = queue.create_row(batch_id, row["row_id"])
+            result = next(item for item in updated["items"] if item["row_id"] == row["row_id"])
+            results.append({"row_id": row["row_id"], "status": result["status"],
+                            "id": result.get("campaign_id"), "error": result.get("issue")})
+        except (PermissionError, ValueError) as exc:
+            results.append({"row_id": row["row_id"], "status": "BLOCKED", "error": str(exc)})
+        except Exception:
+            # A failed response/persistence step can follow a successful POST.
+            results.append({"row_id": row["row_id"], "status": "UNCERTAIN", "error": "Draft state unavailable; reconcile manually"})
+    created = sum(row["status"] == "VERIFIED" and bool(_CAMPAIGN_ID.fullmatch(row.get("id") or "")) for row in results)
+    return {"ok": created == len(rows), "total": len(rows), "created": created,
+            "failed": len(rows) - created, "results": results}

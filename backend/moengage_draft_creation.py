@@ -84,7 +84,9 @@ class DraftCreation:
         self.allow_all_rows = allow_all_rows
 
     @classmethod
-    def from_environment(cls, account: str, user: dict[str, Any]) -> DraftCreation:
+    def from_environment(
+        cls, account: str, user: dict[str, Any], *, workspace_id: str | None = None,
+    ) -> DraftCreation:
         """Production construction is denied until the owner explicitly approves every gate."""
         authorize_draft_account(account, user)
         prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
@@ -152,20 +154,16 @@ class DraftCreation:
         )
         if not get_database_url() and not allow_sqlite:
             raise PermissionError("A shared PostgreSQL database is required for live draft coordination")
-        try:
-            writer = DraftWriter(account, user)
-        except (ValueError, PermissionError) as exc:
-            class FallbackWriter:
-                def __init__(self, err: Exception) -> None:
-                    self._err = err
-                def create(self, *args: Any, **kwargs: Any) -> Any:
-                    raise self._err
-                def get(self, *args: Any, **kwargs: Any) -> Any:
-                    raise self._err
-                def validate(self, *args: Any, **kwargs: Any) -> Any:
-                    raise self._err
-            writer = FallbackWriter(exc)
+        # Construct the channel-specific writer only when creating that channel.
+        # WhatsApp uses the portal session, not the Email/Push V5 credentials.
+        if os.environ.get(prefix + "LIVE_ENABLED") != "true":
+            raise PermissionError("Live draft access requires account owner approval")
+        writer = None
         catalog = load_server_catalog(account)
+        if workspace_id:
+            from moengage_workspaces import workspace_catalog
+
+            catalog = workspace_catalog(account, user, workspace_id)
         return cls(account, user, catalog, writer, approved_live_rows=approved_rows,
                    allow_sqlite_for_tests=allow_sqlite, allow_all_rows=allow_all_rows)
 
@@ -233,112 +231,20 @@ class DraftCreation:
                  self.account, self.catalog["workspace_id"], source_ref, row_id),
             )
 
-    def _create_whatsapp_draft(self, payload: dict[str, Any], idempotency_key: str) -> str:
-        """Create a real WhatsApp campaign draft in MoEngage over HTTP."""
-        if self.allow_sqlite_for_tests and hasattr(self.writer, "create"):
-            try:
-                res = self.writer.create(payload, idempotency_key=idempotency_key)
-                if isinstance(res, dict) and res.get("id"):
-                    return str(res["id"])
-            except Exception:
-                pass
-
-        name = payload.get("basic_details", {}).get("name") or "WhatsApp Draft"
-        seg = payload.get("segmentation_details", {}).get("included_filters", {}).get("filters", [{}])[0]
-        segment_id = seg.get("id") or "65cf4af4d4c88174e5ad186e"
-        segment_name = seg.get("name") or "Test_FSTP_Pranav_1602"
-
-        wa_content = payload.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
-        raw_tpl = wa_content.get("template_id") or "6516c13f43500232b272e627"
-        raw_sender = wa_content.get("sender_id") or "6516baa397c87500027529a3"
-        raw_placeholders = wa_content.get("body_placeholders")
-        body_placeholders = raw_placeholders if isinstance(raw_placeholders, dict) and raw_placeholders else {"{{1}}": "", "{{2}}": "", "{{3}}": ""}
-        from moengage_whatsapp_worker import resolve_moengage_whatsapp_template_id, resolve_moengage_whatsapp_sender_id
-        template_id = resolve_moengage_whatsapp_template_id(raw_tpl, self.account)
-        sender_id, sender = resolve_moengage_whatsapp_sender_id(raw_sender, self.account)
-        body = {
-            "campaign_data": {
-                "campaignName": name,
-                "action": "create",
-                "channel": "WHATSAPP",
-                "channel_type": "MESSAGING",
-                "delivery_type": "ONE_TIME",
-                "campaignType": "whatsapp",
-                "new_segmentation_data": {
-                    "included_filters": {
-                        "filter_operator": "and",
-                        "filters": [
-                            {
-                                "filter_type": "custom_segments",
-                                "name": segment_name,
-                                "id": segment_id,
-                            }
-                        ],
-                    }
-                },
-                "whatsapp_data": {
-                    "sender_id": sender_id,
-                    "sender": sender,
-                    "template_id": template_id,
-                    "body_placeholders": body_placeholders,
-                    "bypass_opt_in_preference": False,
-                },
-                "stepStatus": True,
-                "is_react": True,
-                "c_s_is_new": True,
-                "delivery": "later",
-                "triggerDelayType": "delay",
-                "utm_params": {"is_enabled": False},
-            }
-        }
-
-        http_error = None
-        try:
-            import requests
-
-            from moengage_sync import get_moengage_auth_headers, get_moengage_config
-            headers = get_moengage_auth_headers(self.account)
-            headers["page"] = "whatsapp/create/one-time"
-            cfg = get_moengage_config(self.account)
-            headers["origin"] = cfg["base_url"]
-            url = f"{cfg['base_url']}/v1.0/campaigns/draft"
-            resp = requests.post(url, headers=headers, json=body, timeout=25)
-            if resp.ok:
-                cid = resp.json().get("data", {}).get("id")
-                if cid and isinstance(cid, str):
-                    return cid
-            else:
-                if resp.status_code == 401:
-                    http_error = "MoEngage session expired (401 Unauthorized). Please update Bearer token in Settings -> MoEngage."
-                else:
-                    http_error = f"MoEngage API returned HTTP {resp.status_code}: {resp.text[:160]}"
-        except Exception as exc:
-            http_error = str(exc)
-
-        # Fallback to headless Playwright worker to create real draft in MoEngage web studio
-        playwright_error = None
-        try:
-            from moengage_whatsapp_worker import automate_single_whatsapp_draft_row
-            real_cid = automate_single_whatsapp_draft_row(
-                name=name,
-                segment=segment_name,
-                sender=sender,
-                template=template_id,
-                account=self.account,
-            )
-            if real_cid and isinstance(real_cid, str):
-                return real_cid
-        except Exception as exc:
-            playwright_error = str(exc)
-
-        if self.allow_sqlite_for_tests:
-            return "WA-" + idempotency_key[:8].upper()
-
-        err_summary = http_error or playwright_error or "Direct API and studio automation both unconfirmed"
-        raise RuntimeError(f"MoEngage WhatsApp draft creation failed: {err_summary}")
 
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         """Never reissue an attempted POST, including after timeout or process crash."""
+        if str(row.get("channel", "")).upper() == "WHATSAPP":
+            workspace_id = str(row.get("workspace_id") or "").strip()
+            workspace_name = str(row.get("workspace") or "").strip()
+            if not workspace_id and not workspace_name:
+                return {"state": "BLOCKED", "issues": ["WhatsApp workspace is required in the brief or row"],
+                        "source_ref": row.get("source_ref"), "row_id": row.get("row_id"), "campaign_id": None}
+            if ((workspace_id and workspace_id != self.catalog["workspace_id"])
+                    or (workspace_name and workspace_name not in (self.catalog.get("workspace_name"), self.catalog["workspace_id"]))):
+                return {"state": "BLOCKED", "issues": ["WhatsApp destination differs from the bound workspace"],
+                        "source_ref": row.get("source_ref"), "row_id": row.get("row_id"), "campaign_id": None}
+            row = {**row, "workspace_id": self.catalog["workspace_id"]}
         if self.approved_live_rows is not None and not self.allow_all_rows:
             selected = self.approved_live_rows.get((row.get("source_ref"), row.get("row_id")))
             if (selected is None or (selected[1] is not None and row.get("segment_id") != selected[1])
@@ -350,48 +256,78 @@ class DraftCreation:
             return {"state": "BLOCKED", "issues": item["issues"], "source_ref": item["source_ref"],
                     "row_id": item["row_id"], "campaign_id": None}
         payload = item["candidate_v5_payload"]
+        whatsapp = payload.get("channel") == "WHATSAPP"
+        writer = self.writer
+        if writer is None:
+            if whatsapp:
+                from moengage_whatsapp_worker import WhatsAppDraftWriter
+
+                writer = WhatsAppDraftWriter(self.account, self.catalog["workspace_id"])
+            else:
+                writer = DraftWriter(self.account, self.user)
+        if whatsapp and hasattr(writer, "prepare"):
+            try:
+                payload = writer.prepare(payload)
+            except (ValueError, PermissionError, RuntimeError) as exc:
+                return {"state": "BLOCKED", "issues": [str(exc)], "source_ref": item["source_ref"],
+                        "row_id": item["row_id"], "campaign_id": None}
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         source_ref, row_id = item["source_ref"], item["row_id"]
         stored, fresh = self._reserve(source_ref, row_id, digest)
         state = stored["state"]
         campaign_id = stored.get("campaign_id")
-        if fresh or (payload.get("channel") == "WHATSAPP" and state in ("UNCERTAIN", "MAYBE_SENT") and not campaign_id):
-            if payload.get("channel") == "WHATSAPP":
-                try:
-                    campaign_id = self._create_whatsapp_draft(payload, stored["idempotency_key"])
-                    self._record(source_ref, row_id, "VALIDATED", campaign_id=campaign_id)
-                    return self._result(source_ref, row_id, "VALIDATED", campaign_id, None, "[]")
-                except Exception as wa_err:
-                    self._record(source_ref, row_id, "UNCERTAIN", issue=str(wa_err)[:255])
-                    return self._result(source_ref, row_id, "UNCERTAIN", None, str(wa_err)[:255])
+        if fresh:
             try:
-                created = self.writer.create(payload, idempotency_key=stored["idempotency_key"])
+                created = writer.create(payload, idempotency_key=stored["idempotency_key"])
             except Exception:
                 self._record(source_ref, row_id, "UNCERTAIN", issue="create_result_unconfirmed")
                 return self._result(source_ref, row_id, "UNCERTAIN", None, "create_result_unconfirmed")
-            campaign_id = created.get("id")
-            if (str(created.get("status", "")).upper() != "DRAFT" or not isinstance(campaign_id, str)
+            campaign_id = created.get("id") if isinstance(created, dict) else None
+            if ((not whatsapp and isinstance(created, dict) and str(created.get("status", "")).upper() != "DRAFT") or not isinstance(campaign_id, str)
                     or len(campaign_id) != 24
                     or any(c not in "0123456789abcdefABCDEF" for c in campaign_id)):
                 self._record(source_ref, row_id, "UNCERTAIN", issue="created_draft_unconfirmed")
                 return self._result(source_ref, row_id, "UNCERTAIN", None, "created_draft_unconfirmed")
             self._record(source_ref, row_id, "CREATED", campaign_id=campaign_id)
             state = "CREATED"
+        if whatsapp and state == "VERIFIED":
+            return self._result(source_ref, row_id, state, campaign_id, stored.get("issue"), stored.get("validation_json"))
         if state not in ("CREATED", "VERIFIED") or not campaign_id:
             return self._result(source_ref, row_id, state, campaign_id, stored.get("issue"), stored.get("validation_json"))
         if state == "CREATED":
             try:
-                readback = self.writer.get(campaign_id)
+                readback = writer.get(campaign_id)
             except Exception:
                 self._record(source_ref, row_id, "CREATED", issue="readback_unavailable")
                 return self._result(source_ref, row_id, "CREATED", campaign_id, "readback_unavailable")
-            if (str(readback.get("status", "")).upper() != "DRAFT" or readback.get("id") != campaign_id
-                    or not _matches(readback, payload)):
-                self._record(source_ref, row_id, "NEEDS_REVIEW", issue="readback_mismatch_or_not_draft")
+            expected = payload
+            if whatsapp:
+                wa = payload["campaign_content"]["content"]["whatsapp"]
+                expected = {
+                    "channel": "WHATSAPP", "campaign_delivery_type": "ONE_TIME",
+                    "basic_details": payload["basic_details"],
+                    "segmentation_details": payload["segmentation_details"],
+                    "campaign_content": {"content": {"whatsapp": {
+                        key: wa[key] for key in ("sender_id", "sender_name", "provider", "template_id", "body_placeholders")
+                        if key in wa
+                    }}},
+                }
+            exact_content = True
+            if whatsapp and isinstance(readback, dict):
+                saved_wa = readback.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
+                exact_content = (
+                    saved_wa.get("body_placeholders") == wa["body_placeholders"]
+                    and readback.get("segmentation_details") == payload["segmentation_details"]
+                )
+            if (not isinstance(readback, dict) or str(readback.get("status", "")).upper() != "DRAFT"
+                    or readback.get("id") != campaign_id or not exact_content or not _matches(readback, expected)):
+                self._record(source_ref, row_id, "NEEDS_REVIEW", campaign_id=campaign_id, issue="readback_mismatch_or_not_draft")
                 return self._result(source_ref, row_id, "NEEDS_REVIEW", campaign_id, "readback_mismatch_or_not_draft")
             self._record(source_ref, row_id, "VERIFIED")
+        if whatsapp:
+            return self._result(source_ref, row_id, "VERIFIED", campaign_id)
         try:
-            validation = self.writer.validate(campaign_id)
+            validation = writer.validate(campaign_id)
         except PermissionError:
             self._record(source_ref, row_id, "NEEDS_REVIEW", issue="validation_requires_confirmed_draft")
             return self._result(source_ref, row_id, "NEEDS_REVIEW", campaign_id, "validation_requires_confirmed_draft")

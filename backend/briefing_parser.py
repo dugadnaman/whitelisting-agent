@@ -1193,6 +1193,10 @@ def _extract_kv_metadata_from_adf_or_text(
             meta["sub_product"] = v
         elif k in ("from email", "from address", "sender email"):
             meta["from_address"] = v
+        elif k in ("moengage workspace", "workspace", "workspace name"):
+            meta["workspace"] = v
+        elif k in ("moengage workspace id", "workspace id", "workspace_id"):
+            meta["workspace_id"] = v
 
     return meta
 
@@ -3347,6 +3351,8 @@ def parse_jira_brief(
     moengage_campaign = {
         "campaign_name": approved_cname or f"{key} - {summary}",
         "target_account": sub_account,
+        "workspace_id": campaign_metadata.get("workspace_id"),
+        "workspace": campaign_metadata.get("workspace"),
         "scheduled_date": approved_sched or issue_data.get("duedate"),
         "whatsapp_template": wa_drafts[0].template_name if wa_drafts else None,
         "sms_content": sms_drafts[0].text if sms_drafts else None,

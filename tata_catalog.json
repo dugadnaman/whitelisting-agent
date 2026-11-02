@@ -30,29 +30,24 @@
       "notification_channel": "general"
     }
   ],
-  "whatsapp_senders": [
+  "whatsapp_workspaces": [
     {
-      "sender_name": "Tata Capital Financial Services Limited",
-      "phone_number": "919643789719",
-      "provider": "KARIX"
+      "id": "62aad9b5fb3e82178aac76a3",
+      "name": "Services_TC"
     },
     {
-      "sender_name": "Tata Capital Wealth",
-      "phone_number": "918657597116",
-      "provider": "KARIX"
+      "id": "6516b0db87ee0c3c4499dc68",
+      "name": "Tata Capital"
     },
     {
-      "sender_name": "Tata Capital Housing Finance Limited",
-      "phone_number": "919594951475",
-      "provider": "KARIX"
+      "id": "62aad9735e6ff766f85bb0b8",
+      "name": "Wealth_TC"
+    },
+    {
+      "id": "62aad9425de67f1f07c6ff38",
+      "name": "Moneyfy"
     }
   ],
   "assets": [],
-  "email_templates": [],
-  "whatsapp_templates": [
-    {
-      "id": "test_1234",
-      "name": "test_1234 (EN)"
-    }
-  ]
+  "email_templates": []
 }
