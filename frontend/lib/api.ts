@@ -1559,6 +1559,14 @@ export type MoEngageDraftCandidate = {
           default_click_action_value?: string;
         };
       }>;
+      whatsapp?: {
+        sender_id?: string;
+        sender_name?: string;
+        provider?: string;
+        template_id?: string;
+        template_name?: string;
+        body_placeholders?: Record<string, string>;
+      };
     };
   };
 };

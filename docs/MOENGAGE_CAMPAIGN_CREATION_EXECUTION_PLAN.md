@@ -20,8 +20,16 @@ User-authorized production batch `bd009a60-6ce2-401f-afc5-d6d24b9dd826` created 
 | Tata Capital | Two body variables | `6ae8670b7afcd785566e8dc4` |
 | Services_TC | Static approved template | `6ae86720854ea0ddda567c55` |
 | Services_TC | Two body variables | `6ae86736854ea0ddda567c58` |
+| Tata Capital | Post-fix UI/XLSX, two variables | `6ae86e994ef7d8ff17074df7` |
+| Services_TC | Post-fix UI/XLSX, static template | `6ae86eb3af550c566f9a8e16` |
 
 Variable values included Unicode, quotes, a line break and an HTTPS URL with query parameters. Tata Capital used saved test segment `Test_FSTP_Pranav_1602`; Services_TC used its own saved `swcm189_Customer_Base_Oct2026_Test_v1_24092026`, never the Capital segment ID.
+
+After deploying repair `fa1f8bf`, the actual builder uploaded, previewed and staged a three-row XLSX into batch `5f1ad898-f1ab-4403-9036-e884598e5ad1`. The new sequential UI created the two valid campaigns listed as “Post-fix UI/XLSX” above; the unknown named audience stayed blocked with no campaign ID. Browser network inspection recorded exactly two row-create calls. The two destinations used an exact workspace name and portal ID respectively.
+
+Browser-only fault injection (no provider request) verified HTTP 429 stops after one row request and leaves ready controls resumable; HTTP 503 stops, persists uncertainty through reload and makes no automatic replay; a known `CREATED` ID exposes only read-back recheck, not a new-create action. Real catalog interactions verified sender-dependent selection, live previews, two editable variables, and sender/workspace reset behavior. A single-form round trip staged the exact Unicode and multiline values into local batch `8ab214ef-7953-4480-b782-5f087bac9a18` with zero row-create requests.
+
+The production UI smoke also caught ID-only sender selections incorrectly displaying “Not supplied”, and local audit times incorrectly labeled UTC. Review cards now display resolved sender/provider/template IDs and actual variable values, use explicit UTC formatting, and label WhatsApp times as planning metadata rather than configured sends.
 
 Repairs from adversarial testing:
 

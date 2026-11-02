@@ -58,6 +58,7 @@ function RowCard({
   const source = row.source_fields || {};
   const content = candidate?.campaign_content?.content;
   const email = content?.email;
+  const whatsapp = content?.whatsapp;
   const push = content?.push ? Object.values(content.push)[0]?.basic_details : undefined;
   const segment = candidate?.segmentation_details?.included_filters?.filters?.[0];
   const schedule = candidate?.scheduling_details;
@@ -110,7 +111,7 @@ function RowCard({
 
       {batch && row.updated_at && (
         <p className="text-xs text-gray-400">
-          Last updated: {new Date(row.updated_at * 1000).toLocaleString()} (UTC). Stored draft record; no customer messages sent.
+          Last updated: {new Date(row.updated_at * 1000).toLocaleString(undefined, { timeZone: 'UTC', timeZoneName: 'short' })}. Stored draft record; no customer messages sent.
         </p>
       )}
 
@@ -130,7 +131,7 @@ function RowCard({
         </div>
 
         <div>
-          <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule & Timezone</dt>
+          <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">{isWhatsApp ? 'Planning Time & Timezone — Confirm in MoEngage' : 'Schedule & Timezone'}</dt>
           <dd className="text-gray-900 mt-0.5">
             📅 {schedule?.start_time || [source.scheduled_at, source.timezone].filter(Boolean).join(' · ') || 'Not supplied'}
             {schedule?.timezone ? ` (${schedule.timezone})` : ''}
@@ -196,15 +197,16 @@ function RowCard({
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Sender</dt>
               <dd className="text-gray-900 mt-0.5 font-medium">
-                💬 {source.whatsapp_sender || 'Not supplied'}
+                💬 {whatsapp?.sender_name || source.whatsapp_sender || source.whatsapp_sender_id || 'Not supplied'}
+                {whatsapp?.sender_id && <span className="block text-xs font-mono font-normal">{whatsapp.sender_id}{whatsapp.provider ? ` · ${whatsapp.provider}` : ''}</span>}
               </dd>
             </div>
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Template</dt>
               <dd className="text-gray-900 mt-0.5 font-medium flex flex-wrap items-center gap-1.5">
-                <span>📋 {source.whatsapp_template_name || source.whatsapp_template_id || 'Not supplied'}</span>
-                {source.matched_template_id && (
-                  <span className="text-[11px] font-mono text-gray-500">({source.matched_template_id})</span>
+                <span>📋 {whatsapp?.template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'Not supplied'}</span>
+                {(whatsapp?.template_id || source.matched_template_id) && (
+                  <span className="text-[11px] font-mono text-gray-500">({whatsapp?.template_id || source.matched_template_id})</span>
                 )}
                 {source.matched_template_confidence && (
                   <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
@@ -213,6 +215,18 @@ function RowCard({
                 )}
               </dd>
             </div>
+            {whatsapp?.body_placeholders && Object.keys(whatsapp.body_placeholders).length > 0 && (
+              <div className="sm:col-span-2">
+                <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Template Variables</dt>
+                <dd className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm space-y-2">
+                  {Object.entries(whatsapp.body_placeholders).map(([slot, value]) => (
+                    <div key={slot} className="whitespace-pre-wrap break-words">
+                      <code className="text-xs font-bold">{slot}</code>: {value}
+                    </div>
+                  ))}
+                </dd>
+              </div>
+            )}
           </>
         )}
       </dl>
