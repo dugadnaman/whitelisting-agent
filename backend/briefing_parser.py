@@ -2270,6 +2270,173 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
     return items
 
 
+def extract_templates_from_pptx_file(
+    pptx_path: str | Path, use_ai: bool = False
+) -> list[dict[str, Any]]:
+    """
+    Extract multi-channel marketing templates (SMS, WhatsApp, RCS, Push Notification, Email)
+    from PowerPoint presentations (.pptx).
+    Handles grouped shapes, nested text frames, tables, channel-specific slides,
+    CTAs/buttons, card titles, and customer copy variants.
+    """
+    path = Path(pptx_path)
+    stem = path.stem
+    items: list[dict[str, Any]] = []
+
+    slides_data: list[tuple[int, str, list[tuple[str, str]]]] = []
+    try:
+        from pptx import Presentation
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+        def _get_shape_texts(shape):
+            texts = []
+            if shape.has_text_frame:
+                paras = [p.text.strip() for p in shape.text_frame.paragraphs if p.text.strip()]
+                if paras:
+                    texts.append((shape.name, "\n".join(paras)))
+            if shape.has_table:
+                rows = []
+                for r in shape.table.rows:
+                    rows.append(" | ".join(c.text.strip().replace("\n", " ") for c in r.cells))
+                if rows:
+                    texts.append((shape.name, "\n".join(rows)))
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                for ch in shape.shapes:
+                    texts.extend(_get_shape_texts(ch))
+            return texts
+
+        prs = Presentation(path)
+        for s_idx, slide in enumerate(prs.slides, 1):
+            title = ""
+            if slide.shapes.title and slide.shapes.title.has_text_frame:
+                title = slide.shapes.title.text_frame.text.strip()
+            texts = []
+            for shape in slide.shapes:
+                texts.extend(_get_shape_texts(shape))
+            slides_data.append((s_idx, title, texts))
+    except Exception:
+        try:
+            import xml.etree.ElementTree as ET
+            import zipfile
+
+            with zipfile.ZipFile(path) as z:
+                slide_files = sorted(
+                    [n for n in z.namelist() if n.startswith("ppt/slides/slide") and n.endswith(".xml")],
+                    key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 0,
+                )
+                for s_idx, sf in enumerate(slide_files, 1):
+                    tree = ET.fromstring(z.read(sf))
+                    texts = []
+                    for sp in tree.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}sp"):
+                        p_texts = [
+                            node.text
+                            for node in sp.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t")
+                            if node.text
+                        ]
+                        if p_texts:
+                            clean_t = " ".join(p_texts).strip()
+                            if clean_t:
+                                texts.append(("xml_shape", clean_t))
+                    slides_data.append((s_idx, "", texts))
+        except Exception as fallback_exc:
+            logger.warning("Failed to parse pptx %s: %s", pptx_path, fallback_exc)
+            return []
+
+    theme = (
+        "Pre-Expiry Top Up"
+        if "pre-expiry" in stem.lower()
+        else ("Revised Offer" if "revised" in stem.lower() else stem)
+    )
+
+    for s_idx, title, texts in slides_data:
+        t_check = (title + " " + " ".join(t[1] for t in texts[:3])).lower()
+        if "sms" in t_check:
+            channel = "SMS"
+        elif any(k in t_check for k in ("whatsapp", "wa |", "wa|", "wa ")):
+            channel = "WA"
+        elif "rcs" in t_check:
+            channel = "RCS"
+        elif any(k in t_check for k in ("push notification", "push", "pn")):
+            channel = "PN"
+        elif "email" in t_check or "mailer" in t_check:
+            channel = "EMAIL"
+        elif "in - app" in t_check or "in-app" in t_check:
+            channel = "IN_APP"
+        else:
+            continue
+
+        slide_ctas = []
+        for name, txt in texts:
+            clean = txt.strip()
+            if clean.lower() in (
+                "click now",
+                "check here",
+                "avail now!",
+                "check eligibility",
+                "apply now",
+                "explore now",
+                "apply here",
+                "avail now",
+            ):
+                if clean not in slide_ctas:
+                    slide_ctas.append(clean)
+
+        btn_default = (
+            slide_ctas[0]
+            if slide_ctas
+            else ("Check Offer" if channel != "EMAIL" else "Check Eligibility")
+        )
+
+        seen = set()
+        for name, txt in texts:
+            clean = txt.strip()
+            if not clean or clean in seen:
+                continue
+            if clean.lower() in (
+                title.lower(),
+                "pre-expiry top up",
+                "revised offer",
+                "extra banners",
+                "additional banners _ email",
+            ):
+                continue
+            if re.match(r"^\d+\s+characters$", clean, re.IGNORECASE):
+                continue
+            if clean in slide_ctas:
+                continue
+            if clean in (
+                "Quick approvals",
+                "Flexible Tenure",
+                "Minimal documentation",
+                "Here’s what makes a Tata Capital Personal Loan work for you",
+            ):
+                continue
+
+            seen.add(clean)
+
+            header = None
+            body_txt = clean
+            if channel == "RCS":
+                lines = clean.split("\n")
+                if len(lines) > 1 and not lines[0].lower().startswith(("dear", "hi", "hello")):
+                    header = lines[0].strip()
+                    body_txt = "\n".join(lines[1:]).strip()
+            elif channel == "EMAIL":
+                header = "Here’s what makes a Tata Capital Personal Loan work for you"
+
+            items.append({
+                "channel": channel,
+                "header": header,
+                "text": body_txt,
+                "button_text": btn_default,
+                "button_url": "https://u3.mnge.co/",
+                "variant": f"{theme} - Slide {s_idx}",
+                "source": f"pptx_{stem}",
+            })
+
+    return items
+
+
 def extract_templates_from_excel_file(
     filepath: Path,
     target_month: str | None = None,
@@ -2757,6 +2924,7 @@ def parse_jira_brief(
     )
     has_excel = any(a.get("filename", "").lower().endswith((".xlsx", ".xls", ".csv")) for a in raw_attachments)
     has_docx = any(a.get("filename", "").lower().endswith((".docx", ".doc")) for a in raw_attachments)
+    has_pptx = any(a.get("filename", "").lower().endswith((".pptx", ".ppt")) for a in raw_attachments)
     is_email_campaign = (
         (
             "mailer" in summary.lower()
@@ -2765,10 +2933,11 @@ def parse_jira_brief(
             or "email" in desc_text.lower()
         )
         and (has_mailers_zip or has_subject_lines or "email text" in desc_text.lower())
-    ) or (has_mailers_zip and not has_excel and not has_docx)
+    ) or (has_mailers_zip and not has_excel and not has_docx and not has_pptx)
     mapped_attachments: list[dict[str, Any]] = []
     excel_attachment_paths: list[Path] = []
     docx_attachment_paths: list[Path] = []
+    pptx_attachment_paths: list[Path] = []
     zip_creative_paths: list[str] = []
 
     seen_copy_files: set[bytes] = set()
@@ -2778,9 +2947,10 @@ def parse_jira_brief(
         att_id = att.get("id")
         mime = att.get("mimeType", "")
         local_path: str | None = None
+        is_copy_doc = fn.lower().endswith((".xlsx", ".xls", ".csv", ".docx", ".doc", ".pptx", ".ppt"))
         if att.get("local_path") and Path(att["local_path"]).exists():
             local_path = str(att["local_path"])
-        elif download_creatives and att_id:
+        elif (download_creatives or is_copy_doc) and att_id:
             try:
                 local_path = str(download_jira_attachment(att_id, fn))
             except Exception as exc:
@@ -2788,7 +2958,7 @@ def parse_jira_brief(
 
         if local_path:
             p = Path(local_path)
-            if fn.lower().endswith((".xlsx", ".xls", ".csv", ".docx", ".doc")):
+            if is_copy_doc:
                 # Jira reuploads may have unrelated/sanitized names; only identical bytes are duplicates.
                 with p.open("rb") as copy_file:
                     digest = hashlib.file_digest(copy_file, "sha256").digest()
@@ -2810,15 +2980,18 @@ def parse_jira_brief(
                                         "mime": "image/jpeg",
                                         "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
                                     })
+                    elif fn.lower().endswith((".pptx", ".ppt")):
+                        pptx_attachment_paths.append(p)
                     else:
                         docx_attachment_paths.append(p)
-            elif fn.lower().endswith(".zip"):
                 zip_creative_paths.extend(_extract_images_from_zip(p))
         fn_lower = fn.lower()
         if fn_lower.endswith((".xlsx", ".xls", ".csv")):
             target_chan = "SPREADSHEET_BRIEF"
         elif fn_lower.endswith((".docx", ".doc")):
             target_chan = "DOCUMENT_BRIEF"
+        elif fn_lower.endswith((".pptx", ".ppt")):
+            target_chan = "PRESENTATION_BRIEF"
         elif fn_lower.endswith(".zip"):
             target_chan = "EMAIL_CREATIVE"
         elif "wa" in fn_lower or "whatsapp" in fn_lower:
@@ -2938,6 +3111,11 @@ def parse_jira_brief(
         )
         if items:
             extracted_items.extend(items)
+
+    for pptx_path in pptx_attachment_paths:
+        pptx_items = extract_templates_from_pptx_file(pptx_path, use_ai=use_ai)
+        if pptx_items:
+            extracted_items.extend(pptx_items)
     adf_items = _parse_tables_from_adf(desc_raw)
     if adf_items:
         extracted_items.extend(adf_items)
@@ -3325,7 +3503,7 @@ def parse_jira_brief(
     from jira_client import is_explicit_push
 
     has_push = bool(
-        any(item.get("channel") == "PUSH" for item in extracted_items)
+        any(item.get("channel") in ("PUSH", "PN") for item in extracted_items)
         or is_explicit_push(summary)
         or is_explicit_push(desc_text)
     )
