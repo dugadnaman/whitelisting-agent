@@ -101,10 +101,17 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
     if (!draft.template_type) { setOptions(emptyOptions); setLoading(false); return () => controller.abort(); }
     fetchSmsDltOptions('tata', draft, '', controller.signal).then((result) => {
       if (!controller.signal.aborted) { setOptions(result); setLoading(false); }
-    }).catch((err) => { if (!controller.signal.aborted) { setError(formatError(err)); setLoading(false); } });
+    }).catch((err) => { if (!controller.signal.aborted) { setOptions(emptyOptions); setError(formatError(err)); setLoading(false); } });
     return () => controller.abort();
     // Copy edits do not change portal routing options.
   }, [draft.template_type, draft.category_id, draft.service_type, revision]);
+  useEffect(() => {
+    if (!error) return;
+    // A portal session may be renewed in another tab while this draft stays open.
+    const retry = () => setRevision((value) => value + 1);
+    window.addEventListener('focus', retry);
+    return () => window.removeEventListener('focus', retry);
+  }, [error]);
   const valid = !loading && !error && options.categories.some((option) => option.id === draft.category_id)
     && options.headers.some((option) => option.id === draft.header_id && option.text === draft.header)
     && (!draft.brand_id || options.brands.some((option) => option.id === draft.brand_id))
@@ -113,6 +120,15 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
   function update(patch: Partial<SmsDltDraft>) { onChange(editSmsBriefDraft(draft, patch)); }
   return <fieldset disabled={disabled} className="rounded-xl border border-gray-200 p-4 space-y-3">
     <legend className="px-1 text-xs font-bold">{draft.template_name || 'Unnamed template'}</legend>
+    {loading && <p role="status" className="text-xs text-gray-500">Loading Tata portal options…</p>}
+    {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+      <p className="font-semibold">Could not load VILPOWER categories and sender headers.</p>
+      <p className="mt-1">{error}</p>
+      <div className="mt-2 flex flex-wrap gap-3">
+        <a href="/settings" className="underline">Refresh the Tata SMS portal session in Settings</a>
+        <button type="button" className="font-semibold underline" onClick={() => setRevision((value) => value + 1)}>Retry options</button>
+      </div>
+    </div>}
     {draft.brief && <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
       <p className="font-bold">Client brief provenance · {draft.source_file}</p>
       <p className="break-words">{draft.source_ref}</p>
@@ -141,17 +157,15 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
       <label className="text-xs font-semibold">Template name<input className={`${inputClass} mt-1`} value={draft.template_name} onChange={(e) => update({ template_name: e.target.value })} /></label>
       <label className="text-xs font-semibold">Template type<select className={`${inputClass} mt-1`} value={draft.template_type} onChange={(e) => update({ template_type: e.target.value as SmsDltDraft['template_type'], category_id: '', header_id: '', header: '', brand_id: '', service_type: '' })}><option value="">Choose template type</option>{Object.entries(typeLabels).map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label>
       {draft.template_type === '3' && Boolean(options.service_types?.length) && <label className="text-xs font-semibold">Service type<select className={`${inputClass} mt-1`} value={draft.service_type || ''} onChange={(e) => update({ service_type: e.target.value, category_id: '', header_id: '', header: '', brand_id: '' })} disabled={loading}><option value="">Choose service type</option>{options.service_types?.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>}
-      <label className="text-xs font-semibold">DLT category<select className={`${inputClass} mt-1`} value={draft.category_id} onChange={(e) => update({ category_id: e.target.value, header_id: '', header: '', brand_id: '' })} disabled={loading}><option value="">Choose category</option>{options.categories.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
-      <label className="text-xs font-semibold">Sender header<select className={`${inputClass} mt-1`} value={draft.header_id} onChange={(e) => update({ header_id: e.target.value, header: options.headers.find((option) => option.id === e.target.value)?.text || '' })} disabled={loading}><option value="">Choose header</option>{options.headers.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
-      <label className="text-xs font-semibold">Brand (optional)<select className={`${inputClass} mt-1`} value={draft.brand_id || ''} onChange={(e) => update({ brand_id: e.target.value })} disabled={loading}><option value="">No brand selected</option>{options.brands.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
+      <label className="text-xs font-semibold">DLT category<select className={`${inputClass} mt-1`} value={draft.category_id} onChange={(e) => update({ category_id: e.target.value, header_id: '', header: '', brand_id: '' })} disabled={loading || Boolean(error) || !draft.template_type || !options.categories.length}><option value="">{!draft.template_type ? 'Choose template type first' : loading ? 'Loading categories…' : error ? 'Categories unavailable' : 'Choose category'}</option>{options.categories.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
+      <label className="text-xs font-semibold">Sender header<select className={`${inputClass} mt-1`} value={draft.header_id} onChange={(e) => update({ header_id: e.target.value, header: options.headers.find((option) => option.id === e.target.value)?.text || '' })} disabled={loading || Boolean(error) || !draft.category_id || !options.headers.length}><option value="">{!draft.category_id ? 'Choose category first' : loading ? 'Loading headers…' : error ? 'Headers unavailable' : !options.headers.length ? 'No headers for this selection' : 'Choose header'}</option>{options.headers.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
+      <label className="text-xs font-semibold">Brand (optional)<select className={`${inputClass} mt-1`} value={draft.brand_id || ''} onChange={(e) => update({ brand_id: e.target.value })} disabled={loading || Boolean(error)}><option value="">No brand selected</option>{options.brands.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
       <label className="text-xs font-semibold">Message encoding<select className={`${inputClass} mt-1`} value={draft.message_type} onChange={(e) => update({ message_type: e.target.value as SmsDltDraft['message_type'] })}><option value="">Choose message encoding</option><option value="1">ASCII / English</option><option value="2">Regional / Unicode</option></select></label>
     </div>
     <label className="block text-xs font-semibold">Exact DLT template body<textarea rows={4} className={`${inputClass} mt-1 font-mono`} value={draft.text} onChange={(e) => update({ text: e.target.value })} /></label>
     <p className="text-[11px] text-gray-500">Text is preserved exactly. Use VILPOWER typed variables only: {'{#num#}, {#alp#}, {#urg#}, {#uro#}, {#cbn#}, {#eml#}'} (maximum 15). Replace Jira/WhatsApp placeholders yourself; no normalization or grammar correction is applied.</p>
     <label className="block text-xs font-semibold">Sample message (required when the body has typed variables)<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
     {draft.brief && <label className="flex gap-2 text-xs font-semibold"><input type="checkbox" checked={draft.brief.acknowledged} disabled={!applySmsBriefDecisions(draft.brief)} onChange={(event) => onChange({ ...draft, brief: { ...draft.brief!, acknowledged: event.target.checked } })} />I reviewed every source, campaign, language, warning and token decision, and the exact final body and explicit sample. These selected sources are intended for SMS; no month or approval status was inferred.</label>}
-    {loading && <p role="status" className="text-xs text-gray-500">Loading Tata portal options…</p>}
-    {error && <p role="alert" className="text-xs text-red-700">{error} <a href="/settings" className="underline">Refresh the Tata SMS portal session in Settings</a>. <button type="button" className="underline" onClick={() => setRevision((value) => value + 1)}>Retry options</button></p>}
     {!loading && !error && !valid && <p className="text-xs text-amber-800">Choose valid portal category, header and service type (if applicable) before review. Imported IDs must match current Tata options.</p>}
   </fieldset>;
 }

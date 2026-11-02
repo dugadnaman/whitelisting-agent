@@ -33,6 +33,11 @@ silently redirects credentials or submissions to another account.
    `template_type`, `category_id`, `header_id`, `header`, `brand_id`,
    `message_type`, `sample_message`, `service_type`. No phone numbers are needed.
    Choose missing category/header/type fields from live portal options.
+   If live options fail to load, the editor shows the provider error above the
+   fields and disables unavailable selections. Renew the Tata SMS session in
+   Settings, then return to the draft or use **Retry options**; only failed
+   option loads refresh on window focus. Draft copy and explicit choices are
+   preserved. Select a category before loading its matching sender headers.
    **Native client brief workbooks:** Alternatively, upload multi-sheet `.xlsx` or `.xls`
    campaign briefs directly under **Import native client brief**. The parser extracts
    only SMS / SMS-retargeting rows across personas, product blocks and language columns;
