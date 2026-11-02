@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.config.settings import Settings
 from app.models.report import CampaignMetrics, CampaignRow
+import os
 from app.services.moengage_browser_service import BrowserAuthenticationError, MoEngageBrowserService
 
 
@@ -21,12 +22,33 @@ class MoEngageService:
         self.active_profile = "default"
         self.browser = self._new_browser()
 
-    def _new_browser(self) -> MoEngageBrowserService:
-        return MoEngageBrowserService(
-            self.settings.storage_dir / "moengage-profile",
-            self.settings.moengage_dashboard_url,
-            self.settings.moengage_ui_config,
-            self.settings.moengage_remote_cdp_url,
+    def _new_browser(self):
+        if self.settings.moengage_mode == "browser" and self.settings.moengage_remote_cdp_url:
+            return MoEngageBrowserService(
+                self.settings.storage_dir / "moengage-profile",
+                self.settings.moengage_dashboard_url,
+                self.settings.moengage_ui_config,
+                self.settings.moengage_remote_cdp_url,
+            )
+        token = os.environ.get("APPAREL_MOENGAGE_BEARER_TOKEN") or os.environ.get("MOENGAGE_BEARER_TOKEN", "")
+        refresh = os.environ.get("APPAREL_MOENGAGE_REFRESH_TOKEN") or os.environ.get("MOENGAGE_REFRESH_TOKEN", "")
+        cookie = os.environ.get("APPAREL_MOENGAGE_COOKIE") or os.environ.get("MOENGAGE_COOKIE", "")
+        try:
+            from portal_sessions import load_session
+            s = load_session("apparel", "moengage")
+            if s:
+                token = s.get("bearer_token") or token
+                refresh = s.get("refresh_token") or refresh
+                cookie = s.get("cookie") or cookie
+        except Exception:
+            pass
+        from app.services.moengage_analytics_service import MoEngageAnalyticsService
+        return MoEngageAnalyticsService(
+            dashboard_url=self.settings.moengage_dashboard_url,
+            ui_config=self.settings.moengage_ui_config,
+            bearer_token=token,
+            refresh_token=refresh,
+            cookie=cookie,
         )
 
     def available_profiles(self) -> list[str]:
@@ -47,12 +69,14 @@ class MoEngageService:
         return sorted(mapping, key=str.casefold)
 
     def execution_configured(self) -> bool:
-        return bool(self.settings.moengage_remote_cdp_url and self.configured_brands()
-                    and self.settings.moengage_ui_config.get("workflow") == "recorded_behavior")
+        if self.settings.moengage_mode == "browser" and self.settings.moengage_remote_cdp_url:
+            return bool(self.configured_brands()
+                        and self.settings.moengage_ui_config.get("workflow") in {"recorded_behavior", "analytics_api"})
+        return bool(self.configured_brands())
 
     async def fetch_metrics(self, row: CampaignRow) -> CampaignMetrics:
         if not self.execution_configured():
-            raise MoEngageError("Configure private Chromium and genuine MoEngage report mappings before running attribution")
+            raise MoEngageError("Configure genuine MoEngage report mappings before running attribution")
         if row.campaign_type == "Overall":
             online = replace(row, campaign_type="Online")
             offline = replace(row, campaign_type="Offline")
@@ -73,7 +97,7 @@ class MoEngageService:
 
     async def ensure_authenticated(self, timeout_seconds: float = 90.0) -> None:
         if not self.execution_configured():
-            raise MoEngageError("Configure private Chromium and genuine MoEngage report mappings before running attribution")
+            raise MoEngageError("Configure genuine MoEngage report mappings before running attribution")
         await self.browser.wait_until_ready(timeout_seconds=timeout_seconds)
         status, message = await self.browser.status()
         if status != "connected":

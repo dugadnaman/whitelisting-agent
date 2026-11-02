@@ -52,8 +52,8 @@ def validate_ui_config(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("ui_config contains unsupported settings; API/mock modes and secrets are not supported")
     if not value:
         return {}
-    if value.get("workflow") != "recorded_behavior":
-        raise ValueError("ui_config.workflow must be recorded_behavior")
+    if value.get("workflow") not in {"recorded_behavior", "analytics_api", "api"}:
+        raise ValueError("ui_config.workflow must be recorded_behavior or analytics_api")
     mapping = value.get("query_url_map")
     if not isinstance(mapping, dict) or not mapping or len(mapping) > 50:
         raise ValueError("ui_config.query_url_map must contain the supported brands' report URLs")
@@ -172,9 +172,11 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        mode = os.getenv("MOENGAGE_MODE", "browser").strip().lower()
-        if mode != "browser" or os.getenv("ALLOW_MOCK_WRITES", "false").lower() not in {"", "0", "false", "no"}:
-            raise ValueError("Only genuine browser attribution is supported; remove API/mock settings")
+        mode = os.getenv("MOENGAGE_MODE", "").strip().lower()
+        if not mode:
+            mode = "browser" if os.getenv("MOENGAGE_REMOTE_CDP_URL") else "api"
+        if mode not in {"browser", "api", "analytics"} or os.getenv("ALLOW_MOCK_WRITES", "false").lower() not in {"", "0", "false", "no"}:
+            raise ValueError("Only genuine MoEngage attribution is supported; mock writes are not allowed")
         directory = Path(os.getenv("STORAGE_DIR", "/data"))
         credential_file_env = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
         result = cls(
