@@ -46,6 +46,9 @@ Run one backend process and deployment replica. Jobs/connections remain memory-o
 - Google API requests now have 10-second connect / 45-second read timeouts. The previous actual client reported `timeout=None`. A controlled stalled HTTP write verified timeout propagation and zero automatic write replays; the probe accelerated the configured timeout to 50 ms rather than waiting 45 seconds. Cancellation still waits for an in-flight Google RPC to settle before admitting another job.
 - Repeated genuine HTTP queries and Google writes on isolated worksheet **`HTTP Hardening 2026-11-03 6aa045`**. Verified all 10 output cells, refusal after a real source-name edit, preservation after another actor completed the row, unchanged nonmetric inputs/provenance and three-row rerun preservation. The completed-row preservation phase also verified the full Mastersheet digest was unchanged. No test writes targeted Mastersheet.
 
+- Job history now identifies both the spreadsheet and worksheet. Switching approved tabs no longer leaves different sources with indistinguishable display names.
+- Render readiness probes `/api/health`, so a listening Next.js port alone is insufficient. Supervisor writes its PID under `/tmp` for the non-root runtime user; the final live startup logged `supervisord started with pid 1` without the previous PID-file permission error.
+
 ## Live cutover verification
 
 Actual main backend ran on loopback port 18000 and the built production frontend on 13000, with private disposable identities/database/setup. Attribution used real Apparel session credentials and real Google access, not mocked provider responses. No report-browser process/CDP endpoint was started. The unrelated scheduler was disabled in the disposable smoke launcher.
@@ -82,9 +85,30 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=backend:agents/apparel-attribution/B
 
 Temporary smoke scripts, captured credentials, identities and services are not deployment artifacts. The Google verification worksheet remains the inspectable result artifact. Live credentials, profiles and keys must never be committed.
 
+## Main Render verification — 2026-11-03
+
+Live service: [Apparel attribution](https://whitelisting-agent.onrender.com/apparel/attribution). Final deployed source: [`0c6e4db`](https://github.com/dugadnaman/whitelisting-agent/commit/0c6e4db6d8199679e0bd49841b922e86d6544bd2), following the HTTP cutover in `90a3456`. A platform superadmin must select **Apparel** in the account selector; selecting Tata does not grant an Apparel UI context.
+
+The real production UI previewed and started the write run on [HTTP Hardening 2026-11-03 6aa045](https://docs.google.com/spreadsheets/d/1QTeoRx9gHNDNXmDYRCedTaH-QmTdjFnTOCz0YmQYSOw/edit#gid=1716957635). All test writes targeted that isolated worksheet, never Mastersheet. Used an isolated local Chrome profile only for portal verification; attribution executed as HTTP requests on the main Render service, without a hosted report browser.
+
+| Live scenario | Processed | Successful | Failed | Preserved |
+|---|---:|---:|---:|---:|
+| Seven-brand, three-channel UI run | 9 | 8 | 0 | 1 |
+| Immediate rerun, overwrite off | 9 | 0 | 0 | 9 |
+| Crocs missing-classification check | 1 | 0 | 1 | 0 |
+| Recovery after the final Render deployment | 9 | 0 | 0 | 9 |
+
+- Covered **AGIPL, Aldo, BBW, CIS, CK, R&B and VS** across **WhatsApp, SMS and RCS**, including Online, Offline and Overall, multi-day windows, CIS's SP filter, AGIPL's explicit BBW target, and a genuine BBW/RCS zero-result campaign.
+- Independently checked **all 38 written metric cells** against job results. Nonmetric cells/provenance and the already-complete row were unchanged. The verification worksheet was exactly unchanged by preservation, the Crocs failure and restart recovery. The complete `Mastersheet!A:AG` value digest remained unchanged.
+- Four authenticated CSV exports returned the expected 9 / 9 / 1 / 9 rows. Checked unique sheet-row identities, campaign IDs, brand/channel/type, goal ranges, statuses and every metric; numeric zeroes remained zeroes and nonapplicable/missing metrics remained blank.
+- The original write, preservation and Crocs jobs were `8991f67b442e4d7d9c3297af96a36f60`, `4527c6ff861145b090d822799615eec0` and `0f457b5a0bf149459f0870226ea7e8d5`. These predated the final deployment and were cleared from memory on restart. Recovery job **`30098b101428427ca7298065c5169b02`** confirmed all nine rows were preserved and its source label included the exact verification worksheet.
+- New process startup retained the encrypted Apparel session, stable JWT authentication and environment-installed Google key, while job history reset as documented. Live health returned `moengage_mode=api`, Google configured, MoEngage connected and `mock_writes_enabled=false`. The actual portal recovered/reconnected after restart.
+- Unauthenticated job access returned **401**. Replacing the sealed Google key returned **409**, with the correct `APPAREL_GOOGLE_*` configuration instructions. Setup changes during an active run also returned **409** rather than changing its write target.
+- Restored the approved target to **Mastersheet** after each write/recovery phase. The user's existing browser remained on `tcl_promo` / RCS; no Tata/Bajaj destination or credentials were changed. Existing 29 Render variables were preserved when adding only the three Apparel Google variables. No local Docker build or browser download was used.
+
 ## Deployment status and remaining constraints
 
-The browser-free main-app path is locally verified; **a new Render release has not been deployed by this cutover**. Deploy the root image/source with the persistent configuration described above. No Oracle/Railway browser infrastructure is required for attribution. Existing instructions against local Docker builds/large browser-image downloads remain respected: this verification used native Python and the production Node frontend, not Docker builds.
+The browser-free implementation is deployed and verified on the existing main Render service. No Oracle/Railway attribution browser or worker infrastructure is required. Render's Free service can still cold-start, portal credentials can expire and jobs remain memory-only; HTTP execution does not remove those platform constraints. Production setup uses the existing credential database and a sealed Google key in Render configuration rather than ephemeral uploaded credentials.
 
 The actual native CLI also reached `Ready: http://127.0.0.1:13001/apparel/attribution` with only the main API on 18001 and the frontend on 13001. Its own readiness checks observed API health and the real login page returning 200; no Chrome or worker subprocess was launched.
 

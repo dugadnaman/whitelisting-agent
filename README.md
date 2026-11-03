@@ -272,11 +272,13 @@ The launcher accepts its exact state marker with LF or Windows CRLF line endings
 
 The root Docker image includes the attribution module and Google dependencies. Deploy that image on the existing main service; do not provision an attribution browser or worker service. Run one backend process/replica: job admission and job history are process-local, with a storage lock guarding a shared attribution directory.
 
+Set Render's **Health Check Path** to `/api/health`, not just the frontend port. Supervisor uses `/tmp/supervisord.pid`, writable by the container's non-root user. Wait for active attribution jobs before deploying; rolling instances do not share an in-memory queue or filesystem lock.
+
 Keep the existing persistent `JWT_SECRET` and credential database. For durable file-based setup/key uploads, point `APPAREL_ATTRIBUTION_STORAGE_DIR` at a persistent disk directory. Without a disk, use `APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON`, `APPAREL_GOOGLE_SPREADSHEET_URL` and `APPAREL_GOOGLE_WORKSHEET_NAME` as deployment configuration; uploaded keys/setup on an ephemeral filesystem do not survive redeployment. Environment-installed Google keys are sealed against portal replacement.
 
-Connect only Apparel's MoEngage session through Settings/Auth Sync. On restart, reconnect the sheet and rerun with overwrite off: sheet results persist, but in-memory job history/CSV downloads do not. The browser-free cutover is locally verified; that does not claim a new Render deployment has already been released.
+Connect only Apparel's MoEngage session through Settings/Auth Sync. On restart, reconnect the sheet and rerun with overwrite off: sheet results persist, but in-memory job history/CSV downloads do not. See the [runtime and verification notes](docs/APPAREL_ATTRIBUTION_PAUSED.md) for production evidence and the remaining Crocs prerequisite.
 
-Verification: production frontend build, real main-app HTTP attribution/sheet writes, restart recovery, and the browser-free native launcher were exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
+Verification: the production frontend build, real HTTP attribution/Google writes, CSV exports and preservation were exercised natively on macOS and on the live main Render service. Native launcher startup/recovery was exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
 
 ### 1. Environment Configuration
 
