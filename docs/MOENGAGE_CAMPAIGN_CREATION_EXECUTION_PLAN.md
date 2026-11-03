@@ -1,5 +1,10 @@
 # MoEngage campaign-draft agent — execution plan and decision log
 
+## Bulk-first operator workflow (2026-11-03)
+
+Bulk campaign creation is the primary workflow. The campaign page opens on **Bulk Campaign Upload** on every visit, including saved-batch links; an old remembered single-builder tab cannot hide the bulk queue. Upload CSV/XLSX → review each destination and validation result → stage → **Create Ready WhatsApp Drafts Sequentially** → inspect persisted verified/blocked/uncertain results. The single builder remains available under **Single Campaign (Optional)**, with its existing form-state preservation. This presentation change does not alter write gates, rate caps, workspace routing, or human-only publishing.
+
+
 ## Brief-driven WhatsApp routing (2026-11-02)
 
 The operator selected **Route by brief**. Every WhatsApp JSON/CSV/XLSX row requires `workspace_id` (exact portal workspace ID) or `workspace` (exact registered name); Jira briefs preserve explicit “MoEngage workspace”/“MoEngage workspace ID” metadata, and the review UI requires a destination when missing. Never infer a destination from campaign name, product or the account default. Mixed-workspace uploads persist each row's resolved destination independently. Campaign idempotency, claims and read-back are scoped to that actual workspace; an existing batch cannot be retargeted by a caller.

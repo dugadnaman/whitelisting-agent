@@ -310,7 +310,7 @@ export default function MoEngageCampaignsPage() {
   const account = superadmin ? selectedAccount : currentUser?.tenant_id || '';
   const allowed = !!currentUser && (account === 'tata' || account === 'bajaj') && (superadmin || currentUser.tenant_id === account);
 
-  const [activeTab, setActiveTab] = useTabState<'batch' | 'single' | 'templates'>('moe_active_tab', 'single');
+  const [activeTab, setActiveTab] = useState<'batch' | 'single' | 'templates'>('batch');
   const [catalog, setCatalog] = useState<MoEngageCatalog | null>(null);
   const [waWorkspaces, setWaWorkspaces] = useState<{ id: string; name: string }[]>([]);
   const [waWorkspace, setWaWorkspace] = useState('');
@@ -498,7 +498,7 @@ export default function MoEngageCampaignsPage() {
     try {
       const result = await stageMoEngageDraftBatch(file, account);
       showBatch(result, storageKey);
-      setNotice('Batch staged successfully. Select any ready row to create a draft in MoEngage.');
+      setNotice('Batch staged successfully. Review the destinations below, then use Create Ready WhatsApp Drafts Sequentially to process the ready rows.');
       setFile(null);
       setPreview(null);
       if (fileRef.current) fileRef.current.value = '';
@@ -884,10 +884,10 @@ export default function MoEngageCampaignsPage() {
               <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600 text-white font-bold text-sm">
                 ME
               </span>
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">MoEngage Campaign Builder</h1>
+              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">MoEngage Bulk Campaign Builder</h1>
             </div>
             <p className="text-sm text-gray-500 mt-1">
-              Prepare and review WhatsApp, Push & Email drafts in <strong>{account.toUpperCase()}</strong>. Publishing remains a human action in MoEngage.
+              Upload a campaign spreadsheet, review every row, and create verified drafts in <strong>{account.toUpperCase()}</strong>. Publishing remains a human action in MoEngage.
             </p>
           </div>
 
@@ -933,17 +933,6 @@ export default function MoEngageCampaignsPage() {
         <div className="flex border-b border-gray-200 gap-6 pt-2 text-sm font-semibold">
           <button
             type="button"
-            onClick={() => setActiveTab('single')}
-            className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
-              activeTab === 'single'
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-900'
-            }`}
-          >
-            <span>✨</span> Single Campaign Builder
-          </button>
-          <button
-            type="button"
             onClick={() => setActiveTab('batch')}
             className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'batch'
@@ -951,8 +940,19 @@ export default function MoEngageCampaignsPage() {
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
-            <span>📊</span> Spreadsheet Batch Upload
+            <span>📊</span> Bulk Campaign Upload
             {batch && <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-blue-100 text-blue-800">{batch.items.length}</span>}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('single')}
+            className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
+              activeTab === 'single'
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-900'
+            }`}
+          >
+            Single Campaign (Optional)
           </button>
           <button
             type="button"
@@ -1341,7 +1341,7 @@ export default function MoEngageCampaignsPage() {
           <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-bold text-gray-900">Upload Campaign Spreadsheet</h2>
+                <h2 className="text-base font-bold text-gray-900">Bulk Upload — Review Rows — Create Drafts</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Upload a <code>.csv</code> or <code>.xlsx</code> file. Every WhatsApp row requires its own exact <code>workspace</code> name or portal <code>workspace_id</code>; review each destination before creating.
                 </p>
