@@ -119,7 +119,7 @@ class ReportService:
         job = ReportJob(
             id=job_id,
             upload_id=connection_id,
-            filename=connection.spreadsheet_title,
+            filename=f"{connection.spreadsheet_title} / {connection.worksheet_title}",
             agipl_attribution_brand=agipl_attribution_brand,
             overwrite_existing=overwrite_existing,
         )

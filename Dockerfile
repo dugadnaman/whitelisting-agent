@@ -66,7 +66,7 @@ RUN mkdir -p /var/log/supervisor /etc/supervisor/conf.d
 RUN echo '[supervisord]\n\
 nodaemon=true\n\
 logfile=/var/log/supervisor/supervisord.log\n\
-pidfile=/var/run/supervisord.pid\n\
+pidfile=/tmp/supervisord.pid\n\
 \n\
 [program:fastapi]\n\
 directory=/app\n\
