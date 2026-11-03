@@ -115,6 +115,23 @@ The real production UI previewed and started the write run on [HTTP Hardening 20
 - The user confirmed that MoEngage deduplicates a customer across the entire goal range. Daily-sum customer semantics are removed. Revenue remains the entire-range sum; existing completed rows require an intentional overwrite run to recalculate rather than being silently replaced.
 - Regression verification: **521 tests and 92 subtests passed** across attribution, account isolation, extension/session capture, credential validation, Tata click counts and native startup. The production Next.js build passed compilation, lint/type checks and static generation. Live read-only queries also exercised VS, Aldo, BBW, CIS, CK, R&B and AGIPL/BBW, including genuine zero results, before deployment.
 
+### Live verification of `645a77d`
+
+The correction is deployed on the existing main Render service as [`645a77d`](https://github.com/dugadnaman/whitelisting-agent/commit/645a77d). Render promoted it to Live after 2m 32s. Health reported direct API mode, Google configured, MoEngage connected and mock writes disabled; no new browser service or environment variables were introduced.
+
+| Isolated production scenario | Processed | Successful | Failed | Preserved |
+|---|---:|---:|---:|---:|
+| Eight brands / three channels, fresh metrics | 12 | 10 | 1 | 1 |
+| Rerun with overwrite off | 12 | 0 | 1 | 11 |
+| Intentional Crocs recalculation of obsolete daily counts | 3 | 2 | 1 | 0 |
+
+The expected failure in each run was the deliberately Online-labelled Crocs row, which retained blank metrics. The fresh run wrote **48 metric cells**, including a genuine BBW/RCS zero result. Every metric cell matched its row result; protected and nonmetric cells were unchanged. The rerun left the entire worksheet unchanged. Replacing only the isolated Crocs customer cells with the old daily count and rerunning with overwrite enabled restored the verified entire-period count.
+
+- Production job IDs: `649ccf93b68745aba4edfe16b3bf0c40`, `9fe72f92a0be42e6b185b0668e14b8d4`, `9f271c783526465fa54b46eab7bbe301`.
+- All three authenticated CSV exports matched **12 / 12 / 3** result rows and every customer/revenue metric. Zeroes remained explicit; nonapplicable and failed metrics remained blank.
+- All writes stayed on the isolated Crocs verification worksheet. Mastersheet's `A:AG` digest remained unchanged. Restored the approved target to **Mastersheet** after verification.
+- The deployed API and actual portal previewed **304 campaigns across all eight brands and all three channels** for sent dates 2026-10-27 through 2026-11-01. Rows 3600–3615 displayed the corrected 2026-10-30 → 2026-11-02 goal window; the only input warning was row 3879's `Incorrect brief`. The private-profile Chrome UI showed the new distinct-count/Crocs guidance and reported no browser errors. No Mastersheet attribution job was started for this check.
+
 ## Deployment status and remaining constraints
 
 The browser-free implementation is deployed and verified on the existing main Render service. No Oracle/Railway attribution browser or worker infrastructure is required. Render's Free service can still cold-start, portal credentials can expire and jobs remain memory-only; HTTP execution does not remove those platform constraints. Production setup uses the existing credential database and a sealed Google key in Render configuration rather than ephemeral uploaded credentials.
