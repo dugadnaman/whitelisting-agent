@@ -6,6 +6,10 @@ Bulk campaign creation is the primary workflow. The campaign page opens on **Bul
 
 The plain campaign URL now starts with a clean upload view instead of automatically reopening the last batch. Use **Open last saved batch** or an explicit saved-batch link to resume; **New bulk upload** clears only the current view, never the durable batch or remote drafts. Campaign cards lead with names, destination/audience and message copy. WhatsApp previews resolve live template bodies once per distinct destination workspace and substitute stored variables; unavailable copy is explicitly labeled, never invented. Source identifiers, provider IDs, timing, variable maps and campaign IDs are under a closed **Details** disclosure. Blocking issues, uncertainty warnings and action controls remain visible without opening Details.
 
+**Remove batch** removes an owner-owned batch from app history using a durable archive marker; it does not delete or cancel MoEngage campaigns. Archived batch links and create actions return 404. Audit rows, identity claims and attempt reservations remain, preventing the archived source from silently recreating drafts. Archive/create operations serialize under batch and identity locks; ongoing or unconfirmed attempts must be reconciled before removal. The UI confirms this boundary and clears only the matching saved shortcut. **New bulk upload** remains a nondestructive view reset.
+
+On 2026-11-03 the user requested cleanup of test batch `5f1ad898-f1ab-4403-9036-e884598e5ad1`. Its two matching `DRAFT_ONLY_POSTFIX` campaigns (`6ae86e994ef7d8ff17074df7` in Tata Capital and `6ae86eb3af550c566f9a8e16` in Services_TC) were independently identity-checked and confirmed in Drafts, deleted through MoEngage's native draft-delete contract, and confirmed absent from Drafts. This was a separate explicitly authorized provider cleanup, not a side effect of the app removal endpoint. Other batches and real campaigns were not deleted.
+
 
 ## Brief-driven WhatsApp routing (2026-11-02)
 

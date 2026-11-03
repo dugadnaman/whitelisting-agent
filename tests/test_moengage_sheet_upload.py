@@ -140,3 +140,40 @@ def test_client_whatsapp_workbook_resolves_only_explicit_workspace_audiences(tmp
         )
         assert payload["scheduling_details"]["start_time"].endswith(clock)
     assert result["items"][2]["candidate_v5_payload"] is None
+
+
+def test_batch_removal_requires_owner_jwt_and_hides_archived_get_and_create(monkeypatch, provision_user):
+    import db
+
+    _, owner_headers = provision_user(tenant="tata", email=USER["email"])
+    _, other_headers = provision_user(tenant="tata", email="other-owner@example.com")
+    monkeypatch.setenv("MOENGAGE_DRAFT_TATA_ALLOW_SQLITE", "true")
+    monkeypatch.setattr("moengage_draft_creation.load_server_catalog", lambda _: CATALOG)
+    client = TestClient(app)
+    with patch("requests.request", side_effect=AssertionError("Removal must never call MoEngage")):
+        staged = client.post(
+            "/api/moengage/drafts/batches", headers=owner_headers, data={"account": "tata"},
+            files={"file": ("remove-me.csv", _csv_bytes(ROW), "text/csv")},
+        )
+        assert staged.status_code == 200, staged.text
+        batch_id = staged.json()["batch_id"]
+        path = f"/api/moengage/drafts/batches/{batch_id}"
+        assert client.delete(path, params={"account": "tata"}).status_code == 401
+        assert client.delete(path, headers=owner_headers, params={"account": "bajaj"}).status_code == 403
+        assert client.delete(path, headers=other_headers, params={"account": "tata"}).status_code == 403
+        assert client.delete("/api/moengage/drafts/batches/missing", headers=owner_headers,
+                             params={"account": "tata"}).status_code == 404
+        with db.get_db() as conn:
+            conn.execute("UPDATE moengage_draft_batch_rows SET status='UNCERTAIN' WHERE batch_id=?", (batch_id,))
+        conflict = client.delete(path, headers=owner_headers, params={"account": "tata"})
+        assert conflict.status_code == 409
+        assert client.get(path, headers=owner_headers, params={"account": "tata"}).status_code == 200
+        with db.get_db() as conn:
+            conn.execute("UPDATE moengage_draft_batch_rows SET status='preview_ready' WHERE batch_id=?", (batch_id,))
+        for _ in range(2):
+            removed = client.delete(path, headers=owner_headers, params={"account": "tata"})
+            assert removed.status_code == 200, removed.text
+            assert removed.json() == {"ok": True, "batch_id": batch_id, "archived": True}
+        assert client.get(path, headers=owner_headers, params={"account": "tata"}).status_code == 404
+        assert client.post(f"{path}/rows/2/create", headers=owner_headers, data={"account": "tata"}).status_code == 404
+        assert client.delete(path, headers=other_headers, params={"account": "tata"}).status_code == 403

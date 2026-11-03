@@ -124,7 +124,7 @@ class DraftBatchQueue:
         with self._db() as conn:
             init_database(conn)
 
-    def _batch_row(self, conn: Any, batch_id: str) -> dict[str, Any]:
+    def _batch_row(self, conn: Any, batch_id: str, *, include_archived: bool = False) -> dict[str, Any]:
         row = conn.execute(
             "SELECT * FROM moengage_draft_batches WHERE batch_id=? AND account=? "
             "AND workspace_id=? AND creator_sub=? AND creator_email=?",
@@ -137,7 +137,56 @@ class DraftBatchQueue:
             if exists is not None:
                 raise BatchAccessDenied("Draft batch access denied")
             raise LookupError("Draft batch not found")
+        if row["archived_at"] is not None and not include_archived:
+            raise LookupError("Draft batch not found")
         return dict(row)
+
+    def _lock_batch(self, conn: Any, batch_id: str) -> None:
+        # Archive and create must serialize before checking visibility or claims.
+        if conn.is_postgres:
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (f"moengage-draft-batch:{batch_id}",))
+        else:
+            conn.raw_connection.execute("BEGIN IMMEDIATE")
+
+    def archive(self, batch_id: str) -> dict[str, Any]:
+        """Hide an owned batch without changing audit rows, claims or provider drafts."""
+        with self._db() as conn:
+            self._lock_batch(conn, batch_id)
+            batch = self._batch_row(conn, batch_id, include_archived=True)
+            if batch["archived_at"] is None:
+                identities = conn.execute(
+                    "SELECT DISTINCT account,workspace_id,source_ref,row_id FROM moengage_draft_batch_rows "
+                    "WHERE batch_id=? ORDER BY account,workspace_id,source_ref,row_id", (batch_id,),
+                ).fetchall()
+                if conn.is_postgres:
+                    for row in identities:
+                        conn.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (
+                            f"{row['account']}:{row['workspace_id']}:{row['source_ref']}:{row['row_id']}",))
+                # Include duplicate uploads and the lower-level reservation ledger:
+                # an apparently ready row must not conceal an ongoing source attempt.
+                unconfirmed = conn.execute(
+                    "SELECT 1 FROM moengage_draft_batch_rows AS active "
+                    "WHERE active.status NOT IN ('preview_ready','blocked','VERIFIED','VALIDATED','NEEDS_FIX') "
+                    "AND EXISTS (SELECT 1 FROM moengage_draft_batch_rows AS selected "
+                    "WHERE selected.batch_id=? AND selected.account=active.account "
+                    "AND selected.workspace_id=active.workspace_id AND selected.source_ref=active.source_ref "
+                    "AND selected.row_id=active.row_id)", (batch_id,),
+                ).fetchone()
+                attempt = conn.execute(
+                    "SELECT 1 FROM moengage_draft_attempts AS attempt "
+                    "WHERE (attempt.state NOT IN ('VERIFIED','VALIDATED','NEEDS_FIX') OR attempt.campaign_id IS NULL) "
+                    "AND EXISTS (SELECT 1 FROM moengage_draft_batch_rows AS selected "
+                    "WHERE selected.batch_id=? AND selected.account=attempt.account "
+                    "AND selected.workspace_id=attempt.workspace_id AND selected.source_ref=attempt.source_ref "
+                    "AND selected.row_id=attempt.row_id)", (batch_id,),
+                ).fetchone()
+                if unconfirmed is not None or attempt is not None:
+                    raise ValueError("Draft batch has an ongoing or unconfirmed attempt; inspect it before removal")
+                conn.execute(
+                    "UPDATE moengage_draft_batches SET archived_at=? WHERE batch_id=?",
+                    (time.time(), batch_id),
+                )
+        return {"ok": True, "batch_id": batch_id, "archived": True}
 
     def stage(self, rows: list[Any], source_ref: str) -> dict[str, Any]:
         """Persist every preview row, including blocked/duplicated rows, with raw inputs private."""
@@ -234,19 +283,21 @@ class DraftBatchQueue:
         if creator.catalog.get("workspace_id") != target:
             raise PermissionError("Staged workspace differs from the approved live workspace")
         with self._db() as conn:
+            self._lock_batch(conn, batch_id)
             if conn.is_postgres:
                 conn.execute("SELECT pg_advisory_xact_lock(hashtext(?))", (
                     f"{self.account}:{target}:{current['source_ref']}:{row_id}",))
-            else:
-                conn.raw_connection.execute("BEGIN IMMEDIATE")
             self._batch_row(conn, batch_id)
             claimed_elsewhere = conn.execute(
-                "SELECT batch_id FROM moengage_draft_batch_rows WHERE account=? AND workspace_id=? "
-                "AND source_ref=? AND row_id=? AND batch_id<>? AND status NOT IN ('preview_ready','blocked')",
+                "SELECT other.batch_id FROM moengage_draft_batch_rows AS other "
+                "JOIN moengage_draft_batches AS batch ON batch.batch_id=other.batch_id "
+                "WHERE other.account=? AND other.workspace_id=? AND other.source_ref=? AND other.row_id=? "
+                "AND other.batch_id<>? AND (other.status NOT IN ('preview_ready','blocked') "
+                "OR batch.archived_at IS NOT NULL)",
                 (self.account, target, current["source_ref"], row_id, batch_id),
             ).fetchone()
             if claimed_elsewhere is not None:
-                raise ValueError("Source row already attempted in another batch")
+                raise ValueError("Source row already attempted or archived in another batch")
             if resumable:
                 # A known remote draft must never become a fresh provider POST if
                 # its lower-level durable reservation is missing or inconsistent.

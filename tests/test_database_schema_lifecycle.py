@@ -93,3 +93,39 @@ def test_configured_database_outage_does_not_create_shadow_queue(tmp_path, monke
     with pytest.raises(RuntimeError, match="PostgreSQL database is unavailable"):
         db.get_db()
     assert not fallback.exists()
+
+
+def test_legacy_draft_batch_archive_migration_preserves_rows_and_marker(tmp_path):
+    with connect(tmp_path / "legacy-batches.db") as conn:
+        for statement in db.SQLITE_SCHEMA_DDL:
+            conn.execute(statement.replace(",\n        archived_at REAL", ""))
+        conn.execute(
+            "INSERT INTO moengage_draft_batches "
+            "(batch_id,account,workspace_id,creator_sub,creator_email,source_ref,created_at) "
+            "VALUES ('batch','tata','workspace','owner','owner@example.com','source.csv',123)"
+        )
+        conn.execute(
+            "INSERT INTO moengage_draft_batch_rows "
+            "(batch_id,position,account,workspace_id,source_ref,row_id,channel,row_json,status,issues_json,updated_at) "
+            "VALUES ('batch',0,'tata','workspace','source.csv','1','EMAIL','{}','VALIDATED','[]',124)"
+        )
+        conn.commit()
+        db.init_database(conn, force=True)
+        batch = dict(conn.execute("SELECT * FROM moengage_draft_batches").fetchone())
+        assert batch == {
+            "batch_id": "batch", "account": "tata", "workspace_id": "workspace",
+            "creator_sub": "owner", "creator_email": "owner@example.com", "source_ref": "source.csv",
+            "created_at": 123, "archived_at": None,
+        }
+        conn.execute("UPDATE moengage_draft_batches SET archived_at=125 WHERE batch_id='batch'")
+        conn.commit()
+        db.init_database(conn, force=True)
+        assert conn.execute("SELECT archived_at FROM moengage_draft_batches").fetchone()[0] == 125
+        row = conn.execute("SELECT status,updated_at FROM moengage_draft_batch_rows").fetchone()
+        assert tuple(row) == ("VALIDATED", 124)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO moengage_draft_batch_rows "
+                "(batch_id,position,account,workspace_id,source_ref,row_id,channel,row_json,status,issues_json,updated_at) "
+                "VALUES ('batch',1,'tata','workspace','source.csv','1','EMAIL','{}','UNCERTAIN','[]',126)"
+            )

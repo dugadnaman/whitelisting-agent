@@ -1678,6 +1678,17 @@ export function fetchMoEngageDraftBatch(batchId: string, account: string): Promi
   );
 }
 
+export function removeMoEngageDraftBatch(batchId: string, account: string): Promise<{
+  ok: true;
+  batch_id: string;
+  archived: true;
+}> {
+  return moEngageDraftRequest(
+    `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}?${new URLSearchParams({ account })}`,
+    { method: "DELETE" }
+  );
+}
+
 export function createMoEngageDraftRow(batchId: string, rowId: string, account: string): Promise<MoEngageDraftBatch> {
   const form = new FormData();
   form.append("account", account);

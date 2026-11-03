@@ -109,7 +109,8 @@ def test_batch_owner_requires_both_subject_and_email(isolated_batch_db, changes)
     batch = owner.stage([ROW], ROW["source_ref"])
     intruder = _queue(FakeWriter(), user={**USER, **changes})
     for operation in (lambda: intruder.get(batch["batch_id"]),
-                      lambda: intruder.create_row(batch["batch_id"], "1")):
+                      lambda: intruder.create_row(batch["batch_id"], "1"),
+                      lambda: intruder.archive(batch["batch_id"])):
         with pytest.raises(BatchAccessDenied):
             operation()
     assert owner.get(batch["batch_id"])["items"][0]["status"] == "preview_ready"
@@ -125,6 +126,8 @@ def test_superadmin_cannot_cross_batch_account_ownership(isolated_batch_db):
         intruder.get(batch["batch_id"])
     with pytest.raises(BatchAccessDenied):
         intruder.create_row(batch["batch_id"], "1")
+    with pytest.raises(BatchAccessDenied):
+        intruder.archive(batch["batch_id"])
 
 
 @pytest.mark.parametrize("invalid", [{**ROW, "source_ref": "another.csv"},
@@ -297,3 +300,124 @@ def test_legacy_preflight_rejection_migration_never_unlocks_a_provider_attempt(i
         assert stored["candidate_v5_payload"] is None
         assert queue.create_row(replacement["batch_id"], ROW["row_id"])["items"][0]["status"] == "VALIDATED"
     assert [name for name, _ in writer.calls].count("create") == 1
+
+
+def test_archive_is_durable_idempotent_and_preserves_audit_and_source_claims(isolated_batch_db):
+    writer = FakeWriter()
+    queue = _queue(writer)
+    batch_id = queue.stage([ROW], ROW["source_ref"])["batch_id"]
+    assert queue.create_row(batch_id, ROW["row_id"])["items"][0]["status"] == "VALIDATED"
+    with db.get_db() as conn:
+        original_batch = dict(conn.execute("SELECT * FROM moengage_draft_batches").fetchone())
+        audit = [dict(row) for row in conn.execute("SELECT * FROM moengage_draft_batch_rows").fetchall()]
+        attempts = [dict(row) for row in conn.execute("SELECT * FROM moengage_draft_attempts").fetchall()]
+    calls = list(writer.calls)
+    expected = {"ok": True, "batch_id": batch_id, "archived": True}
+    assert queue.archive(batch_id) == expected
+    with db.get_db() as conn:
+        archived = dict(conn.execute("SELECT * FROM moengage_draft_batches").fetchone())
+        assert archived["archived_at"] >= original_batch["created_at"]
+        assert archived == {**original_batch, "archived_at": archived["archived_at"]}
+        assert [dict(row) for row in conn.execute("SELECT * FROM moengage_draft_batch_rows").fetchall()] == audit
+        assert [dict(row) for row in conn.execute("SELECT * FROM moengage_draft_attempts").fetchall()] == attempts
+    restarted = _queue(writer)
+    assert restarted.archive(batch_id) == expected
+    with db.get_db() as conn:
+        assert conn.execute("SELECT archived_at FROM moengage_draft_batches").fetchone()["archived_at"] == archived["archived_at"]
+    for operation in (lambda: restarted.get(batch_id),
+                      lambda: restarted.create_row(batch_id, ROW["row_id"])):
+        with pytest.raises(LookupError, match="not found"):
+            operation()
+    duplicate = restarted.stage([ROW], ROW["source_ref"])
+    with pytest.raises(ValueError, match="already attempted"):
+        restarted.create_row(duplicate["batch_id"], ROW["row_id"])
+    assert queue.creator.create(ROW)["state"] == "VALIDATED"
+    assert writer.calls == calls
+
+
+def test_archiving_unattempted_rows_does_not_allow_source_recreation(isolated_batch_db):
+    writer = FakeWriter()
+    queue = _queue(writer)
+    batch_id = queue.stage([ROW], ROW["source_ref"])["batch_id"]
+    wrong_workspace = _queue(writer, catalog={**CATALOG, "workspace_id": "another-workspace"})
+    with pytest.raises(BatchAccessDenied):
+        wrong_workspace.archive(batch_id)
+    assert queue.archive(batch_id)["archived"] is True
+    duplicate = queue.stage([ROW], ROW["source_ref"])
+    with pytest.raises(ValueError, match="archived"):
+        queue.create_row(duplicate["batch_id"], ROW["row_id"])
+    with pytest.raises(LookupError, match="not found"):
+        queue.archive("missing-batch")
+    assert writer.calls == []
+    with db.get_db() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM moengage_draft_attempts").fetchone()["n"] == 0
+
+
+@pytest.mark.parametrize("status", ["UNCERTAIN", "MAYBE_SENT", "CREATED", "NEEDS_REVIEW", "BLOCKED", "unknown"])
+def test_archive_rejects_unconfirmed_row_states_without_changing_them(isolated_batch_db, status):
+    queue = _queue(FakeWriter())
+    batch_id = queue.stage([ROW], ROW["source_ref"])["batch_id"]
+    with db.get_db() as conn:
+        conn.execute("UPDATE moengage_draft_batch_rows SET status=? WHERE batch_id=?", (status, batch_id))
+    with pytest.raises(ValueError, match="ongoing or unconfirmed"):
+        queue.archive(batch_id)
+    assert queue.get(batch_id)["items"][0]["status"] == status
+    with db.get_db() as conn:
+        assert conn.execute("SELECT archived_at FROM moengage_draft_batches").fetchone()["archived_at"] is None
+
+
+def test_archive_checks_ledger_even_when_batch_row_looks_ready(isolated_batch_db):
+    writer = FakeWriter(create_error=TimeoutError("provider acknowledgement lost"))
+    queue = _queue(writer)
+    batch_id = queue.stage([ROW], ROW["source_ref"])["batch_id"]
+    assert queue.creator.create(ROW)["state"] == "UNCERTAIN"
+    with pytest.raises(ValueError, match="ongoing or unconfirmed"):
+        queue.archive(batch_id)
+    assert queue.get(batch_id)["items"][0]["status"] == "preview_ready"
+    assert [name for name, _ in writer.calls] == ["create"]
+
+
+def test_archive_rejects_active_create_and_its_duplicate_upload(isolated_batch_db):
+    writer = _PausedWriter()
+    queue = _queue(writer)
+    batch_id = queue.stage([ROW], ROW["source_ref"])["batch_id"]
+    duplicate_id = queue.stage([ROW], ROW["source_ref"])["batch_id"]
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        active = pool.submit(queue.create_row, batch_id, ROW["row_id"])
+        try:
+            assert writer.entered.wait(5)
+            for target in (batch_id, duplicate_id):
+                with pytest.raises(ValueError, match="ongoing or unconfirmed"):
+                    queue.archive(target)
+                queue.get(target)
+        finally:
+            writer.release.set()
+        assert active.result(timeout=5)["items"][0]["status"] == "VALIDATED"
+    assert queue.archive(batch_id)["archived"] is True
+    assert [name for name, _ in writer.calls].count("create") == 1
+
+
+def test_create_rechecks_archive_under_the_shared_lock(isolated_batch_db, monkeypatch):
+    writer = FakeWriter()
+    queue = _queue(writer)
+    batch_id = queue.stage([ROW], ROW["source_ref"])["batch_id"]
+    entered, release = threading.Event(), threading.Event()
+    lock_batch = queue._lock_batch
+
+    def pause_create_lock(conn, selected_batch):
+        if threading.current_thread() is not threading.main_thread():
+            entered.set()
+            assert release.wait(5)
+        lock_batch(conn, selected_batch)
+
+    monkeypatch.setattr(queue, "_lock_batch", pause_create_lock)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        active = pool.submit(queue.create_row, batch_id, ROW["row_id"])
+        try:
+            assert entered.wait(5)
+            assert queue.archive(batch_id)["archived"] is True
+        finally:
+            release.set()
+        with pytest.raises(LookupError, match="not found"):
+            active.result(timeout=5)
+    assert writer.calls == []

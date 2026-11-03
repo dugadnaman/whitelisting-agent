@@ -10,6 +10,7 @@ import {
   fetchMoEngageDraftWorkspaces,
   fetchMoEngageDraftBatch,
   previewMoEngageDraftFile,
+  removeMoEngageDraftBatch,
   stageMoEngageDraftBatch,
 } from '@/lib/api';
 import type {
@@ -459,6 +460,21 @@ export default function MoEngageCampaignsPage() {
     [account]
   );
 
+  const clearSavedBatch = useCallback((id: string, key: string) => {
+    if (localStorage.getItem(key) === id) localStorage.removeItem(key);
+    setBatch(null);
+    setBatchScope('');
+    setPreview(null);
+    setFile(null);
+    setUncertainRows([]);
+    if (fileRef.current) fileRef.current.value = '';
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('batch') === id && url.searchParams.get('account') === account) {
+      url.searchParams.delete('batch');
+      window.history.replaceState(null, '', url.toString());
+    }
+  }, [account]);
+
   useEffect(() => {
     if (!superadmin) return;
     const requested = new URLSearchParams(window.location.search).get('account');
@@ -479,11 +495,12 @@ export default function MoEngageCampaignsPage() {
         if (active) showBatch(result, storageKey);
       })
       .catch((cause: unknown) => {
-        if (active) {
-          localStorage.removeItem(storageKey);
-          const url = new URL(window.location.href);
-          url.searchParams.delete('batch');
-          window.history.replaceState(null, '', url.toString());
+        if (!active) return;
+        if (cause instanceof MoEngageDraftRequestError && cause.status === 404) {
+          clearSavedBatch(id, storageKey);
+          setNotice('This saved batch is no longer available. Upload a spreadsheet to begin.');
+        } else {
+          setError(`Could not open saved batch: ${cause instanceof Error ? cause.message : String(cause)}`);
         }
       })
       .finally(() => {
@@ -492,7 +509,7 @@ export default function MoEngageCampaignsPage() {
     return () => {
       active = false;
     };
-  }, [account, allowed, storageKey, showBatch]);
+  }, [account, allowed, storageKey, showBatch, clearSavedBatch]);
 
   const chooseFile = async (selected: File | undefined) => {
     setFile(null);
@@ -548,8 +565,32 @@ export default function MoEngageCampaignsPage() {
     try {
       showBatch(await fetchMoEngageDraftBatch(batch.batch_id, account), storageKey);
     } catch (cause) {
+      if (cause instanceof MoEngageDraftRequestError && cause.status === 404) {
+        clearSavedBatch(batch.batch_id, storageKey);
+      }
       setError(`Could not read batch: ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeBatch = async () => {
+    if (!batch || batchScope !== storageKey || busy || loading || automatingWa || createInFlight.current) return;
+    if (!window.confirm(
+      `Remove this batch from local app history for ${account.toUpperCase()}?\n\nThis only archives the saved batch in this app. It does not delete, publish, send, or cancel any MoEngage drafts. Audit records and duplicate-prevention reservations are retained; the same source cannot be recreated.`
+    )) return;
+    createInFlight.current = true;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await removeMoEngageDraftBatch(batch.batch_id, account);
+      clearSavedBatch(batch.batch_id, storageKey);
+      setNotice('Batch removed from app history. MoEngage drafts were not changed.');
+    } catch (cause) {
+      setError(`Could not remove batch: ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      createInFlight.current = false;
       setBusy(false);
     }
   };
@@ -1395,13 +1436,23 @@ export default function MoEngageCampaignsPage() {
               onChange={(e) => void chooseFile(e.target.files?.[0])}
               className="block w-full text-sm file:mr-4 file:rounded-xl file:border-0 file:bg-blue-50 file:px-4 file:py-2.5 file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
             />
-            <button type="button" disabled={busy} className="text-xs text-blue-700 underline disabled:opacity-50"
+            <button type="button" disabled={busy || loading || automatingWa} className="text-xs text-blue-700 underline disabled:opacity-50"
               onClick={async () => {
+                if (busy || loading || automatingWa || createInFlight.current) return;
                 const id = localStorage.getItem(storageKey);
                 if (!id) { setNotice('No saved batch yet. Upload a spreadsheet to begin.'); return; }
                 setBusy(true);
+                setError('');
+                setNotice('');
                 try { showBatch(await fetchMoEngageDraftBatch(id, account), storageKey); }
-                catch { setError('Could not open the saved batch. Its link and owner account must match.'); }
+                catch (cause) {
+                  if (cause instanceof MoEngageDraftRequestError && cause.status === 404) {
+                    clearSavedBatch(id, storageKey);
+                    setNotice('This saved batch is no longer available. Upload a spreadsheet to begin.');
+                  } else {
+                    setError(`Could not open saved batch: ${cause instanceof Error ? cause.message : String(cause)}`);
+                  }
+                }
                 finally { setBusy(false); }
               }}>Open last saved batch</button>
           </section>
@@ -1481,6 +1532,14 @@ export default function MoEngageCampaignsPage() {
                       window.history.replaceState(null, '', url.toString());
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}>New bulk upload</button>
+                  <button
+                    type="button"
+                    disabled={busy || loading || automatingWa}
+                    onClick={() => void removeBatch()}
+                    className="rounded-xl border border-rose-300 px-4 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                  >
+                    Remove batch
+                  </button>
                   {batch.items.some((r) => r.channel?.toUpperCase() === 'WHATSAPP' && r.status === 'preview_ready' && !r.campaign_id && !uncertainRows.includes(r.row_id)) && (
                     <button
                       type="button"

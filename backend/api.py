@@ -5135,6 +5135,29 @@ def get_moengage_draft_batch_endpoint(
         raise HTTPException(status_code=404, detail="Draft batch not found") from exc
 
 
+@app.delete("/api/moengage/drafts/batches/{batch_id}")
+def archive_moengage_draft_batch_endpoint(
+    batch_id: str,
+    account: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Remove owned app history only; retain all audit/claim records and remote drafts."""
+    from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
+    from moengage_draft_creation import load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return DraftBatchQueue(account, current_user, load_server_catalog(account)).archive(batch_id)
+    except BatchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Draft batch access denied") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Draft batch not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.post("/api/moengage/drafts/batches/{batch_id}/rows/{row_id}/create")
 def create_moengage_draft_batch_row_endpoint(
     batch_id: str,

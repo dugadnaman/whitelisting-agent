@@ -423,7 +423,8 @@ SQLITE_SCHEMA_DDL = [
         creator_sub TEXT NOT NULL,
         creator_email TEXT NOT NULL,
         source_ref TEXT NOT NULL,
-        created_at REAL NOT NULL
+        created_at REAL NOT NULL,
+        archived_at REAL
     );
     """,
     """
@@ -646,7 +647,8 @@ POSTGRES_SCHEMA_DDL = [
         creator_sub TEXT NOT NULL,
         creator_email TEXT NOT NULL,
         source_ref TEXT NOT NULL,
-        created_at DOUBLE PRECISION NOT NULL
+        created_at DOUBLE PRECISION NOT NULL,
+        archived_at DOUBLE PRECISION
     );
     """,
     """
@@ -841,10 +843,13 @@ def init_database(conn: DBConnection | None = None, force: bool = False) -> None
             ).fetchone()
             if not row:
                 conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_tenant_id VARCHAR(100)")
+            conn.execute("ALTER TABLE moengage_draft_batches ADD COLUMN IF NOT EXISTS archived_at DOUBLE PRECISION")
         else:
             _upgrade_sqlite_task_states(conn)
             if "requested_tenant_id" not in {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}:
                 conn.execute("ALTER TABLE users ADD COLUMN requested_tenant_id TEXT")
+            if "archived_at" not in {row["name"] for row in conn.execute("PRAGMA table_info(moengage_draft_batches)").fetchall()}:
+                conn.execute("ALTER TABLE moengage_draft_batches ADD COLUMN archived_at REAL")
         _upgrade_auth_sync(conn)
         # Old preflight rejections used an attempted-state spelling. Release only
         # identities with no provider reservation; ambiguous writes stay locked.
