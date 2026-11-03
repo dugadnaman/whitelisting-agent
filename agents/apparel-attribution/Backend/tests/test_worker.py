@@ -422,11 +422,18 @@ class WorkerRegressionTests(unittest.TestCase):
         self.assertEqual(parse_tracking_range("31 - 1 Feb", date(2026, 1, 31)), (date(2026, 1, 31), date(2026, 2, 1)))
         self.assertEqual(parse_tracking_range("31 - 1 Jan", date(2025, 12, 31)), (date(2025, 12, 31), date(2026, 1, 1)))
         combined = MoEngageService._combine_metrics(
-            MoEngageService._typed_metrics("Online", 5, 300), MoEngageService._typed_metrics("Offline", 2, 150),
+            MoEngageService._typed_metrics("Online", 5, 300), MoEngageService._typed_metrics("Offline", 2, 150), 6,
         )
-        self.assertEqual(combined, CampaignMetrics(7, 450, 5, 2, 300, 150))
+        self.assertEqual(combined, CampaignMetrics(6, 450, 5, 2, 300, 150))
         with self.assertRaises(MoEngageError):
             MoEngageService._typed_metrics("Online", 0, 450)
+
+    def test_overall_rejects_impossible_union_counts(self):
+        online = MoEngageService._typed_metrics("Online", 5, 300)
+        offline = MoEngageService._typed_metrics("Offline", 2, 150)
+        for total in (4, 8, 6.5, True, float("nan"), float("inf")):
+            with self.subTest(total=total), self.assertRaises(MoEngageError):
+                MoEngageService._combine_metrics(online, offline, total)
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from app.config.settings import Settings
 from app.models.report import CampaignMetrics, JobState, SheetConnection
 from app.services.excel_service import WorkbookValidationError
 from app.services.google_sheet_service import GoogleSheetService
-from app.services.moengage_service import MoEngageAuthenticationError, MoEngageError, daily_total
+from app.services.moengage_service import MoEngageAuthenticationError, MoEngageError, range_total
 from app.services.report_service import ReportService
 from app.utils.excel_utils import parse_tracking_range
 
@@ -137,21 +137,17 @@ class InputBoundaryTests(unittest.TestCase):
             parse_tracking_range("2026-10-04 - 2026-10-03", date(2026, 10, 3))
 
     def test_customer_counts_outside_safe_integer_bounds_are_rejected(self):
-        row = http_fixtures.HttpAttributionTests()
-        row.setUp()
-        base = {"metric": 0, "granularity": "2026/10/03", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0}
-        campaign = replace(row.row, end_date=row.row.start_date)
+        base = {"metric": 0, "granularity": "entire", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0}
         for value in (2**53, 10**400):
             with self.subTest(value_type=type(value).__name__), self.assertRaises(MoEngageError):
-                daily_total({"data": [dict(base, metric=value)]}, campaign, "unique_users")
+                range_total({"data": [dict(base, metric=value)]}, "unique_users")
 
     def test_boolean_series_indices_are_not_accepted_as_zero(self):
-        row = http_fixtures.HttpAttributionTests()
-        row.setUp()
-        campaign = replace(row.row, end_date=row.row.start_date)
-        base = {"metric": 0, "granularity": "2026/10/03", "splitby": [], "grouped_by": [], "step": "A", "tseq": False, "cseq": 0}
-        with self.assertRaises(MoEngageError):
-            daily_total({"data": [base]}, campaign, "unique_users")
+        for field in ("tseq", "cseq"):
+            base = {"metric": 0, "granularity": "entire", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0}
+            base[field] = False
+            with self.subTest(field=field), self.assertRaises(MoEngageError):
+                range_total({"data": [base]}, "unique_users")
 
 
 class ProviderBoundaryTests(unittest.TestCase):
@@ -168,15 +164,13 @@ class ProviderBoundaryTests(unittest.TestCase):
                 http_fixtures.behavior_payload(replace(case.row, brand="AGIPL", attribution_brand="BBW"),
                                                "unique_users", attributes, {"BBW": "BBW"})
 
-    def test_exact_integer_sum_at_json_boundary_and_rejection_above_it(self):
-        case = self.case()
+    def test_exact_integer_total_at_json_boundary_and_rejection_above_it(self):
         maximum = 2**53 - 1
-        values = [{"metric": maximum - 1, "granularity": "2026/10/03", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0},
-                  {"metric": 1, "granularity": "2026/10/04", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0}]
-        self.assertEqual(daily_total({"data": values}, case.row, "unique_users"), maximum)
-        values[1]["metric"] = 2
+        point = {"metric": maximum, "granularity": "entire", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0}
+        self.assertEqual(range_total({"data": [point]}, "unique_users"), maximum)
+        point["metric"] = maximum + 1
         with self.assertRaises(MoEngageError):
-            daily_total({"data": values}, case.row, "unique_users")
+            range_total({"data": [point]}, "unique_users")
 
     def test_http_errors_invalid_envelopes_and_unknown_states_never_write_metrics(self):
         import httpx

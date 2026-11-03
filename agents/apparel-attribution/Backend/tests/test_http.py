@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
     from app.models.report import CampaignMetrics, CampaignRow
     from app.services.moengage_service import (
         APPAREL_ACCOUNT_ID, MoEngageAuthenticationError, MoEngageError, MoEngageService,
-        behavior_payload, daily_total,
+        behavior_payload, range_total,
     )
 
 
@@ -58,11 +58,25 @@ class HttpAttributionTests(unittest.TestCase):
             data = {"status": self.state}
         elif path.endswith("/results"):
             query = self.payloads[-1]
-            online = not query["events"][0]["actions"][0]["c_at_trigger_seg_v2"]["included_filters"]["filters"][0]["attributes"]["filters"][0]["negate"]
-            numbers = ([2, 7] if query["analysis_type"] == "users" else [8998, 35426]) if online else [0, 0]
+            filters = query["events"][0]["actions"][0]["c_at_trigger_seg_v2"]["included_filters"]["filters"][0]["attributes"]["filters"]
+            online_buyers = [{"a", "b"}, {"a", "b", "c", "d", "e", "f", "g"}]
+            offline_buyers = [{"f", "h", "i"}, {"f", "g", "h", "i", "j"}]
+            if not filters:
+                buyers = [left | right for left, right in zip(online_buyers, offline_buyers)]
+                revenues = [9098, 35726]
+            elif filters[0]["negate"]:
+                buyers, revenues = offline_buyers, [100, 300]
+            else:
+                buyers, revenues = online_buyers, [8998, 35426]
+            selected = [i for i, day in enumerate(("2026-10-03", "2026-10-04"))
+                        if query["timerange"]["start"][:10] <= day <= query["timerange"]["end"][:10]]
+            if query["granularity"] == "e":
+                value = len(set().union(*(buyers[i] for i in selected))) if query["analysis_type"] == "users" else sum(revenues[i] for i in selected)
+                points = [(value, "entire")]
+            else:
+                points = [(len(buyers[i]) if query["analysis_type"] == "users" else revenues[i], ("2026/10/03", "2026/10/04")[i]) for i in selected]
             data = {"data": [{"metric": value, "granularity": day, "splitby": [], "grouped_by": [],
-                              "step": "A", "tseq": 0, "cseq": 0}
-                             for day, value in zip(["2026/10/03", "2026/10/04"], numbers)]}
+                              "step": "A", "tseq": 0, "cseq": 0} for value, day in points]}
         else:
             raise AssertionError(path)
         return httpx.Response(200, json=data)
@@ -71,10 +85,10 @@ class HttpAttributionTests(unittest.TestCase):
         return MoEngageService(self.settings, session_loader=lambda: self.config,
                                transport=httpx.MockTransport(self.provider))
 
-    def test_http_contract_preserves_daily_sums_overall_splits_and_campaign_scope(self):
+    def test_whole_range_deduplicates_repeat_days_and_online_offline_overlap(self):
         metrics = asyncio.run(self.service().fetch_metrics(replace(self.row, campaign_type="Overall")))
-        self.assertEqual(metrics, CampaignMetrics(9, 44424, 9, 0, 44424, 0))
-        self.assertEqual(len(self.payloads), 4)
+        self.assertEqual(metrics, CampaignMetrics(10, 44824, 7, 5, 44424, 400))
+        self.assertEqual(len(self.payloads), 5)
         for payload in self.payloads:
             delivery = payload["segmentation"][0]["filters"]["included_filters"]["filters"][0]
             self.assertEqual(delivery["action_name"], "SMS_DELIVERED")
@@ -83,6 +97,22 @@ class HttpAttributionTests(unittest.TestCase):
             self.assertEqual(delivery["attributes"]["filters"][0]["value"], ["readable-campaign"])
             self.assertEqual(payload["timerange"]["end"], "2026-10-04 23:59:59")
 
+
+    def test_distinct_purchasers_and_revenue_for_each_type_and_delivery_channel(self):
+        for channel in ("SMS", "WhatsApp", "RCS"):
+            for kind, expected in (
+                ("Online", CampaignMetrics(7, 44424, 7, None, 44424, None)),
+                ("Offline", CampaignMetrics(5, 400, None, 5, None, 400)),
+                ("Overall", CampaignMetrics(10, 44824, 7, 5, 44424, 400)),
+            ):
+                with self.subTest(channel=channel, kind=kind):
+                    self.assertEqual(asyncio.run(self.service().fetch_metrics(replace(self.row, channel=channel, campaign_type=kind))), expected)
+
+    def test_entire_period_respects_single_day_goal_boundaries(self):
+        for day, users, revenue in ((3, 2, 8998), (4, 7, 35426)):
+            with self.subTest(day=day):
+                row = replace(self.row, start_date=date(2026, 10, day), end_date=date(2026, 10, day))
+                self.assertEqual(asyncio.run(self.service().fetch_metrics(row)), CampaignMetrics(users, revenue, users, None, revenue, None))
     def test_foreign_organization_or_workspace_mismatch_never_submits(self):
         for field in ("account", "profile_account"):
             with self.subTest(field=field):
@@ -91,6 +121,49 @@ class HttpAttributionTests(unittest.TestCase):
                     asyncio.run(self.service().fetch_metrics(self.row))
                 self.assertNotIn("/api/analytics/v4/behavior", self.calls)
                 setattr(self, field, APPAREL_ACCOUNT_ID)
+
+    def test_goal_instruction_prefixes_preserve_month_and_year_rollover(self):
+        from app.utils.excel_utils import parse_tracking_range
+        for text, sent, start, end in (
+            ("Track goals from 30th till 02nd Nov", date(2026, 10, 30), date(2026, 10, 30), date(2026, 11, 2)),
+            ("Track goals from 30th till 02nd Nov", date(2026, 10, 27), date(2026, 10, 30), date(2026, 11, 2)),
+            ("Track goals for 31st to 02nd Jan", date(2026, 12, 31), date(2026, 12, 31), date(2027, 1, 2)),
+            ("Track goal: 31st until 1st Mar", date(2024, 2, 28), None, None),
+            ("Track goals from 28th till 01st Mar", date(2024, 2, 28), date(2024, 2, 28), date(2024, 3, 1)),
+            ("Track goals from 2026-10-30 to 2026-11-02", date(2026, 10, 30), date(2026, 10, 30), date(2026, 11, 2)),
+        ):
+            with self.subTest(text=text, sent=sent):
+                if start is None:
+                    with self.assertRaises(ValueError):
+                        parse_tracking_range(text, sent)
+                else:
+                    self.assertEqual(parse_tracking_range(text, sent), (start, end))
+
+    def test_crocs_offline_only_uses_all_purchases_and_overall_has_no_online_share(self):
+        for channel in ("SMS", "WhatsApp", "RCS"):
+            for kind in ("Offline", "Overall"):
+                for classification in ("missing", "present", "malformed"):
+                    with self.subTest(channel=channel, kind=kind, classification=classification):
+                        self.setUp()
+                        self.settings.moengage_ui_config["workspace_map"]["Crocs"] = "VS_IN"
+                        if classification == "missing":
+                            self.attributes.pop("Txn_Channel")
+                        elif classification == "malformed":
+                            self.attributes["Txn_Channel"] = None
+                        metrics = asyncio.run(self.service().fetch_metrics(replace(self.row, brand="Crocs", channel=channel, campaign_type=kind)))
+                        expected = CampaignMetrics(10, 44824, 0, 10, 0, 44824) if kind == "Overall" else CampaignMetrics(10, 44824, None, 10, None, 44824)
+                        self.assertEqual(metrics, expected)
+                        self.assertEqual(len(self.payloads), 2)
+                        for payload in self.payloads:
+                            sale = payload["events"][0]["actions"][0]["c_at_trigger_seg_v2"]["included_filters"]["filters"][0]
+                            self.assertEqual(sale["attributes"]["filters"], [])
+
+    def test_crocs_online_source_rows_are_rejected_before_provider_requests(self):
+        with self.assertRaises(MoEngageError):
+            asyncio.run(self.service().fetch_metrics(replace(self.row, brand="Crocs")))
+        self.assertEqual(self.calls, [])
+        with self.assertRaises(MoEngageError):
+            behavior_payload(replace(self.row, brand="Crocs"), "unique_users", self.attributes, {})
 
     def test_missing_classification_is_not_fabricated_zeroes(self):
         self.attributes.pop("Txn_Channel")
@@ -111,19 +184,18 @@ class HttpAttributionTests(unittest.TestCase):
         with self.assertRaises(MoEngageError):
             behavior_payload(replace(agipl, attribution_brand="AGIPL"), "unique_users", self.attributes, {"BBW": "BBW"})
 
-    def test_partial_duplicate_split_and_non_numeric_results_are_rejected(self):
-        valid = [{"metric": 2, "granularity": "2026/10/03", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0},
-                 {"metric": 7, "granularity": "2026/10/04", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0}]
-        invalid = [valid[:1], valid + [valid[0]], []]
+    def test_daily_duplicate_split_and_non_numeric_results_are_rejected(self):
+        valid = [{"metric": 7, "granularity": "entire", "splitby": [], "grouped_by": [], "step": "A", "tseq": 0, "cseq": 0}]
+        invalid = [valid * 2, [], [None], [{"metric": 2, "granularity": "2026/10/03"}]]
         for changes in ({"metric": True}, {"metric": "7"}, {"metric": math.inf}, {"metric": math.nan},
                         {"metric": 1.5}, {"metric": -1}, {"step": "B"}, {"splitby": ["store"]},
                         {"granularity": "2026/10/05"}, {"grouped_by": ["user"]}):
             broken = copy.deepcopy(valid)
-            broken[1].update(changes)
+            broken[0].update(changes)
             invalid.append(broken)
         for rows in invalid:
             with self.subTest(rows=rows), self.assertRaises(MoEngageError):
-                daily_total({"data": rows}, self.row, "unique_users")
+                range_total({"data": rows}, "unique_users")
 
     def test_expired_authentication_and_timeout_never_echo_or_resubmit(self):
         self.failure = 401

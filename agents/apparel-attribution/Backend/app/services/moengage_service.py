@@ -5,7 +5,6 @@ import asyncio
 import math
 import re
 from dataclasses import replace
-from datetime import datetime, timedelta
 from collections.abc import Callable
 
 import httpx
@@ -57,18 +56,25 @@ def attribute_types(attributes: dict, name: str) -> list[str]:
 
 
 def behavior_payload(row: CampaignRow, metric: str, sale_attributes: dict, brand_values: dict) -> dict:
-    """Build one daily query; never inherit stale campaign or segment filters."""
-    if row.campaign_type not in {"Online", "Offline"} or metric not in {"unique_users", "total_revenue"}:
-        raise MoEngageError("Select an Online/Offline query and a supported attribution metric")
+    """Build an entire-goal-range query without inherited campaign or segment filters."""
+    if (row.campaign_type not in {"Online", "Offline", "Overall"}
+            or metric not in {"unique_users", "total_revenue"}
+            or row.campaign_type == "Overall" and metric != "unique_users"):
+        raise MoEngageError("Select a supported purchase type and attribution metric")
     if row.channel not in DELIVERY_EVENTS or not row.campaign_id.strip():
         raise MoEngageError("The campaign requires a supported channel and a nonempty readable campaign ID")
     if row.end_date < row.start_date:
         raise MoEngageError("The goal range ends before it starts")
-    if "Txn_Channel" not in sale_attributes:
-        raise MoEngageError(f"{row.brand}: Sale_Array has no Txn_Channel; a confirmed online/offline classification rule is required. No metrics were written.")
-    if "string" not in attribute_types(sale_attributes, "Txn_Channel"):
-        raise MoEngageError("Txn_Channel no longer matches the confirmed classification schema")
-    filters = [attribute("Txn_Channel", operator="exists", negate=row.campaign_type == "Offline")]
+    filters = []
+    if row.brand.casefold() == "crocs":
+        if row.campaign_type == "Online":
+            raise MoEngageError("Crocs is offline-only; correct Online source rows to Offline or Overall before running")
+    elif row.campaign_type != "Overall":
+        if "Txn_Channel" not in sale_attributes:
+            raise MoEngageError(f"{row.brand}: Sale_Array has no Txn_Channel; a confirmed online/offline classification rule is required. No metrics were written.")
+        if "string" not in attribute_types(sale_attributes, "Txn_Channel"):
+            raise MoEngageError("Txn_Channel no longer matches the confirmed classification schema")
+        filters.append(attribute("Txn_Channel", operator="exists", negate=row.campaign_type == "Offline"))
     if row.brand.casefold() == "cis":
         if "Brand_PM" not in sale_attributes:
             raise MoEngageError("CIS requires the confirmed Brand_PM contains SP purchase filter")
@@ -99,7 +105,7 @@ def behavior_payload(row: CampaignRow, metric: str, sale_attributes: dict, brand
                        "readable_name": "Order_Net_Val", "type": "_f"}, "percentile_value": -1}
     start, end = f"{row.start_date.isoformat()} 00:00:00", f"{row.end_date.isoformat()} 23:59:59"
     return {
-        "chart_type": "line", "type": "behavior", "version": "2.0",
+        "chart_type": "bar", "type": "behavior", "version": "2.0",
         "events": [{"id": "A", "actions": [{
             "c_at_trigger_seg_v2": {"included_filters": {"filter_operator": "and", "filters": [sale]}},
             "c_at_act_seg_v2": {"included_filters": {"filter_operator": "and", "filters": []}},
@@ -112,41 +118,28 @@ def behavior_payload(row: CampaignRow, metric: str, sale_attributes: dict, brand
         }]}}}],
         "timerange": {"start": start, "end": end, "startDate": start, "endDate": end,
                       "label": "Custom Range", "dt_label": "custom", "value": (row.end_date - row.start_date).days},
-        "granularity": "d", "analysis_type": "users" if metric == "unique_users" else "aggregation",
+        "granularity": "e", "analysis_type": "users" if metric == "unique_users" else "aggregation",
         "distribution": {}, "count_type": "number", "chart_plot_type": "linear", "rolling_value": -1,
         "user_aggregation_type": "", "user_aggregation_percentile": -1,
         "user_attr_grouped_by": [], "chart_sort_type": "descending", "comparison_timerange": {},
     }
 
 
-def daily_total(data: dict, row: CampaignRow, metric: str) -> float:
-    """Preserve the existing daily-sum semantics; reject partial/duplicate/split results."""
+def range_total(data: dict, metric: str) -> float:
+    """Require the provider's single entire-period total; never sum daily uniques."""
     rows = data.get("data")
-    if not isinstance(rows, list):
-        raise MoEngageError("MoEngage returned no daily attribution results")
-    expected = {row.start_date + timedelta(days=offset) for offset in range((row.end_date - row.start_date).days + 1)}
-    seen = set()
-    total = 0
-    for item in rows:
-        if not isinstance(item, dict):
-            raise MoEngageError("MoEngage returned invalid daily attribution results")
-        try:
-            day = datetime.strptime(item["granularity"], "%Y/%m/%d").date()
-        except (KeyError, TypeError, ValueError):
-            raise MoEngageError("MoEngage returned an invalid attribution date") from None
-        value = item.get("metric")
-        if (day not in expected or day in seen or item.get("step") != "A"
-                or item.get("splitby") != [] or item.get("grouped_by") != []
-                or type(item.get("tseq")) is not int or item["tseq"] != 0
-                or type(item.get("cseq")) is not int or item["cseq"] != 0
-                or not finite_metric(value)
-                or metric == "unique_users" and (value < 0 or value != int(value))):
-            raise MoEngageError("MoEngage returned duplicate, unexpected or invalid daily attribution results")
-        seen.add(day)
-        total += int(value) if metric == "unique_users" else value
-    if seen != expected or not finite_metric(total):
-        raise MoEngageError("MoEngage returned an incomplete attribution date range; no metrics were written")
-    return total
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        raise MoEngageError("MoEngage returned no single entire-period attribution result")
+    item = rows[0]
+    value = item.get("metric")
+    if (item.get("granularity") != "entire" or item.get("step") != "A"
+            or item.get("splitby") != [] or item.get("grouped_by") != []
+            or type(item.get("tseq")) is not int or item["tseq"] != 0
+            or type(item.get("cseq")) is not int or item["cseq"] != 0
+            or not finite_metric(value)
+            or metric == "unique_users" and (value < 0 or value != int(value))):
+        raise MoEngageError("MoEngage returned an unexpected or invalid entire-period attribution result")
+    return int(value) if metric == "unique_users" else value
 
 
 class MoEngageService:
@@ -275,9 +268,11 @@ class MoEngageService:
                     raise MoEngageError("MoEngage attribution query failed or returned an unknown state; no metrics were written")
                 await asyncio.sleep(1)
             results = await self._request(client, "GET", f"/api/analytics/v4/query/{query_id}/results")
-        return daily_total(results, row, metric)
+        return range_total(results, metric)
 
     async def fetch_metrics(self, row: CampaignRow) -> CampaignMetrics:
+        if row.brand.casefold() == "crocs" and row.campaign_type == "Online":
+            raise MoEngageError("Crocs is offline-only; correct Online source rows to Offline or Overall before running")
         async with self._client() as client:
             await self._activate(client, row)
             metadata = await self._request(client, "POST", "/v1/segmentation/metadata/user-event-attrs", json={
@@ -292,7 +287,12 @@ class MoEngageService:
                 return self._typed_metrics(kind, users, revenue)
             try:
                 if row.campaign_type == "Overall":
-                    return self._combine_metrics(await typed("Online"), await typed("Offline"))
+                    if row.brand.casefold() == "crocs":
+                        offline = await typed("Offline")
+                        return self._combine_metrics(self._typed_metrics("Online", 0, 0), offline, offline.unique_users)
+                    online, offline = await typed("Online"), await typed("Offline")
+                    unique_users = await self._query(client, row, "unique_users", attributes)
+                    return self._combine_metrics(online, offline, unique_users)
                 return await typed(row.campaign_type)
             except TimeoutError:
                 raise MoEngageError("MoEngage attribution query timed out; no metrics were written") from None
@@ -312,11 +312,13 @@ class MoEngageService:
         raise MoEngageError(f"Unsupported campaign type {campaign_type!r}")
 
     @staticmethod
-    def _combine_metrics(online: CampaignMetrics, offline: CampaignMetrics) -> CampaignMetrics:
-        if not finite_metric(online.unique_users + offline.unique_users) or not finite_metric(online.total_revenue + offline.total_revenue):
+    def _combine_metrics(online: CampaignMetrics, offline: CampaignMetrics, unique_users: int) -> CampaignMetrics:
+        if (not finite_metric(unique_users) or unique_users != int(unique_users)
+                or not max(online.unique_users, offline.unique_users) <= unique_users <= online.unique_users + offline.unique_users
+                or not finite_metric(online.total_revenue + offline.total_revenue)):
             raise MoEngageError("Combined attribution metrics exceed supported numeric bounds")
         return CampaignMetrics(
-            unique_users=online.unique_users + offline.unique_users,
+            unique_users=int(unique_users),
             total_revenue=round(online.total_revenue + offline.total_revenue, 2),
             online_unique_users=online.online_unique_users, offline_unique_users=offline.offline_unique_users,
             online_revenue=online.online_revenue, offline_revenue=offline.offline_revenue,

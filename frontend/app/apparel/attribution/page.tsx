@@ -444,6 +444,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       <section className={panel} aria-labelledby="selection-heading">
         <h2 id="selection-heading" className="text-lg font-semibold text-gray-900">Select campaigns</h2>
         <p className="mt-1 text-sm text-gray-500">Sent dates select source rows; each row retains its own goal/reporting date range. A preview is required after any selection change.</p>
+        <p className="mt-1 text-sm text-gray-500">Customers are counted once across each row’s entire goal range. Overall deduplicates Online/Offline overlap, so the split customer counts can add up to more than the total. Revenue is summed across the range. Previously completed rows require an intentional overwrite run to recalculate.</p>
         <fieldset disabled={locked} className="mt-5 space-y-5">
           <div>
             <div className="mb-2 text-sm font-semibold text-gray-700">Channels</div>
@@ -547,7 +548,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
                 <p className="text-sm text-gray-500">Use the existing Apparel Auth Sync connection, or update its bearer token, refresh token and cookie in Settings → MoEngage. Sessions can expire; no browser server or CDP configuration is required.</p>
                 <Link href="/settings" className="inline-block text-sm font-semibold text-blue-600">Open Apparel settings →</Link>
               </div>
-              <p className="text-xs text-amber-800">Crocs still requires a confirmed replacement for its missing Txn_Channel classification. Missing splits fail explicitly; they are not written as zero.</p>
+              <p className="text-xs text-amber-800">Crocs is offline-only: Offline rows use all purchases; Overall rows have zero Online metrics and all purchases Offline. Correct Crocs rows marked Online before running.</p>
             </div>
           </div>
         </section>

@@ -56,6 +56,7 @@ def _clean_date_text(value: str) -> str:
     for wrong, right in TYPO_FIXES.items():
         text = text.replace(wrong, right)
     text = ORDINAL_RE.sub("", text)
+    text = re.sub(r"^track\s+goals?\s*(?:(?:from|for)\b\s*)?:?\s*", "", text)
     text = re.sub(r"\b(mon|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b", "", text)
     text = re.sub(r"\((?:1\s*day(?:\s*only)?|1\s*day)\)", "", text)
     text = re.sub(r"\s+", " ", text).strip(" ,-–")

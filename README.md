@@ -176,8 +176,8 @@ report endpoints remain separate Karix message-sending functionality.
    - Login offers Bajaj Finserv, Tata Capital, and Apparel, with automatic organization selection retained as the default. An explicit choice must match an assigned user's organization (or platform-superadmin access); mismatches clear the returned token and stay on login. Apparel sign-ins open `/apparel/attribution` directly. Pending users sign in to `/signup` to request company access; the selector itself never grants permissions.
    - Overwrite protection (off by default) ensures existing completed attribution figures are never overwritten unintentionally.
    - Rechecks campaign identity and current metrics immediately before writing. Retries retain the original campaigns and overwrite choice; moved/edited rows fail rather than receiving another campaign's results. Do not rearrange or edit source rows during a running job: Google Sheets does not provide an atomic compare-and-set for these writes.
-   - Preserves the existing daily-sum semantics for customer counts; Overall adds online and offline results, not a cross-day/cross-channel deduplicated person count. Revenue is `Sale_Array.Order_Net_Val`; delivery filters use each campaign's readable ID and the existing 120-day lookback.
-   - Crocs remains blocked until its missing `Txn_Channel` classification has a confirmed replacement. Incomplete results fail instead of being written as zero. See [attribution runtime and verification notes](docs/APPAREL_ATTRIBUTION_PAUSED.md).
+   - Counts each purchaser once across the entire goal range using MoEngage's entire-period aggregation. Overall queries the distinct Online/Offline union instead of adding split customer counts; customers can appear in both splits. Revenue is the range sum of `Sale_Array.Order_Net_Val`; delivery filters use the readable campaign ID and existing 120-day lookback. Recalculate previously completed rows only with an intentional overwrite run.
+   - Crocs is confirmed offline-only: query all purchases without `Txn_Channel`. Overall totals equal Offline, with Online zero. Crocs rows marked Online fail explicitly until corrected. See [attribution runtime and verification notes](docs/APPAREL_ATTRIBUTION_PAUSED.md).
 ---
 
 ## 📁 Repository Directory Structure
@@ -276,7 +276,7 @@ Set Render's **Health Check Path** to `/api/health`, not just the frontend port.
 
 Keep the existing persistent `JWT_SECRET` and credential database. For durable file-based setup/key uploads, point `APPAREL_ATTRIBUTION_STORAGE_DIR` at a persistent disk directory. Without a disk, use `APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON`, `APPAREL_GOOGLE_SPREADSHEET_URL` and `APPAREL_GOOGLE_WORKSHEET_NAME` as deployment configuration; uploaded keys/setup on an ephemeral filesystem do not survive redeployment. Environment-installed Google keys are sealed against portal replacement.
 
-Connect only Apparel's MoEngage session through Settings/Auth Sync. On restart, reconnect the sheet and rerun with overwrite off: sheet results persist, but in-memory job history/CSV downloads do not. See the [runtime and verification notes](docs/APPAREL_ATTRIBUTION_PAUSED.md) for production evidence and the remaining Crocs prerequisite.
+Connect only Apparel's MoEngage session through Settings/Auth Sync. On restart, reconnect the sheet and rerun with overwrite off: sheet results persist, but in-memory job history/CSV downloads do not. See the [runtime and verification notes](docs/APPAREL_ATTRIBUTION_PAUSED.md) for production evidence and brand-specific rules.
 
 Verification: the production frontend build, real HTTP attribution/Google writes, CSV exports and preservation were exercised natively on macOS and on the live main Render service. Native launcher startup/recovery was exercised on macOS. Windows ACLs, `msvcrt` locking and Windows process-job handling still require execution on Windows.
 
