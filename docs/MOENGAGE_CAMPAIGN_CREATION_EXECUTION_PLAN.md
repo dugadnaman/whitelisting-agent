@@ -4,6 +4,8 @@
 
 Bulk campaign creation is the primary workflow. The campaign page opens on **Bulk Campaign Upload** on every visit, including saved-batch links; an old remembered single-builder tab cannot hide the bulk queue. Upload CSV/XLSX → review each destination and validation result → stage → **Create Ready WhatsApp Drafts Sequentially** → inspect persisted verified/blocked/uncertain results. The single builder remains available under **Single Campaign (Optional)**, with its existing form-state preservation. This presentation change does not alter write gates, rate caps, workspace routing, or human-only publishing.
 
+The plain campaign URL now starts with a clean upload view instead of automatically reopening the last batch. Use **Open last saved batch** or an explicit saved-batch link to resume; **New bulk upload** clears only the current view, never the durable batch or remote drafts. Campaign cards lead with names, destination/audience and message copy. WhatsApp previews resolve live template bodies once per distinct destination workspace and substitute stored variables; unavailable copy is explicitly labeled, never invented. Source identifiers, provider IDs, timing, variable maps and campaign IDs are under a closed **Details** disclosure. Blocking issues, uncertainty warnings and action controls remain visible without opening Details.
+
 
 ## Brief-driven WhatsApp routing (2026-11-02)
 

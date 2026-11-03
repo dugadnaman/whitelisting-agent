@@ -47,12 +47,14 @@ function RowCard({
   busy,
   uncertain,
   onCreate,
+  templateBody,
 }: {
   row: MoEngageDraftRow;
   batch: boolean;
   busy: boolean;
   uncertain: boolean;
   onCreate: (row: MoEngageDraftRow) => void;
+  templateBody?: string;
 }) {
   const candidate = row.candidate_v5_payload;
   const source = row.source_fields || {};
@@ -69,15 +71,13 @@ function RowCard({
   const isWhatsApp = row.channel?.toUpperCase() === 'WHATSAPP';
   const isEmail = row.channel?.toUpperCase() === 'EMAIL';
   const isPush = row.channel?.toUpperCase() === 'PUSH';
+  const message = source['Message Body'] || source.whatsapp_message || source.body || source.message ||
+    templateBody?.replace(/\{\{\d+\}\}/g, (slot) => whatsapp?.body_placeholders?.[slot] || whatsapp?.body_placeholders?.[slot.slice(2, -2)] || slot);
 
   return (
     <article className="rounded-xl border border-gray-200 bg-white p-5 space-y-4 shadow-sm hover:border-gray-300 transition-colors">
       <div className="flex flex-wrap justify-between items-start gap-2">
         <div>
-          <div className="text-xs text-gray-500 font-mono">
-            Source: {row.source_ref || 'Single Campaign'} · Row {row.row_id}
-            {row.channel?.toUpperCase() === 'WHATSAPP' && <div>WhatsApp destination: {row.workspace_name || source.workspace_name || source.workspace || 'Workspace name not supplied'} · {row.workspace_id || source.workspace_id || 'Workspace ID not supplied — review required'}</div>}
-          </div>
           <h3 className="font-semibold text-gray-900 text-base mt-0.5">
             {source.campaign_name || candidate?.basic_details?.name || 'Campaign name missing'}
           </h3>
@@ -108,6 +108,18 @@ function RowCard({
           </span>
         </div>
       </div>
+      <p className="text-sm text-gray-600">
+        {row.workspace_name || source.workspace_name || source.workspace || 'Destination needs review'}
+        {' · '}{segment?.name || source.segment_name || 'Audience needs review'}
+      </p>
+      <div className="rounded-lg bg-gray-50 p-3 text-sm whitespace-pre-wrap">
+        {message || push?.message ||
+          (isWhatsApp ? `Template: ${whatsapp?.template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'Not selected'}. Message preview unavailable; review the template in MoEngage.` : email?.subject || 'No message preview supplied.')}
+      </div>
+      {verified && <p className="text-sm font-medium text-emerald-800">Draft saved and verified. Not published or sent.</p>}
+      <details className="text-sm">
+        <summary className="cursor-pointer font-semibold text-gray-600">Details — source, IDs and configuration</summary>
+        <p className="mt-3 text-xs text-gray-500">{row.source_ref} · Row {row.row_id} · Workspace {row.workspace_id}</p>
 
       {batch && row.updated_at && (
         <p className="text-xs text-gray-400">
@@ -230,18 +242,6 @@ function RowCard({
           </>
         )}
       </dl>
-
-      {issues.length > 0 && (
-        <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-900">
-          <strong className="block font-semibold">Validation Issues:</strong>
-          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
-            {issues.map((issue, index) => (
-              <li key={`${index}-${issue}`}>{issue}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {row.campaign_id && (
         <div
           className={`rounded-xl border p-4 text-sm flex flex-wrap items-center justify-between gap-3 shadow-xs ${
@@ -267,6 +267,19 @@ function RowCard({
           </div>
         </div>
       )}
+      </details>
+
+      {issues.length > 0 && (
+        <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-900">
+          <strong className="block font-semibold">Validation Issues:</strong>
+          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+            {issues.map((issue, index) => (
+              <li key={`${index}-${issue}`}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
 
       {(uncertain || status === 'UNCERTAIN' || status === 'UNKNOWN') && (
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200">
@@ -359,6 +372,21 @@ export default function MoEngageCampaignsPage() {
   }, [file, preview]);
   useEffect(() => () => clearTabState('moe_unsaved_preview'), []);
   const [batch, setBatch] = useState<MoEngageDraftBatch | null>(null);
+  const [reviewBodies, setReviewBodies] = useState<Record<string, string>>({});
+  useEffect(() => {
+    let active = true;
+    setReviewBodies({});
+    const rows = [...(preview?.account === account ? preview.items : []), ...(batch?.account === account ? batch.items : [])];
+    const workspaces = [...new Set(rows.filter(row => row.channel === 'WHATSAPP').map(row => row.workspace_id).filter(Boolean))];
+    void Promise.all(workspaces.map(async workspace => {
+      try { return await fetchMoEngageCatalog(account, workspace); } catch { return null; }
+    })).then(catalogs => {
+      if (active) setReviewBodies(Object.fromEntries(catalogs.flatMap(catalog =>
+        catalog?.whatsapp_templates?.map(template => [`${catalog.workspace_id}:${template.id}`, template.body || '']) || []
+      )));
+    });
+    return () => { active = false; };
+  }, [account, batch?.batch_id, preview]);
   const [batchScope, setBatchScope] = useState('');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -442,7 +470,8 @@ export default function MoEngageCampaignsPage() {
     let active = true;
     const query = new URLSearchParams(window.location.search);
     const urlId = query.get('account') === account ? query.get('batch') : null;
-    const id = urlId || localStorage.getItem(storageKey);
+    const id = urlId;
+    if (!urlId) { setBatch(null); setBatchScope(''); }
     if (!id) return;
     setLoading(true);
     fetchMoEngageDraftBatch(id, account)
@@ -1366,6 +1395,15 @@ export default function MoEngageCampaignsPage() {
               onChange={(e) => void chooseFile(e.target.files?.[0])}
               className="block w-full text-sm file:mr-4 file:rounded-xl file:border-0 file:bg-blue-50 file:px-4 file:py-2.5 file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
             />
+            <button type="button" disabled={busy} className="text-xs text-blue-700 underline disabled:opacity-50"
+              onClick={async () => {
+                const id = localStorage.getItem(storageKey);
+                if (!id) { setNotice('No saved batch yet. Upload a spreadsheet to begin.'); return; }
+                setBusy(true);
+                try { showBatch(await fetchMoEngageDraftBatch(id, account), storageKey); }
+                catch { setError('Could not open the saved batch. Its link and owner account must match.'); }
+                finally { setBusy(false); }
+              }}>Open last saved batch</button>
           </section>
 
           {/* Preview Section */}
@@ -1412,7 +1450,7 @@ export default function MoEngageCampaignsPage() {
 
               <div className="space-y-4">
                 {filteredPreviewItems.map((row, index) => (
-                  <RowCard key={`${row.source_ref}:${row.row_id}:${index}`} row={row} batch={false} busy={busy} uncertain={false} onCreate={createRow} />
+                  <RowCard key={`${row.source_ref}:${row.row_id}:${index}`} row={row} batch={false} busy={busy} uncertain={false} onCreate={createRow} templateBody={reviewBodies[`${row.workspace_id}:${row.candidate_v5_payload?.campaign_content?.content?.whatsapp?.template_id}`]} />
                 ))}
               </div>
             </section>
@@ -1426,7 +1464,7 @@ export default function MoEngageCampaignsPage() {
               <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
                 <div>
                   <h2 className="text-base font-bold text-gray-900">
-                    Staged Batch Queue · <span className="font-mono text-xs text-blue-700 bg-blue-50 px-2 py-0.5 rounded">{batch.batch_id}</span>
+                    Campaign Results
                   </h2>
                   <p className="text-xs text-gray-500 mt-0.5">
                     Source: <span className="font-mono">{batch.source_ref}</span> · Ready:{' '}
@@ -1436,6 +1474,13 @@ export default function MoEngageCampaignsPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" disabled={busy || automatingWa} className="rounded-xl border border-blue-600 px-4 py-2 text-xs font-bold text-blue-700 disabled:opacity-50"
+                    onClick={() => {
+                      setBatch(null); setBatchScope(''); setPreview(null); setFile(null); setNotice(''); setError('');
+                      const url = new URL(window.location.href); url.searchParams.delete('batch');
+                      window.history.replaceState(null, '', url.toString());
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}>New bulk upload</button>
                   {batch.items.some((r) => r.channel?.toUpperCase() === 'WHATSAPP' && r.status === 'preview_ready' && !r.campaign_id && !uncertainRows.includes(r.row_id)) && (
                     <button
                       type="button"
@@ -1479,6 +1524,7 @@ export default function MoEngageCampaignsPage() {
                   <RowCard
                     key={`${row.source_ref}:${row.row_id}:${index}`}
                     row={row}
+                    templateBody={reviewBodies[`${row.workspace_id}:${row.candidate_v5_payload?.campaign_content?.content?.whatsapp?.template_id}`]}
                     batch
                     busy={busy}
                     uncertain={uncertainRows.includes(row.row_id)}
