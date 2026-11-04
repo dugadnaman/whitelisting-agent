@@ -18,8 +18,22 @@ FOLDER_TYPE = "application/vnd.google-apps.folder"
 
 
 def _credential_info():
-    raw = os.getenv("APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-    filename = os.getenv("APPAREL_GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+    raw = (os.getenv("APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON") or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON") or "").strip()
+    filename = (os.getenv("APPAREL_GOOGLE_SERVICE_ACCOUNT_FILE") or os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE") or "").strip()
+    if not raw and not filename:
+        storage_dir = Path(os.getenv("APPAREL_ATTRIBUTION_STORAGE_DIR") or (
+            Path(os.getenv("KARIX_DB_PATH", "data/karix_store.db")).parent / "apparel-attribution"
+        ))
+        candidates = [
+            storage_dir / "google-service-account.json",
+            Path("/data/google-service-account.json"),
+            Path("data/google-service-account.json"),
+            Path("agents/apparel-attribution/data/google-service-account.json"),
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                filename = str(candidate)
+                break
     if not raw and not filename:
         return None
     try:
