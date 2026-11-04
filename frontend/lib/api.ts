@@ -1793,20 +1793,22 @@ export function previewApparelWhatsAppBrief(
   source: ApparelWhatsAppSource,
   options: ApparelWhatsAppOptions
 ): Promise<MoEngageDraftPreview & { source_digest: string }> {
-  return moEngageDraftRequest("/api/apparel/whatsapp/preview", {
-    method: "POST",
-    body: apparelWhatsAppForm(source, options),
-  });
+  return moEngageDraftRequest(
+    "/api/apparel/whatsapp/preview",
+    { method: "POST", body: apparelWhatsAppForm(source, options) },
+    180000
+  );
 }
 
 export function stageApparelWhatsAppBrief(
   source: ApparelWhatsAppSource,
   options: ApparelWhatsAppOptions
 ): Promise<MoEngageDraftBatch> {
-  return moEngageDraftRequest("/api/apparel/whatsapp/batches", {
-    method: "POST",
-    body: apparelWhatsAppForm(source, options),
-  });
+  return moEngageDraftRequest(
+    "/api/apparel/whatsapp/batches",
+    { method: "POST", body: apparelWhatsAppForm(source, options) },
+    180000
+  );
 }
 
 export type ApparelWhatsAppImageResult = {
