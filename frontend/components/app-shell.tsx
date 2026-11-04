@@ -128,7 +128,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                         : 'bg-gray-100/70 border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-200/50'
                     }`}
                   >
-                    <Link href={path} className="inline-flex items-center gap-1.5 truncate max-w-[160px]">
+                    <Link href={path} aria-current={isActive ? 'page' : undefined} className="inline-flex items-center gap-1.5 truncate max-w-[160px]">
                       {path === '/' ? (
                         <img src="/logo.svg" alt="" className="w-3.5 h-3.5 rounded-xs shrink-0" />
                       ) : (
@@ -145,7 +145,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                           closeTab(path);
                         }}
                         className="text-gray-400 hover:text-red-600 rounded p-0.5 transition-colors text-[10px]"
-                        title="Close tab (clears saved draft)"
+                        title={`Close ${meta.label} tab`}
+                        aria-label={`Close ${meta.label} tab`}
                       >
                         ✕
                       </button>

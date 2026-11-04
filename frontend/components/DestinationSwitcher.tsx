@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { useApp } from '@/lib/context';
 import type { Channel } from '@/lib/api';
 import { destinationAccountLabel, destinationChannels, destinationLabel } from '@/lib/destination';
@@ -9,11 +10,12 @@ const CHANNEL_NAMES: Record<Channel, string> = { whatsapp: 'WhatsApp', rcs: 'RCS
 
 export default function DestinationSwitcher() {
   const { account, channel, accounts, currentUser, getAccountLabel, setDestination } = useApp();
+  const campaignPage = usePathname() === '/apparel/campaigns' && account === 'apparel';
   const dialog = useRef<HTMLDialogElement>(null);
   const [nextAccount, setNextAccount] = useState(account);
   const [nextChannel, setNextChannel] = useState<Channel>(channel);
   const [message, setMessage] = useState('');
-  const label = destinationLabel(account, channel, getAccountLabel(account));
+  const label = campaignPage ? 'Apparel · WhatsApp drafts' : destinationLabel(account, channel, getAccountLabel(account));
 
   const open = () => {
     setNextAccount(account);
@@ -26,7 +28,7 @@ export default function DestinationSwitcher() {
     <section aria-label="Whitelisting destination" className="px-4 sm:px-6 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{account === 'all' ? 'Viewing overview' : 'Whitelisting for'}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{campaignPage ? 'Campaign workspace · Draft only' : account === 'all' ? 'Viewing overview' : 'Whitelisting for'}</p>
           <p id="current-destination" aria-live="polite" className="text-sm sm:text-base font-semibold text-gray-900 break-words">{label}</p>
         </div>
         <button type="button" onClick={open} aria-haspopup="dialog" className="shrink-0 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 focus-visible:ring-2 focus-visible:ring-blue-500">Change</button>
@@ -40,6 +42,7 @@ export default function DestinationSwitcher() {
           <div>
             <h2 id="destination-dialog-title" className="text-lg font-bold">Where are you whitelisting?</h2>
             <p className="mt-1 text-sm text-gray-500">Choose the account and channel together. Nothing is submitted by changing this selection.</p>
+            {campaignPage && <p className="text-sm text-blue-700">WhatsApp drafting is independent of the template-whitelisting channel below. Changing this destination does not publish or send campaigns.</p>}
           </div>
           <div>
             <label htmlFor="destination-account" className="mb-1 block text-sm font-semibold">Account / sub-account</label>

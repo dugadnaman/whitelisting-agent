@@ -7,8 +7,8 @@ import { AppProvider } from '@/lib/context';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Karix — Template Whitelisting',
-  description: 'WhatsApp template submission and tracking',
+  title: 'Attributics — Campaign Operations',
+  description: 'Campaign drafting, template whitelisting and attribution reporting',
   icons: {
     icon: [
       { url: '/logo.svg', type: 'image/svg+xml' },
