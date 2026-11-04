@@ -94,7 +94,7 @@ export default function SignupPage() {
       <div className="w-full max-w-md rounded-2xl border border-gray-200/80 bg-white p-6 sm:p-8 shadow-xl space-y-5">
         <div className="space-y-2">
           <div className="inline-flex items-center justify-center">
-            <img src="/logo.svg" alt="Karix" className="w-10 h-10 rounded-xl shadow-md" />
+            <img src="/logo.svg" alt="Attributics" className="w-10 h-10 rounded-xl shadow-md" />
           </div>
           <h1 className="text-xl font-bold text-gray-900">{currentUser ? 'Awaiting company approval' : 'Join your company workspace'}</h1>
           <p className="text-sm text-gray-600">

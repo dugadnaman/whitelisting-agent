@@ -86,7 +86,7 @@ export default function LoginPage() {
         {/* Brand Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center">
-            <img src="/logo.svg" alt="Karix" className="w-12 h-12 rounded-xl shadow-md" />
+            <img src="/logo.svg" alt="Attributics" className="w-12 h-12 rounded-xl shadow-md" />
           </div>
           <h1 className="text-xl font-bold text-gray-900 tracking-tight">Karix Whitelisting Platform</h1>
           <p className="text-xs text-gray-500">Sign in to your organization workspace</p>
