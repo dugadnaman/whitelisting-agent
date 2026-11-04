@@ -19,6 +19,7 @@ const TAB_META: Record<string, { label: string; icon: string }> = {
   '/work-management': { label: 'Work Management', icon: '📋' },
   '/moengage-ops': { label: 'MoEngage Ops', icon: '⚙️' },
   '/apparel/attribution': { label: 'Apparel Attribution', icon: '👔' },
+  '/apparel/campaigns': { label: 'Apparel WhatsApp Drafts', icon: '' },
   '/settings': { label: 'Settings', icon: '⚙️' },
   '/tata/click-count': { label: 'Tata Clicks', icon: '📈' },
 };

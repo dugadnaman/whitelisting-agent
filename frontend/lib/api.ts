@@ -1741,6 +1741,89 @@ export function fetchMoEngageCatalog(account: string, workspace?: string): Promi
 export function fetchMoEngageDraftWorkspaces(account: string): Promise<{ workspaces: MoEngageWorkspace[] }> {
   return moEngageDraftRequest(`/api/moengage/drafts/workspaces?${new URLSearchParams({ account })}`);
 }
+
+export type ApparelWhatsAppCatalog = {
+  account: 'apparel';
+  brand?: string;
+  workspace_id: string;
+  workspace_name?: string;
+  brands: Array<{ brand: string; workspace_id: string; workspace_name: string; no_goals: boolean }>;
+  segments?: Array<{ id: string; name: string }>;
+  whatsapp_templates?: MoEngageCatalogWhatsAppTemplate[];
+  reference_campaigns?: Array<{ id: string; name: string; status: string; has_goals: boolean }>;
+  user_attributes?: string[];
+  goal_reference?: { id: string; name: string; conversion: Record<string, unknown> };
+  google_service_account_email?: string;
+};
+
+export type ApparelWhatsAppOptions = {
+  brand: string;
+  columns?: string[];
+  reference_campaign_id?: string;
+  name_attribute?: string;
+  allow_existing_campaign_copy?: boolean;
+  overrides?: Record<string, Record<string, string>>;
+  expected_source_digest?: string;
+};
+
+export type ApparelWhatsAppSource = {
+  file?: File;
+  spreadsheet_url?: string;
+};
+
+export function fetchApparelWhatsAppCatalog(brand?: string, referenceId?: string): Promise<ApparelWhatsAppCatalog> {
+  const query = new URLSearchParams();
+  if (brand) query.set("brand", brand);
+  if (referenceId) query.set("reference_id", referenceId);
+  return moEngageDraftRequest(`/api/apparel/whatsapp/catalog${query.size ? `?${query}` : ""}`);
+}
+
+function apparelWhatsAppForm(source: ApparelWhatsAppSource, options: ApparelWhatsAppOptions): FormData {
+  const form = new FormData();
+  if (source.file) form.append("file", source.file);
+  else if (source.spreadsheet_url) form.append("spreadsheet_url", source.spreadsheet_url);
+  else throw new Error("Select an Apparel brief file or Google Sheet URL.");
+  form.append("options_json", JSON.stringify(options));
+  return form;
+}
+
+export function previewApparelWhatsAppBrief(
+  source: ApparelWhatsAppSource,
+  options: ApparelWhatsAppOptions
+): Promise<MoEngageDraftPreview & { source_digest: string }> {
+  return moEngageDraftRequest("/api/apparel/whatsapp/preview", {
+    method: "POST",
+    body: apparelWhatsAppForm(source, options),
+  });
+}
+
+export function stageApparelWhatsAppBrief(
+  source: ApparelWhatsAppSource,
+  options: ApparelWhatsAppOptions
+): Promise<MoEngageDraftBatch> {
+  return moEngageDraftRequest("/api/apparel/whatsapp/batches", {
+    method: "POST",
+    body: apparelWhatsAppForm(source, options),
+  });
+}
+
+export type ApparelWhatsAppImageResult = {
+  url?: string;
+  files?: Array<{ id: string; name: string; mime_type: string }>;
+};
+
+export function uploadApparelWhatsAppImage(
+  brand: string,
+  source: { file?: File; drive_url?: string }
+): Promise<ApparelWhatsAppImageResult> {
+  if (Boolean(source.file) === Boolean(source.drive_url)) throw new Error("Select exactly one image file or Google Drive URL.");
+  const form = new FormData();
+  form.append("brand", brand);
+  if (source.file) form.append("file", source.file);
+  else if (source.drive_url) form.append("drive_url", source.drive_url);
+  return moEngageDraftRequest("/api/apparel/whatsapp/media", { method: "POST", body: form });
+}
+
 export type MoEngageCredentials = {
   ok: boolean;
   account: string;

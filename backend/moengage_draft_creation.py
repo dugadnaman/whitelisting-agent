@@ -32,6 +32,8 @@ def load_server_catalog(account: str) -> dict[str, Any]:
     """Load the account/workspace catalog owned by this deployment, not the caller."""
     prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
     path = os.environ.get(prefix + "CATALOG_FILE", "").strip()
+    if not path and account == "apparel":
+        path = str(Path(__file__).with_name("moengage_apparel_catalog.json"))
     if not path:
         raise PermissionError("Server-owned workspace catalog required")
     catalog_file = Path(path)
@@ -90,12 +92,18 @@ class DraftCreation:
     @classmethod
     def from_environment(
         cls, account: str, user: dict[str, Any], *, workspace_id: str | None = None,
+        reference_id: str | None = None,
     ) -> DraftCreation:
         """Production construction is denied until the owner explicitly approves every gate."""
         authorize_draft_account(account, user)
         prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
+        privileged_agipl = False
+        if account == "apparel" and os.environ.get(prefix + "AGIPL_PRIVILEGED_SESSION_APPROVED") == "true":
+            from apparel_whatsapp import brand_info
+            agipl = brand_info("AGIPL")
+            privileged_agipl = workspace_id in (agipl["workspace_id"], agipl["workspace_name"])
         if (os.environ.get(prefix + "ZERO_CHARGE_CONFIRMED") != "true"
-                or os.environ.get(prefix + "NO_PUBLISH_SCOPE_CONFIRMED") != "true"):
+                or (os.environ.get(prefix + "NO_PUBLISH_SCOPE_CONFIRMED") != "true" and not privileged_agipl)):
             raise PermissionError("Workspace billing and no-publish scope approval required")
         operator = os.environ.get(prefix + "LIVE_TEST_OPERATOR_EMAIL", "").strip()
         segment_id = os.environ.get(prefix + "LIVE_TEST_SEGMENT_ID", "").strip()
@@ -167,7 +175,12 @@ class DraftCreation:
         if workspace_id:
             from moengage_workspaces import workspace_catalog
 
-            catalog = workspace_catalog(account, user, workspace_id)
+            options = {"reference_id": reference_id} if account == "apparel" else {}
+            catalog = workspace_catalog(account, user, workspace_id, **options)
+        if account == "apparel":
+            from apparel_whatsapp import draft_access_allowed
+            if not draft_access_allowed(catalog, privileged_agipl_approved=privileged_agipl):
+                raise PermissionError("Apparel requires draft-only MoEngage permissions or the explicit AGIPL-only privileged-session approval")
         return cls(account, user, catalog, writer, approved_live_rows=approved_rows,
                    allow_sqlite_for_tests=allow_sqlite, allow_all_rows=allow_all_rows)
 
@@ -337,6 +350,14 @@ class DraftCreation:
                         if key in wa
                     }}},
                 }
+                if self.account == "apparel":
+                    expected["campaign_content"]["content"]["whatsapp"] = copy_whatsapp = dict(wa)
+                    copy_whatsapp.pop("phone_number", None)
+                    copy_whatsapp.pop("template_name", None)
+                    for key in ("scheduling_details", "conversion_goals", "goal_tracking", "global_control_enabled",
+                                "personalization_enabled", "bypass_opt_in_preference"):
+                        if key in payload:
+                            expected[key] = payload[key]
             content_matches = isinstance(readback, dict) and _matches(readback, expected)
             exact_content = True
             if whatsapp and content_matches:
@@ -344,6 +365,13 @@ class DraftCreation:
                 exact_content = (
                     saved_wa["body_placeholders"] == wa["body_placeholders"]
                     and readback["segmentation_details"] == payload["segmentation_details"]
+                    and (self.account != "apparel" or all(
+                        readback.get(key) == payload[key]
+                        for key in ("conversion_goals", "goal_tracking", "scheduling_details", "personalization_enabled",
+                                    "bypass_opt_in_preference") if key in payload
+                    ))
+                    and (self.account != "apparel" or all(saved_wa.get(key) == wa[key]
+                         for key in ("button_placeholders", "linksTrackingList") if key in wa))
                 )
             if (not content_matches or str(readback.get("status", "")).upper() != "DRAFT"
                     or readback.get("id") != campaign_id or not exact_content):

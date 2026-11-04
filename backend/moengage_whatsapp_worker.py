@@ -113,6 +113,12 @@ class WhatsAppDraftWriter:
             "stepStatus": True, "is_react": True, "c_s_is_new": True,
             "delivery": "later", "triggerDelayType": "delay", "utm_params": {"is_enabled": False},
         }}
+        if self.account == "apparel":
+            from apparel_whatsapp import portal_details
+            body["campaign_data"].update(portal_details(payload))
+            for key in ("header_placeholders", "button_placeholders", "linksTrackingList"):
+                if key in wa:
+                    body["campaign_data"]["whatsapp_data"][key] = copy.deepcopy(wa[key])
         data = self._request("POST", "/v1.0/campaigns/draft", body).get("data")
         campaign_id = data.get("id") if isinstance(data, dict) else None
         if not isinstance(campaign_id, str) or not _CAMPAIGN_ID.fullmatch(campaign_id):
@@ -157,7 +163,7 @@ class WhatsAppDraftWriter:
         if not isinstance(wa, dict):
             raise ValueError("MoEngage returned no saved WhatsApp content")
         sender = _exact(self._senders(), wa.get("sender_id"), ("id",), "saved sender")
-        return {
+        result = {
             "id": campaign_id, "status": "DRAFT", "channel": listed.get("channel"),
             "campaign_delivery_type": listed.get("delivery_type"),
             "basic_details": {"name": draft["campaignName"]},
@@ -165,9 +171,16 @@ class WhatsAppDraftWriter:
             "campaign_content": {"content": {"whatsapp": {
                 "sender_id": wa.get("sender_id"), "sender_name": sender["sender_name"],
                 "provider": str(wa.get("sender") or "").upper(),
-                "template_id": wa.get("template_id"), "body_placeholders": wa.get("body_placeholders"),
+                "template_id": wa.get("template_id"), "body_placeholders": wa.get("body_placeholders") or {},
             }}},
         }
+        if self.account == "apparel":
+            from apparel_whatsapp import saved_details
+            result.update(saved_details(draft))
+            for key in ("header_placeholders", "button_placeholders", "linksTrackingList"):
+                if key in wa:
+                    result["campaign_content"]["content"]["whatsapp"][key] = copy.deepcopy(wa[key])
+        return result
 
 
 def automate_whatsapp_draft_batch(batch_id: str, account: str, user: dict[str, Any]) -> dict[str, Any]:

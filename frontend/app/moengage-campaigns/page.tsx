@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { canUseApparelAttribution } from '@/lib/apparel-attribution';
 import { clearTabState, setTabState, useTabState } from '@/lib/tab-state';
 import { useApp } from '@/lib/context';
 import {
@@ -318,6 +320,17 @@ function RowCard({
 }
 
 export default function MoEngageCampaignsPage() {
+  const { account, currentUser, authLoading } = useApp();
+  const router = useRouter();
+  const apparel = currentUser?.tenant_id === 'apparel' || canUseApparelAttribution(currentUser, account);
+  useEffect(() => {
+    if (!authLoading && apparel) router.replace('/apparel/campaigns');
+  }, [authLoading, apparel, router]);
+  if (authLoading || apparel) return <p className="p-8 text-center text-gray-500">Opening the authorized campaign workspace…</p>;
+  return <GeneralCampaignsPage />;
+}
+
+function GeneralCampaignsPage() {
   const { currentUser, authLoading } = useApp();
   const superadmin = currentUser?.tenant_id === 'all' && currentUser.role === 'superadmin';
   const [selectedAccount, setSelectedAccount] = useState('tata');

@@ -33,7 +33,7 @@ def prepare_routed_batch(
               for field in ("source_ref", "row_id"))
         for row in rows if isinstance(row, dict)
     )
-    catalogs: dict[tuple[str, str], dict[str, Any]] = {}
+    catalogs: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     items = []
     for index, row in enumerate(rows, 1):
         selected = catalog
@@ -41,7 +41,8 @@ def prepare_routed_batch(
         normalized = row
         if isinstance(row, dict) and str(row.get("channel", "")).strip().upper() == "WHATSAPP":
             try:
-                key = (str(row.get("workspace_id") or ""), str(row.get("workspace") or ""))
+                key = (str(row.get("workspace_id") or ""), str(row.get("workspace") or ""),
+                       str(row.get("brand") or ""), str(row.get("goal_reference_id") or ""))
                 if key not in catalogs:
                     catalogs[key] = catalog_for_row(account, user, row, catalog)
                 selected = catalogs[key]
@@ -277,11 +278,18 @@ class DraftBatchQueue:
         elif self.creator is not None:
             creator = self.creator
         else:
+            options = {"reference_id": str(json.loads(current["row_json"]).get("goal_reference_id") or "") or None} if self.account == "apparel" else {}
             creator = DraftCreation.from_environment(
                 self.account, self.user, workspace_id=target if current["channel"] == "WHATSAPP" else None,
+                **options,
             )
         if creator.catalog.get("workspace_id") != target:
             raise PermissionError("Staged workspace differs from the approved live workspace")
+        if self.account == "apparel" and not resumable:
+            refreshed = prepare_batch([json.loads(current["row_json"])], self.account, creator.catalog,
+                                      self.user["email"], source_type="server_catalog")["items"][0]
+            if refreshed["candidate_v5_payload"] != json.loads(current["candidate_json"] or "null"):
+                raise DraftPreflightError("Live draft configuration changed after staging; preview and stage again")
         with self._db() as conn:
             self._lock_batch(conn, batch_id)
             if conn.is_postgres:

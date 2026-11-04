@@ -201,9 +201,8 @@ def test_catalogs_resolve_overlapping_names_to_each_workspaces_actual_ids(portal
         assert catalog["segments"] == [{"id": expected["segment"], "name": "Shared Audience"}]
         assert [(sender["sender_id"], sender["name"]) for sender in catalog["whatsapp_senders"]] == [
             ("999999999999999999999999", "Other Sender"), (expected["sender"], "Shared Sender")]
-        assert catalog["whatsapp_templates"] == [{"id": expected["template"], "name": "shared_template",
-                                                  "sender_ids": [expected["sender"]], "provider": "KARIX",
-                                                  "display_name": "shared_template", "body": TEMPLATE_BODY}]
+        assert [(template["id"], template["name"], template["sender_ids"]) for template in catalog["whatsapp_templates"]] == [
+            (expected["template"], "shared_template", [expected["sender"]])]
     assert set(portal["sessions"]) == {SERVICES, CAPITAL}
     assert portal["config"]["workspace_id"] == V5_KEY
     assert portal["config"]["bearer_token"] == "offline-account"

@@ -1,0 +1,85 @@
+{
+  "account": "apparel",
+  "organization_id": "678e128849349be3423d6fc6",
+  "workspace_id": "6821a8b69962306efba6184c",
+  "whatsapp_workspaces": [
+    {
+      "id": "67ebafa122bb69cb92112742",
+      "name": "VS_IN"
+    },
+    {
+      "id": "67ebafed33cdecd0d631c806",
+      "name": "BBW_IN"
+    },
+    {
+      "id": "67ffab29c409bbb571499a16",
+      "name": "AGIPL_Master_DB"
+    },
+    {
+      "id": "6811d59d5be93388c11a1f3e",
+      "name": "RB_IN"
+    },
+    {
+      "id": "6811d693e69ce694037fd5ed",
+      "name": "CROCS_IN"
+    },
+    {
+      "id": "6821a8b69962306efba6184c",
+      "name": "AL_IN"
+    },
+    {
+      "id": "6821acfb94497fabc316fd1b",
+      "name": "CharlesKeith_IN"
+    }
+  ],
+  "brands": [
+    {
+      "brand": "Aldo",
+      "workspace_id": "6821a8b69962306efba6184c",
+      "workspace_name": "AL_IN",
+      "no_goals": false
+    },
+    {
+      "brand": "CIS",
+      "workspace_id": "6821a8b69962306efba6184c",
+      "workspace_name": "AL_IN",
+      "no_goals": false
+    },
+    {
+      "brand": "VS",
+      "workspace_id": "67ebafa122bb69cb92112742",
+      "workspace_name": "VS_IN",
+      "no_goals": false
+    },
+    {
+      "brand": "BBW",
+      "workspace_id": "67ebafed33cdecd0d631c806",
+      "workspace_name": "BBW_IN",
+      "no_goals": false
+    },
+    {
+      "brand": "Crocs",
+      "workspace_id": "6811d693e69ce694037fd5ed",
+      "workspace_name": "CROCS_IN",
+      "no_goals": true
+    },
+    {
+      "brand": "R&B",
+      "workspace_id": "6811d59d5be93388c11a1f3e",
+      "workspace_name": "RB_IN",
+      "no_goals": true
+    },
+    {
+      "brand": "CK",
+      "workspace_id": "6821acfb94497fabc316fd1b",
+      "workspace_name": "CharlesKeith_IN",
+      "no_goals": true
+    },
+    {
+      "brand": "AGIPL",
+      "workspace_id": "67ffab29c409bbb571499a16",
+      "workspace_name": "AGIPL_Master_DB",
+      "no_goals": true
+    }
+  ]
+}

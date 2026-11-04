@@ -4988,6 +4988,87 @@ def _authorize_moengage_preview(account: str, current_user: dict) -> str:
     return creator
 
 
+@app.get("/api/apparel/whatsapp/catalog")
+def apparel_whatsapp_catalog_endpoint(
+    brand: str | None = Query(None), reference_id: str | None = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    from apparel_whatsapp import catalog
+    _authorize_moengage_preview("apparel", current_user)
+    try:
+        return catalog(brand, current_user, reference_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/apparel/whatsapp/media")
+async def apparel_whatsapp_media_endpoint(
+    brand: str = Form(...), file: UploadFile | None = File(None),
+    drive_url: str | None = Form(None), current_user: dict = Depends(get_current_user),
+):
+    from apparel_whatsapp import upload_image
+    _authorize_moengage_preview("apparel", current_user)
+    try:
+        data = await file.read(5 * 1024 * 1024 + 1) if file else None
+        return await asyncio.to_thread(upload_image, brand, content=data,
+                                       filename=file.filename if file else "", drive_url=drive_url)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if file:
+            await file.close()
+
+
+@app.post("/api/apparel/whatsapp/preview")
+async def apparel_whatsapp_preview_endpoint(
+    options_json: str = Form(...), file: UploadFile | None = File(None),
+    spreadsheet_url: str | None = Form(None), current_user: dict = Depends(get_current_user),
+):
+    from apparel_whatsapp import prepare_source
+    _authorize_moengage_preview("apparel", current_user)
+    try:
+        if len(options_json) > 262144:
+            raise ValueError("Review options exceed the supported size")
+        options = json.loads(options_json)
+        data = await file.read(5 * 1024 * 1024 + 1) if file else None
+        return await asyncio.to_thread(prepare_source, file.filename if file else None,
+                                       data, spreadsheet_url, options, current_user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if file:
+            await file.close()
+
+
+@app.post("/api/apparel/whatsapp/batches")
+async def apparel_whatsapp_stage_endpoint(
+    options_json: str = Form(...), file: UploadFile | None = File(None),
+    spreadsheet_url: str | None = Form(None), current_user: dict = Depends(get_current_user),
+):
+    from apparel_whatsapp import prepare_source
+    _authorize_moengage_preview("apparel", current_user)
+    try:
+        if len(options_json) > 262144:
+            raise ValueError("Review options exceed the supported size")
+        options = json.loads(options_json)
+        data = await file.read(5 * 1024 * 1024 + 1) if file else None
+        return await asyncio.to_thread(prepare_source, file.filename if file else None,
+                                       data, spreadsheet_url, options, current_user, stage=True)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        if file:
+            await file.close()
+
+
 @app.post("/api/moengage/drafts/preview")
 def preview_moengage_drafts_endpoint(
     body: MoEngageDraftPreviewRequest,
@@ -5222,7 +5303,8 @@ def create_moengage_draft_endpoint(
     _authorize_moengage_preview(body.account, current_user)
     try:
         selector = (body.row.get("workspace_id") or body.row.get("workspace")) if str(body.row.get("channel", "")).upper() == "WHATSAPP" else None
-        return DraftCreation.from_environment(body.account, current_user, workspace_id=selector).create(body.row)
+        options = {"reference_id": str(body.row.get("goal_reference_id") or "") or None} if body.account == "apparel" else {}
+        return DraftCreation.from_environment(body.account, current_user, workspace_id=selector, **options).create(body.row)
     except RateLimitError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except PermissionError as exc:

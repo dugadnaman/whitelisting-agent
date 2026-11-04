@@ -354,6 +354,9 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
             continue
         source, row_id = _text(row, "source_ref"), _text(row, "row_id")
         errors: list[str] = []
+        if account == "apparel":
+            from apparel_whatsapp import prepare_row
+            row = prepare_row(row, catalog, errors)
         if not source or not row_id:
             errors.append("source_ref and row_id are required")
         if source and row_id and keys[(source, row_id)] != 1:
@@ -381,7 +384,13 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
         name = _text(row, "campaign_name")
         if not name:
             errors.append("campaign_name is required; Jira summary is not campaign copy")
-        audience = _audience(row, catalog, errors)
+        if account == "apparel":
+            from apparel_whatsapp import prepare_audience
+            audience = prepare_audience(row, catalog, errors)
+            if channel != "WHATSAPP":
+                errors.append("Apparel campaign drafting supports WhatsApp only")
+        else:
+            audience = _audience(row, catalog, errors)
         schedule = _schedule(row, errors)
         if channel == "EMAIL":
             content = _email(row, catalog, name, errors)
@@ -391,11 +400,15 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
             content = _whatsapp(row, catalog, name, errors)
         else:
             content = {}
+        details = {}
+        if account == "apparel" and channel == "WHATSAPP":
+            from apparel_whatsapp import prepare_details
+            details = prepare_details(row, catalog, content, errors)
         candidate = None
         if not errors:
             candidate = {
                 "channel": channel, "campaign_delivery_type": "ONE_TIME", "created_by": creator,
-                **content, "segmentation_details": audience, "scheduling_details": schedule,
+                **content, **details, "segmentation_details": audience, "scheduling_details": schedule,
             }
         results.append({"source_ref": source, "row_id": row_id, "channel": channel,
                         "account": account, "workspace_id": catalog["workspace_id"],

@@ -3314,7 +3314,7 @@ export default function JiraBriefsPage() {
                               Copy ID
                             </button>
                             <a
-                              href="/moengage-campaigns"
+                              href={account === 'apparel' ? '/apparel/campaigns' : '/moengage-campaigns'}
                               className="text-[11px] font-bold text-emerald-700 hover:underline ml-2"
                             >
                               View in MoEngage Campaigns Builder ➔

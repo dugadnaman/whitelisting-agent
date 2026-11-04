@@ -168,14 +168,15 @@ export default function Nav() {
         {links.map((link) => {
           if (link.href === '/apparel/attribution' && !canUseApparelAttribution(currentUser, account)) return null;
           if (link.href === '/tata/click-count' && !canViewTataClickCounts) return null;
+          const href = link.href === '/moengage-campaigns' && canUseApparelAttribution(currentUser, account) ? '/apparel/campaigns' : link.href;
           const active =
-            link.href === '/'
+            href === '/'
               ? pathname === '/'
-              : pathname.startsWith(link.href);
+              : pathname.startsWith(href);
           return (
             <Link
               key={link.href}
-              href={link.href}
+              href={href}
               className={
                 active
                   ? 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-50 text-blue-700 shadow-xs'
@@ -187,7 +188,7 @@ export default function Nav() {
                 <div className="leading-tight">{link.label}</div>
                 {link.subtitle && (
                   <div className={`text-[10px] font-normal mt-0.5 truncate ${active ? 'text-blue-600' : 'text-gray-400'}`}>
-                    {link.subtitle}
+                    {href === '/apparel/campaigns' ? 'WhatsApp brief-to-draft' : link.subtitle}
                   </div>
                 )}
               </div>
