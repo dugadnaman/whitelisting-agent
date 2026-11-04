@@ -129,7 +129,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     }`}
                   >
                     <Link href={path} className="inline-flex items-center gap-1.5 truncate max-w-[160px]">
-                      <span>{meta.icon}</span>
+                      {path === '/' ? (
+                        <img src="/logo.svg" alt="" className="w-3.5 h-3.5 rounded-xs shrink-0" />
+                      ) : (
+                        <span>{meta.icon}</span>
+                      )}
                       <span className="truncate">{meta.label}</span>
                     </Link>
                     {openTabs.length > 1 && (
