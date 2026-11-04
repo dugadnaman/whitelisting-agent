@@ -148,7 +148,7 @@ def _ctas(raw):
 def read_sheet_values(values, brand, source_ref, *, sheet="WhatsApp", columns=None):
     if brand not in BRANDS:
         raise ValueError("Unknown Apparel brand")
-    if sheet != "WhatsApp":
+    if sheet != "WhatsApp" and "whatsapp" not in sheet.lower():
         return []
     values = list(values)
     selected = {str(column).upper() for column in columns} if columns is not None else None

@@ -1749,7 +1749,7 @@ export type ApparelWhatsAppCatalog = {
   brand?: string;
   workspace_id: string;
   workspace_name?: string;
-  brands: Array<{ brand: string; workspace_id: string; workspace_name: string; no_goals: boolean }>;
+  brands: Array<{ brand: string; workspace_id: string; workspace_name: string; no_goals: boolean; spreadsheet_url?: string }>;
   segments?: Array<{ id: string; name: string }>;
   whatsapp_templates?: MoEngageCatalogWhatsAppTemplate[];
   reference_campaigns?: Array<{ id: string; name: string; status: string; has_goals: boolean }>;

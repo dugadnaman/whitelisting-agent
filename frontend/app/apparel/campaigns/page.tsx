@@ -206,7 +206,12 @@ function Workspace({ userId }: { userId: string }) {
     {busy && <p role="status" className="text-sm text-blue-700">{busy}…</p>}
     <fieldset disabled={Boolean(busy)} className={`${panel} space-y-4`}>
       <legend className="font-semibold">1. Brand and verified reference</legend>
-      <label className="block text-sm">Brand<select className={input} value={brand} onChange={(event) => { invalidate(); setBrand(event.target.value); setReference(''); setNameAttribute(''); setOverrides({}); setImageFiles({}); setDriveChoices({}); setSelectedDriveFiles({}); setCatalog(null); setPreview(null); }}>
+      <label className="block text-sm">Brand<select className={input} value={brand} onChange={(event) => {
+        const nextBrand = event.target.value;
+        invalidate(); setBrand(nextBrand); setReference(''); setNameAttribute(''); setOverrides({}); setImageFiles({}); setDriveChoices({}); setSelectedDriveFiles({}); setCatalog(null); setPreview(null);
+        const found = brands.find((item) => item.brand === nextBrand);
+        if (found?.spreadsheet_url) { setSheet(found.spreadsheet_url); setSourceType('sheet'); }
+      }}>
         <option value="">Select brand</option>{brands.map((item) => <option key={item.brand} value={item.brand}>{item.brand} · {item.workspace_name}</option>)}
       </select></label>
       {brand && <p className="text-sm">Workspace: {catalog?.workspace_name || catalog?.workspace_id || 'Loading…'}</p>}

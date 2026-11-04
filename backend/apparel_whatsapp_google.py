@@ -127,14 +127,22 @@ def _get_json(session, url, params):
 
 def read_google_brief(url, brand, *, columns=None) -> list[dict[str, str]]:
     spreadsheet_id = _sheet_id(url)
+    target_tab = "CIS WhatsApp" if brand == "CIS" else "WhatsApp"
     with _session([SHEETS_SCOPE]) as session:
-        payload = _get_json(session, f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}", {
-            "ranges": "'WhatsApp'", "includeGridData": "true",
-            "fields": "sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue,hyperlink))))",
-        })
-    sheets = [sheet for sheet in payload.get("sheets", []) if sheet.get("properties", {}).get("title") == "WhatsApp"]
+        try:
+            payload = _get_json(session, f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}", {
+                "ranges": f"'{target_tab}'", "includeGridData": "true",
+                "fields": "sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue,hyperlink))))",
+            })
+        except ValueError:
+            payload = _get_json(session, f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet_id}", {
+                "ranges": "'WhatsApp'", "includeGridData": "true",
+                "fields": "sheets(properties(title),data(startRow,startColumn,rowData(values(formattedValue,hyperlink))))",
+            })
+    sheets = [sheet for sheet in payload.get("sheets", []) if "whatsapp" in sheet.get("properties", {}).get("title", "").lower()]
     if len(sheets) != 1:
         raise ValueError("Google brief requires an explicitly named WhatsApp tab; upload that workbook instead.")
+    sheet_title = sheets[0].get("properties", {}).get("title", target_tab)
     values = []
     for block in sheets[0].get("data", []):
         start_row, start_column = block.get("startRow", 0), block.get("startColumn", 0)
@@ -147,7 +155,7 @@ def read_google_brief(url, brand, *, columns=None) -> list[dict[str, str]]:
             values[index].extend([""] * max(0, needed - len(values[index])))
             for col, cell in enumerate(cells, start_column):
                 values[index][col] = cell.get("hyperlink") or cell.get("formattedValue", "")
-    return read_sheet_values(values, brand, f"google:{spreadsheet_id}:WhatsApp", columns=columns)
+    return read_sheet_values(values, brand, f"google:{spreadsheet_id}:{sheet_title}", sheet=sheet_title, columns=columns)
 
 
 def _file_metadata(session, file_id):
