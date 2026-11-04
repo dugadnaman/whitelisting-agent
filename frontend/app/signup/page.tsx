@@ -93,6 +93,9 @@ export default function SignupPage() {
     <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50/40 p-4 sm:p-6">
       <div className="w-full max-w-md rounded-2xl border border-gray-200/80 bg-white p-6 sm:p-8 shadow-xl space-y-5">
         <div className="space-y-2">
+          <div className="inline-flex w-10 h-10 rounded-xl bg-slate-900 items-center justify-center shadow-md">
+            <img src="/logo.png" alt="Logo" className="w-6 h-6 object-contain" />
+          </div>
           <h1 className="text-xl font-bold text-gray-900">{currentUser ? 'Awaiting company approval' : 'Join your company workspace'}</h1>
           <p className="text-sm text-gray-600">
             {currentUser ? `Signed in as ${currentUser.name || currentUser.email}.` : 'Create an account and request access from your organization administrator.'}

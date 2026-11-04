@@ -144,7 +144,12 @@ export default function Nav() {
   return (
     <>
     <header className="md:hidden sticky top-0 z-40 h-14 flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4">
-      <span className="font-semibold text-gray-900 truncate">Karix · Template Whitelisting</span>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center shrink-0 shadow-xs">
+          <img src="/logo.png" alt="Logo" className="w-5 h-5 object-contain" />
+        </div>
+        <span className="font-semibold text-gray-900 truncate">Karix · Template Whitelisting</span>
+      </div>
       <button id="workspace-menu-toggle" type="button" aria-controls="workspace-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)} className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500">Menu</button>
     </header>
     {mobileOpen && <button type="button" aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="md:hidden fixed inset-0 z-40 bg-black/30" />}
@@ -152,8 +157,8 @@ export default function Nav() {
       <button type="button" onClick={() => setMobileOpen(false)} className="md:hidden self-end rounded border border-gray-200 m-3 px-3 py-1 text-xs font-semibold">Close navigation</button>
       <div className="p-5 border-b border-gray-100">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
-            K
+          <div className="w-8 h-8 rounded-lg bg-slate-900 flex items-center justify-center shrink-0 shadow-sm">
+            <img src="/logo.png" alt="Logo" className="w-6 h-6 object-contain" />
           </div>
           <div>
             <div className="text-base font-bold text-gray-900 leading-tight">Karix</div>

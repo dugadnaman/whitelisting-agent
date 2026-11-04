@@ -85,8 +85,8 @@ export default function LoginPage() {
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-200/80 p-6 sm:p-8 space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-2">
-          <div className="inline-flex w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-bold text-xl items-center justify-center shadow-md">
-            K
+          <div className="inline-flex w-12 h-12 rounded-xl bg-slate-900 items-center justify-center shadow-md">
+            <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain" />
           </div>
           <h1 className="text-xl font-bold text-gray-900 tracking-tight">Karix Whitelisting Platform</h1>
           <p className="text-xs text-gray-500">Sign in to your organization workspace</p>
