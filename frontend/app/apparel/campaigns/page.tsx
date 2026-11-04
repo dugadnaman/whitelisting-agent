@@ -6,7 +6,7 @@ import { useApp } from '@/lib/context';
 import { canUseApparelAttribution } from '@/lib/apparel-attribution';
 import {
   fetchApparelWhatsAppCatalog, previewApparelWhatsAppBrief, stageApparelWhatsAppBrief,
-  fetchMoEngageDraftBatch, createMoEngageDraftRow, uploadApparelWhatsAppImage,
+  fetchMoEngageDraftBatch, createMoEngageDraftRow, uploadApparelWhatsAppImage, MoEngageDraftRequestError,
   type ApparelWhatsAppCatalog, type ApparelWhatsAppOptions, type ApparelWhatsAppImageResult,
   type MoEngageDraftPreview, type MoEngageDraftBatch, type MoEngageDraftRow,
 } from '@/lib/api';
@@ -139,6 +139,7 @@ function Workspace({ userId }: { userId: string }) {
       if (value.account !== 'apparel' || value.batch_id !== id) throw new Error('Saved batch identity mismatch.');
       if (!isSelectedBrand(value.items)) throw new Error('Select the saved batch’s brand before restoring it.');
       setBatch(value); setConfirmed(false);
+      for (const row of value.items) if (complete(row)) localStorage.removeItem(marker(id, row.row_id));
       setHalted(value.items.some((row) => ['UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(row.status) || localStorage.getItem(marker(id, row.row_id)) === '1'));
     });
   }
@@ -165,7 +166,31 @@ function Workspace({ userId }: { userId: string }) {
           const returned = result.items.find((item) => item.row_id === row.row_id && item.source_ref === row.source_ref && item.workspace_id === row.workspace_id);
           if (!returned || !complete(returned)) throw new Error(`${row.row_id}: ${returned?.status || 'unknown result'}. Stopped; no automatic POST retry.`);
           localStorage.removeItem(key);
-        } catch (err) { if (current(version)) setHalted(true); throw err; }
+        } catch (err) {
+          let verifiedAfterInterruption = false;
+          if (current(version)) {
+            try {
+              const observed = validateBatch(await fetchMoEngageDraftBatch(latest.batch_id, 'apparel'), latest.batch_id);
+              if (current(version)) {
+                const saved = observed.items.find((item) => item.row_id === row.row_id && item.source_ref === row.source_ref && item.workspace_id === row.workspace_id);
+                const preflightDenied = err instanceof MoEngageDraftRequestError && err.status === 423 && saved?.status === 'preview_ready' && !saved.campaign_id;
+                if (saved && (complete(saved) || preflightDenied)) {
+                  localStorage.removeItem(key); setBatch(observed); setConfirmed(false);
+                  setHalted(observed.items.some((item) => ['UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(item.status) || localStorage.getItem(marker(observed.batch_id, item.row_id)) === '1'));
+                  verifiedAfterInterruption = complete(saved);
+                } else setHalted(true);
+              }
+            } catch {
+              // An unavailable authoritative read cannot establish a safe retry.
+              if (current(version)) setHalted(true);
+            }
+          }
+          if (verifiedAfterInterruption) {
+            setNotice('The saved draft is VERIFIED after a delayed response. No duplicate was requested. Review the batch before continuing; nothing was published or activated.');
+            return;
+          }
+          throw err;
+        }
       }
       if (current(version)) { setConfirmed(false); setNotice('Draft creation finished. Review the returned IDs and statuses below. Nothing was published or activated.'); }
     });

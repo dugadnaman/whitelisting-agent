@@ -1650,10 +1650,10 @@ export class MoEngageDraftRequestError extends Error {
   }
 }
 
-async function moEngageDraftRequest<T>(path: string, init?: RequestInit): Promise<T> {
+async function moEngageDraftRequest<T>(path: string, init?: RequestInit, timeoutMs = 60000): Promise<T> {
   if (!getAuthToken()) throw new Error("Sign in to access MoEngage drafts.");
   // A timed-out write may still have reached MoEngage: never retry POSTs automatically.
-  const res = await fetchWithRetry(getApiUrl(path), init, 0);
+  const res = await fetchWithRetry(getApiUrl(path), init, 0, 800, timeoutMs);
   if (!res.ok) throw new MoEngageDraftRequestError(await getErrorMessage(res), res.status);
   return res.json() as Promise<T>;
 }
@@ -1694,7 +1694,9 @@ export function createMoEngageDraftRow(batchId: string, rowId: string, account: 
   form.append("account", account);
   return moEngageDraftRequest(
     `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(rowId)}/create`,
-    { method: "POST", body: form }
+    { method: "POST", body: form },
+    // Fresh provider metadata, durable reservation, save and verification can exceed one minute.
+    account === "apparel" ? 180000 : 60000
   );
 }
 export function createMoEngageDraft(account: string, row: Record<string, unknown>): Promise<{
