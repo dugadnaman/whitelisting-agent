@@ -55,6 +55,79 @@ def get_moengage_config(account: str = "tata") -> dict[str, str]:
         "sender_id": value("SENDER_ID"), "prefix": prefix,
     }
 
+def _authorized_rcs_workspaces(cfg: dict[str, str]) -> list[dict[str, str]]:
+    """Read active destinations owned by the saved anchor's organization."""
+    if not re.fullmatch(r"https://dashboard(?:-\d+)?\.moengage\.com", cfg["base_url"]):
+        raise ValueError("A configured MoEngage dashboard HTTPS origin is required.")
+    if not re.fullmatch(r"[A-Za-z0-9]{24}", cfg["workspace_id"]):
+        raise ValueError("Configure the exact Apparel anchor workspace ID.")
+    try:
+        response = requests.get(
+            cfg["base_url"] + "/dash/auth/listApps",
+            headers=get_moengage_auth_headers_from_config(cfg),
+            timeout=15, allow_redirects=False,
+        )
+        if not response.ok or 300 <= response.status_code < 400:
+            raise ValueError("MoEngage refused the saved session. Reconnect Auth Sync.")
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise ValueError("MoEngage workspace discovery failed. Reconnect Auth Sync.") from exc
+    if (not isinstance(data, dict) or data.get("success") is False
+            or data.get("status") in ("failed", "failure", "error")
+            or str(data.get("code", 200)) != "200"
+            or data.get("loggedIn") is False and not (
+                str(data.get("code")) == "200" and data.get("status") == "success")):
+        raise ValueError("MoEngage rejected the saved session. Reconnect Auth Sync.")
+    apps = data.get("data")
+    if not isinstance(apps, list) or any(not isinstance(app, dict) for app in apps):
+        raise ValueError("MoEngage returned an unrecognized workspace inventory.")
+    anchors = [app for app in apps if app.get("id") == cfg["workspace_id"]]
+    if (len(anchors) != 1 or anchors[0].get("activated") is not True
+            or anchors[0].get("is_test") is not False
+            or not isinstance(anchors[0].get("account_id"), str)
+            or not anchors[0]["account_id"].strip()):
+        raise ValueError("The configured Apparel anchor is not active and authorized.")
+    workspaces = []
+    for app in apps:
+        if (app.get("account_id") != anchors[0]["account_id"]
+                or app.get("activated") is not True or app.get("is_test") is not False):
+            continue
+        if (not isinstance(app.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9]{24}", app["id"])
+                or not isinstance(app.get("name"), str) or not app["name"].strip()):
+            raise ValueError("MoEngage returned invalid workspace details.")
+        workspaces.append({"id": app["id"], "name": app["name"]})
+    if len({app["id"] for app in workspaces}) != len(workspaces):
+        raise ValueError("MoEngage returned duplicate workspace identities.")
+    return sorted(workspaces, key=lambda app: app["name"].casefold())
+
+
+def list_moengage_rcs_workspaces(account: str) -> list[dict[str, str]]:
+    if account.strip().lower() != "apparel":
+        raise ValueError("Workspace selection is available for Apparel RCS sync only.")
+    return _authorized_rcs_workspaces(get_moengage_config(account))
+
+
+def _rcs_workspace_context(account: str, workspace_id: str | None = None):
+    apparel = account.strip().lower() == "apparel"
+    if apparel and not workspace_id:
+        raise ValueError("Select a destination MoEngage workspace before syncing.")
+    if not apparel and workspace_id is not None:
+        raise ValueError("Workspace selection is available for Apparel RCS sync only.")
+    cfg = get_moengage_config(account)
+    if apparel:
+        if workspace_id not in {app["id"] for app in _authorized_rcs_workspaces(cfg)}:
+            raise ValueError("Select an active workspace in the configured Apparel organization.")
+        bound = check_moengage_session(
+            account, bearer_token=cfg["bearer_token"], refresh_token=cfg["refresh_token"],
+            cookie=cfg["cookie"], base_url=cfg["base_url"], workspace_id=workspace_id,
+        )
+        if bound.get("workspace_id") != workspace_id:
+            raise ValueError("MoEngage authorized a different destination workspace.")
+        if workspace_id != cfg["workspace_id"]:
+            cfg["sender_id"] = ""
+        cfg = {**cfg, **bound}
+    return cfg, get_moengage_auth_headers_from_config(cfg)
+
 
 def check_moengage_session(
     account: str, *, bearer_token: str, refresh_token: str, cookie: str,
@@ -245,7 +318,8 @@ def test_moengage_connection(
         }
 
     try:
-        templates = list_moengage_rcs_templates(account)
+        templates = (list_moengage_rcs_templates(account, creds["workspace_id"])
+                     if account.strip().lower() == "apparel" else list_moengage_rcs_templates(account))
         return {
             "ok": True,
             "template_count": len(templates),
@@ -261,15 +335,19 @@ def test_moengage_connection(
 
 def get_moengage_auth_headers(account: str = "tata") -> dict[str, str]:
     """Build MoEngage request headers for an account's workspace."""
-    cfg = get_moengage_config(account)
+    return get_moengage_auth_headers_from_config(get_moengage_config(account))
+
+
+def get_moengage_auth_headers_from_config(cfg: dict[str, str]) -> dict[str, str]:
+    """Build headers from request-local credentials without persisting them."""
     token = cfg["bearer_token"]
 
     if not token:
-        raise OSError(f"Missing MoEngage Bearer token for {account}. Configure it in Settings -> MoEngage.")
+        raise OSError("Missing MoEngage Bearer token. Reconnect Auth Sync.")
 
     expiry = decode_moengage_token_expiry(token)
     if expiry.get("expired") is True:
-        raise OSError(f"MoEngage Bearer token for {account} has expired. Paste a fresh token (Settings -> MoEngage).")
+        raise OSError("MoEngage Bearer token has expired. Reconnect Auth Sync.")
 
     auth_val = token if token.lower().startswith("bearer ") else f"Bearer {token}"
     headers = {
@@ -287,10 +365,11 @@ def get_moengage_auth_headers(account: str = "tata") -> dict[str, str]:
     return headers
 
 
-def list_moengage_rcs_templates(account: str = "tata") -> list[dict[str, Any]]:
-    """Fetch existing registered RCS templates from an account's MoEngage workspace."""
-    cfg = get_moengage_config(account)
-    headers = get_moengage_auth_headers(account)
+def list_moengage_rcs_templates(
+    account: str = "tata", workspace_id: str | None = None, *, _context=None,
+) -> list[dict[str, Any]]:
+    """Fetch registered templates using the destination's bound session."""
+    cfg, headers = _context or _rcs_workspace_context(account, workspace_id)
     url = f"{cfg['base_url']}/template_metadata?template_type=rcs"
     resp = requests.get(url, headers=headers, timeout=20)
     if not resp.ok:
@@ -345,32 +424,33 @@ def create_moengage_rcs_template(
     card_description: str,
     media_url: str | None = None,
     cta_text: str = "Explore Now",
-    cta_url: str = "https://www.tatacapital.com",
+    cta_url: str | None = None,
     sender_id: str | None = None,
     account: str = "tata",
     template_type: str = "card",
     carousel_cards: list[dict[str, Any]] | None = None,
     width: str = "MEDIUM",
     height: str = "MEDIUM",
+    workspace_id: str | None = None,
+    *,
+    _context=None,
 ) -> dict[str, Any]:
     """
     Register an RCS template into an account's MoEngage RCS Template Management:
     POST {base_url}/template_metadata
     """
-    cfg = get_moengage_config(account)
+    cfg, headers = _context or _rcs_workspace_context(account, workspace_id)
     clean_name = re.sub(r"[^\w\-.]", "_", template_name.strip()).strip("_")
     # In MoEngage, template ID and template name are always the exact same
     clean_id = clean_name
 
-    headers = get_moengage_auth_headers(account)
     resolved_sender = _resolve_rcs_sender(account, cfg, headers, sender_id)
 
     resolved_cta_url = (cta_url or "").strip()
-    if not resolved_cta_url or resolved_cta_url in ("https://u3.mnge.co/", "https://www.tatacapital.com"):
-        if account.lower() == "apparel":
-            resolved_cta_url = "https://www.randbfashion.in/randbfashion-Store-Locater.html"
-        else:
-            resolved_cta_url = "https://www.tatacapital.com"
+    if account.strip().lower() != "apparel" and (
+        not resolved_cta_url or resolved_cta_url in ("https://u3.mnge.co/", "https://www.tatacapital.com")
+    ):
+        resolved_cta_url = "https://www.tatacapital.com"
 
     suggestions = []
     if resolved_cta_url:
@@ -411,6 +491,8 @@ def create_moengage_rcs_template(
                     s_text = (s.get("text") or s.get("postbackData") or s.get("postback_data") or "Explore")[:25]
                     s_url = s.get("url") or resolved_cta_url
                     if s_type in ("url_action", "OPEN_URL") or s.get("url"):
+                        if not s_url.strip():
+                            continue
                         card_suggs.append({
                             "type": "OPEN_URL",
                             "text": s_text,
@@ -542,6 +624,7 @@ def create_moengage_rcs_template(
         "name": clean_name,
         "template_id": clean_id,
         "moengage_id": moe_id,
+        "workspace_id": cfg["workspace_id"],
         "created_at": data.get("data", {}).get("created_at"),
     }
 
@@ -566,6 +649,7 @@ def sync_karix_rcs_to_moengage(
     account: str = "tata",
     semantic_dedup: bool = True,
     resolve_attributes: bool = True,
+    workspace_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Pull already-approved RCS templates from Karix for an account and register
@@ -576,6 +660,9 @@ def sync_karix_rcs_to_moengage(
     """
     from rcs_client import fetch_rcs_templates
 
+    context = _rcs_workspace_context(account, workspace_id) if account.strip().lower() == "apparel" or workspace_id is not None else None
+    destination = context[0]["workspace_id"] if context else get_moengage_config(account)["workspace_id"]
+
     try:
         karix_templates = fetch_rcs_templates(client=account)
     except Exception as exc:
@@ -583,6 +670,7 @@ def sync_karix_rcs_to_moengage(
             "ok": False,
             "error": f"Could not read Karix RCS templates for '{account}': {exc}",
             "account": account,
+            "workspace_id": destination,
         }
 
     if not karix_templates:
@@ -590,9 +678,11 @@ def sync_karix_rcs_to_moengage(
             "ok": False,
             "error": f"No RCS templates found in Karix for account '{account}'. Check RCS bot ID / auth token.",
             "account": account,
+            "workspace_id": destination,
         }
 
-    existing = list_moengage_rcs_templates(account)
+    existing = (list_moengage_rcs_templates(account, _context=context)
+                if context else list_moengage_rcs_templates(account))
     existing_names = {str(t.get("name", "")).strip().lower() for t in existing}
     existing_ids = {str(t.get("meta_data", {}).get("template_id", "")).strip().lower() for t in existing}
 
@@ -698,11 +788,13 @@ def sync_karix_rcs_to_moengage(
                 carousel_cards=carousel_cards if is_carousel else None,
                 width=vi.get("width") or "MEDIUM",
                 height=vi.get("height") or "MEDIUM",
+                **({"_context": context} if context else {}),
             )
             created.append({
                     "template_name": name,
                     "template_id": template_id,
                     "moengage_id": res.get("moengage_id"),
+                    "workspace_id": destination,
                     "resolved_description": card_description,
                 }
             )
@@ -713,6 +805,7 @@ def sync_karix_rcs_to_moengage(
     return {
         "ok": True,
         "account": account,
+        "workspace_id": destination,
         "karix_total": len(karix_templates),
         "created": created,
         "created_count": len(created),

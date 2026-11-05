@@ -1512,17 +1512,18 @@ export async function syncRcsTemplateToMoEngage(params: {
   cta_url?: string;
   sender_id?: string;
   account?: string;
+  workspace_id?: string;
   template_type?: string;
   carousel_cards?: Array<Record<string, unknown>>;
   width?: string;
   height?: string;
-}) : Promise<{ ok: boolean; name: string; template_id: string; moengage_id: string }> {
+}) : Promise<{ ok: boolean; name: string; template_id: string; moengage_id: string; workspace_id: string }> {
   const qs = params.account ? `?account=${encodeURIComponent(params.account)}` : "";
   const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/sync${qs}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
-  });
+  }, 0);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }
@@ -1894,9 +1895,18 @@ export async function testMoEngageConnection(
   return res.json();
 }
 
-export async function syncKarixRcsToMoEngage(account: string = "tata"): Promise<{
+export type RcsSyncWorkspace = { id: string; name: string };
+
+export async function fetchRcsSyncWorkspaces(account: string): Promise<RcsSyncWorkspace[]> {
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/workspaces?account=${encodeURIComponent(account)}`), { cache: "no-store" });
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+  return (await res.json()).workspaces;
+}
+
+export async function syncKarixRcsToMoEngage(account: string = "tata", workspaceId?: string): Promise<{
   ok: boolean;
   account: string;
+  workspace_id: string;
   error?: string;
   karix_total: number;
   created: Array<{ template_name: string; template_id: string; moengage_id: string }>;
@@ -1906,9 +1916,11 @@ export async function syncKarixRcsToMoEngage(account: string = "tata"): Promise<
   errors: Array<{ template_name: string; error: string }>;
   error_count: number;
 }> {
-  const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/sync-karix?account=${encodeURIComponent(account)}`), {
+  const qs = new URLSearchParams({ account });
+  if (workspaceId) qs.set("workspace_id", workspaceId);
+  const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/sync-karix?${qs}`), {
     method: "POST",
-  });
+  }, 0);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

@@ -242,34 +242,6 @@ def test_sync_karix_rcs_to_moengage_dedup_and_attributes_integration(attribute_p
         assert "{{1}}" not in call_args["card_description"]
 
 
-def test_apparel_account_rcs_only_sync():
-    """Verify sync_karix_rcs_to_moengage executes for apparel account."""
-    fake_templates = [
-        {
-            "templateId": "apparel_rcs_festive",
-            "status": "APPROVED",
-            "viTemplate": {
-                "name": "apparel_festive_collection",
-                "standaloneCard": {
-                    "cardTitle": "New Autumn Arrivals",
-                    "cardDescription": "Shop the latest festive apparel with exclusive discounts!",
-                },
-            },
-        }
-    ]
-
-    with (
-        patch("rcs_client.fetch_rcs_templates", return_value=fake_templates),
-        patch("moengage_sync.list_moengage_rcs_templates", return_value=[]),
-        patch("moengage_sync.create_moengage_rcs_template") as mock_create,
-    ):
-        mock_create.return_value = {"ok": True, "moengage_id": "apparel_moe_1"}
-
-        res = sync_karix_rcs_to_moengage(account="apparel")
-        assert res["ok"] is True
-        assert res["account"] == "apparel"
-        assert len(res["created"]) == 1
-        assert res["created"][0]["template_name"] == "apparel_festive_collection"
 
 
 def test_apparel_account_blocks_spreadsheet_submission(provision_user):

@@ -4439,6 +4439,7 @@ class MoEngageRcsSyncRequest(BaseModel):
     cta_url: str | None = None
     sender_id: str | None = None
     account: str | None = None
+    workspace_id: str | None = None
     template_type: str | None = None
     carousel_cards: list[dict[str, Any]] | None = None
     width: str | None = "MEDIUM"
@@ -4447,6 +4448,27 @@ def _require_moengage_account_access(account: str, current_user: dict) -> None:
     if current_user.get("sub") in (None, "usr_anon"):
         raise HTTPException(status_code=401, detail="Authentication required")
     require_tenant_access(account, current_user)
+
+def _require_rcs_sync_workspace(account: str, workspace_id: str | None) -> None:
+    if account.strip().lower() == "apparel" and not workspace_id:
+        raise HTTPException(status_code=400, detail="Select a destination MoEngage workspace before syncing.")
+    if account.strip().lower() != "apparel" and workspace_id is not None:
+        raise HTTPException(status_code=400, detail="Workspace selection is available for Apparel RCS sync only.")
+
+
+@app.get("/api/moengage/rcs/workspaces")
+def get_moengage_rcs_workspaces_endpoint(
+    account: str = Query("apparel"),
+    current_user: dict = Depends(get_current_user),
+):
+    _require_moengage_account_access(account, current_user)
+    from moengage_sync import list_moengage_rcs_workspaces
+
+    try:
+        return {"workspaces": list_moengage_rcs_workspaces(account)}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
 
 
 @app.post("/api/moengage/rcs/sync")
@@ -4458,6 +4480,7 @@ async def sync_moengage_rcs_endpoint(
     """Register an approved RCS template into MoEngage Settings -> RCS Template Management."""
     target_account = (req.account or account or "tata").lower().strip()
     _require_moengage_account_access(target_account, current_user)
+    _require_rcs_sync_workspace(target_account, req.workspace_id)
     from moengage_sync import create_moengage_rcs_template
 
     try:
@@ -4472,6 +4495,7 @@ async def sync_moengage_rcs_endpoint(
             cta_url=req.cta_url,
             sender_id=req.sender_id,
             account=target_account,
+            workspace_id=req.workspace_id,
             template_type=req.template_type or ("carousel" if req.carousel_cards else "card"),
             carousel_cards=req.carousel_cards,
             width=req.width or "MEDIUM",
@@ -4487,10 +4511,13 @@ async def sync_moengage_rcs_endpoint(
                 "template_name": req.template_name,
                 "template_id": req.template_id,
                 "moengage_id": res.get("moengage_id"),
+                "workspace_id": res.get("workspace_id"),
             },
             status="success",
         )
         return _json_safe(res)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to sync RCS template %s to MoEngage for account %s: %s", req.template_name, target_account, exc)
         raise HTTPException(status_code=500, detail=f"MoEngage sync error: {exc!s}") from exc
@@ -4498,15 +4525,19 @@ async def sync_moengage_rcs_endpoint(
 @app.get("/api/moengage/rcs/templates")
 async def get_moengage_rcs_templates_endpoint(
     account: str = Query("tata"),
+    workspace_id: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     """List registered RCS templates from MoEngage for the specified account."""
-    require_tenant_access(account, current_user)
+    _require_moengage_account_access(account, current_user)
+    _require_rcs_sync_workspace(account, workspace_id)
     from moengage_sync import list_moengage_rcs_templates
 
     try:
-        templates = await asyncio.to_thread(list_moengage_rcs_templates, account)
+        templates = await asyncio.to_thread(list_moengage_rcs_templates, account, workspace_id)
         return _json_safe({"ok": True, "count": len(templates), "templates": templates})
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Failed to list MoEngage RCS templates: %s", exc)
         raise HTTPException(status_code=500, detail=f"MoEngage API error: {exc!s}") from exc
@@ -4668,17 +4699,23 @@ def sync_karix_rcs_to_moengage_endpoint(
     account: str = Query("tata"),
     semantic_dedup: bool = Query(True),
     resolve_attributes: bool = Query(True),
+    workspace_id: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     """Pull approved RCS templates from Karix and register them in an account's MoEngage workspace."""
-    require_tenant_access(account, current_user)
+    _require_moengage_account_access(account, current_user)
+    _require_rcs_sync_workspace(account, workspace_id)
     from moengage_sync import sync_karix_rcs_to_moengage
 
-    result = sync_karix_rcs_to_moengage(
-        account=account,
-        semantic_dedup=semantic_dedup,
-        resolve_attributes=resolve_attributes,
-    )
+    try:
+        result = sync_karix_rcs_to_moengage(
+            account=account,
+            semantic_dedup=semantic_dedup,
+            resolve_attributes=resolve_attributes,
+            workspace_id=workspace_id,
+        )
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     log_activity(
         user=current_user.get("name", "Operator"),
@@ -4690,6 +4727,7 @@ def sync_karix_rcs_to_moengage_endpoint(
             "created_count": result.get("created_count"),
             "skipped_count": result.get("skipped_count"),
             "error_count": result.get("error_count"),
+            "workspace_id": result.get("workspace_id"),
         },
         status="success" if result.get("ok") else "failed",
     )
