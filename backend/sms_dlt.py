@@ -120,14 +120,15 @@ def preview_drafts(rows: list[dict], account: str = "tata") -> list[dict]:
     for item in inventory:
         by_name.setdefault(item["template_name"].casefold(), []).append(item)
     previews = []
-    seen = set()
+    seen = {}
     for draft in drafts:
         key = draft["template_name"].casefold()
         existing = by_name.get(key, [])
         errors = validate_sms_template(draft)
-        if key in seen:
-            errors.append("Duplicate SMS template name in this batch.")
-        seen.add(key)
+        fields = tuple(draft[field] for field in DRAFT_FIELDS)
+        if key in seen and seen[key] != fields:
+            errors.append("Duplicate name has different SMS DLT fields. Use a distinct name.")
+        seen[key] = fields
         previews.append({
             "template_name": draft["template_name"], "client": account, "channel": "sms",
             "category": {"1": "PROMOTIONAL", "2": "TRANSACTIONAL", "3": "SERVICE"}.get(draft["template_type"], "UNKNOWN"),

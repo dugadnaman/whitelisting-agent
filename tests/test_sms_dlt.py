@@ -90,6 +90,41 @@ def test_mixed_copies_with_same_name_fail_without_staging(monkeypatch):
         assert conn.execute("SELECT count(*) AS n FROM ingestion_jobs WHERE channel='sms'").fetchone()["n"] == 0
 
 
+@pytest.mark.parametrize("placeholder", ["<name>", "<link>", "<url>", "{#alphanumeric#}", "{#url#}"])
+def test_preview_explains_unprepared_placeholders_without_rewriting_copy(monkeypatch, placeholder):
+    inventory(monkeypatch, [])
+    text = f"Hello {placeholder}."
+    preview = sms_dlt.preview_drafts([draft(text=text, sample_message="Hello Example.")])[0]
+    assert preview["status"] == "INVALID"
+    assert preview["components"][0]["text"] == text
+    assert preview["sms_dlt"]["text"] == text
+    assert len(preview["compliance_warnings"]) == 1
+    assert "Prepare placeholders" in preview["compliance_warnings"][0]["issue"]
+
+
+def test_preview_allows_exact_repeats_and_stage_skips_only_the_repeat(monkeypatch):
+    inventory(monkeypatch, [])
+    rows = [draft(source_ref="sheet:2"), draft(source_ref="sheet:3")]
+    previews = sms_dlt.preview_drafts(rows)
+    assert [item["status"] for item in previews] == ["VALID", "VALID"]
+    assert all(not item["compliance_warnings"] for item in previews)
+    job = sms_dlt.stage_batch(rows, "tata", "Tester", "drafts.csv")
+    assert job["duplicate_count"] == 1
+    assert [item["status"] for item in db_queue.get_job_tasks(job["id"])] == ["PENDING", "DUPLICATE"]
+
+
+@pytest.mark.parametrize("fields", [{"text": "Another message.", "sample_message": "Another message."},
+                                  {"header": "OTHERT"}, {"category_id": "other-category"}])
+def test_preview_rejects_same_name_with_different_dlt_fields(monkeypatch, fields):
+    inventory(monkeypatch, [])
+    previews = sms_dlt.preview_drafts([draft(), draft(**fields)])
+    assert previews[1]["status"] == "INVALID"
+    assert any("different SMS DLT fields" in warning["issue"]
+               for warning in previews[1]["compliance_warnings"])
+    with pytest.raises(ValueError, match="different SMS DLT fields"):
+        sms_dlt.stage_batch([draft(), draft(**fields)], "tata", "Tester", "drafts.csv")
+
+
 def test_sms_worker_ignores_karix_auth_circuit_and_never_replays(monkeypatch):
     import vilpower_client
     inventory(monkeypatch, [])

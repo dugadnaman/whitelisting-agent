@@ -793,8 +793,8 @@ def test_pairing_scope_mismatch_never_replaces_the_connected_target(scoped_brows
     assert pairing.json()["code"] not in json.dumps(mismatched)
 
 
-def test_settings_capture_switch_waits_for_slow_validation_without_losing_browser_status(scoped_browser):
-    flow = scoped_browser
+@pytest.fixture(scope="module")
+def settings_component_source():
     frontend = Path(__file__).resolve().parents[1] / "frontend"
     compiled = subprocess.run(
         ["node", "-e", """
@@ -806,6 +806,119 @@ def test_settings_capture_switch_waits_for_slow_validation_without_losing_browse
         """, str(frontend / "components" / "KarixAuthSync.tsx")],
         cwd=frontend, check=True, capture_output=True, text=True,
     ).stdout
+    return frontend, compiled
+
+
+@pytest.mark.parametrize("bridge", ["unpaired", "paired", "failure", "worker-failure", "mismatch", "absent", "late"])
+def test_settings_detects_installation_separately_from_scoped_connection(settings_component_source, bridge):
+    from playwright.sync_api import expect
+
+    frontend, compiled = settings_component_source
+    with sync_playwright() as playwright:
+        if not Path(playwright.chromium.executable_path).exists():
+            pytest.skip("Install the browser with: playwright install chromium")
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.route("https://auth-sync.test/**", lambda route: route.fulfill(
+                content_type="text/html", body='<!doctype html><div id="root"></div>',
+            ))
+            page.goto("https://auth-sync.test/settings")
+            for package, filename in (("react", "react.development.js"), ("react-dom", "react-dom.development.js")):
+                page.add_script_tag(content=(frontend / "node_modules" / package / "umd" / filename).read_text())
+            page.evaluate("""bridge => {
+                window.bridge = bridge;
+                window.requests = [];
+                window.addEventListener('message', event => {
+                    const request = event.data;
+                    if (event.source !== window || !['KARIX_EXTENSION_PING', 'KARIX_EXTENSION_SCOPED_STATUS'].includes(request?.type)) return;
+                    window.requests.push(request.type);
+                    if (['absent', 'late', 'worker-failure'].includes(window.bridge)) return;
+                    const ping = request.type === 'KARIX_EXTENSION_PING';
+                    window.postMessage({
+                        type: 'KARIX_EXTENSION_RESULT', requestId: request.requestId,
+                        ok: ping || window.bridge !== 'failure', message: 'Fixture response',
+                        ...(!ping ? {account: window.bridge === 'mismatch' ? 'bajaj' : request.account,
+                            integration: request.integration, paired: window.bridge === 'paired',
+                            pending: false, syncing: false, capture_active: window.bridge === 'paired',
+                            last_synced_at: null, error: null} : {})
+                    }, location.origin);
+                });
+            }""", bridge)
+            if bridge == "worker-failure":
+                content_bridge = frontend.parent / "browser-extension" / "karix-auth-sync" / "content.js"
+                page.add_script_tag(content=(
+                    "(() => { const globalThis = {KARIX_SYNC_CONFIG: {agentOrigin: location.origin}};"
+                    " const chrome = {runtime: {sendMessage: async () => {throw new Error('Storage unavailable');}}};"
+                    + content_bridge.read_text() + "})();"
+                ))
+            page.add_script_tag(content=(
+                """(() => {
+                    const exports = {};
+                    const require = name => {
+                        if (name === 'react') return window.React;
+                        if (name === 'react/jsx-runtime') return {
+                            jsx: (type, props, key) => React.createElement(type, {...props, key}),
+                            jsxs: (type, props, key) => React.createElement(type, {...props, key})
+                        };
+                        if (name === '@/lib/context') return {useApp: () => ({getAccountLabel: value => value})};
+                        if (name === '@/lib/destination') return {destinationAccountLabel: value => value};
+                        if (name === '@/lib/api') return {
+                            getApiUrl: value => value,
+                            fetchWithRetry: async path => ({ok: true, json: async () =>
+                                path.includes('/targets?')
+                                    ? {targets: [{account: 'tata', integration: 'sms', mode: 'browser', identity: {}, message: ''}]}
+                                    : {account: 'tata', integration: 'sms', paired: true,
+                                        last_synced_at: null, last_validated_at: null,
+                                        validation_state: 'never', message: ''}
+                            })
+                        };
+                        throw new Error('Unexpected import: ' + name);
+                    };
+                """ + compiled + """
+                    ReactDOM.createRoot(document.getElementById('root')).render(
+                        React.createElement(exports.default, {account: 'tata', integration: 'sms'})
+                    );
+                })();
+                """
+            ))
+            # Backend pairing may belong to another browser: it is never installation evidence.
+            expect(page.get_by_role("button", name="Download extension", exact=True)).to_have_count(0)
+            if bridge in ("absent", "late"):
+                expect(page.get_by_role("button", name="Checking extension…", exact=True)).to_be_disabled()
+                expect(page.get_by_role("button", name="Download extension", exact=True)).to_be_visible()
+                if bridge == "late":
+                    page.evaluate("() => { window.bridge = 'unpaired'; window.dispatchEvent(new Event('focus')); }")
+                    expect(page.get_by_role("button", name="Connect this browser", exact=True)).to_be_visible()
+                    expect(page.get_by_role("button", name="Download extension", exact=True)).to_have_count(0)
+            elif bridge in ("failure", "worker-failure", "mismatch"):
+                expect(page.get_by_role("button", name="Retry browser connection", exact=True)).to_be_visible()
+                expect(page.get_by_role("button", name="Download extension", exact=True)).to_have_count(0)
+                expect(page.get_by_role("button", name="Connect this browser", exact=True)).to_have_count(0)
+                if bridge != "worker-failure":
+                    page.evaluate("() => { window.bridge = 'unpaired'; window.dispatchEvent(new Event('focus')); }")
+                    expect(page.get_by_role("button", name="Connect this browser", exact=True)).to_be_visible()
+            elif bridge == "paired":
+                expect(page.get_by_role("link", name="Open VILPOWER to sync", exact=True)).to_be_visible()
+                # Losing scoped status after detection must not turn a known installation into absence.
+                page.evaluate("() => { window.bridge = 'failure'; window.dispatchEvent(new Event('focus')); }")
+                expect(page.get_by_role("button", name="Retry browser connection", exact=True)).to_be_visible()
+                expect(page.get_by_role("button", name="Download extension", exact=True)).to_have_count(0)
+            else:
+                expect(page.get_by_role("button", name="Connect this browser", exact=True)).to_be_visible()
+            if bridge not in ("absent", "late"):
+                page.get_by_text("Setup help", exact=True).click()
+                expect(page.get_by_text("The extension is already detected. Choose", exact=False)).to_be_visible()
+                expect(page.get_by_role("button", name="Download extension ZIP", exact=True)).to_have_count(0)
+                expect(page.get_by_role("button", name="Download recovery ZIP", exact=True)).not_to_be_visible()
+            assert page.evaluate("() => window.requests.includes('KARIX_EXTENSION_PING')")
+        finally:
+            browser.close()
+
+
+def test_settings_capture_switch_waits_for_slow_validation_without_losing_browser_status(scoped_browser, settings_component_source):
+    flow = scoped_browser
+    _, compiled = settings_component_source
     flow.settings.add_script_tag(content=(
         "(() => { const exports = {}; const require = () => ({}); " + compiled
         + " window.authSyncMessage = extensionMessage; })();"

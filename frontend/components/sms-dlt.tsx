@@ -10,7 +10,7 @@ import {
   type TemplatePreview, type JobTask, type IdentificationReport, type SmsBriefExtraction, type SmsBriefDecision,
 } from '@/lib/api';
 import { formatError } from '@/lib/format';
-import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft } from '@/lib/sms-brief';
+import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts } from '@/lib/sms-brief';
 import KarixAuthSync from '@/components/KarixAuthSync';
 
 const inputClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs disabled:bg-gray-100';
@@ -151,7 +151,7 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
         const generated = applySmsBriefDecisions(draft.brief!);
         if (generated && (draft.text === draft.brief!.original_text || window.confirm('Apply decisions from the immutable original? This replaces the current edited body and sample.'))) update(generated);
       }}>Apply occurrence decisions to body and sample</button>
-      <p>You may edit the final body and sample below. The original and every matching source remain visible; review again after any edit. Encoding is only a suggestion based on the exact original copy.</p>
+      <p>You may edit the final body and sample below. The original and every matching source remain visible; review again after any edit. Use Unicode encoding for non-ASCII characters, including ₹ and smart punctuation, even in English copy.</p>
     </div>}
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="text-xs font-semibold">Template name<input className={`${inputClass} mt-1`} value={draft.template_name} onChange={(e) => update({ template_name: e.target.value })} /></label>
@@ -160,11 +160,11 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
       <label className="text-xs font-semibold">DLT category<select className={`${inputClass} mt-1`} value={draft.category_id} onChange={(e) => update({ category_id: e.target.value, header_id: '', header: '', brand_id: '' })} disabled={loading || Boolean(error) || !draft.template_type || !options.categories.length}><option value="">{!draft.template_type ? 'Choose template type first' : loading ? 'Loading categories…' : error ? 'Categories unavailable' : 'Choose category'}</option>{options.categories.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
       <label className="text-xs font-semibold">Sender header<select className={`${inputClass} mt-1`} value={draft.header_id} onChange={(e) => update({ header_id: e.target.value, header: options.headers.find((option) => option.id === e.target.value)?.text || '' })} disabled={loading || Boolean(error) || !draft.category_id || !options.headers.length}><option value="">{!draft.category_id ? 'Choose category first' : loading ? 'Loading headers…' : error ? 'Headers unavailable' : !options.headers.length ? 'No headers for this selection' : 'Choose header'}</option>{options.headers.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
       <label className="text-xs font-semibold">Brand (optional)<select className={`${inputClass} mt-1`} value={draft.brand_id || ''} onChange={(e) => update({ brand_id: e.target.value })} disabled={loading || Boolean(error)}><option value="">No brand selected</option>{options.brands.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
-      <label className="text-xs font-semibold">Message encoding<select className={`${inputClass} mt-1`} value={draft.message_type} onChange={(e) => update({ message_type: e.target.value as SmsDltDraft['message_type'] })}><option value="">Choose message encoding</option><option value="1">ASCII / English</option><option value="2">Regional / Unicode</option></select></label>
+      <label className="text-xs font-semibold">Message encoding<select className={`${inputClass} mt-1`} value={draft.message_type} onChange={(e) => update({ message_type: e.target.value as SmsDltDraft['message_type'] })}><option value="">Choose message encoding</option><option value="1">ASCII / English</option><option value="2">Unicode (including English with ₹)</option></select></label>
     </div>
     <label className="block text-xs font-semibold">Exact DLT template body<textarea rows={4} className={`${inputClass} mt-1 font-mono`} value={draft.text} onChange={(e) => update({ text: e.target.value })} /></label>
-    <p className="text-[11px] text-gray-500">Text is preserved exactly. Use VILPOWER typed variables only: {'{#num#}, {#alp#}, {#urg#}, {#uro#}, {#cbn#}, {#eml#}'} (maximum 15). Replace Jira/WhatsApp placeholders yourself; no normalization or grammar correction is applied.</p>
-    <label className="block text-xs font-semibold">Sample message (required when the body has typed variables)<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
+    <p className="text-[11px] text-gray-500">Text is preserved exactly unless you apply a preparation preview below. VILPOWER accepts {'{#num#}, {#alp#}, {#urg#}, {#uro#}, {#cbn#}, {#eml#}'} (maximum 15). A sample must replace each variable with a real example and preserve all surrounding copy, including ₹ and whitespace.</p>
+    <label className="block text-xs font-semibold">Filled sample message (not variable tokens)<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
     {draft.brief && <label className="flex gap-2 text-xs font-semibold"><input type="checkbox" checked={draft.brief.acknowledged} disabled={!applySmsBriefDecisions(draft.brief)} onChange={(event) => onChange({ ...draft, brief: { ...draft.brief!, acknowledged: event.target.checked } })} />I reviewed every source, campaign, language, warning and token decision, and the exact final body and explicit sample. These selected sources are intended for SMS; no month or approval status was inferred.</label>}
     {!loading && !error && !valid && <p className="text-xs text-amber-800">Choose valid portal category, header and service type (if applicable) before review. Imported IDs must match current Tata options.</p>}
   </fieldset>;
@@ -179,6 +179,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const [ready, setReady] = useState<Record<number, boolean>>({});
   const [categoryLabels, setCategoryLabels] = useState<Record<number, string>>({});
   const [reviewed, setReviewed] = useState<{ signature: string; previews: TemplatePreview[] } | null>(null);
+  const [preparation, setPreparation] = useState<{ signature: string; drafts: SmsDltDraft[] } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -250,12 +251,30 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     }} onChange={(value) => { setReviewed(null); setDrafts((prev) => prev.map((item, idx) => idx === index ? value : item)); }} />)}
     {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800"><p>{error}</p><p className="mt-1">For portal authentication errors, <a href="/settings" className="underline">replace the Tata SMS session in Settings</a>. Check <a href="/" className="underline">History</a> before retrying a submission.</p></div>}
     {!batch && <>
+      <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs">
+        <p>Prepare imported copy for VILPOWER: convert known name/link placeholders and legacy typed aliases, generate filled example samples, choose ASCII/Unicode without changing ₹ or punctuation, and give conflicting names distinct suffixes. Unknown placeholders still need your decision. Native brief variable decisions are preserved.</p>
+        <button type="button" disabled={busy} className={buttonClass} onClick={() => setPreparation({ signature, drafts: prepareSmsDltDrafts(drafts) })}>Preview portal-ready preparation</button>
+        {preparation?.signature === signature && <>
+          {preparation.drafts.every((draft, index) => draft === drafts[index]) ? <p role="status">No preparation changes needed. Validate the drafts below.</p> : <>
+            {preparation.drafts.map((draft, index) => draft === drafts[index] ? null : <div key={index} className="space-y-2 rounded border border-blue-200 bg-white p-3">
+              <p className="font-bold">Row {index + 1} · {draft.template_name}</p>
+              {(['template_name', 'text', 'sample_message', 'message_type'] as const).map((field) => draft[field] === drafts[index][field] ? null : <div key={field}>
+                <p className="font-semibold">{field === 'message_type' ? 'Encoding (1 = ASCII, 2 = Unicode)' : field.replaceAll('_', ' ')}</p>
+                <pre className="whitespace-pre-wrap break-words text-gray-500">Before: {drafts[index][field] || '(empty)'}</pre>
+                <pre className="whitespace-pre-wrap break-words">After: {draft[field]}</pre>
+              </div>)}
+            </div>)}
+            <p>Generated names and sample values are suggestions, not customer data or approved URLs. Applying does not submit anything; edit the results if needed, then validate and confirm every exact body and sample.</p>
+            <button type="button" disabled={busy} className={buttonClass} onClick={() => { setDrafts(preparation.drafts); setPreparation(null); setReviewed(null); setConfirmed(false); }}>Apply preparation to drafts</button>
+          </>}
+        </>}
+      </div>
       <div className="flex flex-wrap gap-3"><button type="button" disabled={busy || !fieldsValid} onClick={review} className={buttonClass}>{busy ? 'Processing…' : 'Validate and review DLT drafts'}</button>{onClose && <button type="button" disabled={busy} onClick={onClose} className="text-xs font-semibold text-gray-600 underline">Back to source drafts</button>}</div>
       {reviewedCurrent && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-4">
         <p className="text-xs font-bold">Destination: Tata Capital (tata) · SMS · VILPOWER</p>
         {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-lg border border-blue-100 bg-white p-3 text-xs">
           <p className="font-bold">{draft.template_name} · {draft.template_type ? typeLabels[draft.template_type] : ''}</p>
-          <p>Header: {draft.header} (ID {draft.header_id}) · Category: {categoryLabels[index]} (ID {draft.category_id}) · Encoding: {draft.message_type === '1' ? 'ASCII' : 'Regional'}{draft.service_type ? ` · Service type: ${draft.service_type}` : ''}{draft.brand_id ? ` · Brand ID: ${draft.brand_id}` : ''}</p>
+          <p>Header: {draft.header} (ID {draft.header_id}) · Category: {categoryLabels[index]} (ID {draft.category_id}) · Encoding: {draft.message_type === '1' ? 'ASCII' : 'Unicode'}{draft.service_type ? ` · Service type: ${draft.service_type}` : ''}{draft.brand_id ? ` · Brand ID: ${draft.brand_id}` : ''}</p>
           {draft.brief && <div className="space-y-1"><p className="font-semibold">Sources: {draft.source_file} · {draft.source_ref}</p>{draft.brief.sources.map((source, idx) => <p key={idx}>{source.sheet}!{source.cell} · Campaign: {source.campaign || 'Not specified'} · Segment: {source.segment || 'Not specified'} · Language: {source.language || 'Not specified'}</p>)}{draft.brief.warnings.map((warning, idx) => <p key={idx} className="text-amber-800">{warning}</p>)}</div>}
           <p className="font-semibold">Exact body</p><pre className="whitespace-pre-wrap break-words font-mono">{draft.text}</pre>
           <p className="font-semibold">Sample message</p><pre className="whitespace-pre-wrap break-words font-mono">{draft.sample_message || '(No variables; no sample supplied)'}</pre>

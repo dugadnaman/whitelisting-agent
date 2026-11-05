@@ -73,3 +73,42 @@ export function editSmsBriefDraft(draft: SmsDltDraft, patch: Partial<SmsDltDraft
   if (next.brief) next.brief = { ...next.brief, acknowledged: false };
   return next;
 }
+
+/** Explicit, reviewable preparation; submission itself never rewrites source copy. */
+export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
+  const aliases: Record<string, string> = { name: 'alp', alphanumeric: 'alp', url: 'urg', link: 'urg' };
+  const examples: Record<string, string> = {
+    num: '123', alp: 'Customer', urg: 'https://example.com/offer', uro: 'https://example.com/offer',
+    cbn: '9876543210', eml: 'customer@example.com',
+  };
+  const reserved = new Set(drafts.map((draft) => draft.template_name.toLowerCase()));
+  const seen = new Map<string, string>();
+  return drafts.map((draft) => {
+    // Native briefs retain their explicit per-occurrence literal/type/sample decisions.
+    const text = draft.brief ? draft.text : draft.text
+      .replace(/<\s*(name|link|url)\s*>/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`)
+      .replace(/\{#(alphanumeric|url|link)#\}/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`);
+    let sample = draft.sample_message;
+    if (!draft.brief && (!sample.trim() || /(?:\{#|<\s*(?:name|link|url)\s*>)/i.test(sample) || text !== draft.text)) {
+      sample = text.replace(/\{#(num|alp|urg|uro|cbn|eml)#\}/g, (_, kind: string) => examples[kind]);
+    } else if (!draft.brief && !/\{#|\{\{|<[^>]+>/.test(text)) {
+      sample = text;
+    }
+    const message_type = /[^\x00-\x7F]/.test(text + sample) ? '2' : '1';
+    let name = draft.template_name;
+    const fields = JSON.stringify([text, sample, message_type, draft.template_type, draft.category_id,
+      draft.header_id, draft.header, draft.brand_id || '', draft.service_type || '']);
+    const previous = seen.get(name.toLowerCase());
+    if (previous !== undefined && previous !== fields) {
+      for (let suffix = 2; ; suffix++) {
+        const ending = `_${suffix}`;
+        const candidate = `${name.slice(0, 60 - ending.length)}${ending}`;
+        if (!reserved.has(candidate.toLowerCase())) { name = candidate; break; }
+      }
+    }
+    reserved.add(name.toLowerCase());
+    seen.set(name.toLowerCase(), fields);
+    if (name === draft.template_name && text === draft.text && sample === draft.sample_message && message_type === draft.message_type) return draft;
+    return editSmsBriefDraft(draft, { template_name: name, text, sample_message: sample, message_type });
+  });
+}

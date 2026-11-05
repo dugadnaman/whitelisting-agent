@@ -12,7 +12,7 @@ function load(name, globals = {}) {
   }).outputText, { exports, module: { exports }, ...globals });
   return exports;
 }
-const { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft } = load('sms-brief.ts');
+const { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts } = load('sms-brief.ts');
 const row = (id, patch = {}) => ({
   id, sheet: 'Historical SMS', cell: `B${id}`, text: 'Exact offer <Name>.', campaign: 'Historical campaign',
   segment: 'Returning', language: 'English', scope: 'Historical', source_kind: 'SMS',
@@ -111,4 +111,41 @@ test('native workbook transport sends multipart to Tata without session lookup a
   assert.equal(new URL(calls[0].url).searchParams.get('account'), 'tata');
   assert.equal(calls[0].init.method, 'POST');
   assert.ok(calls[0].init.body.get('file') instanceof Blob);
+});
+
+test('explicit DLT preparation fixes source placeholders, filled samples and encoding without changing static copy', () => {
+  const text = 'Hi <name>,\r\nTransfer to Tata Capital for ₹6 Lacs. Tap<url> T&Cs apply. ';
+  const source = {
+    template_name: 't588_ext2', text, template_type: '1', category_id: 'category',
+    header_id: 'header', header: 'PLTATA', message_type: '1',
+    sample_message: 'Hi {#alp#},\r\nTransfer to Tata Capital for Rs.6 Lacs. Tap{#urg#} T&Cs apply. ',
+  };
+  const [draft] = prepareSmsDltDrafts([source]);
+  assert.equal(draft.text, 'Hi {#alp#},\r\nTransfer to Tata Capital for ₹6 Lacs. Tap{#urg#} T&Cs apply. ');
+  assert.equal(draft.sample_message, 'Hi Customer,\r\nTransfer to Tata Capital for ₹6 Lacs. Taphttps://example.com/offer T&Cs apply. ');
+  assert.equal(draft.message_type, '2');
+  assert.equal(source.text, text);
+  assert.equal(source.message_type, '1');
+  assert.deepEqual(plain(prepareSmsDltDrafts([draft])), plain([draft]));
+});
+
+test('DLT preparation maps known aliases only and preserves explicit samples and brief decisions', () => {
+  const draft = { template_name: 'offer', text: 'Hi {#alphanumeric#}. {#url#}', sample_message: '', message_type: '1' };
+  const [prepared] = prepareSmsDltDrafts([draft]);
+  assert.equal(prepared.text, 'Hi {#alp#}. {#urg#}');
+  assert.equal(prepared.sample_message, 'Hi Customer. https://example.com/offer');
+  const custom = { ...prepared, sample_message: 'Hi Asha. https://tata.example/offer' };
+  assert.equal(prepareSmsDltDrafts([custom])[0].sample_message, custom.sample_message);
+  assert.equal(prepareSmsDltDrafts([{ ...draft, text: 'Keep <offer> {#var#} {{1}}' }])[0].text, 'Keep <offer> {#var#} {{1}}');
+  const brief = prepareSmsBriefDrafts([row('1')], ['1'], 'source.xlsx')[0];
+  assert.deepEqual(plain(prepareSmsDltDrafts([brief])[0].brief), plain(brief.brief));
+  assert.equal(prepareSmsDltDrafts([brief])[0].text, brief.text);
+});
+
+test('DLT preparation separates conflicting names while exact repeated drafts remain deduplicatable', () => {
+  const first = { template_name: 'offer', text: 'First.', sample_message: 'First.', message_type: '1' };
+  const result = prepareSmsDltDrafts([first, { ...first }, { ...first, text: 'Second.' }, { ...first, template_name: 'offer_2' }]);
+  assert.deepEqual(plain(result.map((draft) => draft.template_name)), ['offer', 'offer', 'offer_3', 'offer_2']);
+  assert.equal(result[2].sample_message, 'Second.');
+  assert.deepEqual(plain(prepareSmsDltDrafts(result)), plain(result));
 });

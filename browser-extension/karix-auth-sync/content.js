@@ -12,10 +12,17 @@
         !['KARIX_EXTENSION_PING', 'KARIX_EXTENSION_PAIR', 'KARIX_EXTENSION_SCOPED_STATUS', 'KARIX_EXTENSION_RETRY', 'KARIX_EXTENSION_SELECT'].includes(message.type) ||
         typeof message.requestId !== 'string' ||
         !/^[A-Za-z0-9_-]{1,128}$/.test(message.requestId)) return;
-    const scoped = message.type !== 'KARIX_EXTENSION_PING';
-    if (scoped && (typeof message.account !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(message.account) ||
+    // Presence belongs to this site bridge, not worker storage or any account's pairing.
+    if (message.type === 'KARIX_EXTENSION_PING') {
+      window.postMessage({
+        type: 'KARIX_EXTENSION_RESULT', requestId: message.requestId,
+        ok: true, message: 'Auth Sync is installed for this site.',
+      }, origin);
+      return;
+    }
+    if (typeof message.account !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(message.account) ||
         !['whatsapp', 'rcs', 'moengage', 'sms'].includes(message.integration) ||
-        (message.integration === 'sms' && message.account !== 'tata'))) return;
+        (message.integration === 'sms' && message.account !== 'tata')) return;
     if (message.type === 'KARIX_EXTENSION_PAIR' &&
         (typeof message.code !== 'string' || !message.code || message.code.length > 1024)) return;
     if (activeRequests.has(message.requestId) || activeRequests.size >= 10) return;
@@ -24,13 +31,13 @@
     try {
       result = await chrome.runtime.sendMessage({
         type: message.type,
-        ...(scoped ? {account: message.account, integration: message.integration} : {}),
+        account: message.account, integration: message.integration,
         ...(message.type === 'KARIX_EXTENSION_PAIR' ? {code: message.code} : {}),
       });
       if (!result || typeof result.ok !== 'boolean' || typeof result.message !== 'string') {
         throw new Error('Invalid extension response.');
       }
-      if (result.ok && scoped && (result.account !== message.account || result.integration !== message.integration)) {
+      if (result.ok && (result.account !== message.account || result.integration !== message.integration)) {
         throw new Error('Invalid scoped extension response.');
       }
     } catch {
@@ -43,7 +50,7 @@
         type: 'KARIX_EXTENSION_RESULT', requestId: message.requestId,
         ok: result.ok, message: result.message,
         ...(typeof result.error_code === 'string' ? {error_code: result.error_code} : {}),
-        ...(result.ok && scoped ? {account: result.account, integration: result.integration} : {}),
+        ...(result.ok ? {account: result.account, integration: result.integration} : {}),
         ...(result.ok && message.type === 'KARIX_EXTENSION_SCOPED_STATUS' ? {
           paired: result.paired, pending: result.pending, syncing: result.syncing,
           last_synced_at: result.last_synced_at, capture_active: result.capture_active, error: result.error,

@@ -385,7 +385,7 @@ def validate_sms_template(draft: dict) -> list[str]:
     if draft.get("template_type") not in ("1", "2", "3"):
         errors.append("template_type must be 1 (promotional), 2 (transactional), or 3 (service)")
     if draft.get("message_type") not in ("1", "2"):
-        errors.append("message_type must be 1 (ASCII) or 2 (regional)")
+        errors.append("message_type must be 1 (ASCII) or 2 (Unicode, including English)")
     name = draft.get("template_name") if isinstance(draft.get("template_name"), str) else ""
     body = draft.get("text") if isinstance(draft.get("text"), str) else ""
     sample = draft.get("sample_message") if isinstance(draft.get("sample_message"), str) else ""
@@ -394,19 +394,21 @@ def validate_sms_template(draft: dict) -> list[str]:
     if len(body) > 2000 or len(sample) > 2000:
         errors.append("Template and sample messages cannot exceed the portal's 2000-character limit")
     if draft.get("message_type") == "1" and (not body.isascii() or not sample.isascii()):
-        errors.append("ASCII message_type requires ASCII template and sample text")
+        errors.append("ASCII message_type requires ASCII template and sample text; use message_type 2 for Unicode, including English with ₹")
     variables = list(_VARIABLE.finditer(body))
     remainder = _VARIABLE.sub("", body)
-    if "{#" in remainder or "#}" in remainder or re.search(r"\{\{.*?\}\}", body):
-        errors.append("Use only exact typed variables {#num#}, {#alp#}, {#urg#}, {#uro#}, {#cbn#}, {#eml#}")
+    unsupported = bool("{#" in remainder or "#}" in remainder or re.search(r"\{\{.*?\}\}", body))
+    unprepared = "brief" not in draft and bool(re.search(r"<\s*(?:name|link|url)\s*>", body, re.IGNORECASE))
+    if unsupported or unprepared:
+        errors.append("Prepare placeholders using only exact typed variables {#num#}, {#alp#}, {#urg#}, {#uro#}, {#cbn#}, {#eml#}; provide filled examples in sample_message")
     if len(variables) > 15:
         errors.append("The portal permits at most 15 typed variables")
-    if variables and len(variables) <= 15 and len(body) <= 2000 and len(sample) <= 2000:
+    if not (unsupported or unprepared) and variables and len(variables) <= 15 and len(body) <= 2000 and len(sample) <= 2000:
         if not sample.strip():
             errors.append("sample_message is required when the template contains typed variables")
-        elif not _sample_matches(body, variables, sample):
+        elif any(sample.count(token) > body.count(token) for token in re.findall(r"<\s*(?:name|link|url)\s*>", sample, re.IGNORECASE)) or not _sample_matches(body, variables, sample):
             errors.append("sample_message must preserve the exact template text and replace every typed variable with a valid example")
-    elif not variables and sample and sample != body:
+    elif not (unsupported or unprepared) and not variables and sample and sample != body:
         errors.append("Without variables, sample_message must equal the exact template text")
     if "brief" in draft:
         from sms_brief import validate_brief_review

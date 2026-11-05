@@ -186,6 +186,52 @@ def test_validation_is_pure_and_preserves_exact_message():
     assert vilpower.validate_sms_template({**draft, "template_type": [], "message_type": {}})
 
 
+@pytest.mark.parametrize("placeholder", ["{#alphanumeric#}", "{#url#}", "{#VAR#}", "{#num}", "{{name}}", "<name>", "<link>", "<url>"])
+def test_unprepared_placeholders_have_actionable_non_cascading_errors(placeholder):
+    draft = {**DRAFT, "text": f"Hello {placeholder}.", "sample_message": "Hello Example."}
+    errors = vilpower.validate_sms_template(draft)
+    assert len(errors) == 1
+    assert "typed variables" in errors[0]
+    assert "Without variables" not in errors[0]
+    assert draft["text"] == f"Hello {placeholder}."
+
+
+@pytest.mark.parametrize("sample", ["Hi {#alp#}, pay ₹1200.", "Hi <name>, pay ₹1200.", "Hi Example, pay Rs.1200."])
+def test_unicode_samples_require_filled_values_and_exact_currency_literals(sample):
+    errors = vilpower.validate_sms_template({
+        **DRAFT, "text": "Hi {#alp#}, pay ₹{#num#}.", "sample_message": sample, "message_type": "2",
+    })
+    assert len(errors) == 1
+    assert "sample_message" in errors[0]
+
+
+def test_unicode_english_is_supported_without_changing_body_or_language():
+    draft = {**DRAFT, "text": "Hi {#alp#}, pay ₹{#num#}.",
+             "sample_message": "Hi Example, pay ₹1200.", "message_type": "2"}
+    assert vilpower.validate_sms_template(draft) == []
+    errors = vilpower.validate_sms_template({**draft, "message_type": "1"})
+    assert len(errors) == 1
+    assert "Unicode" in errors[0]
+    assert "English" in errors[0]
+    assert "₹" in draft["text"]
+
+
+def test_native_brief_allows_explicitly_reviewed_literal_angle_tokens():
+    text = "Hello <Name>, amount {#num#}."
+    brief = {
+        "original_text": "Hello <Name>, amount <amount>.",
+        "sources": [{"sheet": "SMS", "cell": "B2", "campaign": "", "segment": "", "language": "English"}],
+        "warnings": [], "acknowledged": True,
+        "variables": [{"token": "<Name>", "kind": "literal", "sample": ""},
+                      {"token": "<amount>", "kind": "num", "sample": "1200"}],
+    }
+    draft = {**DRAFT, "text": text, "sample_message": "Hello <Name>, amount 1200.", "brief": brief}
+    assert vilpower.validate_sms_template(draft) == []
+    assert vilpower.validate_sms_template({**draft, "brief": {**brief, "variables": []}})
+    assert vilpower.validate_sms_template({**draft, "sample_message": "Hello <Name>, amount <Name>."})
+    assert vilpower.validate_sms_template({**draft, "brief": None})
+
+
 @pytest.mark.parametrize("kind,example,valid", [("num", "123", True), ("num", "abc", False), ("cbn", "1234567890", True),
     ("cbn", "12", False), ("urg", "https://example.test", True), ("uro", "www.example.test", True),
     ("urg", "example.test", False), ("eml", "hello@example.test", True), ("alp", "https://example.test", False)])

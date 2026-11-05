@@ -142,7 +142,9 @@ function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' 
         ? 'Retry was not confirmed in time. Refresh browser capture status before retrying; the existing device was preserved.'
         : type === 'KARIX_EXTENSION_SELECT'
           ? 'The capture switch was not confirmed in time. Refresh browser capture status before trying again; saved sessions were not changed.'
-          : 'Auth Sync did not respond. Install or reload this site’s extension and reload Settings.'));
+          : type === 'KARIX_EXTENSION_SCOPED_STATUS'
+            ? 'Auth Sync did not return this browser’s connection status. Retry the browser connection or reload the extension and Settings.'
+            : 'Auth Sync did not respond for this site. If already installed, check that it is enabled and allowed on this site, then reload Settings.'));
   }, type === 'KARIX_EXTENSION_PAIR' || type === 'KARIX_EXTENSION_RETRY' || type === 'KARIX_EXTENSION_SELECT' ? 45000 : 2500);
   window.addEventListener('message', onMessage);
   signal.addEventListener('abort', onAbort, { once: true });
@@ -161,6 +163,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<boolean | null>(null);
   const [browserStatus, setBrowserStatus] = useState<BrowserStatus | null>(null);
+  const [browserError, setBrowserError] = useState<string | null>(null);
   const [action, setAction] = useState<Action | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const lifecycle = useRef<AbortController | null>(null);
@@ -170,15 +173,24 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const scopeQuery = new URLSearchParams({ account, integration }).toString();
 
   const readBrowserStatus = useCallback(async (signal: AbortSignal) => {
+    let detected = false;
     try {
+      await extensionMessage('KARIX_EXTENSION_PING', signal);
+      signal.throwIfAborted();
+      detected = true;
+      setInstalled(true);
       const next = await extensionMessage('KARIX_EXTENSION_SCOPED_STATUS', signal, { account, integration });
-      if (!isBrowserStatus(next, { account, integration })) throw new Error('Reload Auth Sync and Settings to read current browser capture status.');
+      if (!isBrowserStatus(next, { account, integration })) throw new Error('Auth Sync returned unexpected connection status. Retry this browser connection or reload the extension and Settings.');
       signal.throwIfAborted();
       setBrowserStatus(next);
-      setInstalled(true);
+      setBrowserError(null);
       return next;
     } catch (error) {
-      if (!signal.aborted) { setBrowserStatus(null); setInstalled(false); }
+      if (!signal.aborted) {
+        setBrowserStatus(null);
+        setInstalled(previous => detected || previous === true);
+        setBrowserError(error instanceof Error ? error.message : 'Could not read this browser’s connection status. Retry the browser connection.');
+      }
       throw error;
     }
   }, [account, integration]);
@@ -242,8 +254,8 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     setStatusError(null);
     setInstalled(null);
     setBrowserStatus(null);
+    setBrowserError(null);
     setFeedback(null);
-    const onFocus = () => { void perform('refresh', refresh, false); };
     void perform('refresh', refresh, false);
     let readingBrowser = false;
     const pollBrowser = async () => {
@@ -257,6 +269,10 @@ export default function KarixAuthSync({ account, integration }: Scope) {
         }
       } catch { /* Detection and backend status failures are shown separately. */ }
       finally { readingBrowser = false; }
+    };
+    const onFocus = () => {
+      void perform('refresh', refresh, false);
+      void pollBrowser();
     };
     void pollBrowser();
     const browserTimer = window.setInterval(() => { void pollBrowser(); }, 3000);
@@ -296,13 +312,8 @@ export default function KarixAuthSync({ account, integration }: Scope) {
 
   function detectExtension() {
     void perform('detect', async (signal) => {
-      try {
-        await readBrowserStatus(signal);
-        return 'Auth Sync is installed for this site.';
-      } catch (error) {
-        if (!signal.aborted) setInstalled(false);
-        throw error;
-      }
+      await readBrowserStatus(signal);
+      return 'Auth Sync is installed for this site. Browser connection status refreshed.';
     });
   }
 
@@ -388,8 +399,10 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const refreshStatus = () => { void perform('refresh', refresh); };
   let primary = { label: 'Refresh status', onClick: refreshStatus };
   if (browser && !statusError) {
-    if (installed !== true) primary = { label: 'Download extension', onClick: downloadExtension };
-    else if (!browserStatus?.paired) primary = { label: 'Connect this browser', onClick: connect };
+    if (installed === null) primary = { label: 'Checking extension…', onClick: detectExtension };
+    else if (!installed) primary = { label: 'Download extension', onClick: downloadExtension };
+    else if (!browserStatus) primary = { label: browserError ? 'Retry browser connection' : 'Checking connection…', onClick: detectExtension };
+    else if (!browserStatus.paired) primary = { label: 'Connect this browser', onClick: connect };
     else if (browserStatus.pending) primary = { label: 'Retry sync', onClick: retryCapturedSession };
     else if (!browserStatus.capture_active) primary = { label: 'Enable auto-sync here', onClick: selectTarget };
     else primary = { label: 'Check connection', onClick: checkSession };
@@ -414,7 +427,8 @@ export default function KarixAuthSync({ account, integration }: Scope) {
             : `Connect this browser, then open this account’s ${integration === 'moengage' ? 'workspace' : 'template list'} in ${portal} to sync your login.`}</p>
         <p className="text-xs text-gray-500">{installed === null ? 'Checking the browser extension…'
           : !installed ? 'For automatic updates, install the extension and reload this page.'
-            : !browserStatus?.paired ? 'This browser is not connected for automatic updates.'
+            : !browserStatus ? browserError ? 'The extension is installed, but its browser connection status could not be read. Retry the connection; downloading again is not required.' : 'Extension detected. Checking this account’s browser connection…'
+              : !browserStatus.paired ? 'This browser is not connected for automatic updates.'
               : browserStatus.syncing ? 'Syncing and verifying your session…'
                 : browserStatus.pending ? 'A session is waiting to sync. Retry without reconnecting.'
                   : !browserStatus.capture_active ? 'Auto-sync is set to another account. Enable it here to switch.'
@@ -424,25 +438,31 @@ export default function KarixAuthSync({ account, integration }: Scope) {
 
       {target?.mode !== 'unsupported' && <div>
         {openPortal ? <a href={portalUrl!} target="_blank" rel="noopener noreferrer" className={`${primaryClass} inline-block`}>Open {portal} to sync</a>
-          : <button type="button" onClick={primary.onClick} disabled={disabled || (browser && !statusError && (!status || installed === null || Boolean(browserStatus?.syncing)))} className={primaryClass}>{disabled ? 'Working…' : primary.label}</button>}
+          : <button type="button" onClick={primary.onClick} disabled={disabled || (browser && !statusError && (!status || installed === null || (installed === true && !browserStatus && !browserError) || Boolean(browserStatus?.syncing)))} className={primaryClass}>{disabled ? 'Working…' : primary.label}</button>}
       </div>}
       {statusError && <p role="alert" className="text-sm text-red-700">{statusError}</p>}
+      {installed === true && browserError && <p role="alert" className="text-sm text-red-700">{browserError}</p>}
       {browserStatus?.error && <p role="alert" className="text-sm text-red-700">{syncError(browserStatus.error)}</p>}
       {feedback && <p role={feedback.type === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-xs ${feedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{feedback.message}</p>}
 
       {browser && <details className="border-t border-gray-100 pt-3">
         <summary className="cursor-pointer text-xs font-semibold text-gray-600">Setup help</summary>
         <ol className="mt-3 list-decimal pl-5 text-xs text-gray-600 space-y-2">
-          <li>Download and unzip the extension. Open <code>chrome://extensions</code>, enable Developer mode, choose <strong>Load unpacked</strong>, and select the folder containing <code>manifest.json</code>.</li>
-          <li>Reload this page and choose <strong>Connect this browser</strong>. Each account and channel needs its own connection.</li>
+          {installed === false && <li>Download and unzip the extension. Open <code>chrome://extensions</code>, enable Developer mode, choose <strong>Load unpacked</strong>, and select the folder containing <code>manifest.json</code>.</li>}
+          <li>{installed === true ? 'The extension is already detected. Choose' : installed === null ? 'Wait for extension detection, then choose' : 'Reload this page and choose'} <strong>Connect this browser</strong> if this target is not connected. Each account and channel needs its own connection.</li>
           <li>In {portal}, select this account’s {integration === 'rcs' ? 'configured Sender ID' : integration === 'whatsapp' ? 'configured WABA' : integration === 'sms' ? 'Content Templates' : 'configured workspace'} and reload its {integration === 'moengage' ? 'dashboard' : 'template list'}. Sign in manually, including OTP, only if the portal asks.</li>
         </ol>
         {integration === 'sms' && target?.identity.entity_id && <p className="mt-3 text-xs text-gray-600">Expected entity: TATA CAPITAL LIMITED · {target.identity.entity_id}. This connection registers templates; it never sends SMS.</p>}
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" onClick={downloadExtension} disabled={disabled} className={buttonClass}>Download extension ZIP</button>
+          {installed === false && <button type="button" onClick={downloadExtension} disabled={disabled} className={buttonClass}>Download extension ZIP</button>}
           <button type="button" onClick={detectExtension} disabled={disabled} className={buttonClass}>Detect extension</button>
           {portalUrl && <a href={portalUrl} target="_blank" rel="noopener noreferrer" className={buttonClass}>Open {portal} portal</a>}
         </div>
+        {installed !== false && <details className="mt-3 text-xs text-gray-600">
+          <summary className="cursor-pointer">Extension recovery (optional)</summary>
+          <p className="mt-2">Only if the extension needs updating or repair: download and unzip the ZIP, open <code>chrome://extensions</code>, and reload the unpacked extension or use <strong>Load unpacked</strong>. Reload Settings afterwards. This does not replace connecting each account and channel.</p>
+          <button type="button" onClick={downloadExtension} disabled={disabled} className={`${buttonClass} mt-2`}>Download recovery ZIP</button>
+        </details>}
       </details>}
 
       <details className="border-t border-gray-100 pt-3">
@@ -450,7 +470,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
         <div className="mt-3 space-y-3">
           {browser && <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div><dt className="font-semibold text-gray-500">Saved session</dt><dd className="mt-1 text-gray-800">{statusError ? 'Unable to check' : status?.validation_state === 'valid' ? 'Passed last check (not a live guarantee)' : status?.validation_state === 'invalid' ? 'Last check failed' : 'Not checked yet'}</dd></div>
-            <div><dt className="font-semibold text-gray-500">This browser</dt><dd className="mt-1 text-gray-800">{!browserStatus ? 'Extension unavailable' : !browserStatus.paired ? 'Not connected for this account' : browserStatus.capture_active ? 'Connected · capture active' : 'Connected · capture inactive'}</dd></div>
+            <div><dt className="font-semibold text-gray-500">This browser</dt><dd className="mt-1 text-gray-800">{installed === null ? 'Checking extension…' : installed === false ? 'Extension not detected' : !browserStatus ? browserError ? 'Extension detected · connection check failed' : 'Extension detected · checking connection…' : !browserStatus.paired ? 'Not connected for this account' : browserStatus.capture_active ? 'Connected · capture active' : 'Connected · capture inactive'}</dd></div>
             <div><dt className="font-semibold text-gray-500">Last successful sync</dt><dd className="mt-1 text-gray-800">{status?.last_synced_at ? new Date(status.last_synced_at * 1000).toLocaleString() : 'No successful sync yet'}</dd></div>
             <div><dt className="font-semibold text-gray-500">Registered devices</dt><dd className="mt-1 text-gray-800">{statusError ? 'Unable to check' : status?.paired ? 'At least one device (may be another browser)' : 'No confirmed devices'}</dd></div>
           </dl>}

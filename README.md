@@ -16,11 +16,14 @@ Promotional/Transactional or other Karix sub-account. The picker no longer assum
 SMS support for accounts without channel metadata; changing channels never
 silently redirects credentials or submissions to another account.
 
-1. Open **Settings → VILPOWER · SMS DLT**. Download Auth Sync **2.0.6**, unzip it,
-   load the folder in Chrome's **Load unpacked**, then reload Settings.
-2. **Detect extension → Connect extension** for Tata Capital / SMS. Sign into
-   VILPOWER normally, including CAPTCHA/mobile OTP when required. Verify the
-   profile identifies **TATA CAPITAL LIMITED · 1101637310000019220**.
+1. Open **Settings → VILPOWER · SMS DLT**. Auth Sync is detected automatically.
+   If it is already installed and enabled for this site, use **Connect this browser**
+   or the displayed connection action; no repeat download is required.
+   Only if absent, download Auth Sync **2.0.6**, unzip it, load the folder in Chrome's
+   **Load unpacked**, then reload Settings.
+2. Connect this browser for Tata Capital / SMS. Sign into VILPOWER normally,
+   including CAPTCHA/mobile OTP when required. Verify the profile identifies
+   **TATA CAPITAL LIMITED · 1101637310000019220**.
 3. Reload VILPOWER **Content Templates**. The extension captures the Cookie from
    that successful inventory request and the backend verifies the live principal
    entity before encrypted storage. No credential copying is required. Captured
@@ -49,11 +52,20 @@ silently redirects credentials or submissions to another account.
    selected SMS for DLT whitelisting**. The same DLT editor and confirmation
    are used; edits are retained in the current tab until cleared or the
    destination changes.
-6. Use exact lowercase typed variables: `{#num#}`, `{#alp#}`, `{#urg#}`,
-   `{#uro#}`, `{#cbn#}`, `{#eml#}` (maximum 15). Supply a complete sample with
-   valid example values. Legacy `{#var#}` and WhatsApp `{{1}}` must be edited
-   explicitly. Copy, whitespace, punctuation and variable types are never
-   normalized or grammar-corrected.
+6. Use **Preview portal-ready preparation** for imported/Jira drafts containing
+   `<name>`, `<link>`, `<url>`, `{#alphanumeric#}`, `{#url#}` or `{#link#}`.
+   Inspect the before/after body, filled sample, encoding and any renamed conflicts,
+   then **Apply preparation to drafts**. This changes only known placeholder tokens,
+   generates example values when needed, preserves static copy (including ₹ and
+   whitespace), and selects Unicode for non-ASCII copy, even in English.
+   Generated samples and name suffixes are editable suggestions, not customer data
+   or approved links. Native brief per-occurrence decisions remain explicit.
+   VILPOWER requires lowercase `{#num#}`, `{#alp#}`, `{#urg#}`, `{#uro#}`,
+   `{#cbn#}`, `{#eml#}` (maximum 15) and a complete filled sample with identical
+   surrounding copy. Unknown `{#var#}` and WhatsApp `{{1}}` still need your decision.
+   No preparation runs silently during submission; no grammar correction is applied.
+   Exact repeated drafts can be skipped by the queue; different drafts sharing a
+   name need a distinct name, provided by the preparation preview or a manual edit.
 7. **Validate and review DLT drafts**, check the destination/header/category/body/
    sample confirmation, then **Confirm and queue DLT whitelisting**. A successful
    registration can still be **pending**; it is not approval.
@@ -310,12 +322,20 @@ backend. The application handles this for autonomous remediation flows.
 Deploy/restart the updated backend and frontend together. Choose an account and delivery channel using **Whitelisting for → Change** at the top of the app, then open **Settings → Connections**. Manage the selected Karix channel or open the separate **MoEngage integration** panel; neither opening Settings nor viewing an integration activates extension capture or changes your whitelisting destination. Unsaved connection edits require confirmation before changing destination or integration. **Team & administration** is collapsed below the connection controls.
 
 The connection card shows the last verified session state, this browser's auto-sync
-state, and one next-step action. **Setup help** contains installation instructions;
+state, and one next-step action. Installation detection uses an independent site-bridge
+ping, not account pairing or provider validation. Initial detection shows **Checking
+extension…**; installed browsers show connection actions. Scoped-status errors show
+**Retry browser connection**, never a repeat installation prompt. Detection refreshes
+on focus and periodically, so a late-loading bridge is recognized.
+**Setup help** shows installation instructions only when no extension is detected;
+detected installations keep a ZIP under optional **Extension recovery**.
 **Advanced connection details** contains diagnostics, manual checks, and disconnect.
 A verified saved session does not imply this browser is paired or guarantee that
-the provider session is still valid now.
+the provider session is still valid now. A downloaded ZIP alone is not an enabled
+extension: Chrome must load it and allow it on this site's origin.
 
-1. Click **Download extension** (or **Setup help → Download extension ZIP**) and unzip it into a permanent local folder.
+1. If the extension is not detected, click **Download extension** and unzip it into
+   a permanent local folder. Skip installation when the connection card detects it.
 2. Open `chrome://extensions` in Chrome 124 or newer, enable **Developer mode**, click
    **Load unpacked**, and select the folder containing `manifest.json`.
 3. Reload Settings and click **Connect this browser** for the selected account and integration. **Detect extension** remains available under **Setup help**.
