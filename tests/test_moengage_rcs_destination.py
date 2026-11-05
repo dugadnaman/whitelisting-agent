@@ -26,6 +26,10 @@ def portal(monkeypatch):
     ]
     reads, writes = [], []
     bound_target = [None]
+    senders = {
+        "crocs-sender-record": {"sender_id": "crocs-bot", "sender_name": "Crocs"},
+        "anchor-sender": {"sender_id": "anchor-bot", "sender_name": "Aldo"},
+    }
 
     def get(url, **kwargs):
         if url.endswith('/listApps'):
@@ -42,10 +46,7 @@ def portal(monkeypatch):
             if '/template_metadata' in url:
                 payload = {"data": [{"name": "already_in_crocs", "meta_data": {"template_id": "existing"}}]}
             else:
-                payload = {"rcs_sender_settings": {"karix": {
-                    "crocs-sender-record": {"sender_id": "crocs-bot", "sender_name": "Crocs"},
-                    "anchor-sender": {"sender_id": "anchor-bot", "sender_name": "Aldo"},
-                }}}
+                payload = {"rcs_sender_settings": {"karix": senders}}
         return SimpleNamespace(ok=True, status_code=200, json=lambda: payload)
 
     def post(url, **kwargs):
@@ -56,7 +57,7 @@ def portal(monkeypatch):
     monkeypatch.setattr(sync.requests, 'get', get)
     monkeypatch.setattr(sync.requests, 'post', post)
     return SimpleNamespace(anchor=anchor, target=target, foreign=foreign, config=config,
-                           apps=apps, reads=reads, writes=writes, bound_target=bound_target)
+                           apps=apps, reads=reads, writes=writes, bound_target=bound_target, senders=senders)
 
 
 def register(portal, **changes):
@@ -170,3 +171,83 @@ def test_api_requires_destination_before_provider_calls(provision_user, monkeypa
     response = getattr(client, method)(path, headers=headers, **({'json': body} if body else {}))
     assert response.status_code == 400
     provider.assert_not_called()
+
+
+BRAND_BOTS = [
+    ("67ebafa122bb69cb92112742", "VS_IN", "Wk4lAtdRnQmXTHXF"),
+    ("6821a8b69962306efba6184c", "AL_IN", "axfzbekeNANA8h90"),
+    ("6811d59d5be93388c11a1f3e", "RB_IN", "P7hzkqCcW3x96I6T"),
+]
+
+
+@pytest.fixture(params=BRAND_BOTS)
+def mapped_brand(portal, request):
+    workspace, name, bot = request.param
+    portal.apps.append({"id": workspace, "name": name, "account_id": "apparel-org",
+                        "activated": True, "is_test": False})
+    portal.senders["brand-record"] = {"sender_id": bot, "sender_name": name}
+    return workspace, bot
+
+
+def test_mapped_brand_uses_its_bot_instead_of_saved_sender_override(portal, mapped_brand):
+    workspace, bot = mapped_brand
+    result = register(portal, workspace_id=workspace, sender_id=bot)
+    assert result["workspace_id"] == workspace
+    assert portal.writes[0][1]["json"]["meta_data"]["sender_ids"] == ["brand-record"]
+    assert portal.config["sender_id"] == "anchor-sender"
+
+
+def test_other_brand_source_is_rejected_before_any_registration(portal, mapped_brand):
+    workspace, _ = mapped_brand
+    with pytest.raises(ValueError):
+        register(portal, workspace_id=workspace, sender_id="crocs-bot")
+    assert portal.writes == []
+
+
+def test_mapped_brand_never_fabricates_another_brands_media(portal, mapped_brand):
+    workspace, bot = mapped_brand
+    with pytest.raises(ValueError):
+        register(portal, workspace_id=workspace, sender_id=bot, media_url=None)
+    assert portal.writes == []
+
+
+def test_bulk_reads_only_selected_bot_and_uses_request_provenance(portal, mapped_brand, monkeypatch):
+    import rcs_client
+    workspace, bot = mapped_brand
+    def fetch(*, client, bot_id):
+        assert client == "apparel"
+        assert bot_id == bot
+        return [{"templateId": "brand_offer", "status": "APPROVED", "viTemplate": {
+            "name": "brand_offer", "standaloneCard": {"cardTitle": "Offer", "cardDescription": "Details",
+                                                       "mediaUrl": "https://media.example/original.jpg"}}}]
+    monkeypatch.setattr(rcs_client, "fetch_rcs_templates", fetch)
+    result = sync.sync_karix_rcs_to_moengage(account="apparel", workspace_id=workspace,
+                                           semantic_dedup=False, resolve_attributes=False)
+    assert result["created_count"] == 1
+    assert portal.writes[0][1]["json"]["meta_data"]["sender_ids"] == ["brand-record"]
+
+
+def test_mapped_bulk_never_registers_provider_rows_from_another_bot(portal, mapped_brand, monkeypatch):
+    import rcs_client
+    workspace, _ = mapped_brand
+    monkeypatch.setattr(rcs_client, "fetch_rcs_templates", lambda **kwargs: [{
+        "templateId": "foreign_offer", "botId": "other-brand-bot", "status": "APPROVED",
+        "viTemplate": {"name": "foreign_offer", "standaloneCard": {
+            "cardTitle": "Offer", "cardDescription": "Details", "mediaUrl": "https://media.example/foreign.jpg"}},
+    }])
+    result = sync.sync_karix_rcs_to_moengage(account="apparel", workspace_id=workspace,
+                                           semantic_dedup=False, resolve_attributes=False)
+    assert result["created_count"] == 0
+    assert result["error_count"] == 1
+    assert portal.writes == []
+
+
+def test_mapped_carousel_accepts_original_media_per_card_without_top_level_image(portal, mapped_brand):
+    workspace, bot = mapped_brand
+    cards = [{"cardTitle": "One", "cardDescription": "First", "mediaUrl": "https://media.example/one.jpg"},
+             {"cardTitle": "Two", "cardDescription": "Second", "mediaUrl": "https://media.example/two.jpg"}]
+    register(portal, workspace_id=workspace, sender_id=bot, media_url=None,
+             template_type="carousel", carousel_cards=cards)
+    content = portal.writes[0][1]["json"]["meta_data"]["data"]
+    assert "https://media.example/one.jpg" in str(content)
+    assert "https://media.example/two.jpg" in str(content)

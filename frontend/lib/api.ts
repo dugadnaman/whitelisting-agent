@@ -1895,7 +1895,7 @@ export async function testMoEngageConnection(
   return res.json();
 }
 
-export type RcsSyncWorkspace = { id: string; name: string };
+export type RcsSyncWorkspace = { id: string; name: string; bot_id?: string };
 
 export async function fetchRcsSyncWorkspaces(account: string): Promise<RcsSyncWorkspace[]> {
   const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/workspaces?account=${encodeURIComponent(account)}`), { cache: "no-store" });

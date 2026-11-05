@@ -116,6 +116,7 @@ export default function DashboardPage() {
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
   const syncBusyRef = useRef(false);
   const selectedWorkspace = syncWorkspaces.find((workspace) => workspace.id === syncWorkspaceId);
+  const syncBotId = account === 'apparel' ? selectedWorkspace?.bot_id : undefined;
   const syncDestinationReady = account !== 'apparel' || Boolean(selectedWorkspace && !workspaceLoading && !workspaceError);
   const syncBusy = syncingRcs || Object.values(syncingSingleRcs).some(Boolean);
   const syncDestinationLabel = account === 'apparel' ? selectedWorkspace?.name || 'Select workspace' : 'MoEngage';
@@ -151,6 +152,13 @@ export default function DashboardPage() {
 
   const handleSyncSingleRcsToMoEngage = async (t: Template) => {
     if (!syncDestinationReady || syncBusyRef.current) return;
+    if (syncBotId && !t.sender_ids?.includes(syncBotId)) {
+      setSyncRcsFeedback({
+        message: `Cannot sync '${t.template_name}' to ${syncDestinationLabel}: only templates from Karix Bot ID ${syncBotId} can sync to this workspace. Choose a matching template or destination.`,
+        type: 'error',
+      });
+      return;
+    }
     syncBusyRef.current = true;
     const generation = syncGenerationRef.current;
     const tName = t.template_name;
@@ -167,7 +175,7 @@ export default function DashboardPage() {
         media_url: t.media_url,
         cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
         cta_url: t.cta_url,
-        sender_id: t.sender_ids?.[0],
+        sender_id: syncBotId || t.sender_ids?.[0],
         template_type: isCarousel ? 'carousel' : 'card',
         carousel_cards: t.carousel_cards || undefined,
         width: t.width,
@@ -221,6 +229,15 @@ export default function DashboardPage() {
   };
   const handleSyncSelectedRcsToMoEngage = async () => {
     if (selectedTemplates.size === 0 || !syncDestinationReady || syncBusyRef.current) return;
+    const targets = templates.filter((t) => selectedTemplates.has(t.template_name));
+    const mismatched = syncBotId ? targets.filter((t) => !t.sender_ids?.includes(syncBotId)) : [];
+    if (mismatched.length > 0) {
+      setSyncRcsFeedback({
+        message: `No templates synced to ${syncDestinationLabel}: ${mismatched.length} selected template(s) do not belong to Karix Bot ID ${syncBotId} (${mismatched.map((t) => t.template_name).join(', ')}). Deselect them or choose a matching destination.`,
+        type: 'error',
+      });
+      return;
+    }
     syncBusyRef.current = true;
     const generation = syncGenerationRef.current;
     try {
@@ -229,7 +246,6 @@ export default function DashboardPage() {
       let successCount = 0;
       let failCount = 0;
       const errors: string[] = [];
-      const targets = templates.filter((t) => selectedTemplates.has(t.template_name));
 
       for (const t of targets) {
         if (generation !== syncGenerationRef.current) return;
@@ -245,7 +261,7 @@ export default function DashboardPage() {
             media_url: t.media_url,
             cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
             cta_url: t.cta_url,
-            sender_id: t.sender_ids?.[0],
+            sender_id: syncBotId || t.sender_ids?.[0],
             template_type: isCarousel ? 'carousel' : 'card',
             carousel_cards: t.carousel_cards || undefined,
             width: t.width,
@@ -694,6 +710,11 @@ export default function DashboardPage() {
                   <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.id})</option>
                 ))}
               </select>
+              {syncBotId && (
+                <p className="max-w-sm break-words text-xs text-purple-200">
+                  Karix Bot ID: <span className="font-mono">{syncBotId}</span>. Only templates from this matching bot sync to this workspace.
+                </p>
+              )}
               {workspaceError ? (
                 <div role="alert" className="max-w-sm text-xs text-red-200">
                   {workspaceError}

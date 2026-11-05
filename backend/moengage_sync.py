@@ -21,6 +21,7 @@ from typing import Any
 import requests
 
 from config import _account_prefix, _load_env_file
+from rcs_config import APPAREL_RCS_WORKSPACE_BOTS
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,10 @@ def _authorized_rcs_workspaces(cfg: dict[str, str]) -> list[dict[str, str]]:
         if (not isinstance(app.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9]{24}", app["id"])
                 or not isinstance(app.get("name"), str) or not app["name"].strip()):
             raise ValueError("MoEngage returned invalid workspace details.")
-        workspaces.append({"id": app["id"], "name": app["name"]})
+        workspace = {"id": app["id"], "name": app["name"]}
+        if app["id"] in APPAREL_RCS_WORKSPACE_BOTS:
+            workspace["bot_id"] = APPAREL_RCS_WORKSPACE_BOTS[app["id"]]
+        workspaces.append(workspace)
     if len({app["id"] for app in workspaces}) != len(workspaces):
         raise ValueError("MoEngage returned duplicate workspace identities.")
     return sorted(workspaces, key=lambda app: app["name"].casefold())
@@ -126,6 +130,9 @@ def _rcs_workspace_context(account: str, workspace_id: str | None = None):
         if workspace_id != cfg["workspace_id"]:
             cfg["sender_id"] = ""
         cfg = {**cfg, **bound}
+        bot_id = APPAREL_RCS_WORKSPACE_BOTS.get(workspace_id)
+        if bot_id:
+            cfg = {**cfg, "bot_id": bot_id, "sender_id": bot_id}
     return cfg, get_moengage_auth_headers_from_config(cfg)
 
 
@@ -384,6 +391,9 @@ def _resolve_rcs_sender(
     """Resolve a bot ID, sender name or record ID against this workspace's Karix senders."""
     from rcs_config import get_rcs_bot_id
 
+    if cfg.get("bot_id") and sender_id and sender_id.strip() != cfg["bot_id"]:
+        raise ValueError("The source RCS bot does not match the destination workspace.")
+
     selected = (cfg["sender_id"] or sender_id or get_rcs_bot_id(account)).strip()
     resp = requests.get(f"{cfg['base_url']}/v2/settings/sms?api=1", headers=headers, timeout=20)
     if not resp.ok:
@@ -467,14 +477,22 @@ def create_moengage_rcs_template(
         )
 
     clean_media_url = (media_url or "").strip()
-    if not clean_media_url:
+    is_carousel = (template_type or "").lower() == "carousel" or bool(carousel_cards and len(carousel_cards) >= 2)
+    if cfg.get("bot_id"):
+        if is_carousel:
+            if not carousel_cards or any(
+                not str(card.get("mediaUrl") or card.get("media_url") or "").strip()
+                for card in carousel_cards
+            ):
+                raise ValueError("Original media is required for every mapped workspace carousel card.")
+        elif not clean_media_url:
+            raise ValueError("Original media is required for this mapped workspace.")
+    if not clean_media_url and not cfg.get("bot_id"):
         if account.lower() == "apparel":
             bot_tag = sender_id or "P7hzkqCcW3x96I6T"
             clean_media_url = f"https://rm.virbm.com/{bot_tag}/d11c5b30238a401da9d653e48936045e.jpeg"
         else:
             clean_media_url = "https://rm.virbm.com/Uv9tdd0KNADbq3pX/816429043c23458ab9edc04a903251d8.jpg"
-
-    is_carousel = (template_type or "").lower() == "carousel" or bool(carousel_cards and len(carousel_cards) >= 2)
 
     if is_carousel and carousel_cards:
         cards_payload = []
@@ -662,9 +680,11 @@ def sync_karix_rcs_to_moengage(
 
     context = _rcs_workspace_context(account, workspace_id) if account.strip().lower() == "apparel" or workspace_id is not None else None
     destination = context[0]["workspace_id"] if context else get_moengage_config(account)["workspace_id"]
+    mapped_bot = context[0].get("bot_id") if context else None
 
     try:
-        karix_templates = fetch_rcs_templates(client=account)
+        karix_templates = (fetch_rcs_templates(client=account, bot_id=mapped_bot)
+                           if mapped_bot else fetch_rcs_templates(client=account))
     except Exception as exc:
         return {
             "ok": False,
@@ -695,6 +715,12 @@ def sync_karix_rcs_to_moengage(
         name = str(vi.get("name") or lt.get("templateId", "")).strip()
         template_id = str(lt.get("templateId", "")).strip()
         status = str(lt.get("status", "")).upper()
+        if mapped_bot and any(
+            source.get(key) is not None and source[key] != mapped_bot
+            for source in (lt, vi) for key in ("botId", "bot_id", "senderId", "sender_id")
+        ):
+            errors.append({"template_name": name, "error": "Source RCS bot does not match the destination workspace."})
+            continue
 
         # Only sync approved/active templates
         if status in ("REJECTED", "FAILED", "INACTIVE", "REVOKED"):
@@ -783,7 +809,7 @@ def sync_karix_rcs_to_moengage(
                 cta_text=cta_text,
                 cta_url=cta_url,
                 account=account,
-                sender_id=lt.get("botId") or vi.get("botId"),
+                sender_id=mapped_bot or lt.get("botId") or vi.get("botId"),
                 template_type="carousel" if is_carousel else "card",
                 carousel_cards=carousel_cards if is_carousel else None,
                 width=vi.get("width") or "MEDIUM",

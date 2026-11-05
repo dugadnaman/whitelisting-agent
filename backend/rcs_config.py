@@ -33,6 +33,12 @@ DEFAULT_RCS_BOT_IDS: dict[str, str] = {
     "apparel": "P7hzkqCcW3x96I6T",
 }
 
+APPAREL_RCS_WORKSPACE_BOTS: dict[str, str] = {
+    "67ebafa122bb69cb92112742": "Wk4lAtdRnQmXTHXF",
+    "6821a8b69962306efba6184c": "axfzbekeNANA8h90",
+    "6811d59d5be93388c11a1f3e": "P7hzkqCcW3x96I6T",
+}
+
 APPAREL_ALL_RCS_BOT_IDS: list[str] = [
     "P7hzkqCcW3x96I6T",
     "6aa232b4734aa52ea966d1b4",
@@ -40,6 +46,7 @@ APPAREL_ALL_RCS_BOT_IDS: list[str] = [
     "6aa2396e734aa52ea966d23f",
     "6aa23c2d734aa52ea966d26f",
     "axf2bekeNANA8h90",
+    "axfzbekeNANA8h90",
     "pp6wKCHJhdAlvEP6",
     "Wk4lAtdRnQmXTHXF",
     "Wk4lBploJGyg1Dlr",
