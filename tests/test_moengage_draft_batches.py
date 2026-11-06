@@ -110,7 +110,8 @@ def test_batch_owner_requires_both_subject_and_email(isolated_batch_db, changes)
     intruder = _queue(FakeWriter(), user={**USER, **changes})
     for operation in (lambda: intruder.get(batch["batch_id"]),
                       lambda: intruder.create_row(batch["batch_id"], "1"),
-                      lambda: intruder.archive(batch["batch_id"])):
+                      lambda: intruder.archive(batch["batch_id"]),
+                      lambda: intruder.reconcile_row(batch["batch_id"], "1")):
         with pytest.raises(BatchAccessDenied):
             operation()
     assert owner.get(batch["batch_id"])["items"][0]["status"] == "preview_ready"

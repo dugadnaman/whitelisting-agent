@@ -97,13 +97,8 @@ class DraftCreation:
         """Production construction is denied until the owner explicitly approves every gate."""
         authorize_draft_account(account, user)
         prefix = f"MOENGAGE_DRAFT_{account.upper()}_"
-        privileged_agipl = False
-        if account == "apparel" and os.environ.get(prefix + "AGIPL_PRIVILEGED_SESSION_APPROVED") == "true":
-            from apparel_whatsapp import brand_info
-            agipl = brand_info("AGIPL")
-            privileged_agipl = workspace_id in (agipl["workspace_id"], agipl["workspace_name"])
         if (os.environ.get(prefix + "ZERO_CHARGE_CONFIRMED") != "true"
-                or (os.environ.get(prefix + "NO_PUBLISH_SCOPE_CONFIRMED") != "true" and not privileged_agipl)):
+                or (account != "apparel" and os.environ.get(prefix + "NO_PUBLISH_SCOPE_CONFIRMED") != "true")):
             raise PermissionError("Workspace billing and no-publish scope approval required")
         operator = os.environ.get(prefix + "LIVE_TEST_OPERATOR_EMAIL", "").strip()
         segment_id = os.environ.get(prefix + "LIVE_TEST_SEGMENT_ID", "").strip()
@@ -179,8 +174,8 @@ class DraftCreation:
             catalog = workspace_catalog(account, user, workspace_id, **options)
         if account == "apparel":
             from apparel_whatsapp import draft_access_allowed
-            if not draft_access_allowed(catalog, privileged_agipl_approved=privileged_agipl):
-                raise PermissionError("Apparel requires draft-only MoEngage permissions or the explicit AGIPL-only privileged-session approval")
+            if not draft_access_allowed(catalog):
+                raise PermissionError("Apparel requires active MoEngage draft-management and campaign-management permissions")
         return cls(account, user, catalog, writer, approved_live_rows=approved_rows,
                    allow_sqlite_for_tests=allow_sqlite, allow_all_rows=allow_all_rows)
 
@@ -268,6 +263,107 @@ class DraftCreation:
         return {"state": "BLOCKED", "issues": issues, "source_ref": source_ref,
                 "row_id": row_id, "campaign_id": None}
 
+    def _saved_matches(self, payload: dict, readback: Any, campaign_id: str) -> bool:
+        expected = payload
+        whatsapp = payload.get("channel") == "WHATSAPP"
+        if whatsapp:
+            wa = payload["campaign_content"]["content"]["whatsapp"]
+            fields = (tuple(wa) if self.account == "apparel" else
+                      ("sender_id", "sender_name", "provider", "template_id", "body_placeholders"))
+            selected = {key: wa[key] for key in fields if key in wa and key not in ("phone_number", "template_name")}
+            expected = {
+                "channel": "WHATSAPP", "campaign_delivery_type": "ONE_TIME",
+                "basic_details": payload["basic_details"],
+                "campaign_content": {"content": {"whatsapp": selected}},
+            }
+            for key in ("segmentation_details", "scheduling_details", "conversion_goals", "goal_tracking",
+                        "global_control_enabled", "personalization_enabled", "bypass_opt_in_preference"):
+                if key in payload and (key == "segmentation_details" or self.account == "apparel"):
+                    expected[key] = payload[key]
+        if (not isinstance(readback, dict) or not _matches(readback, expected)
+                or str(readback.get("status", "")).upper() != "DRAFT" or readback.get("id") != campaign_id):
+            return False
+        if whatsapp:
+            saved_wa = readback["campaign_content"]["content"]["whatsapp"]
+            exact = ("body_placeholders",)
+            if self.account == "apparel":
+                exact += ("header_placeholders", "button_placeholders", "linksTrackingList", "cards")
+            return (all(saved_wa.get(key) == wa[key] for key in exact if key in wa)
+                    and ("segmentation_details" not in payload
+                         or readback.get("segmentation_details") == payload["segmentation_details"])
+                    and all(readback.get(key) == payload[key] for key in (
+                        "conversion_goals", "goal_tracking", "scheduling_details", "personalization_enabled",
+                        "bypass_opt_in_preference") if self.account == "apparel" and key in payload))
+        return True
+
+    def reconcile(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Find and verify an already-created WhatsApp draft; never issue a create."""
+        from datetime import datetime
+        from moengage_whatsapp_worker import WhatsAppDraftWriter
+
+        source, row_id = row["source_ref"], row["row_id"]
+        if row.get("channel") != "WHATSAPP" or row.get("workspace_id") != self.catalog["workspace_id"]:
+            raise PermissionError("Reconciliation requires this row's authorized WhatsApp workspace")
+        with self._db() as conn:
+            stored = conn.execute(
+                "SELECT * FROM moengage_draft_attempts WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
+                (self.account, self.catalog["workspace_id"], source, row_id),
+            ).fetchone()
+        if not stored:
+            return {"state": "mismatch", "message": "No durable provider attempt was found. No create was retried."}
+        stored = dict(stored)
+        item = prepare_batch([row], self.account, self.catalog, self.user["email"], source_type="server_catalog")["items"][0]
+        if item["status"] != "preview_ready":
+            return {"state": "mismatch", "message": "Current source settings cannot be verified. No create was retried."}
+        writer = self.writer or WhatsAppDraftWriter(self.account, self.catalog["workspace_id"])
+        payload = writer.prepare(item["candidate_v5_payload"])
+        digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if digest != stored["payload_hash"]:
+            return {"state": "mismatch", "message": "Source settings changed since the attempted save. No create was retried."}
+        candidates = ([stored["campaign_id"]] if stored.get("campaign_id")
+                      else writer.find_drafts(payload["basic_details"]["name"]))
+        matched = []
+        for candidate in candidates:
+            if candidate == row.get("existing_campaign_id"):
+                continue
+            readback = writer.get(candidate)
+            if not stored.get("campaign_id"):
+                created = readback.get("created_at")
+                if isinstance(created, dict):
+                    created = created.get("$date")
+                try:
+                    if isinstance(created, (int, float)):
+                        timestamp = created / 1000 if created > 100_000_000_000 else created
+                    else:
+                        moment = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                        if moment.utcoffset() is None:
+                            continue
+                        timestamp = moment.timestamp()
+                except (TypeError, ValueError):
+                    continue
+                if timestamp < stored["attempted_at"]:
+                    continue
+            if self._saved_matches(payload, readback, candidate):
+                matched.append(candidate)
+        if len(matched) > 1:
+            return {"state": "ambiguous", "message": "Multiple matching drafts exist. Inspect MoEngage; no create was retried."}
+        if not matched:
+            state = "mismatch" if candidates else "not_found"
+            return {"state": state, "message": "No matching new draft was verified in MoEngage. The attempt remains protected; no create was retried."}
+        campaign_id = matched[0]
+        with self._db() as conn:
+            updated = conn.execute(
+                "UPDATE moengage_draft_attempts SET state='VERIFIED',campaign_id=?,issue=NULL "
+                "WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=? AND payload_hash=? "
+                "AND state IN ('MAYBE_SENT','UNCERTAIN','CREATED','VERIFIED') "
+                "AND (campaign_id IS NULL OR campaign_id=?)",
+                (campaign_id, self.account, self.catalog["workspace_id"], source, row_id, digest, campaign_id),
+            ).rowcount
+        if updated != 1:
+            return {"state": "mismatch", "message": "The attempt changed while checking. No create was retried."}
+        return {"state": "verified", "campaign_id": campaign_id, "message": "The existing MoEngage draft is verified. No new draft was created."}
+
+
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         """Never reissue an attempted POST, including after timeout or process crash."""
         channel = str(row.get("channel", "")).strip().upper()
@@ -317,9 +413,11 @@ class DraftCreation:
         if fresh:
             try:
                 created = writer.create(payload, idempotency_key=stored["idempotency_key"])
-            except Exception:
-                self._record(source_ref, row_id, "UNCERTAIN", issue="create_result_unconfirmed")
-                return self._result(source_ref, row_id, "UNCERTAIN", None, "create_result_unconfirmed")
+            except Exception as exc:
+                from moengage_whatsapp_worker import WhatsAppRequestError
+                issue = str(exc) if isinstance(exc, WhatsAppRequestError) else "create_result_unconfirmed"
+                self._record(source_ref, row_id, "UNCERTAIN", issue=issue)
+                return self._result(source_ref, row_id, "UNCERTAIN", None, issue)
             campaign_id = created.get("id") if isinstance(created, dict) else None
             if ((not whatsapp and isinstance(created, dict) and str(created.get("status", "")).upper() != "DRAFT") or not isinstance(campaign_id, str)
                     or len(campaign_id) != 24
@@ -338,46 +436,7 @@ class DraftCreation:
             except Exception:
                 self._record(source_ref, row_id, "CREATED", issue="readback_unavailable")
                 return self._result(source_ref, row_id, "CREATED", campaign_id, "readback_unavailable")
-            expected = payload
-            if whatsapp:
-                wa = payload["campaign_content"]["content"]["whatsapp"]
-                expected = {
-                    "channel": "WHATSAPP", "campaign_delivery_type": "ONE_TIME",
-                    "basic_details": payload["basic_details"],
-                    **({"segmentation_details": payload["segmentation_details"]}
-                       if self.account != "apparel" or "segmentation_details" in payload else {}),
-                    "campaign_content": {"content": {"whatsapp": {
-                        key: wa[key] for key in ("sender_id", "sender_name", "provider", "template_id", "body_placeholders")
-                        if key in wa
-                    }}},
-                }
-                if self.account == "apparel":
-                    expected["campaign_content"]["content"]["whatsapp"] = copy_whatsapp = dict(wa)
-                    copy_whatsapp.pop("phone_number", None)
-                    copy_whatsapp.pop("template_name", None)
-                    for key in ("scheduling_details", "conversion_goals", "goal_tracking", "global_control_enabled",
-                                "personalization_enabled", "bypass_opt_in_preference"):
-                        if key in payload:
-                            expected[key] = payload[key]
-            content_matches = isinstance(readback, dict) and _matches(readback, expected)
-            exact_content = True
-            if whatsapp and content_matches:
-                saved_wa = readback["campaign_content"]["content"]["whatsapp"]
-                exact_content = (
-                    (self.account == "apparel" and "body_placeholders" not in wa
-                     or saved_wa.get("body_placeholders") == wa["body_placeholders"])
-                    and (self.account == "apparel" and "segmentation_details" not in payload
-                         or readback.get("segmentation_details") == payload["segmentation_details"])
-                    and (self.account != "apparel" or all(
-                        readback.get(key) == payload[key]
-                        for key in ("conversion_goals", "goal_tracking", "scheduling_details", "personalization_enabled",
-                                    "bypass_opt_in_preference") if key in payload
-                    ))
-                    and (self.account != "apparel" or all(saved_wa.get(key) == wa[key]
-                         for key in ("header_placeholders", "button_placeholders", "linksTrackingList", "cards") if key in wa))
-                )
-            if (not content_matches or str(readback.get("status", "")).upper() != "DRAFT"
-                    or readback.get("id") != campaign_id or not exact_content):
+            if not self._saved_matches(payload, readback, campaign_id):
                 self._record(source_ref, row_id, "NEEDS_REVIEW", campaign_id=campaign_id, issue="readback_mismatch_or_not_draft")
                 return self._result(source_ref, row_id, "NEEDS_REVIEW", campaign_id, "readback_mismatch_or_not_draft")
             self._record(source_ref, row_id, "VERIFIED")

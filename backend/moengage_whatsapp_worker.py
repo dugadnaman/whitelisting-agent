@@ -22,6 +22,10 @@ from moengage_workspaces import _approved_templates, _sender_inventory, portal_s
 _CAMPAIGN_ID = re.compile(r"[0-9a-fA-F]{24}\Z")
 
 
+class WhatsAppRequestError(RuntimeError):
+    """A failed provider response; never implies that a write is safe to retry."""
+
+
 def _exact(items: list[dict[str, Any]], value: str, fields: tuple[str, ...], label: str) -> dict[str, Any]:
     clean = str(value or "").strip()
     matches = [item for item in items if clean and any(str(item.get(field, "")).strip() == clean for field in fields)]
@@ -40,6 +44,24 @@ class WhatsAppDraftWriter:
         self.base_url = session["base_url"]
         self.headers = session["headers"].copy()
 
+    def _response_error(self, response: requests.Response, data: Any = None) -> WhatsAppRequestError:
+        message = data.get("message") if isinstance(data, dict) else None
+        detail = message if isinstance(message, str) else ""
+        for name, value in self.headers.items():
+            if name.lower() in ("authorization", "refreshtoken", "cookie") and value:
+                detail = detail.replace(value, "<REDACTED>")
+                if name.lower() == "authorization":
+                    detail = detail.replace(re.sub(r"^Bearer\s+", "", value, flags=re.I), "<REDACTED>")
+                if name.lower() == "cookie":
+                    for pair in value.split(";"):
+                        _, _, secret = pair.partition("=")
+                        if secret.strip():
+                            detail = detail.replace(secret.strip(), "<REDACTED>")
+        detail = re.sub(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "<REDACTED>", detail)
+        detail = re.sub(r"[\x00-\x1f\x7f]+", " ", detail).strip()[:300]
+        suffix = ": " + detail if detail else ""
+        return WhatsAppRequestError(f"MoEngage draft response HTTP {response.status_code}{suffix}")
+
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         headers = self.headers.copy()
         headers["page"] = "whatsapp/create/one-time/"
@@ -52,15 +74,19 @@ class WhatsAppDraftWriter:
         except requests.RequestException as exc:
             raise RuntimeError("MoEngage WhatsApp request outcome unconfirmed") from exc
         if response.status_code not in (200, 201):
-            raise ValueError(f"MoEngage WhatsApp request failed (HTTP {response.status_code})")
+            try:
+                rejected = response.json()
+            except ValueError:
+                rejected = None
+            raise self._response_error(response, rejected)
         try:
             data = response.json()
         except ValueError as exc:
-            raise ValueError("MoEngage WhatsApp response unconfirmed") from exc
+            raise WhatsAppRequestError("MoEngage WhatsApp response was not valid JSON; creation is unconfirmed") from exc
         if (not isinstance(data, dict) or (data.get("status") != "success" and data.get("status") is not True)
                 or data.get("success") is False
                 or ("code" in data and str(data["code"]) not in ("200", "201"))):
-            raise ValueError("MoEngage WhatsApp response unconfirmed")
+            raise self._response_error(response, data)
         return data
 
     def _senders(self) -> list[dict[str, Any]]:
@@ -127,9 +153,6 @@ class WhatsAppDraftWriter:
         if self.account == "apparel":
             from apparel_whatsapp import portal_details
             body["campaign_data"].update(portal_details(payload))
-            if "scheduling_details" not in payload:
-                body["campaign_data"].pop("delivery")
-                body["campaign_data"].pop("triggerDelayType")
             for key in ("header_placeholders", "button_placeholders", "linksTrackingList", "cards"):
                 if key in wa:
                     body["campaign_data"]["whatsapp_data"][key] = copy.deepcopy(wa[key])
@@ -189,6 +212,8 @@ class WhatsAppDraftWriter:
                 "template_id": wa.get("template_id"),
             }}},
         }
+        if "c_cr_t" in draft:
+            result["created_at"] = draft["c_cr_t"]
         if self.account != "apparel":
             result["campaign_content"]["content"]["whatsapp"]["body_placeholders"] = wa.get("body_placeholders") or {}
         if self.account == "apparel":
@@ -198,6 +223,29 @@ class WhatsAppDraftWriter:
                 if key in wa:
                     result["campaign_content"]["content"]["whatsapp"][key] = copy.deepcopy(wa[key])
         return result
+
+    def find_drafts(self, name: str) -> list[str]:
+        """Search exact-name draft identities only; a missing result never authorizes a POST."""
+        identities = set()
+        for test_campaigns in (False, True):
+            data = self._request("POST", "/draft/campaigns?api=1", {
+                "c_name": name, "limit": 100, "filter_block": "drafts", "request_type": "campaigns",
+                "get_test_campaigns": test_campaigns, "get_archived_campaigns": False,
+            }).get("data", {})
+            rows = data.get("campaigns") if isinstance(data, dict) else None
+            if not isinstance(rows, list) or len(rows) >= 100:
+                raise ValueError("MoEngage draft search is unavailable or incomplete; no create was retried")
+            for row in rows:
+                if not isinstance(row, dict):
+                    raise ValueError("MoEngage returned invalid draft search metadata")
+                if (row.get("name") or row.get("campaignName")) != name or row.get("channel") != "WHATSAPP":
+                    continue
+                identity = row.get("_id")
+                identity = identity.get("$oid") if isinstance(identity, dict) else identity
+                if not isinstance(identity, str) or not _CAMPAIGN_ID.fullmatch(identity):
+                    raise ValueError("MoEngage returned no real matching draft identity")
+                identities.add(identity)
+        return sorted(identities)
 
 
 def automate_whatsapp_draft_batch(batch_id: str, account: str, user: dict[str, Any]) -> dict[str, Any]:

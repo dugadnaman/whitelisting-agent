@@ -518,7 +518,7 @@ def test_staging_without_a_preview_digest_is_rejected_before_any_queue_write():
     ("publish_duplicate", False), ("draft_denied", False), ("inactive", False),
     ("malformed", False),
 ])
-def test_live_permission_policy_requires_explicit_draft_access_and_publish_denial(monkeypatch, change, verified):
+def test_live_permission_metadata_reports_provider_publish_restriction(monkeypatch, change, verified):
     import moengage_workspaces
     role = {"name": "Marketer", "active": True, "permissions": {
         "campaigns": {"value": [
@@ -543,29 +543,30 @@ def test_live_permission_policy_requires_explicit_draft_access_and_publish_denia
     assert apparel.draft_permissions({})["verified"] is verified
 
 
-def test_owner_flags_do_not_override_a_publish_capable_live_workspace(monkeypatch):
+@pytest.mark.parametrize("brand", list(BRAND_WORKSPACES))
+@pytest.mark.parametrize("can_create", [False, True])
+def test_owner_approved_apparel_roles_allow_drafts_but_never_grant_missing_management_permission(monkeypatch, brand, can_create):
     import os
     import moengage_workspaces
     prefix = "MOENGAGE_DRAFT_APPAREL_"
     for name in list(os.environ):
         if name.startswith(prefix):
             monkeypatch.delenv(name)
-    for name in ("ZERO_CHARGE_CONFIRMED", "NO_PUBLISH_SCOPE_CONFIRMED", "LIVE_ENABLED", "ALLOW_SQLITE"):
+    for name in ("ZERO_CHARGE_CONFIRMED", "LIVE_ENABLED", "ALLOW_SQLITE"):
         monkeypatch.setenv(prefix + name, "true")
-    live = catalog_for()
-    live["draft_permissions"] = {"verified": False, "can_create": True, "publish_disabled": False}
-    monkeypatch.setattr(creation, "load_server_catalog", lambda account: live)
+    live = catalog_for(brand)
+    live["draft_permissions"] = {"verified": False, "can_create": can_create, "publish_disabled": False}
     monkeypatch.setattr(moengage_workspaces, "workspace_catalog", lambda *args, **kwargs: live)
-    with pytest.raises(PermissionError):
-        creation.DraftCreation.from_environment("apparel", USER, workspace_id=live["workspace_id"])
+    if can_create:
+        creator = creation.DraftCreation.from_environment("apparel", USER, workspace_id=live["workspace_id"])
+        assert creator.catalog["workspace_id"] == BRAND_WORKSPACES[brand]
+        assert creator.account == "apparel"
+    else:
+        with pytest.raises(PermissionError):
+            creation.DraftCreation.from_environment("apparel", USER, workspace_id=live["workspace_id"])
 
 
-@pytest.mark.parametrize("brand", ["AGIPL", "VS"])
-@pytest.mark.parametrize("approved", [False, True])
-@pytest.mark.parametrize("can_create", [False, True])
-def test_privileged_session_approval_is_agipl_only_and_never_grants_missing_draft_access(brand, approved, can_create):
-    catalog = catalog_for(brand)
-    catalog["draft_permissions"] = {"verified": False, "can_create": can_create}
-    assert apparel.draft_access_allowed(catalog, privileged_agipl_approved=approved) is (
-        brand == "AGIPL" and approved and can_create
-    )
+@pytest.mark.parametrize("changes", [{"account": "tata"}, {"workspace_id": "ffffffffffffffffffffffff"}])
+def test_apparel_draft_approval_never_extends_to_a_foreign_workspace(changes):
+    catalog = {**catalog_for(), **changes, "draft_permissions": {"can_create": True, "verified": True}}
+    assert not apparel.draft_access_allowed(catalog)

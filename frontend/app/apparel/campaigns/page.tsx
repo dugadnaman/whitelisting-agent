@@ -6,7 +6,7 @@ import { useApp } from '@/lib/context';
 import { canUseApparelAttribution } from '@/lib/apparel-attribution';
 import {
   fetchApparelWhatsAppCatalog, previewApparelWhatsAppBrief, stageApparelWhatsAppBrief,
-  fetchMoEngageDraftBatch, createMoEngageDraftRow, uploadApparelWhatsAppImage, MoEngageDraftRequestError,
+  fetchMoEngageDraftBatch, createMoEngageDraftRow, reconcileMoEngageDraftRow, uploadApparelWhatsAppImage, MoEngageDraftRequestError,
   type ApparelWhatsAppCatalog, type ApparelWhatsAppOptions, type ApparelWhatsAppImageResult,
   type MoEngageDraftPreview, type MoEngageDraftBatch, type MoEngageDraftRow,
 } from '@/lib/api';
@@ -163,6 +163,26 @@ function Workspace({ userId }: { userId: string }) {
     });
   }
 
+  async function reconcileRow(row: MoEngageDraftRow) {
+    if (!batch) return;
+    const snapshot = batch;
+    await run('Checking MoEngage read-only; no new draft request', async (version) => {
+      const key = marker(snapshot.batch_id, row.row_id);
+      localStorage.setItem(key, '1');
+      setHalted(true); setConfirmed(false);
+      const response = await reconcileMoEngageDraftRow(snapshot.batch_id, row.row_id, 'apparel');
+      if (!current(version)) return;
+      const result = validateBatch(response, snapshot.batch_id);
+      const saved = result.items.find((item) => item.row_id === row.row_id && item.source_ref === row.source_ref && item.workspace_id === row.workspace_id);
+      if (!saved || (row.campaign_id && saved.campaign_id !== row.campaign_id)) throw new Error('Reconciliation row identity mismatch. Creation remains stopped.');
+      setBatch(result);
+      const verified = response.reconciliation?.state === 'verified' && complete(saved);
+      if (verified) localStorage.removeItem(key);
+      setHalted(!verified || result.items.some((item) => ['UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(item.status) || localStorage.getItem(marker(result.batch_id, item.row_id)) === '1'));
+      setNotice(response.reconciliation?.message || 'Read-only check completed without verified recovery. Creation remains stopped; no new draft was requested.');
+    });
+  }
+
   async function createReady() {
     if (!batch || !confirmed || halted) return;
     const snapshot = batch;
@@ -183,7 +203,10 @@ function Workspace({ userId }: { userId: string }) {
           if (!current(version)) return;
           latest = result; setBatch(result);
           const returned = result.items.find((item) => item.row_id === row.row_id && item.source_ref === row.source_ref && item.workspace_id === row.workspace_id);
-          if (!returned || !complete(returned)) throw new Error(`${row.row_id}: ${returned?.status || 'unknown result'}. Stopped; no automatic POST retry.`);
+          if (!returned || !complete(returned)) {
+            const issue = returned?.issue?.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 400);
+            throw new Error(`${row.row_id}: ${returned?.status || 'unknown result'}${issue ? ` — ${issue}` : ''}. Stopped; check MoEngage read-only before any further action. No new draft will be requested automatically.`);
+          }
           localStorage.removeItem(key);
         } catch (err) {
           let verifiedAfterInterruption = false;
@@ -353,7 +376,10 @@ function Workspace({ userId }: { userId: string }) {
             setHalted(result.items.some((item) => ['UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(item.status) || localStorage.getItem(marker(batch.batch_id, item.row_id)) === '1'));
             setConfirmed(false);
             setNotice('Saved draft readback completed; no new draft was requested.');
-          })}>Recheck saved draft only</button>}</td>
+          })}>Recheck saved draft only</button>}{['UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(row.status) && <div className="space-y-1">
+            <button type="button" className={button} disabled={Boolean(busy)} onClick={() => void reconcileRow(row)}>Check MoEngage for this draft</button>
+            <p className="text-xs text-gray-500">Read-only check. No new draft request.</p>
+          </div>}</td>
         </tr>)}</tbody></table></div>
         {!allVerified && <><label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={Boolean(busy) || halted || !readyRows} checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />I authorise saving only the {readyRows} ready WhatsApp drafts. Nothing may be published, sent, activated or created as SMS fallback.</label>
         <button type="button" className={`${button} bg-blue-600 text-white`} disabled={Boolean(busy) || !confirmed || halted || !readyRows} onClick={() => void createReady()}>Save {readyRows} drafts to MoEngage</button></>}

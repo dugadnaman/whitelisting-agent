@@ -5305,6 +5305,32 @@ def create_moengage_draft_batch_row_endpoint(
     except Exception as exc:
         logger.error("Draft batch state unavailable; inspect the batch before retry")
         raise HTTPException(status_code=503, detail="Draft state unavailable; inspect before retry") from exc
+
+
+@app.post("/api/moengage/drafts/batches/{batch_id}/rows/{row_id}/reconcile")
+def reconcile_moengage_draft_batch_row_endpoint(
+    batch_id: str,
+    row_id: str,
+    account: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Read MoEngage Drafts and reconcile an owned attempt without another create."""
+    from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
+    from moengage_draft_creation import load_server_catalog
+
+    _authorize_moengage_preview(account, current_user)
+    try:
+        return DraftBatchQueue(account, current_user, load_server_catalog(account)).reconcile_row(batch_id, row_id)
+    except BatchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Draft batch access denied") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Draft batch row not found") from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/moengage/drafts/batches/{batch_id}/automate-whatsapp")
 def automate_moengage_whatsapp_batch_endpoint(
     batch_id: str,

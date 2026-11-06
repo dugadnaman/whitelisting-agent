@@ -1638,6 +1638,13 @@ export type MoEngageDraftBatch = {
   blocked: number;
 };
 
+export type MoEngageDraftReconciliation = MoEngageDraftBatch & {
+  reconciliation?: {
+    state: "verified" | "not_found" | "ambiguous" | "mismatch";
+    message: string;
+  };
+};
+
 function moEngageDraftForm(file: File, account: string): FormData {
   const form = new FormData();
   form.append("file", file);
@@ -1677,6 +1684,15 @@ export function stageMoEngageDraftBatch(file: File, account: string): Promise<Mo
 export function fetchMoEngageDraftBatch(batchId: string, account: string): Promise<MoEngageDraftBatch> {
   return moEngageDraftRequest(
     `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}?${new URLSearchParams({ account })}`
+  );
+}
+
+export function reconcileMoEngageDraftRow(batchId: string, rowId: string, account: string): Promise<MoEngageDraftReconciliation> {
+  const form = new FormData();
+  form.append("account", account);
+  return moEngageDraftRequest(
+    `/api/moengage/drafts/batches/${encodeURIComponent(batchId)}/rows/${encodeURIComponent(rowId)}/reconcile`,
+    { method: "POST", body: form }
   );
 }
 

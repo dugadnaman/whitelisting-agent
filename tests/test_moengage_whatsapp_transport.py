@@ -3,6 +3,7 @@
 import copy
 import json
 import threading
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -71,18 +72,23 @@ def provider(monkeypatch):
             elif method == "GET" and parsed.path == "/template_metadata":
                 result = {"data": state["templates"]}
             elif method == "POST" and parsed.path == "/v1.0/campaigns/draft":
+                if body["campaign_data"].get("delivery") not in ("later", "soon", "periodic", "trigger"):
+                    self.send_document(400, {"status": "error", "message": "Campaign delivery is required"})
+                    return
                 selected = body["campaign_data"]["whatsapp_data"]
                 if selected.get("sender") not in state["senders"]:
                     self.send_error(400, "Unknown sender provider")
                     return
                 state["created"] = copy.deepcopy(body["campaign_data"])
+                state["created"]["c_cr_t"] = datetime.now(timezone.utc).isoformat()
                 result = {"data": {"id": CAMPAIGN_ID}}
             elif method == "GET" and parsed.path == f"/draft/campaigns/get/{CAMPAIGN_ID}":
                 draft = {**copy.deepcopy(state["created"]), "_id": INNER_ID}
                 draft.update(copy.deepcopy(state["saved_overrides"]))
                 result = {"data": {"campaign_draft": {"draft": draft}}}
             elif method == "POST" and parsed.path == "/draft/campaigns":
-                campaigns = ([{"_id": {"$oid": CAMPAIGN_ID}, "channel": "WHATSAPP", "delivery_type": "ONE_TIME"}]
+                campaigns = ([{"_id": {"$oid": CAMPAIGN_ID}, "name": state["created"]["campaignName"],
+                               "channel": "WHATSAPP", "delivery_type": "ONE_TIME"}]
                              if state["membership"] else [])
                 result = {"data": {"campaigns": campaigns}}
             else:
@@ -472,7 +478,7 @@ def test_incomplete_apparel_draft_is_verified_without_audience_or_schedule(appar
     draft = state["created"]
     assert not set(draft) & {
         "new_segmentation_data", "dt", "laterDate", "time", "timezone", "timezoneName",
-        "delivery", "triggerDelayType", "conversion", "clickTrackHours", "impTrackHours",
+        "conversion", "clickTrackHours", "impTrackHours",
     }
     wa = draft["whatsapp_data"]
     assert wa["body_placeholders"] == placeholders
@@ -541,3 +547,54 @@ def test_apparel_cards_must_still_match_live_approved_template(apparel_provider)
     with pytest.raises(ValueError, match="live approved template"):
         writer.prepare(requested)
     assert not writes(state)
+
+
+@pytest.mark.parametrize("change,expected", [
+    ("unchanged", "verified"), ("audience", "mismatch"),
+    ("older_draft", "mismatch"), ("missing", "not_found"),
+])
+def test_uncertain_apparel_create_reconciles_read_only_without_duplicate_posts(apparel_provider, monkeypatch, change, expected):
+    from moengage_draft_batches import DraftBatchQueue
+    state, writer, catalog = apparel_provider
+    original_request = requests.request
+
+    def lost_ack(method, url, **kwargs):
+        result = original_request(method, url, **kwargs)
+        if method == "POST" and urlsplit(url).path == "/v1.0/campaigns/draft":
+            raise requests.Timeout("Acknowledgement lost after provider accepted the draft")
+        return result
+
+    monkeypatch.setattr(requests, "request", lost_ack)
+    worker = DraftCreation("apparel", APPAREL_USER, catalog, writer, allow_sqlite_for_tests=True)
+    row = row_for()
+    monkeypatch.setattr("moengage_draft_batches.catalog_for_row", lambda *args: catalog)
+    queue = DraftBatchQueue("apparel", APPAREL_USER, catalog, allow_sqlite_for_tests=True, creator=worker)
+    batch = queue.stage([row], row["source_ref"])
+    assert queue.create_row(batch["batch_id"], row["row_id"])["items"][0]["status"] == "UNCERTAIN"
+    monkeypatch.setattr(requests, "request", original_request)
+    if change == "audience":
+        state["saved_overrides"]["new_segmentation_data"] = {"included_filters": {}}
+    elif change == "older_draft":
+        state["saved_overrides"]["c_cr_t"] = "2020-01-01T00:00:00+00:00"
+    elif change == "missing":
+        state["membership"] = False
+    result = queue.reconcile_row(batch["batch_id"], row["row_id"])
+    assert result["reconciliation"]["state"] == expected
+    after = queue.create_row(batch["batch_id"], row["row_id"])["items"][0]
+    assert after["status"] == ("VERIFIED" if expected == "verified" else "UNCERTAIN")
+    assert after["campaign_id"] == (CAMPAIGN_ID if expected == "verified" else None)
+    assert len(writes(state)) == 1
+
+
+def test_rejected_save_preserves_safe_provider_reason_without_exposing_session(apparel_provider):
+    state, writer, catalog = apparel_provider
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {
+        "status": "error", "message": "Missing delivery. Authorization: offline-test",
+    })}
+    worker = DraftCreation("apparel", APPAREL_USER, catalog, writer, allow_sqlite_for_tests=True)
+    result = worker.create(row_for())
+    assert result["state"] == "UNCERTAIN"
+    assert "HTTP 400" in result["issue"] and "Missing delivery" in result["issue"]
+    assert "offline-test" not in result["issue"]
+    worker.create(row_for())
+    assert len(writes(state)) == 1

@@ -236,12 +236,12 @@ def draft_permissions(session: dict) -> dict:
             "role": role.get("name", ""), "can_create": can_create, "publish_disabled": publish_disabled}
 
 
-def draft_access_allowed(catalog: dict, *, privileged_agipl_approved: bool = False) -> bool:
-    permissions = catalog.get("draft_permissions", {})
-    if permissions.get("verified") is True:
-        return True
-    return (privileged_agipl_approved is True and permissions.get("can_create") is True
-            and catalog.get("workspace_id") == brand_info("AGIPL")["workspace_id"])
+def draft_access_allowed(catalog: dict) -> bool:
+    from moengage_draft_creation import load_server_catalog
+    # Owner-approved application-enforced draft access, including publish-capable roles.
+    workspaces = {brand["workspace_id"] for brand in load_server_catalog("apparel").get("brands", [])}
+    return (catalog.get("account") == "apparel" and catalog.get("workspace_id") in workspaces
+            and catalog.get("draft_permissions", {}).get("can_create") is True)
 
 
 def enrich_catalog(catalog: dict, session: dict, reference_id: str | None = None) -> dict:

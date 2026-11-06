@@ -253,6 +253,50 @@ class DraftBatchQueue:
                 "ready": sum(item["status"] == "preview_ready" for item in items),
                 "blocked": sum(item["status"].lower() == "blocked" for item in items)}
 
+    def reconcile_row(self, batch_id: str, row_id: str) -> dict[str, Any]:
+        """Associate only a verified existing draft; never repeat a provider create."""
+        with self._db() as conn:
+            batch = self._batch_row(conn, batch_id)
+            rows = conn.execute(
+                "SELECT * FROM moengage_draft_batch_rows WHERE batch_id=? AND row_id=? AND source_ref=?",
+                (batch_id, row_id, batch["source_ref"].strip()),
+            ).fetchall()
+        if not rows:
+            raise LookupError("Draft row not found")
+        if len(rows) != 1:
+            raise ValueError("Duplicate row_id in batch; no unique row can be reconciled")
+        current = dict(rows[0])
+        if current["channel"] != "WHATSAPP":
+            raise ValueError("Only WhatsApp draft attempts support reconciliation")
+        if current["status"] not in ("UNCERTAIN", "MAYBE_SENT", "UNKNOWN", "CREATED"):
+            raise ValueError("This row has no unresolved draft attempt")
+        row = json.loads(current["row_json"])
+        target = current["workspace_id"]
+        if isinstance(self.creator, dict):
+            creator = self.creator[target]
+        elif self.creator is not None:
+            creator = self.creator
+        else:
+            options = {"reference_id": str(row.get("goal_reference_id") or "") or None} if self.account == "apparel" else {}
+            creator = DraftCreation.from_environment(self.account, self.user, workspace_id=target, **options)
+        if creator.catalog.get("workspace_id") != target:
+            raise PermissionError("Staged workspace differs from the authorized workspace")
+        result = creator.reconcile(row)
+        if result["state"] == "verified":
+            with self._db() as conn:
+                self._lock_batch(conn, batch_id)
+                self._batch_row(conn, batch_id)
+                changed = conn.execute(
+                    "UPDATE moengage_draft_batch_rows SET status='VERIFIED',campaign_id=?,issue=NULL,updated_at=? "
+                    "WHERE batch_id=? AND position=? AND status=? AND updated_at=?",
+                    (result["campaign_id"], time.time(), batch_id, current["position"], current["status"], current["updated_at"]),
+                ).rowcount
+            if changed != 1:
+                result = {"state": "mismatch", "message": "The row changed while checking. No create was retried."}
+        response = self.get(batch_id)
+        response["reconciliation"] = {"state": result["state"], "message": result["message"]}
+        return response
+
     def create_row(self, batch_id: str, row_id: str) -> dict[str, Any]:
         """Claim one selected row once; replay only reads its persisted result."""
         with self._db() as conn:
