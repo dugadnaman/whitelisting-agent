@@ -846,3 +846,23 @@ def test_overlapping_retry_approvals_do_not_dispatch_a_second_retry_post(apparel
     assert queue.creator.retry_once(original_row, reviewed_row, digest)["campaign_id"] == CAMPAIGN_ID
     assert len(writes(state)) == 2
     assert stored_retry_history(original_row, catalog) == [history]
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_approved_retry_accepts_source_aliases_that_resolve_to_the_same_template_and_sender(apparel_queue):
+    state, _, catalog, queue = apparel_queue
+    original = row_for("CK", row_id="WhatsApp!DJ")
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {"status": "error"})}
+    assert queue.creator.create(original)["state"] == "UNCERTAIN"
+    state["responses"].clear()
+    reviewed = {
+        **original, "scheduled_at": "2026-08-29T09:00:00+05:30",
+        "whatsapp_template_id": catalog["whatsapp_templates"][0]["id"],
+        "whatsapp_sender": catalog["whatsapp_senders"][0]["name"],
+    }
+    result = queue.creator.retry_once(original, reviewed, reviewed_candidate_hash(reviewed, catalog))
+    assert (result["state"], result["campaign_id"]) == ("VERIFIED", CAMPAIGN_ID)
+    assert state["created"]["whatsapp_data"]["template_id"] == catalog["whatsapp_templates"][0]["id"]
+    assert len(writes(state)) == 2
+    history, = stored_retry_history(original, catalog)
+    assert json.loads(history["original_row_json"]) == original

@@ -5347,7 +5347,7 @@ def retry_moengage_draft_batch_row_once_endpoint(
     body: MoEngageDraftRetryOnceRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    """Authorize one audited draft retry, never publishing or automatically retrying."""
+    """Authorize one audited retry using resolved sender/template IDs, never publishing."""
     from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
     from moengage_draft_creation import RateLimitError, load_server_catalog
 

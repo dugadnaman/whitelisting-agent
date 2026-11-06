@@ -241,7 +241,7 @@ function Workspace({ userId }: { userId: string }) {
   return <div className="mx-auto max-w-6xl space-y-5">
     <header className="space-y-2">
       <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-bold text-gray-900">WhatsApp campaign drafts</h1><span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">Draft only · No sending</span></div>
-      <p className="text-sm text-gray-600">Save the supplied content as MoEngage drafts, then complete missing details directly in MoEngage. Missing launch settings do not block draft saving.</p>
+      <p className="text-sm text-gray-600">Save the supplied content as MoEngage drafts, then complete missing details directly in MoEngage. Missing launch settings do not block draft saving. Template names and sender numbers resolve to approved workspace IDs; no sheet edits are needed.</p>
       <details className="text-sm text-gray-600"><summary className="cursor-pointer font-medium">Scheduling and goal-tracking rules</summary><p className="mt-2">Yearless sheet dates use the client-confirmed 2026 brief year; explicit sheet years take precedence. Approved-template CTAs do not need duplicate entries in the brief. Planned IST times are draft metadata, not activated schedules, and past dates are not moved forward. Goal tracking uses elapsed end − start from delivery: 29 October to 1 November is 3 days. Crocs, AGIPL, R&amp;B and CK have no conversion goals. No publishing, test sends or SMS fallback creation.</p></details>
     </header>
     <ol aria-label="Draft workflow progress" className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">

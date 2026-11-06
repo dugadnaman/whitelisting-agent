@@ -404,12 +404,21 @@ class DraftCreation:
                 or row.get("workspace_id") != self.catalog["workspace_id"]):
             raise DraftPreflightError("Approved retries require the bound Apparel WhatsApp workspace")
         for field in ("account", "workspace_id", "source_ref", "row_id", "channel", "brand",
-                      "campaign_name", "whatsapp_template_id", "whatsapp_sender"):
+                      "campaign_name"):
             if row.get(field) != previous_row.get(field):
                 raise DraftPreflightError("Approved retry identity differs from the original row: " + field)
         if (not isinstance(expected_payload_hash, str) or len(expected_payload_hash) != 64
                 or any(c not in "0123456789abcdef" for c in expected_payload_hash)):
             raise DraftPreflightError("A reviewed retry payload hash is required")
+        from apparel_whatsapp import prepare_row
+        identity_errors: list[str] = []
+        previous_identity = prepare_row(previous_row, self.catalog, identity_errors)
+        reviewed_identity = prepare_row(row, self.catalog, identity_errors)
+        if identity_errors:
+            raise DraftPreflightError("; ".join(identity_errors))
+        for field in ("whatsapp_template_id", "whatsapp_sender_id"):
+            if previous_identity.get(field) != reviewed_identity.get(field):
+                raise DraftPreflightError("Approved retry resolved identity differs from the original row: " + field)
         identity = (self.account, self.catalog["workspace_id"], row["source_ref"], row["row_id"])
         with self._db() as conn:
             stored = conn.execute(
