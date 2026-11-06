@@ -191,7 +191,8 @@ class DraftCreation:
             raise PermissionError("Shared PostgreSQL unavailable; draft creation disabled")
         return conn
 
-    def _reserve(self, source_ref: str, row_id: str, digest: str) -> tuple[dict[str, Any], bool]:
+    def _reserve(self, source_ref: str, row_id: str, digest: str, *,
+                 _retry_of: dict[str, Any] | None = None) -> tuple[dict[str, Any], bool]:
         init_database()
         workspace = self.catalog["workspace_id"]
         now = self.clock()
@@ -205,12 +206,25 @@ class DraftCreation:
                 "SELECT * FROM moengage_draft_attempts WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
                 identity,
             ).fetchone()
-            if existing:
+            if _retry_of is not None:
+                original = _retry_of["attempt"]
+                if (self.account != "apparel" or not existing or existing["state"] != "UNCERTAIN"
+                        or existing["campaign_id"] or existing["idempotency_key"] != original["idempotency_key"]
+                        or existing["payload_hash"] != original["payload_hash"]):
+                    raise DraftPreflightError("The original attempt changed; no retry was reserved")
+                used = conn.execute(
+                    "SELECT 1 FROM moengage_draft_retry_history WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
+                    identity,
+                ).fetchone()
+                if used:
+                    raise DraftPreflightError("This source row's one approved retry has already been used")
+                stored = dict(existing)
+            elif existing:
                 stored = dict(existing)
                 if stored["payload_hash"] != digest:
                     raise ValueError("Source row already reserved with different campaign content")
                 return stored, False
-            if self.approved_live_rows is not None:
+            if self.approved_live_rows is not None and _retry_of is None:
                 count = conn.execute(
                     "SELECT COUNT(*) AS n FROM moengage_draft_attempts WHERE workspace_id=?",
                     (workspace,),
@@ -219,17 +233,36 @@ class DraftCreation:
                     raise RateLimitError("Workspace live draft test attempts already used")
             for seconds, maximum in ((1, 5), (60, 5), (3600, 25), (86400, 100)):
                 count = conn.execute(
-                    "SELECT COUNT(*) AS n FROM moengage_draft_attempts WHERE workspace_id=? AND attempted_at>=?",
-                    (workspace, now - seconds),
+                    "SELECT (SELECT COUNT(*) FROM moengage_draft_attempts WHERE workspace_id=? AND attempted_at>=?) "
+                    "+ (SELECT COUNT(*) FROM moengage_draft_retry_history WHERE workspace_id=? AND original_attempted_at>=?) AS n",
+                    (workspace, now - seconds, workspace, now - seconds),
                 ).fetchone()["n"]
                 if count >= maximum:
                     raise RateLimitError("Workspace draft-create rate cap reached")
             key = str(uuid4())
-            conn.execute(
-                "INSERT INTO moengage_draft_attempts (account,workspace_id,source_ref,row_id,payload_hash,"
-                "idempotency_key,state,attempted_at) VALUES (?,?,?,?,?,?,'MAYBE_SENT',?)",
-                (*identity, digest, key, now),
-            )
+            if _retry_of is not None:
+                conn.execute(
+                    "INSERT INTO moengage_draft_retry_history "
+                    "(account,workspace_id,source_ref,row_id,original_attempt_json,original_row_json,retry_row_json,"
+                    "original_attempted_at,approved_by,approved_at,retry_idempotency_key,retry_payload_hash) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*identity, json.dumps(stored), json.dumps(_retry_of["previous_row"]), json.dumps(_retry_of["row"]),
+                     stored["attempted_at"], self.user["sub"], now, key, _retry_of["expected_payload_hash"]),
+                )
+                changed = conn.execute(
+                    "UPDATE moengage_draft_attempts SET payload_hash=?,idempotency_key=?,state='MAYBE_SENT',attempted_at=?,"
+                    "campaign_id=NULL,validation_json=NULL,issue=NULL "
+                    "WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=? AND idempotency_key=?",
+                    (digest, key, now, *identity, stored["idempotency_key"]),
+                ).rowcount
+                if changed != 1:
+                    raise DraftPreflightError("The original attempt changed; no retry was reserved")
+            else:
+                conn.execute(
+                    "INSERT INTO moengage_draft_attempts (account,workspace_id,source_ref,row_id,payload_hash,"
+                    "idempotency_key,state,attempted_at) VALUES (?,?,?,?,?,?,'MAYBE_SENT',?)",
+                    (*identity, digest, key, now),
+                )
             return {"state": "MAYBE_SENT", "idempotency_key": key, "campaign_id": None}, True
 
     def _record(self, source_ref: str, row_id: str, state: str, *,
@@ -364,8 +397,52 @@ class DraftCreation:
         return {"state": "verified", "campaign_id": campaign_id, "message": "The existing MoEngage draft is verified. No new draft was created."}
 
 
-    def create(self, row: dict[str, Any]) -> dict[str, Any]:
-        """Never reissue an attempted POST, including after timeout or process crash."""
+    def retry_once(self, previous_row: dict[str, Any], row: dict[str, Any],
+                   expected_payload_hash: str) -> dict[str, Any]:
+        """Consume one explicit owner approval, never an automatic POST retry."""
+        if (self.account != "apparel" or row.get("channel") != "WHATSAPP"
+                or row.get("workspace_id") != self.catalog["workspace_id"]):
+            raise DraftPreflightError("Approved retries require the bound Apparel WhatsApp workspace")
+        for field in ("account", "workspace_id", "source_ref", "row_id", "channel", "brand",
+                      "campaign_name", "whatsapp_template_id", "whatsapp_sender"):
+            if row.get(field) != previous_row.get(field):
+                raise DraftPreflightError("Approved retry identity differs from the original row: " + field)
+        if (not isinstance(expected_payload_hash, str) or len(expected_payload_hash) != 64
+                or any(c not in "0123456789abcdef" for c in expected_payload_hash)):
+            raise DraftPreflightError("A reviewed retry payload hash is required")
+        identity = (self.account, self.catalog["workspace_id"], row["source_ref"], row["row_id"])
+        with self._db() as conn:
+            stored = conn.execute(
+                "SELECT * FROM moengage_draft_attempts WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
+                identity,
+            ).fetchone()
+            history = conn.execute(
+                "SELECT * FROM moengage_draft_retry_history WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
+                identity,
+            ).fetchone()
+        if history:
+            if (not stored or history["approved_by"] != self.user["sub"]
+                    or stored["idempotency_key"] != history["retry_idempotency_key"]
+                    or row != json.loads(history["retry_row_json"])):
+                raise DraftPreflightError("The approved retry reservation or reviewed source differs")
+            return self.create(row, expected_payload_hash=expected_payload_hash)
+        if not stored or (stored["state"] != "UNCERTAIN" and not stored["campaign_id"]):
+            # MAYBE_SENT may still have an active HTTP request; never renew it.
+            raise DraftPreflightError("The original provider attempt is not a settled uncertain outcome")
+        original = dict(stored)
+        reconciliation = self.reconcile(previous_row)
+        if reconciliation["state"] == "verified":
+            return {**self._result(row["source_ref"], row["row_id"], "VERIFIED", reconciliation["campaign_id"]),
+                    "recovered_existing": True}
+        if reconciliation["state"] != "not_found":
+            raise DraftPreflightError(reconciliation["message"])
+        return self.create(row, expected_payload_hash=expected_payload_hash,
+                           _retry_of={"attempt": original, "previous_row": previous_row, "row": row,
+                                      "expected_payload_hash": expected_payload_hash})
+
+    def create(self, row: dict[str, Any], *, expected_payload_hash: str | None = None,
+               _retry_of: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Never automatically reissue an attempted POST, including after a crash."""
         channel = str(row.get("channel", "")).strip().upper()
         if channel == "WHATSAPP":
             workspace_id = str(row.get("workspace_id") or "").strip()
@@ -386,8 +463,14 @@ class DraftCreation:
         preview = prepare_batch([row], self.account, self.catalog, self.user["email"], source_type="server_catalog")
         item = preview["items"][0]
         if item["status"] != "preview_ready":
+            if _retry_of is not None:
+                raise DraftPreflightError("; ".join(item["issues"]))
             return self._preflight_blocked(item, item["issues"])
         payload = item["candidate_v5_payload"]
+        if expected_payload_hash is not None:
+            reviewed = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            if reviewed != expected_payload_hash:
+                raise DraftPreflightError("Reviewed retry content changed; no new draft request was made")
         whatsapp = payload.get("channel") == "WHATSAPP"
         writer = self.writer
         if writer is None:
@@ -404,10 +487,12 @@ class DraftCreation:
             try:
                 payload = writer.prepare(payload)
             except (ValueError, PermissionError, RuntimeError) as exc:
+                if _retry_of is not None:
+                    raise DraftPreflightError(str(exc)) from exc
                 return self._preflight_blocked(item, [str(exc)])
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         source_ref, row_id = item["source_ref"], item["row_id"]
-        stored, fresh = self._reserve(source_ref, row_id, digest)
+        stored, fresh = self._reserve(source_ref, row_id, digest, _retry_of=_retry_of)
         state = stored["state"]
         campaign_id = stored.get("campaign_id")
         if fresh:

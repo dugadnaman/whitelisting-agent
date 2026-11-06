@@ -25,7 +25,7 @@ import requests as http_client
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from db_queue import (
     create_job_with_tasks,
@@ -5011,6 +5011,15 @@ class MoEngageDraftPreviewRequest(BaseModel):
     overrides: dict[str, Any] | None = None
 
 
+class MoEngageDraftRetryOnceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    account: Literal["apparel"]
+    row: dict[str, Any]
+    expected_payload_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    acknowledge_duplicate_risk: StrictBool
+
+
 def _authorize_moengage_preview(account: str, current_user: dict) -> str:
     from moengage_drafts import authorize_draft_account
 
@@ -5329,6 +5338,39 @@ def reconcile_moengage_draft_batch_row_endpoint(
         raise HTTPException(status_code=404, detail="Draft batch row not found") from exc
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/moengage/drafts/batches/{batch_id}/rows/{row_id}/retry-once")
+def retry_moengage_draft_batch_row_once_endpoint(
+    batch_id: str,
+    row_id: str,
+    body: MoEngageDraftRetryOnceRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Authorize one audited draft retry, never publishing or automatically retrying."""
+    from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue
+    from moengage_draft_creation import RateLimitError, load_server_catalog
+
+    _authorize_moengage_preview(body.account, current_user)
+    if body.acknowledge_duplicate_risk is not True:
+        raise HTTPException(status_code=400, detail="Explicit duplicate-risk acknowledgement required")
+    try:
+        return DraftBatchQueue(body.account, current_user, load_server_catalog(body.account)).retry_row_once(
+            batch_id, row_id, body.row, body.expected_payload_hash)
+    except BatchAccessDenied as exc:
+        raise HTTPException(status_code=403, detail="Draft batch access denied") from exc
+    except RateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=423, detail=str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Draft batch row not found") from exc
+    except (ValueError, RuntimeError) as exc:
+        status_code = 409 if "already reserved" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Draft retry state unavailable; inspect the batch before retry")
+        raise HTTPException(status_code=503, detail="Draft state unavailable; inspect before retry") from exc
 
 
 @app.post("/api/moengage/drafts/batches/{batch_id}/automate-whatsapp")

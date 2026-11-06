@@ -241,3 +241,49 @@ def test_invalid_or_conflicting_media_fails_before_provider_access(gateway, monk
         files={"file": ("creative.png", content, "image/png")} if content is not None else None)
     assert response.status_code == 400
     forbidden.assert_not_called()
+
+
+@pytest.mark.parametrize("acknowledgement", [None, False, "true", 1])
+def test_retry_once_requires_literal_duplicate_risk_acknowledgement(gateway, acknowledgement):
+    client, headers, metadata, _ = gateway
+    body = {"account": "apparel", "row": {}, "expected_payload_hash": "a" * 64}
+    if acknowledgement is not None:
+        body["acknowledge_duplicate_risk"] = acknowledgement
+    response = client.post("/api/moengage/drafts/batches/missing/rows/missing/retry-once",
+                           headers=headers, json=body)
+    assert response.status_code == (400 if acknowledgement is False else 422)
+    metadata.assert_not_called()
+    assert stored_rows() == []
+
+
+@pytest.mark.parametrize("identity", ["anonymous", "foreign", "wrong_account"])
+def test_retry_once_denies_wrong_identity_and_account(gateway, provision_user, identity):
+    client, headers, metadata, _ = gateway
+    if identity == "anonymous":
+        headers = {}
+    elif identity == "foreign":
+        headers = provision_user(tenant="tata")[1]
+    body = {"account": "tata" if identity == "wrong_account" else "apparel",
+            "row": {}, "expected_payload_hash": "a" * 64, "acknowledge_duplicate_risk": True}
+    response = client.post("/api/moengage/drafts/batches/missing/rows/missing/retry-once",
+                           headers=headers, json=body)
+    assert response.status_code in (401, 403, 422)
+    metadata.assert_not_called()
+    assert stored_rows() == []
+
+
+def test_retry_once_denies_another_apparel_batch_owner(gateway, provision_user):
+    client, headers, _, _ = gateway
+    preview = post(client, "/preview", headers, data=brief()).json()
+    staged = post(client, "/batches", headers, data=brief(), options={
+        "brand": "Crocs", "expected_source_digest": preview["source_digest"]})
+    assert staged.status_code == 200
+    batch = staged.json()
+    before = [dict(row) for row in stored_rows()]
+    response = client.post(
+        f"/api/moengage/drafts/batches/{batch['batch_id']}/rows/WhatsApp!C/retry-once",
+        headers=provision_user()[1],
+        json={"account": "apparel", "row": {}, "expected_payload_hash": "a" * 64,
+              "acknowledge_duplicate_risk": True})
+    assert response.status_code == 403
+    assert [dict(row) for row in stored_rows()] == before

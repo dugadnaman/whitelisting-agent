@@ -1,6 +1,8 @@
 """Account-owned batch lifecycle, independent rows, and no duplicate remote create."""
 
 import copy
+import hashlib
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -10,6 +12,18 @@ import db
 from moengage_draft_batches import BatchAccessDenied, DraftBatchQueue, prepare_routed_batch
 from moengage_draft_creation import DraftCreation, DraftPreflightError, RateLimitError
 from tests.test_moengage_draft_creation import CATALOG, ROW, USER, FakeWriter
+from moengage_preview import prepare_batch
+from tests.test_apparel_whatsapp_content import USER as APPAREL_USER, row_for
+from tests.test_moengage_whatsapp_transport import (
+    CAMPAIGN_ID,
+    apparel_provider,
+    apparel_queue,
+    provider,
+    reviewed_candidate_hash,
+    stored_attempt,
+    stored_retry_history,
+    writes,
+)
 
 
 @pytest.fixture
@@ -422,3 +436,193 @@ def test_create_rechecks_archive_under_the_shared_lock(isolated_batch_db, monkey
         with pytest.raises(LookupError, match="not found"):
             active.result(timeout=5)
     assert writer.calls == []
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_queue_retry_requires_fresh_candidate_hash_and_persists_reviewed_schedule(apparel_queue):
+    state, writer, catalog, queue = apparel_queue
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    batch_id = queue.stage([original_row], original_row["source_ref"])["batch_id"]
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {"status": "error"})}
+    assert queue.create_row(batch_id, original_row["row_id"])["items"][0]["status"] == "UNCERTAIN"
+    original_attempt = stored_attempt(original_row, catalog)
+    state["responses"].clear()
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    candidate = prepare_batch([reviewed_row], "apparel", catalog, APPAREL_USER["email"],
+                              source_type="server_catalog")["items"][0]["candidate_v5_payload"]
+    digest = reviewed_candidate_hash(reviewed_row, catalog)
+    prepared_digest = hashlib.sha256(json.dumps(
+        writer.prepare(candidate), sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    assert prepared_digest != digest
+    for wrong_digest in ("0" * 64, prepared_digest, reviewed_candidate_hash(original_row, catalog)):
+        try:
+            queue.retry_row_once(batch_id, original_row["row_id"], reviewed_row, wrong_digest)
+        except (ValueError, PermissionError):
+            pass
+        assert stored_attempt(original_row, catalog) == original_attempt
+        assert stored_retry_history(original_row, catalog) == []
+        assert queue.get(batch_id)["items"][0]["status"] == "UNCERTAIN"
+        assert len(writes(state)) == 1
+
+    retried = queue.retry_row_once(batch_id, original_row["row_id"], reviewed_row, digest)
+    assert (retried["batch_id"], retried["items"][0]["status"],
+            retried["items"][0]["campaign_id"]) == (batch_id, "VERIFIED", CAMPAIGN_ID)
+    assert state["created"]["dt"] == "2026-11-08T03:30:00.000Z"
+    assert len(writes(state)) == 2
+    with db.get_db() as conn:
+        current = conn.execute(
+            "SELECT row_json,candidate_json FROM moengage_draft_batch_rows WHERE batch_id=?",
+            (batch_id,),
+        ).fetchone()
+    assert json.loads(current["row_json"]) == reviewed_row
+    assert json.loads(current["candidate_json"]) == candidate
+    history, = stored_retry_history(original_row, catalog)
+    assert json.loads(history["original_row_json"]) == original_row
+    assert json.loads(history["original_attempt_json"]) == original_attempt
+    restarted = DraftBatchQueue("apparel", APPAREL_USER, catalog, allow_sqlite_for_tests=True,
+                                creator=queue.creator)
+    replay = restarted.retry_row_once(batch_id, original_row["row_id"], reviewed_row, digest)
+    assert replay["items"][0]["status"] == "VERIFIED"
+    assert replay["items"][0]["campaign_id"] == CAMPAIGN_ID
+    assert restarted.create_row(batch_id, original_row["row_id"])["items"][0]["campaign_id"] == CAMPAIGN_ID
+    assert stored_retry_history(original_row, catalog) == [history]
+    assert len(writes(state)) == 2
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_rejected_retry_consumes_only_approval_even_after_provider_recovers(apparel_queue):
+    state, _, catalog, queue = apparel_queue
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    batch_id = queue.stage([original_row], original_row["source_ref"])["batch_id"]
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {"status": "error"})}
+    assert queue.create_row(batch_id, original_row["row_id"])["items"][0]["status"] == "UNCERTAIN"
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    digest = reviewed_candidate_hash(reviewed_row, catalog)
+    retried = queue.retry_row_once(batch_id, original_row["row_id"], reviewed_row, digest)
+    assert retried["items"][0]["status"] == "UNCERTAIN"
+    assert retried["items"][0]["campaign_id"] is None
+    assert state["created"] is None and len(writes(state)) == 2
+    retry_attempt = stored_attempt(reviewed_row, catalog)
+    history, = stored_retry_history(original_row, catalog)
+
+    state["responses"].clear()
+    replay = queue.retry_row_once(batch_id, original_row["row_id"], reviewed_row, digest)
+    assert replay["items"][0]["status"] == "UNCERTAIN"
+    another_row = {**reviewed_row, "scheduled_at": "2026-11-09T09:00:00+05:30"}
+    try:
+        queue.retry_row_once(batch_id, original_row["row_id"], another_row,
+                             reviewed_candidate_hash(another_row, catalog))
+    except (ValueError, PermissionError):
+        pass
+    assert queue.create_row(batch_id, original_row["row_id"])["items"][0]["status"] == "UNCERTAIN"
+    assert stored_attempt(reviewed_row, catalog) == retry_attempt
+    assert stored_retry_history(original_row, catalog) == [history]
+    assert len(writes(state)) == 2 and state["created"] is None
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+@pytest.mark.parametrize("field,value", [
+    ("source_ref", "another-source.xlsx"),
+    ("row_id", "WhatsApp!DK"),
+    ("campaign_name", "Another campaign"),
+    ("account", "tata"),
+    ("workspace_id", "67ebafa122bb69cb92112742"),
+    ("brand", "VS"),
+    ("channel", "EMAIL"),
+    ("whatsapp_sender", "Another approved sender"),
+    ("whatsapp_template_id", "another_approved_template"),
+])
+def test_queue_retry_cannot_move_original_source_or_draft_identity(apparel_queue, field, value):
+    state, _, catalog, queue = apparel_queue
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    batch_id = queue.stage([original_row], original_row["source_ref"])["batch_id"]
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {"status": "error"})}
+    assert queue.create_row(batch_id, original_row["row_id"])["items"][0]["status"] == "UNCERTAIN"
+    original_attempt = stored_attempt(original_row, catalog)
+    state["responses"].clear()
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    if field == "whatsapp_sender":
+        sender = {**catalog["whatsapp_senders"][0], "id": "444444444444444444444444",
+                  "sender_id": "444444444444444444444444", "name": value, "sender_name": value,
+                  "number": "+919999999999", "phone_number": "+919999999999"}
+        catalog["whatsapp_senders"].append(sender)
+        state["senders"]["Karix"][sender["sender_id"]] = {
+            "sender_name": value, "whatsapp_business_no": sender["number"],
+        }
+        catalog["whatsapp_templates"][0]["sender_ids"].append(sender["sender_id"])
+        state["templates"][0]["meta_data"]["sender_ids"].append(sender["sender_id"])
+    elif field == "whatsapp_template_id":
+        template = copy.deepcopy(catalog["whatsapp_templates"][0])
+        template.update(id="555555555555555555555555", name=value)
+        catalog["whatsapp_templates"].append(template)
+        live_template = copy.deepcopy(state["templates"][0])
+        live_template.update(id=template["id"], name=value)
+        state["templates"].append(live_template)
+    moved_row = {**reviewed_row, field: value}
+    # Valid alternate identities receive their own matching review hash, so an
+    # implementation that checks only the digest would still be caught.
+    digest = reviewed_candidate_hash(
+        moved_row if field in {"source_ref", "row_id", "campaign_name",
+                               "whatsapp_sender", "whatsapp_template_id"} else reviewed_row,
+        catalog,
+    )
+    try:
+        queue.retry_row_once(batch_id, original_row["row_id"], moved_row, digest)
+    except (ValueError, PermissionError):
+        pass
+    assert queue.get(batch_id)["items"][0]["status"] == "UNCERTAIN"
+    assert stored_attempt(original_row, catalog) == original_attempt
+    assert stored_retry_history(original_row, catalog) == []
+    with db.get_db() as conn:
+        assert json.loads(conn.execute(
+            "SELECT row_json FROM moengage_draft_batch_rows WHERE batch_id=?", (batch_id,),
+        ).fetchone()["row_json"]) == original_row
+        assert conn.execute("SELECT COUNT(*) AS n FROM moengage_draft_attempts").fetchone()["n"] == 1
+    assert len(writes(state)) == 1
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+@pytest.mark.parametrize("changes", [{"sub": "another-sub"}, {"email": "another@example.invalid"}])
+def test_foreign_apparel_batch_owner_cannot_approve_retry(apparel_queue, changes):
+    state, _, catalog, queue = apparel_queue
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    batch_id = queue.stage([original_row], original_row["source_ref"])["batch_id"]
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {"status": "error"})}
+    assert queue.create_row(batch_id, original_row["row_id"])["items"][0]["status"] == "UNCERTAIN"
+    original_attempt = stored_attempt(original_row, catalog)
+    state["responses"].clear()
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    intruder = DraftBatchQueue("apparel", {**APPAREL_USER, **changes}, catalog,
+                              allow_sqlite_for_tests=True, creator=queue.creator)
+    before = len(state["requests"])
+    with pytest.raises(BatchAccessDenied):
+        intruder.retry_row_once(batch_id, original_row["row_id"], reviewed_row,
+                                reviewed_candidate_hash(reviewed_row, catalog))
+    assert len(state["requests"]) == before
+    assert len(writes(state)) == 1
+    assert stored_attempt(original_row, catalog) == original_attempt
+    assert stored_retry_history(original_row, catalog) == []
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_retry_readback_recovers_reviewed_source_after_queue_persistence_loss(apparel_queue):
+    state, _, catalog, queue = apparel_queue
+    original = row_for("CK", row_id="WhatsApp!DJ")
+    batch_id = queue.stage([original], original["source_ref"])["batch_id"]
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {"status": "error"})}
+    assert queue.create_row(batch_id, original["row_id"])["items"][0]["status"] == "UNCERTAIN"
+    state["responses"].clear()
+    reviewed = {**original, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    result = queue.creator.retry_once(original, reviewed, reviewed_candidate_hash(reviewed, catalog))
+    assert result["state"] == "VERIFIED"
+    # Simulate losing the queue write after the durable provider lifecycle completed.
+    assert queue.get(batch_id)["items"][0]["status"] == "UNCERTAIN"
+    recovered = queue.reconcile_row(batch_id, original["row_id"])
+    row = recovered["items"][0]
+    assert (row["status"], row["campaign_id"]) == ("VERIFIED", CAMPAIGN_ID)
+    assert row["source_fields"]["scheduled_at"] == reviewed["scheduled_at"]
+    history, = stored_retry_history(original, catalog)
+    assert json.loads(history["original_row_json"]) == original
+    assert json.loads(history["retry_row_json"]) == reviewed
+    assert len(writes(state)) == 2

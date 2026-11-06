@@ -1,8 +1,10 @@
 """Exercise WhatsApp's real HTTP transport against a deterministic local provider."""
 
 import copy
+import hashlib
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
@@ -10,8 +12,10 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 import requests
 
+import db
 import moengage_whatsapp_worker as transport
 from moengage_draft_creation import DraftCreation
+from moengage_draft_batches import DraftBatchQueue
 from moengage_preview import prepare_batch
 from tests.test_apparel_whatsapp_content import USER as APPAREL_USER, catalog_for, row_for
 from tests.test_moengage_whatsapp_bulk import (
@@ -92,7 +96,7 @@ def provider(monkeypatch):
             elif method == "POST" and parsed.path == "/draft/campaigns":
                 campaigns = ([{"_id": {"$oid": CAMPAIGN_ID}, "name": state["created"]["campaignName"],
                                "channel": "WHATSAPP", "delivery_type": "ONE_TIME"}]
-                             if state["membership"] else [])
+                             if state["membership"] and state["created"] is not None else [])
                 result = {"data": {"campaigns": campaigns}}
             else:
                 self.send_error(404)
@@ -440,9 +444,9 @@ def test_same_name_with_another_draft_id_does_not_prove_membership(provider):
 
 
 @pytest.fixture
-def apparel_provider(provider, monkeypatch):
+def apparel_provider(provider, monkeypatch, request):
     state, original_writer = provider
-    catalog = catalog_for()
+    catalog = catalog_for(getattr(request, "param", "VS"))
     sender = catalog["whatsapp_senders"][0]
     template = catalog["whatsapp_templates"][0]
     state["senders"] = {"Karix": {
@@ -460,6 +464,45 @@ def apparel_provider(provider, monkeypatch):
 
     monkeypatch.setattr(transport, "portal_session", portal_session)
     return state, transport.WhatsAppDraftWriter("apparel", catalog["workspace_id"]), catalog
+
+
+@pytest.fixture
+def apparel_queue(apparel_provider, monkeypatch):
+    state, writer, catalog = apparel_provider
+    # The live writer enriches this optional catalog field. Review hashes must
+    # cover the V5 candidate, not that later transport preparation.
+    catalog["whatsapp_senders"][0].pop("phone_number")
+    monkeypatch.setattr("moengage_draft_batches.catalog_for_row", lambda *args: catalog)
+    creator = DraftCreation("apparel", APPAREL_USER, catalog, writer, allow_sqlite_for_tests=True)
+    queue = DraftBatchQueue("apparel", APPAREL_USER, catalog, allow_sqlite_for_tests=True, creator=creator)
+    return state, writer, catalog, queue
+
+
+def reviewed_candidate_hash(row, catalog):
+    item = prepare_batch([row], "apparel", catalog, APPAREL_USER["email"],
+                         source_type="server_catalog")["items"][0]
+    assert item["status"] == "preview_ready", item["issues"]
+    return hashlib.sha256(json.dumps(
+        item["candidate_v5_payload"], sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+
+
+def stored_attempt(row, catalog):
+    with db.get_db() as conn:
+        return dict(conn.execute(
+            "SELECT * FROM moengage_draft_attempts "
+            "WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
+            ("apparel", catalog["workspace_id"], row["source_ref"], row["row_id"]),
+        ).fetchone())
+
+
+def stored_retry_history(row, catalog):
+    with db.get_db() as conn:
+        return [dict(item) for item in conn.execute(
+            "SELECT * FROM moengage_draft_retry_history "
+            "WHERE account=? AND workspace_id=? AND source_ref=? AND row_id=?",
+            ("apparel", catalog["workspace_id"], row["source_ref"], row["row_id"]),
+        ).fetchall()]
 
 
 @pytest.mark.parametrize("placeholders", [{}, {"1": "Customer"}])
@@ -643,3 +686,163 @@ def test_rejected_save_preserves_safe_provider_reason_without_exposing_session(a
     assert "offline-test" not in result["issue"]
     worker.create(row_for())
     assert len(writes(state)) == 1
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_approved_retry_preserves_rejected_attempt_and_replays_without_third_post(apparel_queue):
+    state, _, catalog, queue = apparel_queue
+    worker = queue.creator
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {
+        "status": "error", "message": "Campaign delivery is required",
+    })}
+    assert worker.create(original_row)["state"] == "UNCERTAIN"
+    original_attempt = stored_attempt(original_row, catalog)
+    assert original_attempt["state"] == "UNCERTAIN"
+    assert original_attempt["campaign_id"] is None
+    assert state["created"] is None and len(writes(state)) == 1
+    assert worker.create(original_row)["state"] == "UNCERTAIN"
+    assert len(writes(state)) == 1
+
+    state["responses"].clear()
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    digest = reviewed_candidate_hash(reviewed_row, catalog)
+    retried = worker.retry_once(original_row, reviewed_row, digest)
+    assert retried["state"] == "VERIFIED"
+    assert retried["campaign_id"] == CAMPAIGN_ID
+    assert len(writes(state)) == 2
+    assert state["created"]["dt"] == "2026-11-08T03:30:00.000Z"
+    assert writes(state)[0][3]["campaign_data"]["dt"] == "2026-10-29T13:00:00.000Z"
+
+    retry_attempt = stored_attempt(reviewed_row, catalog)
+    assert retry_attempt["idempotency_key"] != original_attempt["idempotency_key"]
+    assert retry_attempt["attempted_at"] >= original_attempt["attempted_at"]
+    history, = stored_retry_history(original_row, catalog)
+    assert json.loads(history["original_attempt_json"]) == original_attempt
+    assert json.loads(history["original_row_json"]) == original_row
+    assert history["original_attempted_at"] == original_attempt["attempted_at"]
+    assert history["approved_by"] in (APPAREL_USER["sub"], APPAREL_USER["email"])
+    assert history["approved_at"] >= original_attempt["attempted_at"]
+    assert history["retry_idempotency_key"] == retry_attempt["idempotency_key"]
+    assert history["retry_payload_hash"] == digest
+
+    restarted = DraftCreation("apparel", APPAREL_USER, catalog, queue.creator.writer,
+                              allow_sqlite_for_tests=True)
+    replay = restarted.retry_once(original_row, reviewed_row, digest)
+    assert (replay["state"], replay["campaign_id"]) == ("VERIFIED", CAMPAIGN_ID)
+    assert restarted.create(reviewed_row)["campaign_id"] == CAMPAIGN_ID
+    assert stored_retry_history(original_row, catalog) == [history]
+    assert stored_attempt(reviewed_row, catalog) == retry_attempt
+    assert len(writes(state)) == 2
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_approved_retry_recovers_lost_ack_using_original_schedule_without_history(apparel_queue, monkeypatch):
+    state, writer, catalog, queue = apparel_queue
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    original_request = requests.request
+
+    def lost_ack(method, url, **kwargs):
+        response = original_request(method, url, **kwargs)
+        if method == "POST" and urlsplit(url).path == "/v1.0/campaigns/draft":
+            raise requests.Timeout("Acknowledgement lost after provider accepted the draft")
+        return response
+
+    monkeypatch.setattr(requests, "request", lost_ack)
+    assert queue.creator.create(original_row)["state"] == "UNCERTAIN"
+    original_attempt = stored_attempt(original_row, catalog)
+    monkeypatch.setattr(requests, "request", original_request)
+    # An earlier empty search is not authorization to skip a fresh check.
+    state["membership"] = False
+    assert queue.creator.reconcile(original_row)["state"] == "not_found"
+    state["membership"] = True
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    digest = reviewed_candidate_hash(reviewed_row, catalog)
+    recovered = queue.creator.retry_once(original_row, reviewed_row, digest)
+    assert (recovered["state"], recovered["campaign_id"]) == ("VERIFIED", CAMPAIGN_ID)
+    assert recovered["recovered_existing"] is True
+    assert writer.get(CAMPAIGN_ID)["scheduling_details"]["start_time"] == "2026-10-29T18:30:00"
+    assert stored_retry_history(original_row, catalog) == []
+    after = stored_attempt(original_row, catalog)
+    assert after["idempotency_key"] == original_attempt["idempotency_key"]
+    assert after["attempted_at"] == original_attempt["attempted_at"]
+    assert after["state"] == "VERIFIED" and after["campaign_id"] == CAMPAIGN_ID
+    assert len(writes(state)) == 1
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_active_maybe_sent_cannot_be_rearmed_by_an_approved_retry(apparel_queue, monkeypatch):
+    state, _, catalog, queue = apparel_queue
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    digest = reviewed_candidate_hash(reviewed_row, catalog)
+    original_request = requests.request
+    entered, release = threading.Event(), threading.Event()
+
+    def paused_create(method, url, **kwargs):
+        if method == "POST" and urlsplit(url).path == "/v1.0/campaigns/draft":
+            entered.set()
+            if not release.wait(5):
+                raise requests.Timeout("Test did not release the original create")
+        return original_request(method, url, **kwargs)
+
+    monkeypatch.setattr(requests, "request", paused_create)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        active = pool.submit(queue.creator.create, original_row)
+        try:
+            assert entered.wait(5)
+            reservation = stored_attempt(original_row, catalog)
+            assert reservation["state"] == "MAYBE_SENT"
+            try:
+                queue.creator.retry_once(original_row, reviewed_row, digest)
+            except (ValueError, PermissionError):
+                pass
+            assert stored_attempt(original_row, catalog) == reservation
+            assert stored_retry_history(original_row, catalog) == []
+            assert not writes(state)
+        finally:
+            release.set()
+        assert active.result(timeout=5)["state"] == "VERIFIED"
+    assert len(writes(state)) == 1
+
+
+@pytest.mark.parametrize("apparel_provider", ["CK"], indirect=True)
+def test_overlapping_retry_approvals_do_not_dispatch_a_second_retry_post(apparel_queue, monkeypatch):
+    state, _, catalog, queue = apparel_queue
+    original_row = row_for("CK", row_id="WhatsApp!DJ")
+    state["responses"] = {("POST", "/v1.0/campaigns/draft"): (400, {"status": "error"})}
+    assert queue.creator.create(original_row)["state"] == "UNCERTAIN"
+    original_attempt = stored_attempt(original_row, catalog)
+    state["responses"].clear()
+    reviewed_row = {**original_row, "scheduled_at": "2026-11-08T09:00:00+05:30"}
+    digest = reviewed_candidate_hash(reviewed_row, catalog)
+    original_request = requests.request
+    accepted, release = threading.Event(), threading.Event()
+
+    def paused_ack(method, url, **kwargs):
+        response = original_request(method, url, **kwargs)
+        if method == "POST" and urlsplit(url).path == "/v1.0/campaigns/draft":
+            accepted.set()
+            if not release.wait(5):
+                raise requests.Timeout("Test did not release the retry acknowledgement")
+        return response
+
+    monkeypatch.setattr(requests, "request", paused_ack)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        retry = pool.submit(queue.creator.retry_once, original_row, reviewed_row, digest)
+        try:
+            assert accepted.wait(5)
+            try:
+                queue.creator.retry_once(original_row, reviewed_row, digest)
+            except (ValueError, PermissionError):
+                pass
+            assert len(writes(state)) == 2
+            history, = stored_retry_history(original_row, catalog)
+            assert json.loads(history["original_attempt_json"]) == original_attempt
+            assert history["retry_idempotency_key"] == stored_attempt(reviewed_row, catalog)["idempotency_key"]
+        finally:
+            release.set()
+        assert retry.result(timeout=5)["state"] == "VERIFIED"
+    assert queue.creator.retry_once(original_row, reviewed_row, digest)["campaign_id"] == CAMPAIGN_ID
+    assert len(writes(state)) == 2
+    assert stored_retry_history(original_row, catalog) == [history]

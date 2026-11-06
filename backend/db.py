@@ -47,6 +47,7 @@ VALID_TABLES: set[str] = {
     "system_errors",
     "alert_scheduler_runs",
     "moengage_draft_attempts",
+    "moengage_draft_retry_history",
     "moengage_draft_batches",
     "moengage_draft_batch_rows",
 }
@@ -416,6 +417,24 @@ SQLITE_SCHEMA_DDL = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_moe_draft_attempts_workspace_time ON moengage_draft_attempts(workspace_id, attempted_at);",
     """
+    CREATE TABLE IF NOT EXISTS moengage_draft_retry_history (
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        original_attempt_json TEXT NOT NULL,
+        original_row_json TEXT NOT NULL,
+        original_attempted_at REAL NOT NULL,
+        approved_by TEXT NOT NULL,
+        approved_at REAL NOT NULL,
+        retry_idempotency_key TEXT NOT NULL,
+        retry_payload_hash TEXT NOT NULL,
+        retry_row_json TEXT NOT NULL,
+        PRIMARY KEY (account, workspace_id, source_ref, row_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_moe_retry_history_workspace_time ON moengage_draft_retry_history(workspace_id, original_attempted_at);",
+    """
     CREATE TABLE IF NOT EXISTS moengage_draft_batches (
         batch_id TEXT PRIMARY KEY,
         account TEXT NOT NULL,
@@ -639,6 +658,24 @@ POSTGRES_SCHEMA_DDL = [
     );
     """,
     "CREATE INDEX IF NOT EXISTS idx_moe_draft_attempts_workspace_time ON moengage_draft_attempts(workspace_id, attempted_at);",
+    """
+    CREATE TABLE IF NOT EXISTS moengage_draft_retry_history (
+        account TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        row_id TEXT NOT NULL,
+        original_attempt_json TEXT NOT NULL,
+        original_row_json TEXT NOT NULL,
+        original_attempted_at DOUBLE PRECISION NOT NULL,
+        approved_by TEXT NOT NULL,
+        approved_at DOUBLE PRECISION NOT NULL,
+        retry_idempotency_key TEXT NOT NULL,
+        retry_payload_hash TEXT NOT NULL,
+        retry_row_json TEXT NOT NULL,
+        PRIMARY KEY (account, workspace_id, source_ref, row_id)
+    );
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_moe_retry_history_workspace_time ON moengage_draft_retry_history(workspace_id, original_attempted_at);",
     """
     CREATE TABLE IF NOT EXISTS moengage_draft_batches (
         batch_id TEXT PRIMARY KEY,

@@ -7,6 +7,7 @@ cause another provider POST; known CREATED drafts may resume readback only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -254,6 +255,18 @@ class DraftBatchQueue:
                 "ready": sum(item["status"] == "preview_ready" for item in items),
                 "blocked": sum(item["status"].lower() == "blocked" for item in items)}
 
+    def _approved_retry_row(self, conn: Any, current: dict[str, Any]) -> dict[str, Any] | None:
+        if self.account != "apparel":
+            return None
+        history = conn.execute(
+            "SELECT h.retry_row_json FROM moengage_draft_retry_history h "
+            "JOIN moengage_draft_attempts a ON a.account=h.account AND a.workspace_id=h.workspace_id "
+            "AND a.source_ref=h.source_ref AND a.row_id=h.row_id AND a.idempotency_key=h.retry_idempotency_key "
+            "WHERE h.account=? AND h.workspace_id=? AND h.source_ref=? AND h.row_id=? AND h.approved_by=?",
+            (self.account, current["workspace_id"], current["source_ref"], current["row_id"], self.subject),
+        ).fetchone()
+        return json.loads(history["retry_row_json"]) if history else None
+
     def reconcile_row(self, batch_id: str, row_id: str) -> dict[str, Any]:
         """Associate only a verified existing draft; never repeat a provider create."""
         with self._db() as conn:
@@ -272,6 +285,10 @@ class DraftBatchQueue:
         if current["status"] not in ("UNCERTAIN", "MAYBE_SENT", "UNKNOWN", "CREATED"):
             raise ValueError("This row has no unresolved draft attempt")
         row = json.loads(current["row_json"])
+        with self._db() as conn:
+            retry_row = self._approved_retry_row(conn, current)
+        if retry_row is not None:
+            row = retry_row
         target = current["workspace_id"]
         if isinstance(self.creator, dict):
             creator = self.creator[target]
@@ -285,19 +302,97 @@ class DraftBatchQueue:
             raise PermissionError("Staged workspace differs from the authorized workspace")
         result = creator.reconcile(row)
         if result["state"] == "verified":
+            context = (current["row_json"], current["candidate_json"], current["source_fields_json"])
+            if retry_row is not None:
+                item = prepare_batch([row], self.account, creator.catalog, self.email, source_type="server_catalog")["items"][0]
+                fields = {**item["source_fields"], "_draft_warnings": json.dumps(item.get("warnings", []))}
+                context = (json.dumps(row), json.dumps(item["candidate_v5_payload"]), json.dumps(fields))
             with self._db() as conn:
                 self._lock_batch(conn, batch_id)
                 self._batch_row(conn, batch_id)
                 changed = conn.execute(
-                    "UPDATE moengage_draft_batch_rows SET status='VERIFIED',campaign_id=?,issue=NULL,updated_at=? "
+                    "UPDATE moengage_draft_batch_rows SET status='VERIFIED',campaign_id=?,issue=NULL,"
+                    "row_json=?,candidate_json=?,source_fields_json=?,updated_at=? "
                     "WHERE batch_id=? AND position=? AND status=? AND updated_at=?",
-                    (result["campaign_id"], time.time(), batch_id, current["position"], current["status"], current["updated_at"]),
+                    (result["campaign_id"], *context, time.time(), batch_id, current["position"], current["status"], current["updated_at"]),
                 ).rowcount
             if changed != 1:
                 result = {"state": "mismatch", "message": "The row changed while checking. No create was retried."}
         response = self.get(batch_id)
         response["reconciliation"] = {"state": result["state"], "message": result["message"]}
         return response
+
+    def retry_row_once(self, batch_id: str, row_id: str, row: dict[str, Any],
+                       expected_payload_hash: str) -> dict[str, Any]:
+        """Apply one explicit owner approval; preserve the original uncertain attempt."""
+        with self._db() as conn:
+            batch = self._batch_row(conn, batch_id)
+            rows = conn.execute(
+                "SELECT * FROM moengage_draft_batch_rows WHERE batch_id=? AND row_id=? AND source_ref=?",
+                (batch_id, row_id, batch["source_ref"].strip()),
+            ).fetchall()
+        if not rows:
+            raise LookupError("Draft row not found")
+        if len(rows) != 1:
+            raise ValueError("Duplicate row_id in batch; no unique row can be retried")
+        current = dict(rows[0])
+        if self.account != "apparel" or current["channel"] != "WHATSAPP":
+            raise DraftPreflightError("Only Apparel WhatsApp supports an explicitly approved retry")
+        if current["campaign_id"]:
+            return self.get(batch_id)
+        if current["status"] not in ("UNCERTAIN", "UNKNOWN", "MAYBE_SENT"):
+            raise DraftPreflightError("This row has no uncertain attempt to retry")
+        previous = json.loads(current["row_json"])
+        for field in ("account", "workspace_id", "source_ref", "row_id"):
+            if row.get(field) != previous.get(field):
+                raise DraftPreflightError("Approved retry source or workspace differs from this batch")
+        target = current["workspace_id"]
+        if isinstance(self.creator, dict):
+            creator = self.creator[target]
+        elif self.creator is not None:
+            creator = self.creator
+        else:
+            options = {key: str(previous.get(field) or "") or None for key, field in
+                       (("reference_id", "goal_reference_id"), ("template_ref", "whatsapp_template_id"))}
+            creator = DraftCreation.from_environment(self.account, self.user, workspace_id=target, **options)
+        if creator.catalog.get("workspace_id") != target:
+            raise DraftPreflightError("Retry workspace differs from the authorized workspace")
+        item = prepare_batch([row], self.account, creator.catalog, self.email, source_type="server_catalog")["items"][0]
+        if item["status"] != "preview_ready":
+            raise DraftPreflightError("; ".join(item["issues"]))
+        reviewed = hashlib.sha256(json.dumps(item["candidate_v5_payload"], sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        if reviewed != expected_payload_hash:
+            raise DraftPreflightError("Reviewed retry content changed; no new draft request was made")
+        result = creator.retry_once(previous, row, expected_payload_hash)
+        if (not isinstance(result, dict) or result.get("account") != self.account
+                or result.get("workspace_id") != target or result.get("source_ref") != current["source_ref"]
+                or result.get("row_id") != row_id):
+            raise ValueError("Approved retry result identity is unconfirmed")
+        if result["state"] == "MAYBE_SENT":
+            return self.get(batch_id)
+        if result["state"] not in ("UNCERTAIN", "CREATED", "VERIFIED", "NEEDS_REVIEW"):
+            raise ValueError("Approved retry result state is unconfirmed")
+        if result["state"] in ("CREATED", "VERIFIED", "NEEDS_REVIEW") and not result.get("campaign_id"):
+            raise ValueError("Approved retry campaign ID is unconfirmed")
+        with self._db() as conn:
+            approved = self._approved_retry_row(conn, current)
+            if result.get("recovered_existing"):
+                context = (current["row_json"], current["candidate_json"], current["source_fields_json"], current["issues_json"])
+            elif approved == row:
+                fields = {**item["source_fields"], "_draft_warnings": json.dumps(item.get("warnings", []))}
+                context = (json.dumps(row), json.dumps(item["candidate_v5_payload"]), json.dumps(fields), json.dumps(item["issues"]))
+            else:
+                raise DraftPreflightError("No durable approved retry context was found")
+            self._lock_batch(conn, batch_id)
+            self._batch_row(conn, batch_id)
+            conn.execute(
+                "UPDATE moengage_draft_batch_rows SET status=?,campaign_id=?,issue=?,validation_json=?,"
+                "row_json=?,candidate_json=?,source_fields_json=?,issues_json=?,updated_at=? "
+                "WHERE batch_id=? AND position=? AND status=? AND updated_at=?",
+                (result["state"], result.get("campaign_id"), result.get("issue"), json.dumps(result.get("validation_errors", [])),
+                 *context, time.time(), batch_id, current["position"], current["status"], current["updated_at"]),
+            )
+        return self.get(batch_id)
 
     def create_row(self, batch_id: str, row_id: str) -> dict[str, Any]:
         """Claim one selected row once; replay only reads its persisted result."""
