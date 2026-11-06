@@ -151,7 +151,7 @@ def _approved_templates(items: Any, senders: list[dict[str, Any]]) -> list[dict[
                           "display_name": item["display_name"] if isinstance(item.get("display_name"), str) else name,
                           "body": body if isinstance(body, str) else "",
                           "sender_ids": sender_ids, "provider": provider,
-                          "template_content": {key: content[key] for key in ("header", "body", "footer", "buttons", "buttons_order", "cards") if isinstance(content, dict) and key in content}})
+                          "template_content": {key: content[key] for key in ("header", "body", "footer", "buttons", "buttons_order", "carousel_cards") if isinstance(content, dict) and key in content}})
     if len({row["id"] for row in templates}) != len(templates):
         raise ValueError("MoEngage returned ambiguous WhatsApp template identities")
     return templates
@@ -177,13 +177,24 @@ def _metadata_request(session: dict[str, Any], method: str, path: str, payload: 
     return data
 
 
-def workspace_catalog(account: str, user: dict[str, Any], selector: str, *, reference_id: str | None = None) -> dict[str, Any]:
+def workspace_catalog(account: str, user: dict[str, Any], selector: str, *, reference_id: str | None = None,
+                      template_ref: str | None = None) -> dict[str, Any]:
     workspace = _select_workspace(list_workspace_choices(account, user), selector)
     session = portal_session(account, workspace["id"])
     senders = _sender_inventory(_metadata_request(session, "GET", "/whatsapp/settings").get("sender_settings"))
     templates = _approved_templates(
         _metadata_request(session, "GET", "/template_metadata?template_type=whatsapp").get("data"), senders,
     )
+    if account == "apparel" and template_ref:
+        matches = [(index, template) for index, template in enumerate(templates)
+                   if template_ref in (template["id"], template["name"], template["display_name"])]
+        if len(matches) == 1:
+            index, selected = matches[0]
+            detail = _metadata_request(session, "GET", f"/template_meta/{selected['id']}").get("data")
+            complete = _approved_templates([detail], senders)
+            if len(complete) != 1 or complete[0]["id"] != selected["id"]:
+                raise ValueError("Full WhatsApp template metadata differs from the approved selection")
+            templates[index] = complete[0]
     rows = _metadata_request(session, "POST", "/v2/custom-segments/dashboard?archived=false").get("custom_segments")
     if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
         raise ValueError("MoEngage saved segment inventory unavailable")
@@ -221,5 +232,6 @@ def catalog_for_row(account: str, user: dict[str, Any], row: dict[str, Any],
         if brand_info(str(row.get("brand") or ""))["workspace_id"] != _select_workspace(list_workspace_choices(account, user), selector)["id"]:
             raise ValueError("Apparel brand and selected workspace disagree")
     if account == "apparel":
-        return workspace_catalog(account, user, selector, reference_id=str(row.get("goal_reference_id") or "") or None)
+        return workspace_catalog(account, user, selector, reference_id=str(row.get("goal_reference_id") or "") or None,
+                                 template_ref=str(row.get("whatsapp_template_id") or "") or None)
     return workspace_catalog(account, user, selector)

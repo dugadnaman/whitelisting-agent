@@ -78,7 +78,7 @@ def prepare_audience(row: dict, catalog: dict, warnings: list[str]) -> dict | No
 def prepare_row(row: dict, catalog: dict, errors: list[str]) -> dict:
     result = dict(row)
     for field in ("brand", "whatsapp_sender", "whatsapp_template_id", "whatsapp_name_attribute",
-                  "whatsapp_name_fallback", "whatsapp_image_url", "whatsapp_cta_links",
+                  "whatsapp_name_fallback", "whatsapp_image_url", "whatsapp_cta_links", "cta_raw",
                   "existing_campaign_id", "global_control_group",
                   "tracking_goal", "scheduled_at", "segment_name", "exclude_segment_name",
                   "template_type"):
@@ -156,22 +156,52 @@ def prepare_details(row: dict, catalog: dict, content: dict, errors: list[str], 
         if not isinstance(links, dict) or any(not isinstance(key, str) or not https_url(value) for key, value in links.items()):
             raise ValueError("CTA links must be a JSON object of button labels to public HTTPS URLs")
         buttons = (template.get("buttons") or {}).get("call_to_action", [])
+        dynamic_buttons = [button for button in buttons if button.get("action") == "NAVIGATION"
+                           and (button.get("action_type") == "DYNAMIC_LINK_TRACKING"
+                                or button.get("action_type") == "DYNAMIC" and re.search(r"\{\{\d+\}\}", button.get("action_value", "")))]
+        source_url = row.get("cta_raw", "").strip()
+        if re.fullmatch(r"https?://\S+", source_url) and not https_url(source_url):
+            raise ValueError("CTA links must be public HTTPS URLs")
+        if not raw_links and https_url(source_url) and len(dynamic_buttons) == 1:
+            links = {dynamic_buttons[0].get("button_text", ""): source_url}
         placeholders, tracking, consumed = {}, [], set()
-        slot = len(set(re.findall(r"\{\{(\d+)\}\}", approved.get("body", ""))))
+        tracking_slot = len(buttons)
         for button in buttons:
-            if button.get("action") != "NAVIGATION" or button.get("action_type") not in ("DYNAMIC_LINK_TRACKING", "DYNAMIC"):
-                continue
-            slot += 1
+            action_type = button.get("action_type")
             label = button.get("button_text", "").strip().casefold()
             matches = [(key, value) for key, value in links.items() if key.strip().casefold() == label]
+            if len(matches) > 1:
+                raise ValueError("CTA label matches more than one supplied URL: " + button.get("button_text", ""))
+            if button.get("action") != "NAVIGATION" or action_type not in ("DYNAMIC_LINK_TRACKING", "DYNAMIC"):
+                consumed.update(key for key, value in matches if value == button.get("action_value"))
+                continue
+            action_value = button.get("action_value", "")
+            if action_type == "DYNAMIC_LINK_TRACKING":
+                slot = "{{" + str(tracking_slot) + "}}"
+                tracking_slot += 1
+                prefix, suffix = "", ""
+            else:
+                variables = re.findall(r"\{\{\d+\}\}", action_value)
+                if not variables:
+                    consumed.update(key for key, value in matches if value == action_value)
+                    continue
+                if len(variables) != 1:
+                    warnings.append("Complete the template URL variables for " + button.get("button_text", "") + " in MoEngage")
+                    continue
+                slot = variables[0]
+                prefix, suffix = action_value.split(slot)
             if not matches:
                 warnings.append("Add the URL for " + button.get("button_text", "") + " in MoEngage")
                 continue
-            if len(matches) != 1:
-                raise ValueError("CTA label matches more than one supplied URL: " + button.get("button_text", ""))
             key, value = matches[0]
+            if not value.startswith(prefix) or not value.endswith(suffix) or len(value) <= len(prefix) + len(suffix):
+                warnings.append("The source URL does not fit the approved CTA for " + button.get("button_text", "") + "; complete it in MoEngage")
+                continue
+            variable = value[len(prefix):len(value) - len(suffix) if suffix else None]
+            if slot in placeholders and placeholders[slot] != variable:
+                raise ValueError("Approved CTA variables resolve to conflicting source URLs")
             consumed.add(key)
-            placeholders["{{" + str(slot) + "}}"] = value
+            placeholders[slot] = variable
             tracking.append({"trackingEnabled": True, "url": value})
         if set(links) != consumed:
             warnings.append("Some source CTA labels do not match the approved template; configure them in MoEngage")
@@ -210,11 +240,8 @@ def prepare_details(row: dict, catalog: dict, content: dict, errors: list[str], 
             errors.append("Global control group must be explicitly Yes or No")
         else:
             details["global_control_enabled"] = controls in ("yes", "true", "enabled")
-    if template.get("cards"):
-        wa["cards"] = copy.deepcopy(template["cards"])
-        warnings.append("Approved carousel cards retained; complete their creative and links in MoEngage")
-    elif row.get("template_type", "").strip().casefold() not in ("", "simple", "simple_type"):
-        warnings.append("Review carousel settings in MoEngage before launch")
+    if template.get("carousel_cards"):
+        warnings.append("Complete any dynamic carousel creative and links in MoEngage; approved cards remain on the selected template")
     return details
 
 

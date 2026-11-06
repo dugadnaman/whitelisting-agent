@@ -86,19 +86,27 @@ def test_missing_inputs_are_visible_and_columns_never_shift():
     assert read_sheet_values(values, "VS", "input", sheet="SMS") == []
 
 
-def test_no_inferred_current_year_or_send_time():
+@pytest.mark.parametrize("brief_date,send_date,tracking,expected", [
+    ("26th Aug", "29th Aug", "7 days", "2026-08-29T09:00:00+05:30"),
+    ("26th Aug2025", "29th Aug", "7 days", "2025-08-29T09:00:00+05:30"),
+    ("26th Aug2026", "29th Aug2027", "7 days", "2027-08-29T09:00:00+05:30"),
+    ("26th Aug", "29th Aug", "29th Aug-1st September2027", "2027-08-29T09:00:00+05:30"),
+])
+def test_client_confirmed_brief_year_and_explicit_sheet_years(brief_date, send_date, tracking, expected):
     values = brief((2,))
-    values[2][2] = "27th October"
-    values[6][2] = "3 days"
-    record = read_sheet_values(values, "VS", "input")[0]
-    assert record["scheduled_at"] == ""
-    assert "_row_error" not in record
-    assert "explicit year" in record["_row_warnings"]
-    assert record["send_date"] == "29th October|Thursday"
-    assert record["send_time"] == "6:30PM"
-    values[2][2] = "27th October2026"
+    values[2][2], values[3][2], values[4][2], values[6][2] = brief_date, send_date, "9:00 AM", tracking
+    values[16][2] = "https://www.charleskeith.in/in/stores?utm_source=CRM&utm_medium=WhatsApp"
+    record = read_sheet_values(values, "CK", "input")[0]
+    assert record["scheduled_at"] == expected
+    assert record["send_date"] == send_date and record["send_time"] == "9:00 AM"
+    assert record["cta_raw"] == values[16][2]
+    assert "_row_warnings" not in record
+
+
+def test_missing_send_time_is_not_invented():
+    values = brief((2,))
     values[4][2] = ""
-    assert "send time" in read_sheet_values(values, "VS", "input")[0]["_row_warnings"]
+    assert read_sheet_values(values, "CK", "input")[0]["scheduled_at"] == ""
 
 
 def test_screenshot_spacers_do_not_create_phantom_campaigns():
@@ -144,7 +152,6 @@ def test_incomplete_schedule_and_cta_remain_source_values_not_errors():
     values[16][2] = "Shop Now:\nURL to be supplied"
     record = read_sheet_values(values, "VS", "input")[0]
     assert "_row_error" not in record
-    assert "explicit year" in record["_row_warnings"]
     assert "CTA requires" in record["_row_warnings"]
     assert "; " in record["_row_warnings"]
     assert record["scheduled_at"] == ""

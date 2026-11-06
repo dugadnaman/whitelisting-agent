@@ -120,10 +120,6 @@ class WhatsAppDraftWriter:
             wa.get("body_placeholders", {}) if self.account == "apparel" else wa.get("body_placeholders"),
             template.get("body"), allow_partial=self.account == "apparel",
         )
-        if self.account == "apparel" and "cards" in wa:
-            approved_cards = template.get("template_content", {}).get("cards")
-            if not isinstance(wa["cards"], list) or wa["cards"] != approved_cards:
-                raise ValueError("WhatsApp cards must match the live approved template")
         wa.update(sender_id=sender["id"], sender_name=sender["sender_name"],
                   provider=sender["provider"].upper(), phone_number=sender["phone_number"],
                   template_id=template["id"], template_name=template.get("name") or template.get("display_name"))
@@ -153,7 +149,7 @@ class WhatsAppDraftWriter:
         if self.account == "apparel":
             from apparel_whatsapp import portal_details
             body["campaign_data"].update(portal_details(payload))
-            for key in ("header_placeholders", "button_placeholders", "linksTrackingList", "cards"):
+            for key in ("header_placeholders", "button_placeholders", "linksTrackingList"):
                 if key in wa:
                     body["campaign_data"]["whatsapp_data"][key] = copy.deepcopy(wa[key])
         data = self._request("POST", "/v1.0/campaigns/draft", body).get("data")
@@ -219,7 +215,7 @@ class WhatsAppDraftWriter:
         if self.account == "apparel":
             from apparel_whatsapp import saved_details
             result.update(saved_details(draft))
-            for key in ("body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList", "cards"):
+            for key in ("body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList"):
                 if key in wa:
                     result["campaign_content"]["content"]["whatsapp"][key] = copy.deepcopy(wa[key])
         return result

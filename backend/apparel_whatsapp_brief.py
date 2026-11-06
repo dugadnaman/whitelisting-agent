@@ -1,4 +1,4 @@
-"""Offline, transposed Apparel WhatsApp brief intake; never supplies campaign defaults."""
+"""Offline, transposed Apparel WhatsApp brief intake for the confirmed 2026 brief cycle."""
 from __future__ import annotations
 
 import calendar
@@ -16,6 +16,8 @@ from zipfile import BadZipFile, ZipFile
 MAX_BYTES = 5 * 1024 * 1024
 BRANDS = {"VS", "Aldo", "BBW", "CIS", "Crocs", "R&B", "CK", "AGIPL"}
 IST = timezone(timedelta(hours=5, minutes=30))
+# Client-confirmed annual brief context; explicit sheet years always take precedence.
+BRIEF_YEAR = 2026
 
 
 def _text(value):
@@ -124,6 +126,9 @@ CAMPAIGN_FIELDS = {
 def _ctas(raw):
     if not raw.strip():
         return ""
+    if re.fullmatch(r"https?://\S+", raw.strip()):
+        # Keep the original URL in cta_raw; resolve its button from the approved template.
+        return ""
     result = {}
     pending = None
     for line in raw.splitlines():
@@ -185,7 +190,7 @@ def read_sheet_values(values, brand, source_ref, *, sheet="WhatsApp", columns=No
                 warnings.append(f"Missing {key}")
         try:
             years = re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", fields.get("brief_date", "") + " " + fields.get("tracking", ""))
-            send_date = _date(fields.get("send_date", ""), int(years[0]) if years else None)
+            send_date = _date(fields.get("send_date", ""), int(years[0]) if years else BRIEF_YEAR)
             if _date_parts(fields.get("send_date", ""))[2] is None and fields.get("brief_date"):
                 brief_day, brief_month, brief_year = _date_parts(fields["brief_date"])
                 if brief_year and (send_date.month, send_date.day) < (brief_month, brief_day):

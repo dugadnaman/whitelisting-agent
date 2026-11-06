@@ -5367,7 +5367,8 @@ def create_moengage_draft_endpoint(
     _authorize_moengage_preview(body.account, current_user)
     try:
         selector = (body.row.get("workspace_id") or body.row.get("workspace")) if str(body.row.get("channel", "")).upper() == "WHATSAPP" else None
-        options = {"reference_id": str(body.row.get("goal_reference_id") or "") or None} if body.account == "apparel" else {}
+        options = {key: str(body.row.get(field) or "") or None for key, field in
+                   (("reference_id", "goal_reference_id"), ("template_ref", "whatsapp_template_id"))} if body.account == "apparel" else {}
         return DraftCreation.from_environment(body.account, current_user, workspace_id=selector, **options).create(body.row)
     except RateLimitError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc

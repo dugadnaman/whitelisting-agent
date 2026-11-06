@@ -92,7 +92,7 @@ class DraftCreation:
     @classmethod
     def from_environment(
         cls, account: str, user: dict[str, Any], *, workspace_id: str | None = None,
-        reference_id: str | None = None,
+        reference_id: str | None = None, template_ref: str | None = None,
     ) -> DraftCreation:
         """Production construction is denied until the owner explicitly approves every gate."""
         authorize_draft_account(account, user)
@@ -170,7 +170,7 @@ class DraftCreation:
         if workspace_id:
             from moengage_workspaces import workspace_catalog
 
-            options = {"reference_id": reference_id} if account == "apparel" else {}
+            options = {"reference_id": reference_id, "template_ref": template_ref} if account == "apparel" else {}
             catalog = workspace_catalog(account, user, workspace_id, **options)
         if account == "apparel":
             from apparel_whatsapp import draft_access_allowed
@@ -287,7 +287,7 @@ class DraftCreation:
             saved_wa = readback["campaign_content"]["content"]["whatsapp"]
             exact = ("body_placeholders",)
             if self.account == "apparel":
-                exact += ("header_placeholders", "button_placeholders", "linksTrackingList", "cards")
+                exact += ("header_placeholders", "button_placeholders", "linksTrackingList")
             return (all(saved_wa.get(key) == wa[key] for key in exact if key in wa)
                     and ("segmentation_details" not in payload
                          or readback.get("segmentation_details") == payload["segmentation_details"])

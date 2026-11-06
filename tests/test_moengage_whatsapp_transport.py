@@ -70,7 +70,10 @@ def provider(monkeypatch):
             if method == "GET" and parsed.path == "/whatsapp/settings":
                 result = {"sender_settings": state["senders"]}
             elif method == "GET" and parsed.path == "/template_metadata":
-                result = {"data": state["templates"]}
+                result = {"data": state.get("template_summaries", state["templates"])}
+            elif method == "GET" and parsed.path.startswith("/template_meta/"):
+                result = {"data": next(template for template in state["templates"]
+                                        if template["id"] == parsed.path.rsplit("/", 1)[1])}
             elif method == "POST" and parsed.path == "/v1.0/campaigns/draft":
                 if body["campaign_data"].get("delivery") not in ("later", "soon", "periodic", "trigger"):
                     self.send_document(400, {"status": "error", "message": "Campaign delivery is required"})
@@ -506,20 +509,17 @@ def test_apparel_partial_values_still_require_live_numbered_slots(apparel_provid
 
 @pytest.mark.parametrize("changed", [
     None, "body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList",
-    "cards", "audience", "schedule", "goals", "tracking",
+    "audience", "schedule", "goals", "tracking",
 ])
-def test_apparel_supplied_fields_and_approved_cards_round_trip_or_require_review(apparel_provider, changed):
+def test_apparel_supplied_fields_round_trip_or_require_review(apparel_provider, changed):
     state, writer, catalog = apparel_provider
-    cards = [{"body": "Approved card", "header": {"type": "IMAGE"}}]
-    catalog["whatsapp_templates"][0]["template_content"]["cards"] = copy.deepcopy(cards)
-    state["templates"][0]["meta_data"]["content"]["cards"] = copy.deepcopy(cards)
-    if changed in ("body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList", "cards"):
+    if changed in ("body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList"):
         requested = prepare_batch([row_for()], "apparel", catalog, APPAREL_USER["email"],
                                   source_type="apparel_whatsapp_brief")["items"][0]["candidate_v5_payload"]
         prepared = writer.prepare(requested)
         wa = copy.deepcopy(prepared["campaign_content"]["content"]["whatsapp"])
         wa["sender"] = "Karix"
-        wa[changed] = [] if changed in ("linksTrackingList", "cards") else {"different": "changed"}
+        wa[changed] = [] if changed == "linksTrackingList" else {"different": "changed"}
         state["saved_overrides"]["whatsapp_data"] = wa
     elif changed == "audience":
         state["saved_overrides"]["new_segmentation_data"] = {"included_filters": {}}
@@ -536,17 +536,62 @@ def test_apparel_supplied_fields_and_approved_cards_round_trip_or_require_review
     assert result["state"] == ("VERIFIED" if changed is None else "NEEDS_REVIEW")
     assert worker.create(row_for()) == result
     assert len(writes(state)) == 1
-    assert state["created"]["whatsapp_data"]["cards"] == cards
 
 
-def test_apparel_cards_must_still_match_live_approved_template(apparel_provider):
-    state, writer, catalog = apparel_provider
-    requested = prepare_batch([row_for()], "apparel", catalog, APPAREL_USER["email"],
-                              source_type="apparel_whatsapp_brief")["items"][0]["candidate_v5_payload"]
-    requested["campaign_content"]["content"]["whatsapp"]["cards"] = [{"body": "Invented card"}]
-    with pytest.raises(ValueError, match="live approved template"):
-        writer.prepare(requested)
-    assert not writes(state)
+@pytest.mark.parametrize("action_type,action_value,expected", [
+    ("STATIC", "https://www.example.com/shop?category=tili&utm_source=whatsapp", None),
+    ("DYNAMIC", "{{7}}", {"{{7}}": "https://www.example.com/shop?category=tili&utm_source=whatsapp"}),
+    ("DYNAMIC", "https://www.example.com/{{7}}", {"{{7}}": "shop?category=tili&utm_source=whatsapp"}),
+    ("DYNAMIC_LINK_TRACKING", "", {"{{1}}": "https://www.example.com/shop?category=tili&utm_source=whatsapp"}),
+])
+def test_yearless_client_brief_uses_full_template_cta_without_sheet_edits(apparel_provider, monkeypatch, action_type, action_value, expected):
+    import apparel_whatsapp as apparel
+    import moengage_workspaces as workspaces
+    from apparel_whatsapp_brief import read_sheet_values
+    from tests.test_apparel_whatsapp_content import SHOP
+
+    state, writer, base = apparel_provider
+    template = state["templates"][0]
+    template["meta_data"]["content"] = {
+        "body": "Hey there,\nYour Fall 2026 wardrobe starts here.",
+        "buttons": {"call_to_action": [
+            {"action": "NAVIGATION", "action_type": action_type, "button_text": "Shop Now", "action_value": action_value},
+        ]},
+    }
+    state["template_summaries"] = copy.deepcopy(state["templates"])
+    state["template_summaries"][0]["meta_data"]["content"] = {"body": template["meta_data"]["content"]["body"]}
+    state["responses"] = {("POST", "/v2/custom-segments/dashboard"): (200, {
+        "status": "success", "custom_segments": [],
+    })}
+    monkeypatch.setattr(workspaces, "list_workspace_choices", lambda *args: [
+        {"id": base["workspace_id"], "name": "VS"},
+    ])
+    monkeypatch.setattr(workspaces, "portal_session", lambda *args: {
+        "base_url": writer.base_url, "headers": writer.headers,
+    })
+    monkeypatch.setattr(apparel, "enrich_catalog", lambda catalog, *args: {**base, **catalog})
+    values = [
+        ["Brief Date", "", "26th Aug"], ["Send Date and Day", "", "29th Aug"],
+        ["Send Time", "", "9:00 AM"], ["Campaign Name", "", "Fall new arrivals"],
+        ["SenderID", "", base["whatsapp_senders"][0]["number"]],
+        ["TemplateID", "", template["id"]], ["CTALink", "", SHOP],
+    ]
+    row = read_sheet_values(values, "VS", "client-sheet")[0]
+    catalog = workspaces.workspace_catalog("apparel", APPAREL_USER, base["workspace_id"], template_ref=template["id"])
+    row["workspace_id"] = catalog["workspace_id"]
+    worker = DraftCreation("apparel", APPAREL_USER, catalog, writer, allow_sqlite_for_tests=True)
+    result = worker.create(row)
+    assert result["state"] == "VERIFIED", result
+    assert len(writes(state)) == 1
+    saved = state["created"]
+    assert saved["dt"] == "2026-08-29T03:30:00.000Z"
+    wa = saved["whatsapp_data"]
+    assert wa["template_id"] == template["id"]
+    if expected is not None:
+        assert wa["button_placeholders"] == expected
+    else:
+        assert "button_placeholders" not in wa
+    assert row["cta_raw"] == SHOP and row["send_date"] == "29th Aug"
 
 
 @pytest.mark.parametrize("change,expected", [

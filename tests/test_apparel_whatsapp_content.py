@@ -67,8 +67,8 @@ def catalog_for(brand="VS"):
                 "body": BODY, "header": {"type": "IMAGE"},
                 "buttons": {"call_to_action": [
                     {"action": "NAVIGATION", "action_type": "DYNAMIC_LINK_TRACKING", "button_text": "Shop Now"},
-                    {"action": "NAVIGATION", "action_type": "STATIC", "button_text": "Terms", "url": "https://www.example.com/terms"},
-                    {"action": "NAVIGATION", "action_type": "DYNAMIC", "button_text": "Download App"},
+                    {"action": "NAVIGATION", "action_type": "STATIC", "button_text": "Terms", "action_value": "https://www.example.com/terms"},
+                    {"action": "NAVIGATION", "action_type": "DYNAMIC", "button_text": "Download App", "action_value": "{{2}}"},
                 ]},
             },
         }],
@@ -178,7 +178,7 @@ def test_reviewed_body_audiences_media_buttons_and_exact_schedule_are_preserved(
     assert "Gorgeous" in personalization
     assert "default" in personalization
     assert wa["header_placeholders"] == {"dynamic": {"url": IMAGE, "file_name": "", "source": "URL"}}
-    assert wa["button_placeholders"] == {"{{2}}": SHOP, "{{3}}": APP}
+    assert wa["button_placeholders"] == {"{{3}}": SHOP, "{{2}}": APP}
     assert wa["linksTrackingList"] == [
         {"trackingEnabled": True, "url": SHOP}, {"trackingEnabled": True, "url": APP},
     ]
@@ -311,7 +311,7 @@ def test_drive_sharing_pages_are_not_media_assets(url):
 @pytest.mark.parametrize("field,value", [
     ("whatsapp_sender", 8657864167), ("whatsapp_image_url", [IMAGE]),
     ("segment_name", {"id": "seg-include"}), ("exclude_segment_name", ["AGIPL Internal"]),
-    ("global_control_group", False), ("template_type", ["Simple"]),
+    ("global_control_group", False), ("template_type", ["Simple"]), ("cta_raw", ["https://example.com"]),
 ])
 def test_invalid_source_field_types_block_the_row_instead_of_crashing(field, value):
     blocked(row_for(**{field: value}))
@@ -326,7 +326,7 @@ def test_incomplete_campaign_preserves_source_content_without_inventing_launch_s
     )
     catalog = catalog_for()
     cards = [{"header": {"type": "IMAGE"}, "body": "Original card copy", "buttons": {"call_to_action": []}}]
-    catalog["whatsapp_templates"][0]["template_content"]["cards"] = copy.deepcopy(cards)
+    catalog["whatsapp_templates"][0]["template_content"]["carousel_cards"] = copy.deepcopy(cards)
     result = preview(row, catalog)
     item = result["items"][0]
     assert result["ready"] == 1 and result["blocked"] == 0
@@ -337,7 +337,6 @@ def test_incomplete_campaign_preserves_source_content_without_inventing_launch_s
     assert "conversion_goals" not in payload
     assert payload["goal_tracking"] == {"value": 7, "unit": "days"}
     wa = payload["campaign_content"]["content"]["whatsapp"]
-    assert wa["cards"] == cards
     assert wa["body_placeholders"] == {}
     assert "header_placeholders" not in wa and "button_placeholders" not in wa
     assert item["source_fields"]["segment_name"] == "CK_NewLaunch_Active_OnOff"
@@ -350,7 +349,7 @@ def test_incomplete_campaign_preserves_source_content_without_inventing_launch_s
 def test_partial_dynamic_buttons_keep_supplied_link_and_slot_number():
     payload = ready(row_for(whatsapp_cta_links=json.dumps({"Download App": APP})))
     wa = payload["campaign_content"]["content"]["whatsapp"]
-    assert wa["button_placeholders"] == {"{{3}}": APP}
+    assert wa["button_placeholders"] == {"{{2}}": APP}
     assert wa["linksTrackingList"] == [{"trackingEnabled": True, "url": APP}]
 
 
@@ -372,7 +371,7 @@ def provider_saved_draft():
         "whatsapp_data": {
             "sender_id": SENDER_ID, "sender": "Karix", "template_id": TEMPLATE_ID,
             "body_placeholders": {"{{1}}": NAME_EXPRESSION},
-            "button_placeholders": {"{{2}}": SHOP, "{{3}}": APP},
+            "button_placeholders": {"{{3}}": SHOP, "{{2}}": APP},
             "header_placeholders": {"dynamic": {"url": IMAGE, "file_name": "", "source": "URL"}},
             "linksTrackingList": [{"trackingEnabled": True, "url": SHOP}, {"trackingEnabled": True, "url": APP}],
             "bypass_opt_in_preference": False,

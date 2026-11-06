@@ -33,7 +33,7 @@ def prepare_routed_batch(
               for field in ("source_ref", "row_id"))
         for row in rows if isinstance(row, dict)
     )
-    catalogs: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    catalogs: dict[tuple[str, ...], dict[str, Any]] = {}
     items = []
     for index, row in enumerate(rows, 1):
         selected = catalog
@@ -42,7 +42,8 @@ def prepare_routed_batch(
         if isinstance(row, dict) and str(row.get("channel", "")).strip().upper() == "WHATSAPP":
             try:
                 key = (str(row.get("workspace_id") or ""), str(row.get("workspace") or ""),
-                       str(row.get("brand") or ""), str(row.get("goal_reference_id") or ""))
+                       str(row.get("brand") or ""), str(row.get("goal_reference_id") or ""),
+                       str(row.get("whatsapp_template_id") or "") if account == "apparel" else "")
                 if key not in catalogs:
                     catalogs[key] = catalog_for_row(account, user, row, catalog)
                 selected = catalogs[key]
@@ -277,7 +278,8 @@ class DraftBatchQueue:
         elif self.creator is not None:
             creator = self.creator
         else:
-            options = {"reference_id": str(row.get("goal_reference_id") or "") or None} if self.account == "apparel" else {}
+            options = {key: str(row.get(field) or "") or None for key, field in
+                       (("reference_id", "goal_reference_id"), ("template_ref", "whatsapp_template_id"))} if self.account == "apparel" else {}
             creator = DraftCreation.from_environment(self.account, self.user, workspace_id=target, **options)
         if creator.catalog.get("workspace_id") != target:
             raise PermissionError("Staged workspace differs from the authorized workspace")
@@ -326,7 +328,9 @@ class DraftBatchQueue:
         elif self.creator is not None:
             creator = self.creator
         else:
-            options = {"reference_id": str(json.loads(current["row_json"]).get("goal_reference_id") or "") or None} if self.account == "apparel" else {}
+            staged_row = json.loads(current["row_json"])
+            options = {key: str(staged_row.get(field) or "") or None for key, field in
+                       (("reference_id", "goal_reference_id"), ("template_ref", "whatsapp_template_id"))} if self.account == "apparel" else {}
             creator = DraftCreation.from_environment(
                 self.account, self.user, workspace_id=target if current["channel"] == "WHATSAPP" else None,
                 **options,
