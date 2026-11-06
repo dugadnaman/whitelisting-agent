@@ -240,13 +240,8 @@ def test_all_four_no_goal_brands_remove_goals_even_if_inventory_has_a_reference(
     assert portal["clickTrackHours"] == portal["impTrackHours"] == 0
 
 
-@pytest.mark.parametrize("approval", ["", "false", "yes", True])
-def test_existing_source_campaign_needs_explicit_duplicate_copy_approval(approval):
-    blocked(row_for(existing_campaign_id="444444444444444444444444", allow_existing_campaign_copy=approval))
-
-
-def test_approved_source_copy_creates_a_new_candidate_without_reusing_campaign_id():
-    payload = ready(row_for(existing_campaign_id="444444444444444444444444", allow_existing_campaign_copy="true"))
+def test_existing_campaign_is_reference_only_and_a_new_draft_can_be_prepared():
+    payload = ready(row_for(existing_campaign_id="444444444444444444444444"))
     assert "444444444444444444444444" not in json.dumps(payload)
     assert payload["basic_details"]["name"] == "VS Tili reviewed offer"
 
@@ -254,19 +249,15 @@ def test_approved_source_copy_creates_a_new_candidate_without_reusing_campaign_i
 @pytest.mark.parametrize("change", [
     {"workspace_id": BRAND_WORKSPACES["BBW"]}, {"account": "tata"}, {"brand": "TATA"},
     {"whatsapp_sender": "9999999999"}, {"whatsapp_name_attribute": "first_name"},
-    {"whatsapp_name_attribute": ""}, {"goal_reference_id": ""},
     {"goal_reference_id": "campaign:ffffffffffffffffffffffff"},
-    {"segment_name": ""}, {"exclude_segment_name": "Unknown exclusion"},
-    {"exclude_segment_name": "VS_ON_ATC_91D_No_Pr"},
     {"scheduled_at": "2026-10-29T18:30:00"}, {"timezone": "UTC"},
-    {"global_control_group": "maybe"}, {"template_type": "Carousel"},
-    {"tracking_goal": "0 hours"},
+    {"global_control_group": "maybe"},
 ])
 def test_unreviewed_identity_audience_personalization_and_schedule_are_blocked(change):
     blocked({**row_for(), **change})
 
 
-@pytest.mark.parametrize("selection", ["workspace", "sender_alias", "template_alias", "segment_alias", "template_sender"])
+@pytest.mark.parametrize("selection", ["workspace", "sender_alias", "template_alias", "template_sender"])
 def test_wrong_workspace_or_ambiguous_inventory_never_selects_the_first_match(selection):
     catalog, row = catalog_for(), row_for()
     if selection == "workspace":
@@ -275,16 +266,13 @@ def test_wrong_workspace_or_ambiguous_inventory_never_selects_the_first_match(se
         catalog["whatsapp_senders"].append({**catalog["whatsapp_senders"][0], "id": "555555555555555555555555", "sender_id": "555555555555555555555555"})
     elif selection == "template_alias":
         catalog["whatsapp_templates"].append({**catalog["whatsapp_templates"][0], "id": "666666666666666666666666"})
-    elif selection == "segment_alias":
-        row["segment_name"] = "vs on atc 91d no pr"
-        catalog["segments"].append({"id": "other-segment", "name": "vs_on_atc_91d_no_pr"})
     else:
         catalog["whatsapp_templates"][0]["sender_ids"] = ["777777777777777777777777"]
     blocked(row, catalog)
 
 
 @pytest.mark.parametrize("placeholders", [
-    {}, {"{{2}}": "Ananya"}, {"{{1}}": "Ananya", "{{2}}": "extra"},
+    {"{{2}}": "Ananya"}, {"{{1}}": "Ananya", "{{2}}": "extra"},
     {"{{1}}": "Ananya", "1": "Alias collision"}, {"name": "Ananya"},
     {"{{1}}": ""}, {"{{1}}": 123}, ["Ananya"], "invalid JSON",
 ])
@@ -294,13 +282,11 @@ def test_missing_extra_ambiguous_or_mistyped_body_variables_are_blocked(placehol
 
 
 @pytest.mark.parametrize("links", [
-    {}, {"Shop Now": SHOP}, {"Shop Now": SHOP, "Download App": APP, "Unexpected": SHOP},
     {"Shop Now": SHOP, " shop now ": SHOP, "Download App": APP},
     {"Shop Now": SHOP, "Download App": 123}, [SHOP, APP], None,
 ])
-def test_missing_extra_ambiguous_or_mistyped_cta_slots_are_blocked(links):
+def test_ambiguous_or_mistyped_cta_slots_are_blocked(links):
     blocked(row_for(whatsapp_cta_links=json.dumps(links)))
-
 
 @pytest.mark.parametrize("url", [
     "http://cdn.example.com/image.png", "https://localhost/image.png", "https://127.0.0.1/image.png",
@@ -318,7 +304,8 @@ def test_unsafe_media_and_button_urls_cannot_be_saved(field, url):
     "https://drive.google.com/drive/folders/images", "https://docs.google.com/document/d/shared/edit",
 ])
 def test_drive_sharing_pages_are_not_media_assets(url):
-    blocked(row_for(whatsapp_image_url=url))
+    payload = ready(row_for(whatsapp_image_url=url))
+    assert "header_placeholders" not in payload["campaign_content"]["content"]["whatsapp"]
 
 
 @pytest.mark.parametrize("field,value", [
@@ -328,6 +315,48 @@ def test_drive_sharing_pages_are_not_media_assets(url):
 ])
 def test_invalid_source_field_types_block_the_row_instead_of_crashing(field, value):
     blocked(row_for(**{field: value}))
+
+
+def test_incomplete_campaign_preserves_source_content_without_inventing_launch_settings():
+    row = row_for(
+        scheduled_at="", segment_name="CK_NewLaunch_Active_OnOff", exclude_segment_name="",
+        whatsapp_image_url="", whatsapp_cta_links="", whatsapp_name_fallback="",
+        tracking_goal="7 days", goal_reference_id="",
+        existing_campaign_id="444444444444444444444444", template_type="Carousel",
+    )
+    catalog = catalog_for()
+    cards = [{"header": {"type": "IMAGE"}, "body": "Original card copy", "buttons": {"call_to_action": []}}]
+    catalog["whatsapp_templates"][0]["template_content"]["cards"] = copy.deepcopy(cards)
+    result = preview(row, catalog)
+    item = result["items"][0]
+    assert result["ready"] == 1 and result["blocked"] == 0
+    assert item["warnings"] and not item["issues"]
+    payload = item["candidate_v5_payload"]
+    assert "scheduling_details" not in payload
+    assert "segmentation_details" not in payload
+    assert "conversion_goals" not in payload
+    assert payload["goal_tracking"] == {"value": 7, "unit": "days"}
+    wa = payload["campaign_content"]["content"]["whatsapp"]
+    assert wa["cards"] == cards
+    assert wa["body_placeholders"] == {}
+    assert "header_placeholders" not in wa and "button_placeholders" not in wa
+    assert item["source_fields"]["segment_name"] == "CK_NewLaunch_Active_OnOff"
+    assert item["source_fields"]["existing_campaign_id"] == "444444444444444444444444"
+    assert "444444444444444444444444" not in json.dumps(payload)
+    portal = apparel.portal_details(payload)
+    assert "dt" not in portal and "conversion" not in portal
+
+
+def test_partial_dynamic_buttons_keep_supplied_link_and_slot_number():
+    payload = ready(row_for(whatsapp_cta_links=json.dumps({"Download App": APP})))
+    wa = payload["campaign_content"]["content"]["whatsapp"]
+    assert wa["button_placeholders"] == {"{{3}}": APP}
+    assert wa["linksTrackingList"] == [{"trackingEnabled": True, "url": APP}]
+
+
+def test_unresolved_exclusion_does_not_save_a_broader_audience():
+    payload = ready(row_for(exclude_segment_name="Unknown exclusion"))
+    assert "segmentation_details" not in payload
 
 
 def provider_saved_draft():

@@ -12,6 +12,7 @@ import requests
 import moengage_whatsapp_worker as transport
 from moengage_draft_creation import DraftCreation
 from moengage_preview import prepare_batch
+from tests.test_apparel_whatsapp_content import USER as APPAREL_USER, catalog_for, row_for
 from tests.test_moengage_whatsapp_bulk import (
     CATALOG_WA,
     ROW_WA,
@@ -427,3 +428,116 @@ def test_same_name_with_another_draft_id_does_not_prove_membership(provider):
     assert result["campaign_id"] == CAMPAIGN_ID
     assert worker.create(ROW_WA)["state"] == "CREATED"
     assert len(writes(state)) == 1
+
+
+@pytest.fixture
+def apparel_provider(provider, monkeypatch):
+    state, original_writer = provider
+    catalog = catalog_for()
+    sender = catalog["whatsapp_senders"][0]
+    template = catalog["whatsapp_templates"][0]
+    state["senders"] = {"Karix": {
+        sender["sender_id"]: {"sender_name": sender["name"], "whatsapp_business_no": sender["number"]},
+    }}
+    state["templates"] = [{
+        "id": template["id"], "name": template["name"], "status": "ACTIVE",
+        "meta_data": {"sender_ids": [sender["sender_id"]], "provider": "Karix", "state": "APPROVED",
+                      "content": copy.deepcopy(template["template_content"])},
+    }]
+
+    def portal_session(account, workspace_id):
+        assert account == "apparel" and workspace_id == catalog["workspace_id"]
+        return {"base_url": original_writer.base_url, "headers": original_writer.headers.copy()}
+
+    monkeypatch.setattr(transport, "portal_session", portal_session)
+    return state, transport.WhatsAppDraftWriter("apparel", catalog["workspace_id"]), catalog
+
+
+@pytest.mark.parametrize("placeholders", [{}, {"1": "Customer"}])
+def test_incomplete_apparel_draft_is_verified_without_audience_or_schedule(apparel_provider, placeholders):
+    state, writer, catalog = apparel_provider
+    template = catalog["whatsapp_templates"][0]
+    template["body"] = template["template_content"]["body"] = "Hello {{1}}, your {{2}} is ready."
+    state["templates"][0]["meta_data"]["content"]["body"] = template["body"]
+    row = {key: value for key, value in row_for().items() if key in (
+        "account", "brand", "workspace_id", "source_ref", "row_id", "channel", "campaign_name",
+        "whatsapp_sender", "whatsapp_template_id",
+    )}
+    row["whatsapp_placeholders"] = json.dumps(placeholders)
+    worker = DraftCreation("apparel", APPAREL_USER, catalog, writer, allow_sqlite_for_tests=True)
+    result = worker.create(row)
+    assert result["state"] == "VERIFIED"
+    assert worker.create(row) == result
+    assert len(writes(state)) == 1
+    draft = state["created"]
+    assert not set(draft) & {
+        "new_segmentation_data", "dt", "laterDate", "time", "timezone", "timezoneName",
+        "delivery", "triggerDelayType", "conversion", "clickTrackHours", "impTrackHours",
+    }
+    wa = draft["whatsapp_data"]
+    assert wa["body_placeholders"] == placeholders
+    assert not set(wa) & {"header_placeholders", "button_placeholders", "linksTrackingList", "cards"}
+    saved = writer.get(CAMPAIGN_ID)
+    assert not set(saved) & {"segmentation_details", "scheduling_details", "conversion_goals", "goal_tracking"}
+
+
+@pytest.mark.parametrize("placeholders", [
+    {"3": "Unexpected"}, {"1": "Customer", "{{1}}": "Alias"}, {"customer": "Customer"},
+    {"1": ""}, {"1": 42}, [], None,
+])
+def test_apparel_partial_values_still_require_live_numbered_slots(apparel_provider, placeholders):
+    state, writer, _ = apparel_provider
+    requested = payload()
+    wa = requested["campaign_content"]["content"]["whatsapp"]
+    template = state["templates"][0]
+    sender_id, sender = next(iter(state["senders"]["Karix"].items()))
+    wa.update(sender_id=sender_id, sender_name=sender["sender_name"], template_id=template["id"],
+              body_placeholders=placeholders)
+    with pytest.raises(ValueError, match="placeholder"):
+        writer.prepare(requested)
+    assert not writes(state)
+
+
+@pytest.mark.parametrize("changed", [
+    None, "body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList",
+    "cards", "audience", "schedule", "goals", "tracking",
+])
+def test_apparel_supplied_fields_and_approved_cards_round_trip_or_require_review(apparel_provider, changed):
+    state, writer, catalog = apparel_provider
+    cards = [{"body": "Approved card", "header": {"type": "IMAGE"}}]
+    catalog["whatsapp_templates"][0]["template_content"]["cards"] = copy.deepcopy(cards)
+    state["templates"][0]["meta_data"]["content"]["cards"] = copy.deepcopy(cards)
+    if changed in ("body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList", "cards"):
+        requested = prepare_batch([row_for()], "apparel", catalog, APPAREL_USER["email"],
+                                  source_type="apparel_whatsapp_brief")["items"][0]["candidate_v5_payload"]
+        prepared = writer.prepare(requested)
+        wa = copy.deepcopy(prepared["campaign_content"]["content"]["whatsapp"])
+        wa["sender"] = "Karix"
+        wa[changed] = [] if changed in ("linksTrackingList", "cards") else {"different": "changed"}
+        state["saved_overrides"]["whatsapp_data"] = wa
+    elif changed == "audience":
+        state["saved_overrides"]["new_segmentation_data"] = {"included_filters": {}}
+    elif changed == "schedule":
+        state["saved_overrides"].update(dt="2026-10-30T13:00:00.000Z", laterDate="10/30/2026", time="06:30 pm")
+    elif changed == "goals":
+        goals = copy.deepcopy(catalog["goal_reference"]["conversion"])
+        goals["primary"]["rc"] = "USD"
+        state["saved_overrides"]["conversion"] = goals
+    elif changed == "tracking":
+        state["saved_overrides"].update(clickTrackHours=9, impTrackHours=9)
+    worker = DraftCreation("apparel", APPAREL_USER, catalog, writer, allow_sqlite_for_tests=True)
+    result = worker.create(row_for())
+    assert result["state"] == ("VERIFIED" if changed is None else "NEEDS_REVIEW")
+    assert worker.create(row_for()) == result
+    assert len(writes(state)) == 1
+    assert state["created"]["whatsapp_data"]["cards"] == cards
+
+
+def test_apparel_cards_must_still_match_live_approved_template(apparel_provider):
+    state, writer, catalog = apparel_provider
+    requested = prepare_batch([row_for()], "apparel", catalog, APPAREL_USER["email"],
+                              source_type="apparel_whatsapp_brief")["items"][0]["candidate_v5_payload"]
+    requested["campaign_content"]["content"]["whatsapp"]["cards"] = [{"body": "Invented card"}]
+    with pytest.raises(ValueError, match="live approved template"):
+        writer.prepare(requested)
+    assert not writes(state)

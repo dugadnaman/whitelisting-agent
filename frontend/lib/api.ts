@@ -1607,6 +1607,7 @@ export type MoEngageDraftRow = {
   workspace_name?: string;
   status: string;
   issues: string[];
+  warnings?: string[];
   candidate_v5_payload?: MoEngageDraftCandidate | null;
   source_fields?: MoEngageDraftSourceFields;
   campaign_id?: string | null;
@@ -1764,7 +1765,6 @@ export type ApparelWhatsAppOptions = {
   columns?: string[];
   reference_campaign_id?: string;
   name_attribute?: string;
-  allow_existing_campaign_copy?: boolean;
   overrides?: Record<string, Record<string, string>>;
   expected_source_digest?: string;
 };

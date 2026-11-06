@@ -344,7 +344,8 @@ class DraftCreation:
                 expected = {
                     "channel": "WHATSAPP", "campaign_delivery_type": "ONE_TIME",
                     "basic_details": payload["basic_details"],
-                    "segmentation_details": payload["segmentation_details"],
+                    **({"segmentation_details": payload["segmentation_details"]}
+                       if self.account != "apparel" or "segmentation_details" in payload else {}),
                     "campaign_content": {"content": {"whatsapp": {
                         key: wa[key] for key in ("sender_id", "sender_name", "provider", "template_id", "body_placeholders")
                         if key in wa
@@ -363,15 +364,17 @@ class DraftCreation:
             if whatsapp and content_matches:
                 saved_wa = readback["campaign_content"]["content"]["whatsapp"]
                 exact_content = (
-                    saved_wa["body_placeholders"] == wa["body_placeholders"]
-                    and readback["segmentation_details"] == payload["segmentation_details"]
+                    (self.account == "apparel" and "body_placeholders" not in wa
+                     or saved_wa.get("body_placeholders") == wa["body_placeholders"])
+                    and (self.account == "apparel" and "segmentation_details" not in payload
+                         or readback.get("segmentation_details") == payload["segmentation_details"])
                     and (self.account != "apparel" or all(
                         readback.get(key) == payload[key]
                         for key in ("conversion_goals", "goal_tracking", "scheduling_details", "personalization_enabled",
                                     "bypass_opt_in_preference") if key in payload
                     ))
                     and (self.account != "apparel" or all(saved_wa.get(key) == wa[key]
-                         for key in ("button_placeholders", "linksTrackingList") if key in wa))
+                         for key in ("header_placeholders", "button_placeholders", "linksTrackingList", "cards") if key in wa))
                 )
             if (not content_matches or str(readback.get("status", "")).upper() != "DRAFT"
                     or readback.get("id") != campaign_id or not exact_content):

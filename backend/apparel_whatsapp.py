@@ -53,26 +53,33 @@ def _segment(value: str, catalog: dict) -> dict:
     return {"filter_type": "custom_segments", "name": row["name"], "id": row["id"]}
 
 
-def prepare_audience(row: dict, catalog: dict, errors: list[str]) -> dict | None:
+def prepare_audience(row: dict, catalog: dict, warnings: list[str]) -> dict | None:
     try:
-        result = {"included_filters": {"filter_operator": "and", "filters": [_segment(row.get("segment_name", ""), catalog)]}}
-        excluded = row.get("exclude_segment_name", "").strip()
-        if excluded:
-            denied = _segment(excluded, catalog)
-            if denied["id"] == result["included_filters"]["filters"][0]["id"]:
-                raise ValueError("The same audience cannot be included and excluded")
-            result["excluded_filters"] = {"filter_operator": "and", "filters": [denied]}
-        return result
+        included = _segment(row.get("segment_name", ""), catalog)
     except ValueError as exc:
-        errors.append(str(exc))
+        warnings.append(str(exc) + "; select the audience in MoEngage before launch")
         return None
+    result = {"included_filters": {"filter_operator": "and", "filters": [included]}}
+    excluded = row.get("exclude_segment_name", "").strip()
+    if excluded:
+        try:
+            denied = _segment(excluded, catalog)
+        except ValueError as exc:
+            warnings.append(str(exc) + "; select the exclusion in MoEngage before launch")
+            # Do not save a broader audience when its requested exclusion is unresolved.
+            return None
+        if denied["id"] == included["id"]:
+            warnings.append("The same audience is included and excluded; configure it in MoEngage")
+            return None
+        result["excluded_filters"] = {"filter_operator": "and", "filters": [denied]}
+    return result
 
 
 def prepare_row(row: dict, catalog: dict, errors: list[str]) -> dict:
     result = dict(row)
     for field in ("brand", "whatsapp_sender", "whatsapp_template_id", "whatsapp_name_attribute",
                   "whatsapp_name_fallback", "whatsapp_image_url", "whatsapp_cta_links",
-                  "existing_campaign_id", "allow_existing_campaign_copy", "global_control_group",
+                  "existing_campaign_id", "global_control_group",
                   "tracking_goal", "scheduled_at", "segment_name", "exclude_segment_name",
                   "template_type"):
         if field in result and not isinstance(result[field], str):
@@ -84,8 +91,11 @@ def prepare_row(row: dict, catalog: dict, errors: list[str]) -> dict:
         info = brand_info(brand)
         if catalog["workspace_id"] != info["workspace_id"]:
             raise ValueError("Apparel brand and selected workspace disagree")
-        if row.get("existing_campaign_id") and row.get("allow_existing_campaign_copy") != "true":
-            errors.append("This brief already has a campaign ID; explicitly approve a new draft copy before creating")
+        if row.get("existing_campaign_id"):
+            result["_row_warnings"] = "; ".join(filter(None, [
+                result.get("_row_warnings", ""),
+                "Existing campaign ID retained as source information; saving creates a new draft, not an update",
+            ]))
         requested = row.get("whatsapp_sender", "").strip()
         digits = re.sub(r"\D", "", requested)
         possible = []
@@ -105,78 +115,106 @@ def prepare_row(row: dict, catalog: dict, errors: list[str]) -> dict:
             slots = set(re.findall(r"\{\{(\d+)\}\}", templates[0].get("body", "")))
             if slots == {"1"} and row.get("whatsapp_name_fallback"):
                 name = row.get("whatsapp_name_attribute", "")
-                if name not in catalog.get("user_attributes", []):
+                if not name:
+                    result["_row_warnings"] = "; ".join(filter(None, [
+                        result.get("_row_warnings", ""), "Choose customer-name personalization in MoEngage",
+                    ]))
+                elif name not in catalog.get("user_attributes", []):
                     raise ValueError("Choose the workspace's actual customer-name attribute for personalization")
-                fallback = row["whatsapp_name_fallback"]
-                expression = "{{ UserAttribute[" + json.dumps(name) + "] | default(" + json.dumps(fallback) + ", true) }}"
-                result["whatsapp_placeholders"] = json.dumps({"{{1}}": expression}, ensure_ascii=False)
+                else:
+                    fallback = row["whatsapp_name_fallback"]
+                    expression = "{{ UserAttribute[" + json.dumps(name) + "] | default(" + json.dumps(fallback) + ", true) }}"
+                    result["whatsapp_placeholders"] = json.dumps({"{{1}}": expression}, ensure_ascii=False)
     except (KeyError, ValueError) as exc:
         errors.append(str(exc))
     return result
 
 
-def prepare_details(row: dict, catalog: dict, content: dict, errors: list[str]) -> dict:
-    """Complete the approved template without changing its body, static buttons or opt-in policy."""
-    details: dict[str, Any] = {}
-    try:
-        wa = content["campaign_content"]["content"]["whatsapp"]
-        templates = [t for t in catalog.get("whatsapp_templates", []) if t.get("id") == wa.get("template_id")]
-        if len(templates) != 1:
-            return details
-        template = templates[0].get("template_content", {})
-        header = template.get("header") or {}
-        image = row.get("whatsapp_image_url", "").strip()
-        if header.get("type") in ("IMAGE", "VIDEO", "DOCUMENT"):
-            if not https_url(image) or urlsplit(image).hostname in ("drive.google.com", "docs.google.com"):
-                raise ValueError("Resolve the brief's Drive creative to a durable image URL, or enter the exact public image URL")
+def prepare_details(row: dict, catalog: dict, content: dict, errors: list[str], warnings: list[str]) -> dict:
+    """Retain supplied draft content; leave unfinished launch settings for MoEngage."""
+    details: dict[str, Any] = {"personalization_enabled": True, "bypass_opt_in_preference": False}
+    wa = content.get("campaign_content", {}).get("content", {}).get("whatsapp", {})
+    templates = [t for t in catalog.get("whatsapp_templates", []) if t.get("id") == wa.get("template_id")]
+    if len(templates) != 1:
+        return details
+    approved = templates[0]
+    template = approved.get("template_content", {})
+    header = template.get("header") or {}
+    image = row.get("whatsapp_image_url", "").strip()
+    if header.get("type") in ("IMAGE", "VIDEO", "DOCUMENT"):
+        if not image or urlsplit(image).hostname in ("drive.google.com", "docs.google.com"):
+            warnings.append("Add the header creative in MoEngage before launch")
+        elif not https_url(image):
+            errors.append("Header creative must be a public HTTPS URL")
+        else:
             wa["header_placeholders"] = {"dynamic": {"url": image, "file_name": "", "source": "URL"}}
-        elif image and header.get("type") not in (None, "NONE", "TEXT"):
-            raise ValueError("The approved template requires a supported media header")
-        raw_links = row.get("whatsapp_cta_links", "")
+    elif image and not https_url(image):
+        errors.append("Header creative must be a public HTTPS URL")
+    raw_links = row.get("whatsapp_cta_links", "")
+    try:
         links = json.loads(raw_links) if raw_links else {}
         if not isinstance(links, dict) or any(not isinstance(key, str) or not https_url(value) for key, value in links.items()):
             raise ValueError("CTA links must be a JSON object of button labels to public HTTPS URLs")
         buttons = (template.get("buttons") or {}).get("call_to_action", [])
-        placeholders, tracking = {}, []
-        consumed = set()
-        slot = len(set(re.findall(r"\{\{(\d+)\}\}", templates[0].get("body", ""))))
+        placeholders, tracking, consumed = {}, [], set()
+        slot = len(set(re.findall(r"\{\{(\d+)\}\}", approved.get("body", ""))))
         for button in buttons:
             if button.get("action") != "NAVIGATION" or button.get("action_type") not in ("DYNAMIC_LINK_TRACKING", "DYNAMIC"):
                 continue
             slot += 1
             label = button.get("button_text", "").strip().casefold()
             matches = [(key, value) for key, value in links.items() if key.strip().casefold() == label]
+            if not matches:
+                warnings.append("Add the URL for " + button.get("button_text", "") + " in MoEngage")
+                continue
             if len(matches) != 1:
-                raise ValueError("Brief must provide exactly one URL for template button: " + button.get("button_text", ""))
+                raise ValueError("CTA label matches more than one supplied URL: " + button.get("button_text", ""))
             key, value = matches[0]
             consumed.add(key)
             placeholders["{{" + str(slot) + "}}"] = value
             tracking.append({"trackingEnabled": True, "url": value})
         if set(links) != consumed:
-            raise ValueError("Brief has CTA links that do not match this approved template's dynamic buttons")
-        wa["button_placeholders"], wa["linksTrackingList"] = placeholders, tracking
-        goals = {}
-        window = {"tracking_value": "0", "tracking_unit": "days"}
-        if row.get("brand") not in NO_GOALS:
-            reference = catalog.get("goal_reference")
-            if not reference or reference.get("id") != row.get("goal_reference_id"):
-                raise ValueError("Choose and review this brand's existing WhatsApp conversion-goal reference")
+            warnings.append("Some source CTA labels do not match the approved template; configure them in MoEngage")
+        if placeholders:
+            wa["button_placeholders"], wa["linksTrackingList"] = placeholders, tracking
+    except (TypeError, ValueError) as exc:
+        errors.append(str(exc))
+    if row.get("brand") in NO_GOALS:
+        details.update(conversion_goals={}, goal_tracking={"value": 0, "unit": "days"})
+    else:
+        reference = catalog.get("goal_reference")
+        if row.get("goal_reference_id") and (not reference or reference.get("id") != row["goal_reference_id"]):
+            errors.append("Goal reference does not match the selected workspace reference")
+        if reference and reference.get("id") == row.get("goal_reference_id"):
             goals = copy.deepcopy(reference["conversion"])
             primary = goals.get("primary") if isinstance(goals, dict) else None
             if not isinstance(primary, dict) or not primary.get("action") or not isinstance(goals.get("secondary", []), list):
-                raise ValueError("The reference has no usable conversion goals")
-            window = tracking_window(row.get("tracking_goal", ""), row.get("scheduled_at", ""))
-        details = {"conversion_goals": goals, "goal_tracking": {"value": int(window["tracking_value"]), "unit": window["tracking_unit"]},
-                   "personalization_enabled": True, "bypass_opt_in_preference": False}
-        controls = row.get("global_control_group", "").strip().casefold()
-        if controls:
-            if controls not in ("yes", "no", "true", "false", "enabled", "disabled"):
-                raise ValueError("Global control group must be explicitly Yes or No")
+                errors.append("The reference has no usable conversion goals")
+            else:
+                details["conversion_goals"] = goals
+        else:
+            warnings.append("Set conversion goals in MoEngage before launch")
+        tracking = row.get("tracking_goal", "").strip()
+        duration = re.fullmatch(r"(\d+)\s*(hours?|hrs?|days?)", tracking, re.I)
+        if duration and int(duration[1]) > 0:
+            details["goal_tracking"] = {"value": int(duration[1]), "unit": "hours" if duration[2].lower().startswith("h") else "days"}
+        else:
+            try:
+                window = tracking_window(tracking, row.get("scheduled_at", ""))
+                details["goal_tracking"] = {"value": int(window["tracking_value"]), "unit": window["tracking_unit"]}
+            except (TypeError, ValueError):
+                warnings.append("Set the goal-tracking window in MoEngage before launch")
+    controls = row.get("global_control_group", "").strip().casefold()
+    if controls:
+        if controls not in ("yes", "no", "true", "false", "enabled", "disabled"):
+            errors.append("Global control group must be explicitly Yes or No")
+        else:
             details["global_control_enabled"] = controls in ("yes", "true", "enabled")
-        if template.get("cards") or row.get("template_type", "").strip().casefold() not in ("", "simple", "simple_type"):
-            raise ValueError("This brief must identify every card of its approved WhatsApp carousel before creation")
-    except (KeyError, TypeError, ValueError) as exc:
-        errors.append(str(exc))
+    if template.get("cards"):
+        wa["cards"] = copy.deepcopy(template["cards"])
+        warnings.append("Approved carousel cards retained; complete their creative and links in MoEngage")
+    elif row.get("template_type", "").strip().casefold() not in ("", "simple", "simple_type"):
+        warnings.append("Review carousel settings in MoEngage before launch")
     return details
 
 
@@ -267,7 +305,7 @@ def prepare_source(filename: str | None, data: bytes | None, spreadsheet_url: st
     from apparel_whatsapp_google import read_google_brief
     from moengage_draft_batches import DraftBatchQueue, prepare_routed_batch
     from moengage_draft_creation import load_server_catalog
-    allowed = {"brand", "columns", "reference_campaign_id", "name_attribute", "allow_existing_campaign_copy", "overrides", "expected_source_digest"}
+    allowed = {"brand", "columns", "reference_campaign_id", "name_attribute", "overrides", "expected_source_digest"}
     if not isinstance(options, dict) or set(options) - allowed:
         raise ValueError("Invalid Apparel WhatsApp review options")
     info = brand_info(options.get("brand", ""))
@@ -286,7 +324,7 @@ def prepare_source(filename: str | None, data: bytes | None, spreadsheet_url: st
         values = overrides.get(row["row_id"], {})
         if not isinstance(values, dict) or set(values) - OVERRIDES or any(not isinstance(value, str) or len(value) > 20000 for value in values.values()):
             raise ValueError("Only supported string-valued campaign fields can be reviewed")
-        row.update(values, workspace_id=info["workspace_id"], goal_reference_id=str(options.get("reference_campaign_id") or ""), whatsapp_name_attribute=str(options.get("name_attribute") or ""), allow_existing_campaign_copy="true" if options.get("allow_existing_campaign_copy") is True else "false")
+        row.update(values, workspace_id=info["workspace_id"], goal_reference_id=str(options.get("reference_campaign_id") or ""), whatsapp_name_attribute=str(options.get("name_attribute") or ""))
     base = load_server_catalog("apparel")
     result = prepare_routed_batch(rows, "apparel", user, base, source_type="apparel_whatsapp_brief")
     digest = hashlib.sha256(json.dumps(
@@ -302,44 +340,61 @@ def prepare_source(filename: str | None, data: bytes | None, spreadsheet_url: st
 
 
 def portal_details(payload: dict) -> dict:
-    scheduled = payload["scheduling_details"]
-    zone = scheduled["timezone"]
-    if zone != "Asia/Kolkata":
-        raise ValueError("Apparel briefs require explicit Asia/Kolkata scheduling")
-    local = datetime.fromisoformat(scheduled["start_time"] + "+05:30")
-    goals = payload["conversion_goals"]
-    tracking = payload["goal_tracking"]
-    result = {"dt": local.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"), "laterDate": local.strftime("%m/%d/%Y"), "time": local.strftime("%I:%M %p").lower(), "timezone": [zone, "+0530"], "timezoneName": zone, "goal": goals.get("primary", {}).get("action", ""), "conversion": goals, "clickTrackHours": tracking["value"], "impTrackHours": tracking["value"], "attributionMultiplier": 24 if tracking["unit"] == "days" else 1, "is_jinja": True, "bypass_opt_in_preference": False}
+    result = {"is_jinja": True, "bypass_opt_in_preference": False}
+    scheduled = payload.get("scheduling_details")
+    if scheduled:
+        zone = scheduled["timezone"]
+        if zone != "Asia/Kolkata":
+            raise ValueError("Apparel briefs require explicit Asia/Kolkata scheduling")
+        local = datetime.fromisoformat(scheduled["start_time"] + "+05:30")
+        result.update(dt=local.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                      laterDate=local.strftime("%m/%d/%Y"), time=local.strftime("%I:%M %p").lower(),
+                      timezone=[zone, "+0530"], timezoneName=zone)
+    if "conversion_goals" in payload:
+        goals = payload["conversion_goals"]
+        result.update(goal=goals.get("primary", {}).get("action", ""), conversion=goals)
+    if "goal_tracking" in payload:
+        tracking = payload["goal_tracking"]
+        result.update(clickTrackHours=tracking["value"], impTrackHours=tracking["value"],
+                      attributionMultiplier=24 if tracking["unit"] == "days" else 1)
     if "global_control_enabled" in payload:
         result["global_control_enabled"] = payload["global_control_enabled"]
     return result
 
 
 def saved_details(draft: dict) -> dict:
-    stamp = datetime.fromisoformat(draft["dt"].replace("Z", "+00:00"))
-    if (stamp.utcoffset() is None or draft.get("timezone") != ["Asia/Kolkata", "+0530"]
-            or draft.get("timezoneName", "Asia/Kolkata") != "Asia/Kolkata"
-            or type(draft.get("clickTrackHours")) is not int or draft["clickTrackHours"] < 0
-            or type(draft.get("impTrackHours")) is not int
-            or draft.get("clickTrackHours") != draft.get("impTrackHours")
-            or type(draft.get("attributionMultiplier")) is not int
-            or draft.get("attributionMultiplier") not in (1, 24)):
-        raise ValueError("Saved schedule or goal tracking differs from the requested configuration")
-    from zoneinfo import ZoneInfo
-    conversion = draft.get("conversion") or {}
-    if (not isinstance(conversion, dict)
-            or (draft.get("goal") or "") != (conversion.get("primary") or {}).get("action", "")):
-        raise ValueError("Saved conversion goals are inconsistent")
-    local = stamp.astimezone(ZoneInfo("Asia/Kolkata"))
-    if (datetime.strptime(draft["laterDate"], "%m/%d/%Y").date() != local.date()
-            or datetime.strptime(draft["time"].upper(), "%I:%M %p").time() != local.time().replace(microsecond=0)):
-        raise ValueError("Saved local schedule differs from its delivery timestamp")
-    return {"scheduling_details": {"delivery_type": "AT_FIXED_TIME", "start_time": local.strftime("%Y-%m-%dT%H:%M:%S"), "timezone": "Asia/Kolkata"},
-            "conversion_goals": conversion,
-            "goal_tracking": {"value": draft.get("clickTrackHours"), "unit": "days" if draft.get("attributionMultiplier") == 24 else "hours"},
-            "personalization_enabled": draft.get("is_jinja"),
-            "bypass_opt_in_preference": draft.get("bypass_opt_in_preference") or draft.get("whatsapp_data", {}).get("bypass_opt_in_preference", False),
-            **({"global_control_enabled": draft["global_control_enabled"]} if "global_control_enabled" in draft else {})}
+    result = {
+        "personalization_enabled": draft.get("is_jinja"),
+        "bypass_opt_in_preference": draft.get("bypass_opt_in_preference") or draft.get("whatsapp_data", {}).get("bypass_opt_in_preference", False),
+    }
+    if draft.get("dt"):
+        stamp = datetime.fromisoformat(draft["dt"].replace("Z", "+00:00"))
+        if (stamp.utcoffset() is None or draft.get("timezone") != ["Asia/Kolkata", "+0530"]
+                or draft.get("timezoneName", "Asia/Kolkata") != "Asia/Kolkata"):
+            raise ValueError("Saved schedule differs from the requested configuration")
+        from zoneinfo import ZoneInfo
+        local = stamp.astimezone(ZoneInfo("Asia/Kolkata"))
+        if (datetime.strptime(draft["laterDate"], "%m/%d/%Y").date() != local.date()
+                or datetime.strptime(draft["time"].upper(), "%I:%M %p").time() != local.time().replace(microsecond=0)):
+            raise ValueError("Saved local schedule differs from its delivery timestamp")
+        result["scheduling_details"] = {"delivery_type": "AT_FIXED_TIME", "start_time": local.strftime("%Y-%m-%dT%H:%M:%S"), "timezone": "Asia/Kolkata"}
+    if "conversion" in draft:
+        conversion = draft["conversion"]
+        if (not isinstance(conversion, dict)
+                or (draft.get("goal") or "") != (conversion.get("primary") or {}).get("action", "")):
+            raise ValueError("Saved conversion goals are inconsistent")
+        result["conversion_goals"] = conversion
+    if "clickTrackHours" in draft or "impTrackHours" in draft:
+        if (type(draft.get("clickTrackHours")) is not int or draft["clickTrackHours"] < 0
+                or type(draft.get("impTrackHours")) is not int
+                or draft.get("clickTrackHours") != draft.get("impTrackHours")
+                or type(draft.get("attributionMultiplier")) is not int
+                or draft["attributionMultiplier"] not in (1, 24)):
+            raise ValueError("Saved goal tracking differs from the requested configuration")
+        result["goal_tracking"] = {"value": draft["clickTrackHours"], "unit": "days" if draft["attributionMultiplier"] == 24 else "hours"}
+    if "global_control_enabled" in draft:
+        result["global_control_enabled"] = draft["global_control_enabled"]
+    return result
 
 
 def upload_image(brand: str, *, content: bytes | None = None, filename: str = "",

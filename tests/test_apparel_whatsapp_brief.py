@@ -36,6 +36,7 @@ def test_physical_campaign_columns_and_canonical_fields():
     assert [row["campaign_name"] for row in records] == [f"VS_Tili_ON_ATC_{i}" for i in range(4)]
     for row in records:
         assert "_row_error" not in row
+        assert "_row_warnings" not in row
         assert row["scheduled_at"] == "2026-10-29T18:30:00+05:30"
         assert row["tracking_value"] == "3"
         assert row["tracking_unit"] == "days"
@@ -77,9 +78,10 @@ def test_missing_inputs_are_visible_and_columns_never_shift():
     values[10][4] = ""
     records = read_sheet_values(values, "VS", "input")
     assert [row["row_id"] for row in records] == ["WhatsApp!C", "WhatsApp!E"]
-    assert "Missing campaign_name" in records[0]["_row_error"]
-    assert "Missing whatsapp_sender" in records[0]["_row_error"]
-    assert "Missing whatsapp_template_id" in records[1]["_row_error"]
+    assert all("_row_error" not in row for row in records)
+    assert "Missing campaign_name" in records[0]["_row_warnings"]
+    assert "Missing whatsapp_sender" in records[0]["_row_warnings"]
+    assert "Missing whatsapp_template_id" in records[1]["_row_warnings"]
     assert len(read_sheet_values(values, "VS", "input", columns=["E"])) == 1
     assert read_sheet_values(values, "VS", "input", sheet="SMS") == []
 
@@ -90,10 +92,68 @@ def test_no_inferred_current_year_or_send_time():
     values[6][2] = "3 days"
     record = read_sheet_values(values, "VS", "input")[0]
     assert record["scheduled_at"] == ""
-    assert "explicit year" in record["_row_error"]
+    assert "_row_error" not in record
+    assert "explicit year" in record["_row_warnings"]
+    assert record["send_date"] == "29th October|Thursday"
+    assert record["send_time"] == "6:30PM"
     values[2][2] = "27th October2026"
     values[4][2] = ""
-    assert "send time" in read_sheet_values(values, "VS", "input")[0]["_row_error"]
+    assert "send time" in read_sheet_values(values, "VS", "input")[0]["_row_warnings"]
+
+
+def test_screenshot_spacers_do_not_create_phantom_campaigns():
+    # Zero-based DJ/DK/DL/DM/DN positions, including mapped separator metadata.
+    values = brief((113, 116))
+    for cells in values:
+        cells.extend([None] * (118 - len(cells)))
+    for column in (114, 115, 117):
+        values[1][column] = "Owner"
+        values[2][column] = "27th October2026"
+        values[3][column] = "29th October|Thursday"
+        values[4][column] = "6:30PM"
+        values[6][column] = "3 days"
+        values[17][column] = "No"
+        values[18][column] = "separator notes"
+        values[23][column] = "Draft"
+        values[0][column] = "Unmapped formatting"
+    values[0][0] = "Unmapped row"
+    records = read_sheet_values(values, "VS", "input")
+    assert [row["row_id"] for row in records] == ["WhatsApp!DJ", "WhatsApp!DM"]
+    assert [row["campaign_name"] for row in records] == ["VS_Tili_ON_ATC_0", "VS_Tili_ON_ATC_1"]
+    assert read_sheet_values(values, "VS", "input", columns=["DK", "DL", "DN"]) == []
+
+
+@pytest.mark.parametrize("field", [
+    "Campaign Name", "TemplateID", "SenderID", "BodyCopy", "TargetAudience",
+    "Exclude", "ImageURL", "CTALink", "CampaignID",
+])
+def test_single_campaign_bearing_field_retains_partial_campaign(field):
+    record = read_sheet_values([[field, "", "Supplied content"]], "VS", "input")[0]
+    assert record["row_id"] == "WhatsApp!C"
+    assert "_row_error" not in record
+    assert isinstance(record["_row_warnings"], str)
+    assert "Missing" in record["_row_warnings"]
+
+
+def test_incomplete_schedule_and_cta_remain_source_values_not_errors():
+    values = brief((2,))
+    values[2][2] = "27th October"
+    values[3][2] = "29th October|Thursday"
+    values[4][2] = "Evening, confirm with owner"
+    values[6][2] = "3 days"
+    values[16][2] = "Shop Now:\nURL to be supplied"
+    record = read_sheet_values(values, "VS", "input")[0]
+    assert "_row_error" not in record
+    assert "explicit year" in record["_row_warnings"]
+    assert "CTA requires" in record["_row_warnings"]
+    assert "; " in record["_row_warnings"]
+    assert record["scheduled_at"] == ""
+    assert record["whatsapp_cta_links"] == ""
+    assert record["send_date"] == values[3][2]
+    assert record["send_time"] == values[4][2]
+    assert record["cta_raw"] == values[16][2]
+    assert record["whatsapp_variable_instructions"] == values[14][2]
+    assert all(isinstance(value, str) for value in record.values())
 
 
 def test_csv_and_xlsx_preserve_hyperlinks_and_ignore_other_sheets():
@@ -133,7 +193,7 @@ def test_xlsx_numeric_sender_and_multi_link_cta_text_survive_google_export():
     workbook.save(stream)
     workbook.close()
     record = read_brief("export.xlsx", stream.getvalue(), "VS")[0]
-    assert "_row_error" not in record
+    assert "_row_warnings" not in record
     assert record["whatsapp_sender"] == "8657864167"
     assert record["whatsapp_template_id"] == "vs_tili_on_atc"
     assert json.loads(record["whatsapp_cta_links"]) == {
@@ -147,7 +207,7 @@ def test_xlsx_numeric_sender_and_multi_link_cta_text_survive_google_export():
 def test_goal_free_brands_do_not_require_irrelevant_tracking_configuration(brand, tracking):
     values = brief((2,))
     values[6][2] = tracking
-    assert "_row_error" not in read_sheet_values(values, brand, "brief")[0]
+    assert "_row_warnings" not in read_sheet_values(values, brand, "brief")[0]
 
 
 def test_limits_and_unknown_inputs():
@@ -291,7 +351,7 @@ def test_no_goals_brands_allow_absent_tracking_without_inventing_a_window(brand)
     values = brief((2,))
     values[6][2] = ""
     row = read_sheet_values(values, brand, "input")[0]
-    assert "_row_error" not in row
+    assert "_row_warnings" not in row
     assert row["tracking_goal"] == ""
     assert "tracking_value" not in row
     assert row["scheduled_at"] == "2026-10-29T18:30:00+05:30"

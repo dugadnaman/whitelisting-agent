@@ -90,7 +90,14 @@ class WhatsAppDraftWriter:
                           ("id", "name", "display_name"), "template")
         if not _CAMPAIGN_ID.fullmatch(str(template.get("id") or "")):
             raise ValueError("MoEngage returned no real WhatsApp template ID")
-        _whatsapp_placeholder_values(wa.get("body_placeholders"), template.get("body"))
+        _whatsapp_placeholder_values(
+            wa.get("body_placeholders", {}) if self.account == "apparel" else wa.get("body_placeholders"),
+            template.get("body"), allow_partial=self.account == "apparel",
+        )
+        if self.account == "apparel" and "cards" in wa:
+            approved_cards = template.get("template_content", {}).get("cards")
+            if not isinstance(wa["cards"], list) or wa["cards"] != approved_cards:
+                raise ValueError("WhatsApp cards must match the live approved template")
         wa.update(sender_id=sender["id"], sender_name=sender["sender_name"],
                   provider=sender["provider"].upper(), phone_number=sender["phone_number"],
                   template_id=template["id"], template_name=template.get("name") or template.get("display_name"))
@@ -106,17 +113,24 @@ class WhatsAppDraftWriter:
         body = {"campaign_data": {
             "campaignName": payload["basic_details"]["name"], "action": "create",
             "channel": "WHATSAPP", "channel_type": "MESSAGING", "delivery_type": "ONE_TIME",
-            "campaignType": "whatsapp", "new_segmentation_data": payload["segmentation_details"],
+            "campaignType": "whatsapp",
             "whatsapp_data": {"sender_id": wa["sender_id"], "sender": sender["provider"],
-                              "template_id": wa["template_id"], "body_placeholders": wa["body_placeholders"],
+                              "template_id": wa["template_id"],
                               "bypass_opt_in_preference": False},
             "stepStatus": True, "is_react": True, "c_s_is_new": True,
             "delivery": "later", "triggerDelayType": "delay", "utm_params": {"is_enabled": False},
         }}
+        if self.account != "apparel" or "segmentation_details" in payload:
+            body["campaign_data"]["new_segmentation_data"] = payload["segmentation_details"]
+        if self.account != "apparel" or "body_placeholders" in wa:
+            body["campaign_data"]["whatsapp_data"]["body_placeholders"] = copy.deepcopy(wa["body_placeholders"])
         if self.account == "apparel":
             from apparel_whatsapp import portal_details
             body["campaign_data"].update(portal_details(payload))
-            for key in ("header_placeholders", "button_placeholders", "linksTrackingList"):
+            if "scheduling_details" not in payload:
+                body["campaign_data"].pop("delivery")
+                body["campaign_data"].pop("triggerDelayType")
+            for key in ("header_placeholders", "button_placeholders", "linksTrackingList", "cards"):
                 if key in wa:
                     body["campaign_data"]["whatsapp_data"][key] = copy.deepcopy(wa[key])
         data = self._request("POST", "/v1.0/campaigns/draft", body).get("data")
@@ -167,17 +181,20 @@ class WhatsAppDraftWriter:
             "id": campaign_id, "status": "DRAFT", "channel": listed.get("channel"),
             "campaign_delivery_type": listed.get("delivery_type"),
             "basic_details": {"name": draft["campaignName"]},
-            "segmentation_details": draft.get("new_segmentation_data"),
+            **({"segmentation_details": draft.get("new_segmentation_data")}
+               if self.account != "apparel" or "new_segmentation_data" in draft else {}),
             "campaign_content": {"content": {"whatsapp": {
                 "sender_id": wa.get("sender_id"), "sender_name": sender["sender_name"],
                 "provider": str(wa.get("sender") or "").upper(),
-                "template_id": wa.get("template_id"), "body_placeholders": wa.get("body_placeholders") or {},
+                "template_id": wa.get("template_id"),
             }}},
         }
+        if self.account != "apparel":
+            result["campaign_content"]["content"]["whatsapp"]["body_placeholders"] = wa.get("body_placeholders") or {}
         if self.account == "apparel":
             from apparel_whatsapp import saved_details
             result.update(saved_details(draft))
-            for key in ("header_placeholders", "button_placeholders", "linksTrackingList"):
+            for key in ("body_placeholders", "header_placeholders", "button_placeholders", "linksTrackingList", "cards"):
                 if key in wa:
                     result["campaign_content"]["content"]["whatsapp"][key] = copy.deepcopy(wa[key])
         return result

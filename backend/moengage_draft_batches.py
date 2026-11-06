@@ -220,7 +220,9 @@ class DraftBatchQueue:
                     (batch_id, index, self.account, item["workspace_id"], item["source_ref"], item["row_id"],
                      item.get("channel", ""), encoded_rows[index],
                      json.dumps(item["candidate_v5_payload"]) if item["candidate_v5_payload"] is not None else None,
-                     json.dumps(item.get("source_fields", {})), item["status"], json.dumps(item["issues"]), now)
+                     json.dumps({**item.get("source_fields", {}), **(
+                         {"_draft_warnings": json.dumps(item.get("warnings", []))} if self.account == "apparel" else {}
+                     )}), item["status"], json.dumps(item["issues"]), now)
                     for index, item in enumerate(preview["items"])
                 ],
             )
@@ -242,6 +244,8 @@ class DraftBatchQueue:
                   "campaign_id": row["campaign_id"], "issue": row["issue"],
                   "validation_errors": json.loads(row["validation_json"]), "updated_at": row["updated_at"]} for row in rows]
         for item in items:
+            if self.account == "apparel":
+                item["warnings"] = json.loads(item["source_fields"].pop("_draft_warnings", "[]"))
             if item["channel"] == "WHATSAPP" and item["source_fields"].get("workspace_name"):
                 item["workspace_name"] = item["source_fields"]["workspace_name"]
         return {"batch_id": batch_id, "account": batch["account"], "workspace_id": batch["workspace_id"],

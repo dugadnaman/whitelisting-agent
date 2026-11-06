@@ -114,6 +114,12 @@ FIELDS = {
     "campaignid": "existing_campaign_id", "campaignstatus": "existing_campaign_status",
 }
 
+CAMPAIGN_FIELDS = {
+    "campaign_name", "whatsapp_sender", "whatsapp_template_id", "segment_name",
+    "exclude_segment_name", "whatsapp_variable_instructions", "whatsapp_image_url",
+    "cta_raw", "existing_campaign_id",
+}
+
 
 def _ctas(raw):
     if not raw.strip():
@@ -159,27 +165,24 @@ def read_sheet_values(values, brand, source_ref, *, sheet="WhatsApp", columns=No
         if selected is not None and physical not in selected:
             continue
         fields = {}
-        populated = False
         for cells in values:
             value = cells[index] if len(cells) > index else None
-            if _text(value).strip():
-                populated = True
             labels = [_label(cell) for cell in cells[:2]]
             field = next((FIELDS[label] for label in ["".join(labels), *reversed(labels)] if label in FIELDS), None)
             if field:
                 fields[field] = _text(value)
-        if not populated:
+        if not any(fields.get(key, "").strip() for key in CAMPAIGN_FIELDS):
             continue
         row = {key: "" for key in ("campaign_name", "segment_name", "exclude_segment_name", "whatsapp_sender", "whatsapp_template_id", "template_type", "scheduled_at", "tracking_goal", "whatsapp_variable_instructions", "whatsapp_name_fallback", "whatsapp_image_url", "whatsapp_cta_links", "existing_campaign_id", "existing_campaign_status", "global_control_group", "notes")}
-        row.update({key: value for key, value in fields.items() if key in row})
+        row.update(fields)
         row["tracking_goal"] = fields.get("tracking", "")
         row.update(account="apparel", channel="WHATSAPP", brand=brand, source_ref=_text(source_ref), row_id=f"{sheet}!{physical}", timezone="Asia/Kolkata")
         for key in ("campaign_name", "segment_name", "exclude_segment_name", "whatsapp_sender", "whatsapp_template_id", "existing_campaign_id", "existing_campaign_status"):
             row[key] = _identifier(row[key])
-        errors = []
+        warnings = []
         for key in ("campaign_name", "segment_name", "whatsapp_sender", "whatsapp_template_id"):
             if not row[key]:
-                errors.append(f"Missing {key}")
+                warnings.append(f"Missing {key}")
         try:
             years = re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", fields.get("brief_date", "") + " " + fields.get("tracking", ""))
             send_date = _date(fields.get("send_date", ""), int(years[0]) if years else None)
@@ -199,16 +202,16 @@ def read_sheet_values(values, brand, source_ref, *, sheet="WhatsApp", columns=No
                 raise ValueError("Missing or invalid send time")
             row["scheduled_at"] = datetime.combine(send_date, parsed_time, IST).isoformat()
         except (ValueError, TypeError) as exc:
-            errors.append(str(exc))
+            warnings.append(str(exc))
         if brand not in {"Crocs", "AGIPL", "R&B", "CK"}:
             try:
                 row.update(tracking_window(row["tracking_goal"], row["scheduled_at"]))
             except (ValueError, TypeError) as exc:
-                errors.append(str(exc))
+                warnings.append(str(exc))
         try:
             row["whatsapp_cta_links"] = _ctas(fields.get("cta_raw", ""))
         except ValueError as exc:
-            errors.append(str(exc))
+            warnings.append(str(exc))
         # Preserve instructions verbatim; only extract an explicitly stated fallback.
         instructions = row["whatsapp_variable_instructions"].translate(str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"'}))
         fallback = re.search(r"(?:fallback\s*(?:is|:|=)?\s*[\"']?([\w -]+)|[\"']([^\"']+)[\"']\s+(?:as\s+)?fallback)", instructions, re.I)
@@ -218,8 +221,8 @@ def read_sheet_values(values, brand, source_ref, *, sheet="WhatsApp", columns=No
             missing_name = re.search(r"\bname\b.*?\b(?:can't|cannot|isn't|is not|not)\b.*?\b(?:found|available)\b.*?\buse\s+(?:the\s+)?(?:copy|text)\s*[-:–—]?\s*[\"']([^\"']+)[\"']", instructions, re.I | re.S)
             if missing_name:
                 row["whatsapp_name_fallback"] = missing_name[1]
-        if errors:
-            row["_row_error"] = "; ".join(errors)
+        if warnings:
+            row["_row_warnings"] = "; ".join(warnings)
         rows.append(row)
     return rows
 

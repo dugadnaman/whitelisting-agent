@@ -239,7 +239,7 @@ def _match_whatsapp_body(body: str, template: str) -> dict[str, str] | None:
     return {f"{{{{{number}}}}}": matched.group(f"p{number}") for number in seen} if matched else None
 
 
-def _whatsapp_placeholder_values(placeholders: Any, template_body: str | None) -> dict[str, str]:
+def _whatsapp_placeholder_values(placeholders: Any, template_body: str | None, *, allow_partial: bool = False) -> dict[str, str]:
     """Compare numbered slots without rewriting the provider's accepted key spelling."""
     if (not isinstance(placeholders, dict)
             or any(not isinstance(key, str) or not isinstance(value, str) or not value.strip()
@@ -254,8 +254,10 @@ def _whatsapp_placeholder_values(placeholders: Any, template_body: str | None) -
         if number in normalized:
             raise ValueError("WhatsApp body placeholder aliases are ambiguous")
         normalized[number] = value
-    if template_body is not None and set(normalized) != set(re.findall(r"\{\{(\d+)\}\}", template_body)):
-        raise ValueError("WhatsApp body placeholders must match the live template variables")
+    if template_body is not None:
+        slots = set(re.findall(r"\{\{(\d+)\}\}", template_body))
+        if not set(normalized).issubset(slots) or (not allow_partial and set(normalized) != slots):
+            raise ValueError("WhatsApp body placeholders must match the live template variables")
     return normalized
 
 
@@ -307,7 +309,7 @@ def _whatsapp(row: dict[str, Any], catalog: dict[str, Any], name: str, errors: l
             body_placeholders = inferred if inferred is not None else {}
         else:
             body_placeholders = json.loads(ph_raw) if isinstance(ph_raw, str) else ph_raw
-        values = _whatsapp_placeholder_values(body_placeholders, template.get("body") if template else None)
+        values = _whatsapp_placeholder_values(body_placeholders, template.get("body") if template else None, allow_partial=catalog.get("account") == "apparel")
         if inferred is not None and {
             key: " ".join(value.split()) for key, value in values.items()
         } != {key[2:-2]: " ".join(value.split()) for key, value in inferred.items()}:
@@ -357,6 +359,7 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
         if account == "apparel":
             from apparel_whatsapp import prepare_row
             row = prepare_row(row, catalog, errors)
+        warnings = [message.strip() for message in _text(row, "_row_warnings").split(";") if message.strip()] if account == "apparel" else []
         if not source or not row_id:
             errors.append("source_ref and row_id are required")
         if source and row_id and keys[(source, row_id)] != 1:
@@ -386,12 +389,18 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
             errors.append("campaign_name is required; Jira summary is not campaign copy")
         if account == "apparel":
             from apparel_whatsapp import prepare_audience
-            audience = prepare_audience(row, catalog, errors)
+            audience = prepare_audience(row, catalog, warnings)
             if channel != "WHATSAPP":
                 errors.append("Apparel campaign drafting supports WhatsApp only")
         else:
             audience = _audience(row, catalog, errors)
-        schedule = _schedule(row, errors)
+        if account == "apparel" and not _text(row, "scheduled_at"):
+            schedule = None
+            warnings.append("Set the send date and time in MoEngage before launch")
+        else:
+            schedule = _schedule(row, errors)
+            if account == "apparel" and schedule and schedule["timezone"] != "Asia/Kolkata":
+                errors.append("Apparel briefs require explicit Asia/Kolkata scheduling")
         if channel == "EMAIL":
             content = _email(row, catalog, name, errors)
         elif channel == "PUSH":
@@ -403,22 +412,31 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
         details = {}
         if account == "apparel" and channel == "WHATSAPP":
             from apparel_whatsapp import prepare_details
-            details = prepare_details(row, catalog, content, errors)
+            details = prepare_details(row, catalog, content, errors, warnings)
+            wa = content["campaign_content"]["content"]["whatsapp"]
+            template = next((item for item in _items(catalog, "whatsapp_templates") if item.get("id") == wa.get("template_id")), None)
+            if template and wa.get("body_placeholders") is not None:
+                values = _whatsapp_placeholder_values(wa["body_placeholders"], template.get("body"), allow_partial=True)
+                if set(values) != set(re.findall(r"\{\{(\d+)\}\}", template.get("body", ""))):
+                    warnings.append("Complete the template variables in MoEngage before launch")
         candidate = None
         if not errors:
             candidate = {
                 "channel": channel, "campaign_delivery_type": "ONE_TIME", "created_by": creator,
-                **content, **details, "segmentation_details": audience, "scheduling_details": schedule,
+                **content, **details,
+                **({"segmentation_details": audience} if audience is not None else {}),
+                **({"scheduling_details": schedule} if schedule is not None else {}),
             }
         results.append({"source_ref": source, "row_id": row_id, "channel": channel,
                         "account": account, "workspace_id": catalog["workspace_id"],
                         "source_fields": {
                             k: str(row[k]).strip() for k in sorted(row)
-                            if k not in ("_row_error", "candidate_v5_payload", "source_ref", "row_id", "account", "workspace_id", "channel")
+                            if k not in ("_row_error", "_row_warnings", "candidate_v5_payload", "source_ref", "row_id", "account", "workspace_id", "channel")
                             and isinstance(row.get(k), str) and str(row[k]).strip()
                         },
                         "source_attachments": row.get("source_attachments", []),
                         "status": "preview_ready" if candidate else "blocked", "issues": errors,
+                        **({"warnings": warnings} if account == "apparel" else {}),
                         "candidate_v5_payload": candidate})
     return {
         "account": account, "workspace_id": catalog["workspace_id"], "source_type": source_type,
