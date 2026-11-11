@@ -446,7 +446,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       {feedback && <p role={feedback.type === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-xs ${feedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{feedback.message}</p>}
 
       {browser && <details className="border-t border-gray-100 pt-3">
-        <summary className="cursor-pointer text-sm font-medium text-gray-700">Setup help · browser → portal → verify</summary>
+        <summary className="cursor-pointer text-sm font-medium text-gray-700">Setup help</summary>
         <ol className="mt-3 list-decimal pl-5 text-sm leading-relaxed text-gray-600 space-y-3">
           {installed === false && <li>Download and unzip the extension. Open <code>chrome://extensions</code>, enable Developer mode, choose <strong>Load unpacked</strong>, and select the folder containing <code>manifest.json</code>.</li>}
           <li>{installed === true ? 'The extension is already detected. Choose' : installed === null ? 'Wait for extension detection, then choose' : 'Reload this page and choose'} <strong>Connect this browser</strong> if this target is not connected. Each account and channel needs its own connection.</li>
