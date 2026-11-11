@@ -326,7 +326,7 @@ export default function ActivityLogsPage() {
               aria-label="Search activity"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search user, action, template name, details..."
+              placeholder="Search user, action or template"
               className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-gray-500 outline-none"
             />
           </div>
@@ -468,7 +468,6 @@ export default function ActivityLogsPage() {
       <div className="bg-white rounded-xl border border-gray-200/80  overflow-hidden">
         <div className="p-4 bg-gray-50/80 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="w-2 h-2 rounded-full bg-blue-600" />
             <h3 className="text-base font-medium text-gray-900  ">
               Audit trail ({logs.length} events)
             </h3>

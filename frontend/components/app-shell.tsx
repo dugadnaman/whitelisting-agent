@@ -124,7 +124,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 return (
                   <div
                     key={path}
-                    className={`group inline-flex items-center gap-2 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                    className={`group inline-flex shrink-0 whitespace-nowrap items-center gap-2 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                       isActive
                         ? 'border-blue-600 text-gray-900 font-medium'
                         : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
@@ -146,7 +146,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                         title={`Close ${meta.label} tab`}
                         aria-label={`Close ${meta.label} tab`}
                       >
-                        ✕
+                        <svg aria-hidden="true" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" d="M5 5l10 10M15 5L5 15" /></svg>
                       </button>
                     )}
                   </div>
@@ -156,7 +156,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Page Content */}
-            <div key={scopeKey} className="workspace-content p-4 sm:p-6 xl:p-8 flex-1 min-w-0">{children}</div>
+            <div key={scopeKey} className="workspace-content p-4 pb-24 sm:p-6 sm:pb-20 xl:p-8 xl:pb-20 flex-1 min-w-0">{children}</div>
           </div>
         )}
       </main>

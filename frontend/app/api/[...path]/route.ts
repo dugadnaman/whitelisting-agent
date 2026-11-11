@@ -9,10 +9,11 @@ async function handle(req: NextRequest, { params }: { params: { path: string[] }
   const url = `${backendUrl}/api/${path}${searchParams ? '?' + searchParams : ''}`;
 
   const headers = new Headers(req.headers);
-  // Remove hop-by-hop headers that Node fetch manages automatically
+  // Remove hop-by-hop and encoding headers so upstream decompression stays aligned
   headers.delete('host');
   headers.delete('connection');
   headers.delete('content-length');
+  headers.set('accept-encoding', 'identity');
   try {
     // Forward the request body stream directly (duplex: 'half' required for Node fetch streaming)
     const res = await fetch(url, {
@@ -23,9 +24,12 @@ async function handle(req: NextRequest, { params }: { params: { path: string[] }
       duplex: 'half',
     });
 
+    const resHeaders = new Headers(res.headers);
+    resHeaders.delete('content-encoding');
+    resHeaders.delete('content-length');
     return new NextResponse(res.body, {
       status: res.status,
-      headers: res.headers,
+      headers: resHeaders,
     });
   } catch (err) {
     console.error(`Proxy error for ${url}:`, err);

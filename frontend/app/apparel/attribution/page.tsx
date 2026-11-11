@@ -26,7 +26,8 @@ type Resource = 'health' | 'google' | 'session' | 'jobs' | 'setup';
 function StatusBadge({ value }: { value: string }) {
   const good = ['ok', 'connected', 'completed', 'success', 'configured'].includes(value);
   const bad = ['failed', 'disconnected', 'not_configured', 'unavailable'].includes(value);
-  return <span className={`inline-flex rounded-md px-2 py-1 text-sm font-normal ${good ? 'bg-emerald-50 text-emerald-700' : bad ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'}`}>{value.replaceAll('_', ' ')}</span>;
+  const neutral = value === 'checking';
+  return <span className={`inline-flex rounded-md px-2 py-1 text-sm font-normal ${good ? 'bg-emerald-50 text-emerald-700' : bad ? 'bg-red-50 text-red-700' : neutral ? 'bg-gray-100 text-gray-600' : 'bg-amber-50 text-amber-800'}`}>{value.replaceAll('_', ' ')}</span>;
 }
 
 export default function ApparelAttributionPage() {

@@ -417,7 +417,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
           <h3 id={titleId} className="text-lg font-semibold text-gray-900">{portal} connection</h3>
           <p className="mt-1 text-sm text-gray-600">{accountTitle} · {integrationTitle}</p>
         </div>
-        <span role="status" className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${validated ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : invalid ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>{statusLabel}</span>
+        <span role="status" className={`rounded-md border px-2.5 py-1 text-xs font-medium ${validated ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : invalid ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>{statusLabel}</span>
       </div>
 
       {browser && <div className="text-sm text-gray-600 space-y-1">
@@ -443,7 +443,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       {statusError && <p role="alert" className="text-sm text-red-700">{statusError}</p>}
       {installed === true && browserError && <p role="alert" className="text-sm text-red-700">{browserError}</p>}
       {browserStatus?.error && <p role="alert" className="text-sm text-red-700">{syncError(browserStatus.error)}</p>}
-      {feedback && <p role={feedback.type === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-xs ${feedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{feedback.message}</p>}
+      {feedback && <p role={feedback.type === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-xs ${feedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{feedback.message}</p>}
 
       {browser && <details className="border-t border-gray-100 pt-3">
         <summary className="cursor-pointer text-sm font-medium text-gray-700">Setup help · browser → portal → verify</summary>

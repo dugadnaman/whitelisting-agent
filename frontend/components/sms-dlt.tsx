@@ -269,13 +269,13 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
         ].map(([tag, purpose, length]) => <tr key={tag} className="border-t border-gray-100"><th scope="row" className="p-2 font-mono">{tag}</th><td className="p-2">{purpose}</td><td className="whitespace-nowrap p-2">{length}</td></tr>)}</tbody>
       </table></div>
     </details>}
-      {!batch && <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs">
+      {!batch && <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs">
         <p className="font-medium">Need to prepare imported messages?</p>
         <p>Preview fixes for known name/link placeholders, filled samples, encoding and duplicate names. Exact surrounding copy stays unchanged; nothing is applied or submitted automatically.</p>
         <button type="button" disabled={busy} className={buttonClass} onClick={() => setPreparation({ signature, drafts: prepareSmsDltDrafts(drafts) })}>Prepare messages for review</button>
         {preparation?.signature === signature && <>
           {preparation.drafts.every((draft, index) => draft === drafts[index]) ? <p role="status">No preparation changes needed. Validate the drafts below.</p> : <>
-            {preparation.drafts.map((draft, index) => draft === drafts[index] ? null : <div key={index} className="space-y-2 rounded border border-blue-200 bg-white p-3">
+            {preparation.drafts.map((draft, index) => draft === drafts[index] ? null : <div key={index} className="space-y-2 rounded border border-gray-200 bg-white p-3">
               <p className="font-medium">Row {index + 1} · {draft.template_name}</p>
               {(['template_name', 'text', 'sample_message', 'message_type'] as const).map((field) => draft[field] === drafts[index][field] ? null : <div key={field}>
                 <p className="font-medium">{field === 'message_type' ? 'Encoding (1 = ASCII, 2 = Unicode)' : field.replaceAll('_', ' ')}</p>
@@ -306,7 +306,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     }} onChange={(value) => { setReviewed(null); setDrafts((prev) => prev.map((item, idx) => idx === index ? value : item)); }} />)}
     {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800"><p>{error}</p><p className="mt-1">For portal authentication errors, <a href="/settings" className="underline">replace the Tata SMS session in Settings</a>. Check <a href="/" className="underline">History</a> before retrying a submission.</p></div>}
     {!batch && <>
-      <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 pr-20 shadow-sm">
+      <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:pr-44 shadow-sm">
         <button type="button" disabled={busy || !fieldsValid} onClick={review} className={buttonClass}>{busy ? 'Checking…' : `Review & whitelist (${drafts.length})`}</button>
         {!fieldsValid && <p className="text-xs text-gray-600">Complete DLT settings, message samples and any source decisions to continue.</p>}
         {onClose && <button type="button" disabled={busy} onClick={onClose} className="text-xs font-medium text-gray-600 underline">Back to source</button>}
@@ -315,7 +315,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
         <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-5 space-y-4">
         <h3 id="sms-confirmation-title" className="font-medium">3. Confirm SMS whitelisting</h3>
         <p className="text-xs font-medium">Destination: Tata Capital · SMS · VILPOWER</p>
-        {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-lg border border-blue-100 bg-white p-3 text-xs">
+        {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-lg border border-gray-200 bg-white p-3 text-xs">
           <p className="font-medium">{draft.template_name} · {draft.template_type ? typeLabels[draft.template_type] : ''}</p>
           <p>Header: {draft.header} · Category: {categoryLabels[index]} · Encoding: {draft.message_type === '1' ? 'ASCII' : 'Unicode'}</p>
           <details className="text-gray-500"><summary className="cursor-pointer">Provider IDs</summary><p className="mt-1 break-all">Header ID: {draft.header_id} · Category ID: {draft.category_id}{draft.service_type ? ` · Service type: ${draft.service_type}` : ''}{draft.brand_id ? ` · Brand ID: ${draft.brand_id}` : ''}</p></details>

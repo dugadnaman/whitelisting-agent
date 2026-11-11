@@ -114,7 +114,7 @@ export default function LoginPage() {
               value={organization}
               onChange={(e) => setOrganization(e.target.value)}
               disabled={loading}
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white disabled:bg-gray-100"
+              className="workspace-select"
             >
               <option value="">Use my account&apos;s organization</option>
               <option value="bajaj">Bajaj Finserv</option>
@@ -135,7 +135,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
-              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors font-sans"
+              className="workspace-input"
             />
           </div>
 
@@ -159,7 +159,7 @@ export default function LoginPage() {
                 type="button"
                 disabled={loading}
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 text-sm font-medium p-1 rounded focus-visible:outline-2 focus-visible:outline-indigo-500"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 text-sm font-medium p-1 rounded"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
                 aria-pressed={showPassword}
               >

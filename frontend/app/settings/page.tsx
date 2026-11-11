@@ -553,9 +553,9 @@ export default function SettingsPage() {
 
   if (!hasAccountAccess) {
     return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-medium text-gray-900">Account settings</h1>
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 space-y-2">
+      <div className="workspace-page space-y-6">
+        <h1 className="workspace-heading">Account settings</h1>
+        <div className="workspace-panel p-6 space-y-2">
           <p className="text-sm font-medium text-gray-900">{currentUser?.name}</p>
           <p className="text-sm text-gray-600">{currentUser?.email}</p>
           <p className="text-sm text-gray-600">Organization: {getAccountLabel(currentUser?.tenant_id)}</p>
@@ -729,7 +729,7 @@ export default function SettingsPage() {
                 value={moeBearerToken}
                 autoComplete="off"
                 onChange={(event) => setMoeBearerToken(event.target.value)}
-                placeholder="Paste the Authorization: Bearer <JWT> header from MoEngage DevTools..."
+                placeholder="Paste the Authorization: Bearer <JWT> header from MoEngage DevTools"
                 className="workspace-input w-full font-mono"
               />
               <p className="text-sm text-gray-500 mt-1">
@@ -878,7 +878,7 @@ export default function SettingsPage() {
                       type="password"
                       value={session}
                       onChange={(e) => setSession(e.target.value)}
-                      placeholder="Paste Session header from DevTools..."
+                      placeholder="Paste Session header from DevTools"
                       className="workspace-input w-full font-mono"
                     />
                   </div>
@@ -892,7 +892,7 @@ export default function SettingsPage() {
                       type="text"
                       value={user}
                       onChange={(e) => setUser(e.target.value)}
-                      placeholder="Paste User header from DevTools..."
+                      placeholder="Paste User header from DevTools"
                       className="workspace-input w-full font-mono"
                     />
                   </div>
@@ -972,7 +972,7 @@ export default function SettingsPage() {
                       autoComplete="new-password"
                       value={wabaAuthToken}
                       onChange={(e) => setWabaAuthToken(e.target.value)}
-                      placeholder="Leave blank to preserve saved token..."
+                      placeholder="Leave blank to preserve saved token"
                       className="workspace-input w-full font-mono"
                     />
                     <p className="text-sm text-gray-500 mt-1">Leave blank to keep the saved key. A value entered here is tested exactly as an official API token, not as a portal session. Save rejects invalid replacements and preserves the previous key.</p>
@@ -1440,7 +1440,7 @@ export default function SettingsPage() {
       {/* Invite Modal */}
       {showInviteModal && canManageTeam && teamTenant && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div role="dialog" aria-label="Add team colleague" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
+          <div role="dialog" aria-modal="true" aria-label="Add team colleague" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-base font-medium text-gray-900">Add colleague</h3>
               <button type="button" aria-label="Close colleague dialog" onClick={() => setShowInviteModal(false)} className="text-gray-500 hover:text-gray-600 font-medium">
@@ -1465,7 +1465,7 @@ export default function SettingsPage() {
                   setInvitePassword('');
                   const team = await fetchTeam(teamTenant);
                   setTeamMembers(team || []);
-                  setBanner({ type: 'success', message: `Added ${nameSaved} to ${getAccountLabel(teamTenant || selectedAccount)}!` });
+                  setBanner({ type: 'success', message: `Added ${nameSaved} to ${getAccountLabel(teamTenant || selectedAccount)}.` });
                 } catch (err) {
                   setBanner({ type: 'error', message: err instanceof Error ? err.message : String(err) });
                 } finally {
@@ -1553,7 +1553,7 @@ export default function SettingsPage() {
       {/* Add Account Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div role="dialog" aria-label="Add client account" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
+          <div role="dialog" aria-modal="true" aria-label="Add client account" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-base font-medium text-gray-900">Add client account</h3>
               <button
@@ -1628,7 +1628,7 @@ export default function SettingsPage() {
       {/* Delete Confirmation Modal */}
       {accountToDelete && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-sm w-full p-6 shadow-sm border border-gray-100 space-y-4">
+          <div role="dialog" aria-modal="true" aria-label="Delete account confirmation" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-sm w-full p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex items-center gap-3 text-red-600">
               <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" />

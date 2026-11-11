@@ -250,10 +250,10 @@ function Workspace({ userId }: { userId: string }) {
       <p className="workspace-description max-w-3xl">Save the supplied content as MoEngage drafts, then complete missing details directly in MoEngage. Missing launch settings do not block draft saving. Template names and sender numbers resolve to approved workspace IDs; no sheet edits are needed.</p>
       <details className="workspace-guide text-sm text-gray-600"><summary className="cursor-pointer font-medium text-gray-900">Before you begin: scheduling and goal-tracking rules</summary><p className="mt-3 leading-relaxed">Yearless sheet dates use the client-confirmed 2026 brief year; explicit sheet years take precedence. Approved-template CTAs do not need duplicate entries in the brief. Planned IST times are draft metadata, not activated schedules, and past dates are not moved forward. Goal tracking uses elapsed end − start from delivery: 29 October to 1 November is 3 days. Crocs, AGIPL, R&amp;B and CK have no conversion goals. No publishing, test sends or SMS fallback creation.</p></details>
     </header>
-    <ol aria-label="Draft workflow progress" className="flex gap-4 overflow-x-auto border-b border-gray-200 pb-3 text-xs sm:grid sm:grid-cols-4 sm:text-sm">
+    <ol aria-label="Draft workflow progress" className="grid grid-cols-2 gap-3 border-b border-gray-200 pb-3 text-xs sm:grid-cols-4 sm:text-sm">
       {['Brand & brief', 'Review campaigns', 'Stage for approval', 'Save drafts'].map((label, index) => {
         const step = batch ? 3 : reviewed ? 2 : preview ? 1 : 0;
-        return <li key={label} aria-current={step === index ? 'step' : undefined} className={`shrink-0 ${step === index ? 'font-medium text-gray-900' : 'text-gray-500'}`}><span className="mr-2 font-mono tabular-nums">{index + 1}.</span>{label}{allVerified && index === 3 ? ' · Complete' : ''}</li>;
+        return <li key={label} aria-current={step === index ? 'step' : undefined} className={`min-w-0 ${step === index ? 'font-medium text-gray-900' : 'text-gray-500'}`}><span className="mr-1.5 font-mono tabular-nums">{index + 1}.</span>{label}{allVerified && index === 3 ? ' · Complete' : ''}</li>;
       })}
     </ol>
     {error && <div ref={errorRef} tabIndex={-1} role="alert" className="scroll-mt-40 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"><p className="font-medium">Action needed</p><p className="mt-1">{error}</p></div>}

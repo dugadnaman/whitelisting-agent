@@ -25,8 +25,8 @@ function StatusBadge({ status }: { status: string }) {
     approved: 'bg-green-100 text-green-800 border border-green-200',
     rejected: 'bg-red-100 text-red-800 border border-red-200',
     failed: 'bg-red-100 text-red-800 border border-red-200',
-    submitted: 'bg-blue-100 text-blue-800 border border-blue-200',
-    duplicate: 'bg-blue-100 text-blue-800 border border-blue-200',
+    submitted: 'bg-sky-50 text-sky-800 border border-sky-200',
+    duplicate: 'bg-sky-50 text-sky-800 border border-sky-200',
     unknown: 'bg-gray-100 text-gray-800 border border-gray-200',
   };
   const s = (status || 'unknown').toLowerCase();
@@ -38,7 +38,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function LiveBadge({ live, existsOnWaba, channel }: { live?: boolean; existsOnWaba?: boolean; channel?: string }) {
-  if (channel === 'sms' && (live || existsOnWaba)) return <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700" title="Found in the VILPOWER DLT inventory; see approval status separately">On DLT portal</span>;
+  if (channel === 'sms' && (live || existsOnWaba)) return <span className="rounded bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-800 border border-sky-200" title="Found in the VILPOWER DLT inventory; see approval status separately">On DLT portal</span>;
   if (live) {
     return (
       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200" title="Synced live from the Karix WABA">
@@ -49,8 +49,8 @@ function LiveBadge({ live, existsOnWaba, channel }: { live?: boolean; existsOnWa
   }
   if (existsOnWaba) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200" title="Found on Karix WABA">
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-800 border border-sky-200" title="Found on Karix WABA">
+        <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
         On WABA
       </span>
     );
@@ -65,10 +65,10 @@ function LiveBadge({ live, existsOnWaba, channel }: { live?: boolean; existsOnWa
 function ActivityIcon({ action }: { action: string }) {
   const map: Record<string, { bg: string; icon: string }> = {
     TEMPLATE_SUBMISSION: { bg: 'bg-emerald-50 text-emerald-600', icon: 'M4 5h12M9 3v2m1.048 8.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129' },
-    TEMPLATE_PREVIEW: { bg: 'bg-blue-50 text-blue-600', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
-    STATUS_POLL: { bg: 'bg-blue-50 text-blue-600', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
-    CREDENTIALS_UPDATE: { bg: 'bg-amber-50 text-amber-600', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
-    CREDENTIALS_TEST: { bg: 'bg-blue-50 text-blue-600', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+    TEMPLATE_PREVIEW: { bg: 'bg-gray-100 text-gray-600', icon: 'M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z' },
+    STATUS_POLL: { bg: 'bg-sky-50 text-sky-700', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+    CREDENTIALS_UPDATE: { bg: 'bg-amber-50 text-amber-600', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
+    CREDENTIALS_TEST: { bg: 'bg-gray-100 text-gray-600', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
   };
   const item = map[action] || { bg: 'bg-gray-50 text-gray-500', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' };
   return (
@@ -544,7 +544,7 @@ export default function DashboardPage() {
         { key: 'approved', label: 'Approved', value: stats?.approved ?? 0, color: 'bg-emerald-500' },
         { key: 'pending', label: 'Pending', value: stats?.pending ?? 0, color: 'bg-amber-400' },
         { key: 'failed', label: 'Failed', value: stats?.failed ?? 0, color: 'bg-red-500' },
-        { key: 'duplicate', label: 'Duplicate', value: stats?.duplicate ?? 0, color: 'bg-blue-400' },
+        { key: 'duplicate', label: 'Duplicate', value: stats?.duplicate ?? 0, color: 'bg-sky-500' },
       ];
   const distTotal = segs.reduce((acc, s) => acc + s.value, 0);
 
@@ -560,7 +560,7 @@ export default function DashboardPage() {
         { key: 'approved', label: 'Approved', value: stats?.approved ?? 0, dot: 'bg-emerald-500', statusValue: 'approved' },
         { key: 'pending', label: 'Pending', value: stats?.pending ?? 0, dot: 'bg-amber-500', statusValue: 'pending' },
         { key: 'failed', label: 'Failed', value: stats?.failed ?? 0, dot: 'bg-red-500', statusValue: 'failed' },
-        { key: 'total', label: 'Total Templates', value: total, dot: 'bg-blue-500', statusValue: '' },
+        { key: 'total', label: 'Total Templates', value: total, dot: 'bg-gray-600', statusValue: '' },
       ];
 
   return (
@@ -597,7 +597,7 @@ export default function DashboardPage() {
               <span
                 className={`rounded-md border px-2 py-1 text-xs font-medium ${
                   stats.karix_health.status === 'optimal' ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                    : stats.karix_health.status === 'moderate' ? 'border-blue-200 bg-blue-50 text-blue-800'
+                    : stats.karix_health.status === 'moderate' ? 'border-sky-200 bg-sky-50 text-sky-800'
                     : stats.karix_health.status === 'degraded' ? 'border-amber-200 bg-amber-50 text-amber-800'
                     : 'border-rose-200 bg-rose-50 text-rose-800'
                 }`}
@@ -1096,7 +1096,7 @@ export default function DashboardPage() {
                                 toggleRow(key);
                               }
                             }}
-                            className={`hover:bg-gray-50/70 transition-colors cursor-pointer ${isExpanded ? 'bg-blue-50/30' : ''}`}
+                            className={`hover:bg-gray-50/70 transition-colors cursor-pointer ${isExpanded ? 'bg-gray-50' : ''}`}
                           >
                             {(channel === 'whatsapp' || channel === 'rcs') && (
                               <td className="w-10 px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -1203,7 +1203,7 @@ export default function DashboardPage() {
                                 )}
                                 <button
                                   type="button"
-                                  className="rounded px-2 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
+                                  className="rounded px-2 py-1.5 text-sm font-medium text-blue-700 hover:bg-gray-100"
                                   onClick={() => toggleRow(key)}
                                   aria-expanded={isExpanded}
                                   aria-label={`${isExpanded ? 'Hide' : 'Show'} details for ${t.template_name}`}
@@ -1275,10 +1275,10 @@ export default function DashboardPage() {
                                           handleSyncSingleRcsToMoEngage(t);
                                         }}
                                         disabled={syncBusy || !syncDestinationReady}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto ${
+                                        className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto ${
                                           syncedSingleRcs[t.template_name]
                                             ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                            : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-300'
+                                            : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'
                                         }`}
                                       >
                                         {syncingSingleRcs[t.template_name] ? (
@@ -1387,7 +1387,7 @@ export default function DashboardPage() {
       </div>
       {/* Delete from Spreadsheet Modal */}
       {showFileDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-xs">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
           <div role="dialog" aria-modal="true" aria-labelledby="file-delete-heading" className="bg-white rounded-xl border border-gray-200 shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-5">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
               <div className="flex items-center gap-2.5">

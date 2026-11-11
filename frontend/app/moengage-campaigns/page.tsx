@@ -1011,7 +1011,7 @@ function GeneralCampaignsPage() {
             aria-pressed={activeTab === 'batch'}
             className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'batch'
-                ? 'border-indigo-600 text-gray-700'
+                ? 'border-indigo-600 text-gray-900'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
@@ -1024,7 +1024,7 @@ function GeneralCampaignsPage() {
             aria-pressed={activeTab === 'single'}
             className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'single'
-                ? 'border-indigo-600 text-gray-700'
+                ? 'border-indigo-600 text-gray-900'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
@@ -1036,7 +1036,7 @@ function GeneralCampaignsPage() {
             aria-pressed={activeTab === 'templates'}
             className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'templates'
-                ? 'border-indigo-600 text-gray-700'
+                ? 'border-indigo-600 text-gray-900'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
@@ -1049,13 +1049,13 @@ function GeneralCampaignsPage() {
       {error && (
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 flex items-start gap-3">
           <div className="flex-1">{error}</div>
-          <button type="button" aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded p-1 text-rose-700 hover:bg-rose-100">✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded p-1 text-rose-700 hover:bg-rose-100"><svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" d="M5 5l10 10M15 5L5 15" /></svg></button>
         </div>
       )}
       {notice && (
         <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 flex items-start gap-3">
           <div className="flex-1 font-medium">{notice}</div>
-          <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')} className="shrink-0 rounded p-1 text-emerald-700 hover:bg-emerald-100">✕</button>
+          <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')} className="shrink-0 rounded p-1 text-emerald-700 hover:bg-emerald-100"><svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" d="M5 5l10 10M15 5L5 15" /></svg></button>
         </div>
       )}
       {busy && <p role="status" className="workspace-guide flex items-center gap-3 text-sm text-gray-700"><span aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-200 border-t-indigo-600" />{automatingWa ? 'Saving and verifying WhatsApp drafts sequentially. Results appear below.' : 'Processing your request. Keep this page open until the result is confirmed.'}</p>}
@@ -1500,7 +1500,7 @@ function GeneralCampaignsPage() {
                     aria-pressed={filterChannel === ch}
                     className={`workspace-filter-chip ${
                       filterChannel === ch
-                        ? 'border-gray-200 bg-gray-50 text-gray-900'
+                        ? 'border-gray-900 bg-gray-900 text-white'
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
@@ -1584,7 +1584,7 @@ function GeneralCampaignsPage() {
                     aria-pressed={filterChannel === ch}
                     className={`workspace-filter-chip ${
                       filterChannel === ch
-                        ? 'border-gray-200 bg-gray-50 text-gray-900'
+                        ? 'border-gray-900 bg-gray-900 text-white'
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >

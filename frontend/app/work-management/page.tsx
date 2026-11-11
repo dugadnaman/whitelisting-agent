@@ -773,7 +773,7 @@ export default function WorkManagementPage() {
           >
             
             <span>Daily SLA reminders</span>
-            <span className="text-sm bg-white/20 px-1.5 py-0.5 rounded-md font-medium">
+            <span className="text-sm bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded-md font-medium">
               10am • 1pm • 4pm
             </span>
           </button>
@@ -803,7 +803,7 @@ export default function WorkManagementPage() {
           }`}
         >
           Turnaround & bottlenecks
-          <span className="text-sm bg-white/20 px-1.5 py-0.5 rounded-md font-medium">
+          <span className={`text-sm px-1.5 py-0.5 rounded-md font-medium ${activeTab === 'ANALYTICS' ? 'bg-white/20 text-white' : 'bg-white text-gray-700 border border-gray-200'}`}>
             SLA view
           </span>
         </button>
@@ -993,7 +993,7 @@ export default function WorkManagementPage() {
                 <div
                   onClick={() => setAnalyticsRoadblockFilter('TATA')}
                   className={`bg-gray-800 h-full transition-colors hover:brightness-110 relative ${
-                    analyticsRoadblockFilter === 'TATA' ? 'ring-2 ring-blue-900 z-10' : ''
+                    analyticsRoadblockFilter === 'TATA' ? 'ring-2 ring-gray-900 z-10' : ''
                   }`}
                   style={{ width: `${Math.max(5, analyticsData.roadblock_attribution.tata_capital.percentage)}%` }}
                   title={`Tata Capital: ${analyticsData.roadblock_attribution.tata_capital.percentage}% (${analyticsData.roadblock_attribution.tata_capital.count} tickets) - Click to filter`}
@@ -1001,7 +1001,7 @@ export default function WorkManagementPage() {
                 <div
                   onClick={() => setAnalyticsRoadblockFilter('KARIX')}
                   className={`bg-gray-500 h-full transition-colors hover:brightness-110 relative ${
-                    analyticsRoadblockFilter === 'KARIX' ? 'ring-2 ring-purple-900 z-10' : ''
+                    analyticsRoadblockFilter === 'KARIX' ? 'ring-2 ring-gray-700 z-10' : ''
                   }`}
                   style={{ width: `${Math.max(5, analyticsData.roadblock_attribution.karix_meta.percentage)}%` }}
                   title={`Karix / Meta Gate: ${analyticsData.roadblock_attribution.karix_meta.percentage}% (${analyticsData.roadblock_attribution.karix_meta.count} tickets) - Click to filter`}
@@ -1032,7 +1032,7 @@ export default function WorkManagementPage() {
                   onClick={() => setAnalyticsRoadblockFilter('TATA')}
                   className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-medium transition-colors flex flex-wrap items-center gap-2 border ${
                     analyticsRoadblockFilter === 'TATA'
-                      ? 'bg-blue-600 text-white border-gray-600 '
+                      ? 'bg-gray-900 text-white border-gray-900'
                       : 'bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100'
                   }`}
                 >
@@ -1043,7 +1043,7 @@ export default function WorkManagementPage() {
                   onClick={() => setAnalyticsRoadblockFilter('KARIX')}
                   className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-medium transition-colors flex flex-wrap items-center gap-2 border ${
                     analyticsRoadblockFilter === 'KARIX'
-                      ? 'bg-purple-600 text-white border-gray-600 '
+                      ? 'bg-gray-700 text-white border-gray-700'
                       : 'bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100'
                   }`}
                 >
@@ -1243,7 +1243,7 @@ export default function WorkManagementPage() {
                     value={analyticsSearchQuery}
                   aria-label="Search stalled tickets"
                     onChange={(e) => setAnalyticsSearchQuery(e.target.value)}
-                    placeholder="Search key, summary, root cause, assignee..."
+                    placeholder="Search key, summary, cause or assignee"
                     className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full md:w-64 border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-800"
                   />
                   {(analyticsRoadblockFilter !== 'ALL' || analyticsSearchQuery || analyticsSelectedOperator) && (
@@ -1469,12 +1469,12 @@ export default function WorkManagementPage() {
                           <td className="py-3 px-4">
                             <div className="flex flex-wrap items-center gap-3">
                               <div
-                                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium text-white  ${
+                                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium text-white ${
                                   isOverloaded
-                                    ? 'bg-red-600'
+                                    ? 'bg-red-700'
                                     : isModerate
-                                    ? 'bg-amber-600'
-                                    : 'bg-indigo-600'
+                                    ? 'bg-amber-700'
+                                    : 'bg-gray-800'
                                 }`}
                               >
                                 {getInitials(u.name)}
@@ -1664,7 +1664,7 @@ export default function WorkManagementPage() {
                       <h3 className="text-base font-medium text-gray-900">
                         Workload balancing
                       </h3>
-                      <span className="text-sm  font-medium px-2 py-0.5 rounded-md bg-indigo-500/30 text-gray-700 border border-gray-200">
+                      <span className="text-sm font-medium px-2 py-0.5 rounded-md bg-gray-100 text-gray-700 border border-gray-200">
                         AI-assisted
                       </span>
                     </div>
@@ -1691,7 +1691,7 @@ export default function WorkManagementPage() {
                         setAiPrompt(`Relieve ${maxLoadedUser.name} of active tickets to available team members`);
                         setShowAiDrawer(true);
                       }}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors flex flex-wrap items-center gap-2 "
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 transition-colors flex flex-wrap items-center gap-2"
                     >
                       Quick Rebalance ({maxLoadedUser.name})
                     </button>
@@ -1699,7 +1699,7 @@ export default function WorkManagementPage() {
                   <button
                     onClick={() => setShowAiDrawer(!showAiDrawer)}
                     aria-expanded={showAiDrawer}
-                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3.5 py-1.5 rounded-lg text-sm font-medium bg-white hover:bg-white/20 text-gray-900 border border-gray-200 transition-colors flex flex-wrap items-center gap-2"
+                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3.5 py-1.5 rounded-lg text-sm font-medium bg-white hover:bg-gray-50 text-gray-900 border border-gray-200 transition-colors flex flex-wrap items-center gap-2"
                   >
                     <span>{showAiDrawer ? 'Hide balancing controls' : 'Open balancing controls'}</span>
                   </button>
@@ -1763,7 +1763,7 @@ export default function WorkManagementPage() {
                         <button
                           key={qp}
                           onClick={() => setAiPrompt(qp)}
-                          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium bg-white hover:bg-white/20 text-gray-700 px-2.5 py-1 rounded-lg border border-gray-200 transition-colors"
+                          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 px-2.5 py-1 rounded-lg border border-gray-200 transition-colors"
                         >
                           {qp}
                         </button>
@@ -1818,7 +1818,7 @@ export default function WorkManagementPage() {
                                     setAiProposals(prev => prev.map(item => item.issue_key === p.issue_key ? { ...item, executed: true } : item));
                                     await handleRefresh();
                                   }}
-                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 flex-1 py-1 px-2 rounded bg-white hover:bg-white/20 text-amber-800 border border-amber-400/30 text-sm font-medium transition-colors cursor-pointer"
+                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 flex-1 py-1 px-2 rounded bg-white hover:bg-gray-50 text-amber-800 border border-amber-300 text-sm font-medium transition-colors cursor-pointer"
                                   title="Apply reassignment in Agent only (skip Jira update)"
                                 >
                                    Skip Jira
@@ -1892,7 +1892,7 @@ export default function WorkManagementPage() {
                 value={searchQuery}
                 aria-label="Search Jira tickets"
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search key, title, channel..."
+                placeholder="Search key, title or channel"
                 className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 workspace-search w-full pl-8 pr-9"
               />
               <svg className="w-4 h-4 text-gray-500 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2027,7 +2027,7 @@ export default function WorkManagementPage() {
                 setBulkTargetId(data?.assignees[0]?.account_id || '');
                 setBulkModalOpen(true);
               }}
-              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-1.5 rounded-lg text-sm font-medium bg-indigo-500 hover:bg-gray-400 text-white  flex flex-wrap items-center gap-2 transition-colors"
+              className="workspace-button-primary"
             >
               Bulk reassign ({selectedTicketKeys.length})
             </button>
@@ -2064,7 +2064,7 @@ export default function WorkManagementPage() {
               subtitle: 'Waiting on Tata audience mart / client copy',
               badgeClass: 'bg-rose-50 text-rose-700 border-rose-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t border-t-gray-300',
+              accentBorder: '',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 return (
@@ -2082,7 +2082,7 @@ export default function WorkManagementPage() {
               subtitle: 'Drafting, MoEngage & creative formatting',
               badgeClass: 'bg-gray-50 text-gray-700 border-gray-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t border-t-gray-300',
+              accentBorder: '',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 const isBlocked =
@@ -2110,7 +2110,7 @@ export default function WorkManagementPage() {
               subtitle: 'Karix submission & Meta approval latency',
               badgeClass: 'bg-gray-50 text-gray-700 border-gray-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t border-t-gray-300',
+              accentBorder: '',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 const isDone =
@@ -2139,7 +2139,7 @@ export default function WorkManagementPage() {
               subtitle: 'Approved templates & completed campaigns',
               badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t border-t-gray-300',
+              accentBorder: '',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 return (
@@ -2324,7 +2324,7 @@ export default function WorkManagementPage() {
                                     }`}
                                     title={canTransferTickets ? 'Reassign this single ticket' : 'Transfer power is restricted to Dnyanesh, Neel, and Mrunali'}
                                   >
-                                    {canTransferTickets ? 'Transfer' : ' Transfer'}
+                                    Transfer
                                   </button>
                                 </div>
                               </div>
@@ -2581,7 +2581,7 @@ export default function WorkManagementPage() {
                             }`}
                             title={canTransferTickets ? 'Reassign this single ticket' : 'Transfer power is restricted to Dnyanesh, Neel, and Mrunali'}
                           >
-                            {canTransferTickets ? 'Transfer' : ' Transfer'}
+                            Transfer
                           </button>
                         </div>
                       </td>
@@ -2597,7 +2597,7 @@ export default function WorkManagementPage() {
       )}
       {/* Ticket Transfer Modal */}
       {transferItem && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div role="dialog" aria-modal="true" aria-label="Transfer Jira ticket" className="bg-white rounded-xl shadow-xl max-w-md min-w-0 w-full max-h-[90vh] overflow-y-auto p-6 border border-gray-200 space-y-4">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
@@ -2714,7 +2714,7 @@ export default function WorkManagementPage() {
 
       {/* Bulk Reassign Modal */}
       {bulkModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div role="dialog" aria-modal="true" aria-label="Bulk reassign Jira tickets" className="bg-white rounded-xl shadow-xl max-w-md min-w-0 w-full max-h-[90vh] overflow-y-auto p-6 border border-gray-200 space-y-4">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
@@ -2836,8 +2836,8 @@ export default function WorkManagementPage() {
 
       {/* Daily SLA Alert Dispatcher Modal */}
       {showAlertModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 overflow-y-auto flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-label="Daily SLA reminders" className="bg-white rounded-xl shadow-2xl max-w-4xl w-full border border-gray-200 flex flex-col max-h-[92vh] my-auto overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto flex items-center justify-center p-3 sm:p-4">
+          <div role="dialog" aria-modal="true" aria-label="Daily SLA reminders" className="bg-white rounded-xl shadow-xl max-w-4xl w-full border border-gray-200 flex flex-col max-h-[92vh] my-auto overflow-hidden">
             {/* Modal Header (Sticky Top) */}
             <div className="p-4 sm:p-5 border-b border-gray-100 flex items-start justify-between shrink-0 bg-white z-10">
               <div>
@@ -2883,7 +2883,7 @@ export default function WorkManagementPage() {
                 onClick={handleToggleScheduler}
                 className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors self-start sm:self-auto border ${
                   schedulerStatus?.enabled
-                    ? 'bg-white hover:bg-white/20 text-gray-900 border-gray-200'
+                    ? 'bg-white hover:bg-gray-50 text-gray-900 border-gray-300'
                     : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
                 }`}
               >
@@ -3124,7 +3124,7 @@ export default function WorkManagementPage() {
                     value={googleChatWebhookUrl}
                   aria-label="Google Chat webhook URL"
                     onChange={(e) => setGoogleChatWebhookUrl(e.target.value)}
-                    placeholder="Paste Google Chat Webhook URL (https://chat.googleapis.com/v1/spaces/...)..."
+                    placeholder="https://chat.googleapis.com/v1/spaces/..."
                     className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg px-2.5 py-1 text-sm text-gray-800 placeholder-gray-400 font-mono"
                   />
                 </div>
@@ -3274,8 +3274,8 @@ export default function WorkManagementPage() {
       )}
       {/* WhatsApp Gateway Pairing Modal */}
       {showWhatsAppModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 overflow-y-auto flex items-center justify-center p-3 sm:p-4 backdrop-blur-sm">
-          <div role="dialog" aria-modal="true" aria-label="WhatsApp gateway pairing" className="bg-white rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto border border-gray-200 flex flex-col overflow-hidden">
+        <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto flex items-center justify-center p-3 sm:p-4">
+          <div role="dialog" aria-modal="true" aria-label="WhatsApp gateway pairing" className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto border border-gray-200 flex flex-col overflow-hidden">
             <div className="p-4 bg-gray-50 border-b border-gray-200 text-gray-900 flex items-center justify-between">
               <div className="flex flex-wrap items-center gap-2">
                 

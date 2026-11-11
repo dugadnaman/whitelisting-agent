@@ -94,7 +94,7 @@ export default function MoEngageOpsPage() {
         filesCount > 1
           ? `across ${filesCount} CSV files (${camps} campaigns, ${flows} flows, ${nodes} action nodes)`
           : `(${camps} campaigns, ${flows} flows, ${nodes} action nodes)`;
-      alert(`Successfully imported ${count} items ${partsSummary} from ${file.name}!`);
+      alert(`Successfully imported ${count} items ${partsSummary} from ${file.name}.`);
       await loadDashboard();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -175,7 +175,6 @@ export default function MoEngageOpsPage() {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="workspace-heading">MoEngage operations</h1>
             <span className="inline-flex flex-wrap items-center gap-2 px-2.5 py-0.5 rounded-md text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
-              <span className="w-2 h-2 rounded-full bg-blue-500 " />
               Tata Capital
             </span>
           </div>
@@ -517,7 +516,7 @@ export default function MoEngageOpsPage() {
 
       {/* Workspace Management Modal */}
       {showWorkspacesModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div role="dialog" aria-modal="true" aria-label="MoEngage workspaces" className="bg-white rounded-xl shadow-xl max-w-2xl min-w-0 w-full p-6 border border-gray-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
               <div>

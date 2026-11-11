@@ -82,7 +82,7 @@ function DraftWarningList({ draft, showAspectWarnings = true }: { draft: DraftWa
           {warning.recommendation && <p>{warning.recommendation}</p>}
         </div>)}
       {draft.grammar_warnings?.map((warning, index) => (
-        <div key={`grammar-${index}`} className="p-2 rounded-lg border border-gray-200 bg-gray-50 text-blue-900">
+        <div key={`grammar-${index}`} className="p-2 rounded-lg border border-gray-200 bg-gray-50 text-gray-800">
           <p className="font-medium">{warning.component ? `${warning.component}: ` : ''}Grammar: {warning.issue}</p>
           {warning.suggestion && <p>{warning.suggestion}</p>}
           {warning.original && <p>Original: {warning.original}</p>}
@@ -118,8 +118,8 @@ function BriefStatusBadge({ status }: { status?: string }) {
     dotColor = 'bg-emerald-500';
     label = 'Completed';
   } else if (s === 'in progress' || s === 'in_progress' || s === 'review' || s === 'test sent' || s === 'submitted') {
-    colorClass = 'bg-blue-50 text-blue-800 border-blue-200';
-    dotColor = 'bg-blue-500';
+    colorClass = 'bg-sky-50 text-sky-800 border-sky-200';
+    dotColor = 'bg-sky-500';
     label = 'In Progress';
   } else if (s === 'failed' || s === 'rejected' || s === 'error') {
     colorClass = 'bg-rose-50 text-rose-800 border-rose-200';
@@ -1564,7 +1564,7 @@ export default function JiraBriefsPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <p className="workspace-eyebrow">Campaign operations</p>
-          <h1 className="text-[28px] font-medium tracking-tight text-gray-900 sm:text-3xl">Jira briefs</h1>
+          <h1 className="workspace-heading">Jira briefs</h1>
           <p className="max-w-2xl text-sm leading-relaxed text-gray-500">From ticket to reviewed template. Keep the source in view and confirm only what you choose.</p>
         </div>
         <button type="button" onClick={() => loadIssues(searchQuery, briefStatusFilter)} disabled={loadingIssues}
@@ -1580,11 +1580,11 @@ export default function JiraBriefsPage() {
             { label: 'Review', detail: workflowStep === 3 ? 'Review prepared' : loadedCurrentBrief ? (smsReview?.issueKey === brief?.issue_key && activeTab === 'sms' ? 'DLT review open' : 'Check copy & selection') : 'After loading' },
             { label: 'Confirm', detail: workflowStep === 3 ? 'Awaiting your confirmation' : brief?.is_email_campaign && loadedCurrentBrief ? 'No whitelisting required' : smsReview?.issueKey === brief?.issue_key && activeTab === 'sms' ? 'Within DLT review' : 'Final approval required' },
           ].map((step, index) => (
-            <li key={step.label} aria-current={workflowStep === index + 1 ? 'step' : undefined} className="relative flex min-w-0 flex-1 gap-2 last:flex-none last:w-[30%] sm:gap-3">
+            <li key={step.label} aria-current={workflowStep === index + 1 ? 'step' : undefined} className="relative flex min-w-0 flex-1 gap-2 sm:gap-3">
               {index < 2 && <span aria-hidden="true" className={`absolute left-8 right-2 top-4 h-px ${workflowStep > index + 1 ? 'bg-blue-300' : 'bg-gray-200'}`} />}
               <span aria-hidden="true" className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-medium ${workflowStep >= index + 1 ? 'border-gray-200 bg-gray-50 text-blue-800' : 'border-gray-200 bg-white text-gray-400'}`}>{index + 1}</span>
-              <div className="relative min-w-0 bg-white pr-2 pt-1">
-                <p className={`text-sm font-medium ${workflowStep === index + 1 ? 'text-blue-800' : workflowStep > index + 1 ? 'text-gray-800' : 'text-gray-500'}`}>{step.label}</p>
+              <div className="relative min-w-0 bg-white pr-2 pt-1.5">
+                <p className={`text-xs sm:text-sm font-medium ${workflowStep === index + 1 ? 'text-blue-800' : workflowStep > index + 1 ? 'text-gray-800' : 'text-gray-500'}`}>{step.label}</p>
                 <p className="mt-1 hidden text-xs leading-relaxed text-gray-500 sm:block">{step.detail}</p>
               </div>
             </li>
@@ -1615,8 +1615,8 @@ export default function JiraBriefsPage() {
             
             <span>{feedback.message}</span>
           </div>
-          <button aria-label="Dismiss feedback" onClick={() => setFeedback(null)} className="text-gray-400 hover:text-gray-600">
-            ✕
+          <button aria-label="Dismiss feedback" onClick={() => setFeedback(null)} className="text-gray-400 hover:text-gray-600 p-1 rounded">
+            <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" d="M5 5l10 10M15 5L5 15" /></svg>
           </button>
         </div>
       )}
@@ -1689,7 +1689,7 @@ export default function JiraBriefsPage() {
                       onClick={() => handleSelectIssue(issue.key)}
                       className={`w-full text-left p-3 rounded-lg border transition-colors text-sm space-y-2 ${
                         isSelected
-                          ? 'bg-gray-50/80 border-blue-300 ring-1 ring-blue-400/40 '
+                          ? 'bg-gray-50 border-gray-900 ring-1 ring-gray-900/15'
                           : 'bg-white border-gray-200 hover:bg-gray-50/80'
                       }`}
                     >
@@ -1697,7 +1697,7 @@ export default function JiraBriefsPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium font-mono text-blue-700">{issue.key}</span>
                         {issue.is_email ? (
-                          <span className="rounded-lg bg-gray-50 px-1.5 py-0.5 text-xs font-medium text-purple-700">
+                          <span className="rounded-md bg-sky-50 border border-sky-200 px-1.5 py-0.5 text-xs font-medium text-sky-800">
                             Email
                           </span>
                         ) : (
@@ -1805,10 +1805,10 @@ export default function JiraBriefsPage() {
 
                     {/* Dedicated RCS Destination Card when RCS templates are present */}
                     {channel === 'rcs' && rcsTemplates.length > 0 && (
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-blue-950 space-y-2">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-800 space-y-2">
                         <p className="font-medium">RCS bot: {currentRcs.botName}</p>
                         <details>
-                          <summary className="cursor-pointer text-blue-800">Connection details</summary>
+                          <summary className="cursor-pointer text-gray-700 font-medium">Connection details</summary>
                           <p className="mt-2 break-words">Bot ID: {currentRcs.botId || 'Not configured'} · User: {currentRcs.rcsUser} · Entity: {currentRcs.entity}</p>
                         </details>
                         {!currentRcs.botId && (
@@ -1857,7 +1857,7 @@ export default function JiraBriefsPage() {
                     </button>
                   )}
 
-                  {brief.is_email_campaign && <p className="text-xs text-purple-800">Email campaigns do not need Karix whitelisting. Open More tools for MoEngage staging.</p>}
+                  {brief.is_email_campaign && <p className="text-xs text-gray-700">Email campaigns do not need Karix whitelisting. Open More tools for MoEngage staging.</p>}
                 </div>
 
                 {/* Creatives Attachment Strip & Image Preview Gallery */}
@@ -2010,7 +2010,7 @@ export default function JiraBriefsPage() {
                         onClick={() => setActiveTab('email')}
                         className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'email'
-                            ? 'border-purple-600 text-purple-700 bg-white'
+                            ? 'border-blue-600 text-gray-900 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
@@ -2024,7 +2024,7 @@ export default function JiraBriefsPage() {
                         onClick={() => setActiveTab('comments')}
                         className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'comments'
-                            ? 'border-indigo-600 text-indigo-700 bg-white'
+                            ? 'border-blue-600 text-gray-900 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
@@ -2035,20 +2035,26 @@ export default function JiraBriefsPage() {
                       </button>
 
                       <details className="relative px-3 text-xs">
-                        <summary className="cursor-pointer py-3 text-gray-500">More tools</summary>
-                      <button
-                        onClick={() => setActiveTab('moengage')}
-                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
-                          activeTab === 'moengage'
-                            ? 'border-amber-600 text-amber-700 bg-white'
-                            : 'border-transparent text-gray-500 hover:text-gray-700'
-                        }`}
-                      >
-                        <span>MoEngage email staging</span>
-                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
-                          Draft
-                        </span>
-                      </button>
+                        <summary className="cursor-pointer py-3 text-gray-600 hover:text-gray-900 font-medium">More tools</summary>
+                        <div className="mt-1 sm:absolute sm:right-0 sm:top-full z-20 min-w-[200px] rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              (e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open');
+                              setActiveTab('moengage');
+                            }}
+                            className={`w-full rounded-md py-2 px-3 text-left text-xs font-medium transition-colors flex items-center justify-between gap-2 ${
+                              activeTab === 'moengage'
+                                ? 'bg-gray-100 text-gray-900'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                          >
+                            <span>MoEngage email staging</span>
+                            <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded font-mono">
+                              Draft
+                            </span>
+                          </button>
+                        </div>
                       </details>
                     </>
                   ) : (
@@ -2057,7 +2063,7 @@ export default function JiraBriefsPage() {
                         onClick={() => setActiveTab('whatsapp')}
                         className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'whatsapp'
-                            ? 'border-emerald-600 text-emerald-700 bg-white'
+                            ? 'border-blue-600 text-gray-900 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
@@ -2071,7 +2077,7 @@ export default function JiraBriefsPage() {
                         onClick={() => setActiveTab('rcs')}
                         className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'rcs'
-                            ? 'border-blue-600 text-blue-700 bg-white'
+                            ? 'border-blue-600 text-gray-900 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
@@ -2085,7 +2091,7 @@ export default function JiraBriefsPage() {
                         onClick={() => setActiveTab('sms')}
                         className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'sms'
-                            ? 'border-purple-600 text-purple-700 bg-white'
+                            ? 'border-blue-600 text-gray-900 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
@@ -2099,7 +2105,7 @@ export default function JiraBriefsPage() {
                         onClick={() => setActiveTab('comments')}
                         className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'comments'
-                            ? 'border-indigo-600 text-indigo-700 bg-white'
+                            ? 'border-blue-600 text-gray-900 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
@@ -2110,20 +2116,26 @@ export default function JiraBriefsPage() {
                       </button>
 
                       <details className="relative px-3 text-xs">
-                        <summary className="cursor-pointer py-3 text-gray-500">More tools</summary>
-                      <button
-                        onClick={() => setActiveTab('moengage')}
-                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
-                          activeTab === 'moengage'
-                            ? 'border-amber-600 text-amber-700 bg-white'
-                            : 'border-transparent text-gray-500 hover:text-gray-700'
-                        }`}
-                      >
-                        <span>MoEngage staging</span>
-                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
-                          Draft
-                        </span>
-                      </button>
+                        <summary className="cursor-pointer py-3 text-gray-600 hover:text-gray-900 font-medium">More tools</summary>
+                        <div className="mt-1 sm:absolute sm:right-0 sm:top-full z-20 min-w-[200px] rounded-lg border border-gray-200 bg-white p-1 shadow-lg">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              (e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open');
+                              setActiveTab('moengage');
+                            }}
+                            className={`w-full rounded-md py-2 px-3 text-left text-xs font-medium transition-colors flex items-center justify-between gap-2 ${
+                              activeTab === 'moengage'
+                                ? 'bg-gray-100 text-gray-900'
+                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                            }`}
+                          >
+                            <span>MoEngage staging</span>
+                            <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded font-mono">
+                              Draft
+                            </span>
+                          </button>
+                        </div>
                       </details>
                     </>
                   )}
@@ -2184,7 +2196,7 @@ export default function JiraBriefsPage() {
                             <div
                               key={`wa-card-${idx}`}
                               className={`p-4 rounded-xl border transition-colors space-y-3 ${
-                                isSelected ? 'bg-white border-blue-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
+                                isSelected ? 'bg-white border-gray-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
                               }`}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2564,7 +2576,7 @@ export default function JiraBriefsPage() {
                             <div
                               key={`rcs-card-${idx}`}
                               className={`p-4 rounded-xl border transition-colors space-y-3 ${
-                                isSelected ? 'bg-white border-blue-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
+                                isSelected ? 'bg-white border-gray-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
                               }`}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -2608,7 +2620,7 @@ export default function JiraBriefsPage() {
                                     className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
                                       syncedRcs[rcs.template_name]
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                        : 'bg-gray-50 text-purple-700 border-gray-200 hover:bg-purple-100'
+                                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                     }`}
                                     title="Register this RCS template directly into MoEngage Settings -> RCS template management"
                                   >
@@ -3224,7 +3236,7 @@ export default function JiraBriefsPage() {
                               href="/moengage-campaigns"
                               className="text-xs font-medium text-emerald-700 hover:underline ml-2"
                             >
-                              View in MoEngage Campaigns Builder ➔
+                              View in MoEngage Campaigns Builder →
                             </a>
                           </div>
                         </div>
@@ -3461,7 +3473,7 @@ export default function JiraBriefsPage() {
                               rows={2}
                               value={moePushBody}
                               onChange={(e) => setMoePushBody(e.target.value)}
-                              placeholder="Message body copy..."
+                              placeholder="Message body"
                               className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
                           </div>
@@ -3476,7 +3488,7 @@ export default function JiraBriefsPage() {
                               rows={3}
                               value={moeEmailContent}
                               onChange={(e) => setMoeEmailContent(e.target.value)}
-                              placeholder="<p>HTML content...</p>"
+                              placeholder="<p>HTML content</p>"
                               className="w-full px-3 py-2 rounded-lg border border-gray-300 font-mono text-sm text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
                           </div>
@@ -3533,7 +3545,7 @@ export default function JiraBriefsPage() {
                 </div>
               </div>
               {!brief.is_email_campaign && channel !== 'sms' && (activeTab === 'whatsapp' || activeTab === 'rcs') && (
-                <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 pr-20 shadow-lg" aria-label="Whitelisting review">
+                <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 sm:pr-44 shadow-lg" aria-label="Whitelisting review">
                   <button
                     type="button"
                     onClick={() => requestWhitelist(channel === 'rcs' ? 'rcs' : 'whatsapp')}
@@ -3554,8 +3566,8 @@ export default function JiraBriefsPage() {
       </div>
     </div>
     {commentReview && commentReview.signature === previewSignature && validationReady && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4" role="dialog" aria-modal="true" aria-labelledby="jira-report-confirmation-title">
-        <div className="max-h-[90vh] overflow-y-auto w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="jira-report-confirmation-title">
+        <div className="max-h-[90vh] overflow-y-auto w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-xl space-y-4">
           <h2 id="jira-report-confirmation-title" className="text-base font-medium text-gray-900">Report validation errors on {commentReview.issueKey}?</h2>
           <p className="text-xs text-gray-600">Review the exact comment below. Nothing is posted until you choose “Yes, post comment”.</p>
           <pre className="max-h-[55vh] overflow-auto whitespace-pre-wrap break-words p-3 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-800 font-sans">{commentReview.text}</pre>
@@ -3569,12 +3581,12 @@ export default function JiraBriefsPage() {
     )}
     {confirmationMode && brief && (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
         role="dialog"
         aria-modal="true"
         aria-labelledby="whitelist-confirmation-title"
       >
-        <div className="max-h-[90vh] overflow-y-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-5">
+        <div className="max-h-[90vh] overflow-y-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl space-y-5">
           <div className="flex items-start gap-3">
             <div className="text-sm font-medium text-amber-800 shrink-0">
 
@@ -3617,13 +3629,12 @@ export default function JiraBriefsPage() {
 
             {/* Dedicated RCS whitelisting destination breakdown inside modal */}
             {(confirmationMode === 'all' || confirmationMode === 'rcs') && selectedRcsCount > 0 && (
-              <div className="rounded-xl border border-gray-200 bg-gray-50/90 p-4 space-y-3 text-blue-950">
-                <div className="flex min-w-0 flex-wrap items-center justify-between">
-                  <span className="font-medium text-xs normal-case tracking-normal text-blue-900 flex items-center gap-2">
-                    
+              <div className="rounded-xl border border-gray-200 bg-gray-50/90 p-4 space-y-3 text-gray-900">
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-xs normal-case tracking-normal text-gray-800 flex items-center gap-2">
                     <span>RCS whitelisting destination</span>
                   </span>
-                  <span className="font-mono text-xs bg-gray-200/90 px-2 py-0.5 rounded-lg text-blue-900 font-medium border border-blue-300">
+                  <span className="font-mono text-xs bg-white px-2 py-0.5 rounded-lg text-gray-800 font-medium border border-gray-300">
                     Bot ID: {currentRcs.botId}
                   </span>
                 </div>
@@ -3635,7 +3646,7 @@ export default function JiraBriefsPage() {
                   </div>
                   <div>
                     <span className="text-xs text-gray-500 normal-case block font-medium">RCS bot name</span>
-                    <span className="font-medium text-blue-700">{currentRcs.botName}</span>
+                    <span className="font-medium text-gray-900">{currentRcs.botName}</span>
                   </div>
                   <div>
                     <span className="text-xs text-gray-500 normal-case block font-medium">Karix portal user</span>
@@ -3680,14 +3691,14 @@ export default function JiraBriefsPage() {
     {/* Full-Resolution Creative Lightbox Modal */}
     {previewCreativeModal && (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
         onClick={() => setPreviewCreativeModal(null)}
         role="dialog"
         aria-modal="true"
         aria-labelledby="creative-lightbox-title"
       >
         <div
-          className="relative max-w-4xl max-h-[92vh] w-full bg-gray-900 border border-gray-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+          className="relative max-w-4xl max-h-[92vh] w-full bg-gray-900 border border-gray-700 rounded-2xl overflow-hidden shadow-xl flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="p-4 bg-gray-950/90 border-b border-gray-800 flex items-center justify-between text-white text-xs">
@@ -3711,10 +3722,11 @@ export default function JiraBriefsPage() {
               </JiraCreativeDownload>
               <button
                 onClick={() => setPreviewCreativeModal(null)}
-                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 text-base font-medium px-3 transition-colors"
+                className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
                 title="Close preview"
+                aria-label="Close creative preview"
               >
-                ✕
+                <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" d="M5 5l10 10M15 5L5 15" /></svg>
               </button>
             </div>
           </div>

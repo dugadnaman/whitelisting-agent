@@ -31,7 +31,7 @@ export default function DestinationSwitcher() {
           <p className="text-xs font-medium text-gray-500">{campaignPage ? 'Campaign workspace · Draft only' : account === 'all' ? 'Viewing overview' : 'Whitelisting for'}</p>
           <p id="current-destination" aria-live="polite" className="text-sm font-medium text-gray-900 break-words">{label}</p>
         </div>
-        <button type="button" onClick={open} aria-haspopup="dialog" className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Change <span aria-hidden="true" className="ml-1 text-gray-400">⌄</span></button>
+        <button type="button" onClick={open} aria-haspopup="dialog" className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Change <svg aria-hidden="true" className="h-3.5 w-3.5 text-gray-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" strokeLinejoin="round" d="M6 8l4 4 4-4" /></svg></button>
       </div>
       <dialog ref={dialog} aria-labelledby="destination-dialog-title" onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }} className="m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-gray-200 bg-white p-0 text-gray-900 shadow-xl backdrop:bg-black/40">
         <form className="p-5 sm:p-6 space-y-5" onSubmit={(event) => {
@@ -66,9 +66,9 @@ export default function DestinationSwitcher() {
             {nextAccount === 'apparel' && <p className="mt-1 text-xs text-gray-500">Apparel supports RCS only.</p>}
             {nextAccount === 'tata' && <p className="mt-1 text-xs text-gray-500">Tata Capital uses VILPOWER SMS DLT only. WhatsApp and RCS remain on their separate sub-accounts.</p>}
           </div>}
-          <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm">
-            <p className="font-medium">{destinationLabel(nextAccount, nextChannel, getAccountLabel(nextAccount))}</p>
-            <p className="mt-1 text-blue-900">{nextAccount === 'all' ? 'Overview only. Choose one account before whitelisting or connecting a session.' : `Used for ${nextAccount === 'tata' && nextChannel === 'sms' ? 'VILPOWER SMS DLT' : 'Karix'} template previews, whitelisting and connections in Settings. Existing submissions are never moved.`}</p>
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm">
+            <p className="font-medium text-gray-900">{destinationLabel(nextAccount, nextChannel, getAccountLabel(nextAccount))}</p>
+            <p className="mt-1 text-gray-600">{nextAccount === 'all' ? 'Overview only. Choose one account before whitelisting or connecting a session.' : `Used for ${nextAccount === 'tata' && nextChannel === 'sms' ? 'VILPOWER SMS DLT' : 'Karix'} template previews, whitelisting and connections in Settings. Existing submissions are never moved.`}</p>
           </div>
           {message && <p role="status" className="text-sm text-amber-800">{message}</p>}
           <div className="flex justify-end gap-2">

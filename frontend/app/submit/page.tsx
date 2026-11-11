@@ -15,8 +15,8 @@ function StatusBadge({ status }: { status: string }) {
     approved: 'bg-green-100 text-green-800 border border-green-200',
     rejected: 'bg-red-100 text-red-800 border border-red-200',
     failed: 'bg-red-100 text-red-800 border border-red-200',
-    submitted: 'bg-blue-100 text-blue-800 border border-blue-200',
-    duplicate: 'bg-blue-100 text-blue-800 border border-blue-200',
+    submitted: 'bg-sky-50 text-sky-800 border border-sky-200',
+    duplicate: 'bg-sky-50 text-sky-800 border border-sky-200',
     blocked_aspect_ratio: 'bg-rose-100 text-rose-900 border border-rose-300',
     blocked: 'bg-rose-100 text-rose-900 border border-rose-300',
     unknown: 'bg-gray-100 text-gray-800 border border-gray-200',
@@ -1127,7 +1127,13 @@ export default function SubmitPage() {
                         ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'
                   }`}
                 >
-                  {state.isStreaming ? '⋯' : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio') ? '!' : '✓'}
+                  {state.isStreaming ? (
+                    <svg aria-hidden="true" className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+                  ) : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio') ? (
+                    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75"><path strokeLinecap="round" d="M10 6v5m0 3.5h.01" /></svg>
+                  ) : (
+                    <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75"><path strokeLinecap="round" strokeLinejoin="round" d="M5 10.5l3 3 7-7" /></svg>
+                  )}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -1347,9 +1353,10 @@ export default function SubmitPage() {
                     setIdentifyError(null);
                     if (identifyInputRef.current) identifyInputRef.current.value = '';
                   }}
-                  className="text-gray-500 hover:text-gray-600 font-medium"
+                  aria-label="Clear master catalog file"
+                  className="text-gray-500 hover:text-gray-700 p-1 rounded"
                 >
-                  ✕
+                  <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path strokeLinecap="round" d="M5 5l10 10M15 5L5 15" /></svg>
                 </button>
               </div>
             )}
@@ -1621,8 +1628,8 @@ export default function SubmitPage() {
       {/* Aspect Ratio Adjustment Confirmation Modal */}
       {/* Aspect Ratio Block Confirmation Modal */}
       {channel === 'rcs' && showBlockedModal && currentPreviews && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-h-[calc(100dvh-2rem)] max-w-lg w-full overflow-y-auto p-6 shadow-2xl border border-gray-100 space-y-5">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-h-[calc(100dvh-2rem)] max-w-lg w-full overflow-y-auto p-6 shadow-xl border border-gray-200 space-y-5">
             <div className="flex items-start justify-between pb-3 border-b border-gray-100">
               <div className="flex items-start gap-3">
                 <div>
