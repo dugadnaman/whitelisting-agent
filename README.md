@@ -35,7 +35,12 @@ silently redirects credentials or submissions to another account.
    XLSX or XLS containing `template_name` and `text`. Optional import columns:
    `template_type`, `category_id`, `header_id`, `header`, `brand_id`,
    `message_type`, `sample_message`, `service_type`. No phone numbers are needed.
-   Choose missing category/header/type fields from live portal options.
+   Under **DLT settings for all messages**, choose the type, category and sender
+   from live portal options, then **Apply settings to all messages**. Routing is
+   applied explicitly, without changing message copy or source evidence. Automatic
+   encoding selects ASCII/Unicode separately for each message, including ₹ in
+   English copy. Per-template overrides remain under **Template settings**; native
+   brief acknowledgements must be renewed after changing settings.
    If live options fail to load, the editor shows the provider error above the
    fields and disables unavailable selections. Renew the Tata SMS session in
    Settings, then return to the draft or use **Retry options**; only failed
@@ -48,14 +53,14 @@ silently redirects credentials or submissions to another account.
    candidate with its sheet/cell provenance. Select between 1 and 500 candidates, then
    decide every placeholder as literal text or a typed variable with explicit samples
    before confirming registration.
-5. Alternatively, in **Jira Briefs → SMS**, select drafts and choose **Review
-   selected SMS for DLT whitelisting**. The same DLT editor and confirmation
-   are used; edits are retained in the current tab until cleared or the
-   destination changes.
-6. Use **Preview portal-ready preparation** for imported/Jira drafts containing
+5. In **Jira Briefs → SMS**, select messages individually or use **Select all**,
+   then **Review & whitelist SMS**. The same shared setup, message editor and final
+   confirmation are used for Jira and file uploads. Edits stay in the current tab
+   until cleared or the destination changes.
+6. Use **Prepare messages for review** for imported/Jira drafts containing
    `<name>`, `<link>`, `<url>`, `{#alphanumeric#}`, `{#url#}` or `{#link#}`.
    Inspect the before/after body, filled sample, encoding and any renamed conflicts,
-   then **Apply preparation to drafts**. This changes only known placeholder tokens,
+   then **Apply suggested changes**. This changes only known placeholder tokens,
    generates example values when needed, preserves static copy (including ₹ and
    whitespace), and selects Unicode for non-ASCII copy, even in English.
    Generated samples and name suffixes are editable suggestions, not customer data
@@ -66,9 +71,11 @@ silently redirects credentials or submissions to another account.
    No preparation runs silently during submission; no grammar correction is applied.
    Exact repeated drafts can be skipped by the queue; different drafts sharing a
    name need a distinct name, provided by the preparation preview or a manual edit.
-7. **Validate and review DLT drafts**, check the destination/header/category/body/
-   sample confirmation, then **Confirm and queue DLT whitelisting**. A successful
-   registration can still be **pending**; it is not approval.
+7. Choose **Review & whitelist**, review the destination, settings, exact body and
+   filled sample for every message, acknowledge the review, then **Confirm & whitelist**.
+   Provider IDs are expandable; validation errors remain visible and block confirmation.
+   Returning to editing or changing drafts requires a fresh review and acknowledgement.
+   Registration can still be **pending**; it is not approval. No SMS is sent.
 8. Use the dashboard's **Refresh DLT Approvals** to reconcile exact DLT IDs.
    The identification panel compares exact copy and can hand missing templates
    directly into review. Identical names with different DLT IDs remain separate.
@@ -162,7 +169,7 @@ report endpoints remain separate Karix message-sending functionality.
 3. **Phase 3 — Operational Work Management & Sync**:
    - Bi-directional Jira integration for campaign briefs, attachment parsing, and task handoffs.
    - Jira Briefs follows the same shared destination and opens its selected channel for messaging briefs. Other channel drafts remain available to review, but cannot be submitted through the wrong channel's action. Wealth WhatsApp is no longer silently redirected to Promotional: choose Promotional WhatsApp explicitly, review, then submit. Jira preview/submit requests require one `account`; submission also requires explicit `channels`. The obsolete `whatsapp_account` split-routing field is rejected.
-   - **Jira-first workspace**: Tata navigation leads with **Jira Briefs** and the dashboard has **Open Jira Briefs**. Secondary navigation remains under **More tools**. The review layout follows **Choose a ticket → Review templates → Confirm**, with one **Review & whitelist** action for the current destination; another channel's tab is read-only until the destination changes. Filters, ticket metadata, source attachments, nonblocking suggestions and MoEngage tools are expandable. Blocking issues remain visible. On mobile, **Change ticket** reopens the ticket picker without pushing the review below the queue. A single workspace tab no longer adds an extra tab bar.
+   - **Jira-first workspace**: Tata navigation leads with **Jira Briefs** and the dashboard has **Open Jira Briefs**. Every permitted sidebar link is always visible; primary workflow links use stronger text above a divider, while secondary links remain quieter but directly accessible. The review layout follows **Choose a ticket → Review templates → Confirm**, with one **Review & whitelist** action for the current destination; another channel's tab is read-only until the destination changes. Filters, ticket metadata, source attachments, nonblocking suggestions and MoEngage tools are expandable. Blocking issues remain visible. On mobile, **Change ticket** reopens the ticket picker without pushing the review below the queue. A single workspace tab no longer adds an extra tab bar.
    - Jira Briefs CTA previews support WhatsApp API buttons with `text` and legacy fallback buttons with `label`/`text`. Both shapes are type-checked by the production frontend build.
    - Jira Briefs has **Add template** in WhatsApp, RCS, and SMS panels, including empty channels. Use it to separate two messages incorrectly parsed into one template, then edit the original. New drafts have unique names, open in edit mode, and remain unchecked for whitelisting. Unsent source edits are local to the loaded brief. Tata SMS selections can enter the dedicated VILPOWER DLT review flow; reloading Jira reparses its source.
    - Jira WhatsApp/RCS drafts use the same pre-submission inspection as Excel uploads: image dimensions/ratios, grammar, compliance and duplicate warnings are visible before whitelisting. Copy, CTA, channel and creative changes trigger fresh validation; unavailable validation or invalid media cannot be bypassed by submitting stale browser flags. Carousel images are checked individually.

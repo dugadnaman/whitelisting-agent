@@ -10,7 +10,7 @@ import {
   type TemplatePreview, type JobTask, type IdentificationReport, type SmsBriefExtraction, type SmsBriefDecision,
 } from '@/lib/api';
 import { formatError } from '@/lib/format';
-import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts } from '@/lib/sms-brief';
+import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts, applySmsDltSettings } from '@/lib/sms-brief';
 import KarixAuthSync from '@/components/KarixAuthSync';
 
 const inputClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs disabled:bg-gray-100';
@@ -88,8 +88,8 @@ export function smsDltDraft(value: { template_name: string; text: string } & Par
   return { template_type: '', category_id: '', header_id: '', header: '', message_type: '', sample_message: '', ...value };
 }
 
-function SmsDltEditor({ draft, onChange, disabled, onReady }: {
-  draft: SmsDltDraft; onChange: (draft: SmsDltDraft) => void; disabled: boolean; onReady: (ready: boolean, category?: string) => void;
+function SmsDltEditor({ draft, onChange, disabled, onReady, settingsOnly = false }: {
+  draft: SmsDltDraft; onChange: (draft: SmsDltDraft) => void; disabled: boolean; onReady: (ready: boolean, category?: string) => void; settingsOnly?: boolean;
 }) {
   const [options, setOptions] = useState<SmsDltOptions>(emptyOptions);
   const [loading, setLoading] = useState(true);
@@ -118,8 +118,16 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
     && (draft.template_type !== '3' || !options.service_types?.length || Boolean(draft.service_type && options.service_types.some((option) => option.id === draft.service_type)));
   useEffect(() => { onReady(valid, options.categories.find((option) => option.id === draft.category_id)?.text || ''); }, [valid, onReady, options.categories, draft.category_id]);
   function update(patch: Partial<SmsDltDraft>) { onChange(editSmsBriefDraft(draft, patch)); }
+  const providerFields = <div className="grid gap-3 sm:grid-cols-2">
+    <label className="text-xs font-semibold">Template type<select className={`${inputClass} mt-1`} value={draft.template_type} onChange={(e) => update({ template_type: e.target.value as SmsDltDraft['template_type'], category_id: '', header_id: '', header: '', brand_id: '', service_type: '' })}><option value="">Choose template type</option>{Object.entries(typeLabels).map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label>
+    {draft.template_type === '3' && Boolean(options.service_types?.length) && <label className="text-xs font-semibold">Service type<select className={`${inputClass} mt-1`} value={draft.service_type || ''} onChange={(e) => update({ service_type: e.target.value, category_id: '', header_id: '', header: '', brand_id: '' })}><option value="">Choose service type</option>{options.service_types?.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>}
+    <label className="text-xs font-semibold">DLT category<select className={`${inputClass} mt-1`} value={draft.category_id} onChange={(e) => update({ category_id: e.target.value, header_id: '', header: '', brand_id: '' })} disabled={loading || Boolean(error) || !draft.template_type || !options.categories.length}><option value="">{!draft.template_type ? 'Choose template type first' : loading ? 'Loading categories…' : error ? 'Categories unavailable' : 'Choose category'}</option>{options.categories.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
+    <label className="text-xs font-semibold">Sender header<select className={`${inputClass} mt-1`} value={draft.header_id} onChange={(e) => update({ header_id: e.target.value, header: options.headers.find((option) => option.id === e.target.value)?.text || '' })} disabled={loading || Boolean(error) || !draft.category_id || !options.headers.length}><option value="">{!draft.category_id ? 'Choose category first' : loading ? 'Loading headers…' : error ? 'Headers unavailable' : !options.headers.length ? 'No headers for this selection' : 'Choose header'}</option>{options.headers.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
+    <label className="text-xs font-semibold">Brand (optional)<select className={`${inputClass} mt-1`} value={draft.brand_id || ''} onChange={(e) => update({ brand_id: e.target.value })} disabled={loading || Boolean(error)}><option value="">No brand selected</option>{options.brands.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
+    <label className="text-xs font-semibold">Message encoding<select className={`${inputClass} mt-1`} value={draft.message_type} onChange={(e) => update({ message_type: e.target.value as SmsDltDraft['message_type'] })}><option value="">{settingsOnly ? 'Automatic for each message' : 'Choose message encoding'}</option><option value="1">ASCII / English</option><option value="2">Unicode (including English with ₹)</option></select></label>
+  </div>;
   return <fieldset disabled={disabled} className="rounded-xl border border-gray-200 p-4 space-y-3">
-    <legend className="px-1 text-xs font-bold">{draft.template_name || 'Unnamed template'}</legend>
+    <legend className="px-1 text-xs font-bold">{settingsOnly ? 'Shared DLT settings' : draft.template_name || 'Unnamed template'}</legend>
     {loading && <p role="status" className="text-xs text-gray-500">Loading Tata portal options…</p>}
     {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
       <p className="font-semibold">Could not load VILPOWER categories and sender headers.</p>
@@ -129,7 +137,7 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
         <button type="button" className="font-semibold underline" onClick={() => setRevision((value) => value + 1)}>Retry options</button>
       </div>
     </div>}
-    {draft.brief && <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
+    {!settingsOnly && draft.brief && <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
       <p className="font-bold">Client brief provenance · {draft.source_file}</p>
       <p className="break-words">{draft.source_ref}</p>
       {draft.brief.sources.map((source, index) => <div key={index} className="space-y-2 border-t border-amber-200 pt-2">
@@ -153,20 +161,19 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
       }}>Apply occurrence decisions to body and sample</button>
       <p>You may edit the final body and sample below. The original and every matching source remain visible; review again after any edit. Use Unicode encoding for non-ASCII characters, including ₹ and smart punctuation, even in English copy.</p>
     </div>}
-    <div className="grid gap-3 sm:grid-cols-2">
-      <label className="text-xs font-semibold">Template name<input className={`${inputClass} mt-1`} value={draft.template_name} onChange={(e) => update({ template_name: e.target.value })} /></label>
-      <label className="text-xs font-semibold">Template type<select className={`${inputClass} mt-1`} value={draft.template_type} onChange={(e) => update({ template_type: e.target.value as SmsDltDraft['template_type'], category_id: '', header_id: '', header: '', brand_id: '', service_type: '' })}><option value="">Choose template type</option>{Object.entries(typeLabels).map(([id, text]) => <option key={id} value={id}>{text}</option>)}</select></label>
-      {draft.template_type === '3' && Boolean(options.service_types?.length) && <label className="text-xs font-semibold">Service type<select className={`${inputClass} mt-1`} value={draft.service_type || ''} onChange={(e) => update({ service_type: e.target.value, category_id: '', header_id: '', header: '', brand_id: '' })} disabled={loading}><option value="">Choose service type</option>{options.service_types?.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>}
-      <label className="text-xs font-semibold">DLT category<select className={`${inputClass} mt-1`} value={draft.category_id} onChange={(e) => update({ category_id: e.target.value, header_id: '', header: '', brand_id: '' })} disabled={loading || Boolean(error) || !draft.template_type || !options.categories.length}><option value="">{!draft.template_type ? 'Choose template type first' : loading ? 'Loading categories…' : error ? 'Categories unavailable' : 'Choose category'}</option>{options.categories.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
-      <label className="text-xs font-semibold">Sender header<select className={`${inputClass} mt-1`} value={draft.header_id} onChange={(e) => update({ header_id: e.target.value, header: options.headers.find((option) => option.id === e.target.value)?.text || '' })} disabled={loading || Boolean(error) || !draft.category_id || !options.headers.length}><option value="">{!draft.category_id ? 'Choose category first' : loading ? 'Loading headers…' : error ? 'Headers unavailable' : !options.headers.length ? 'No headers for this selection' : 'Choose header'}</option>{options.headers.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
-      <label className="text-xs font-semibold">Brand (optional)<select className={`${inputClass} mt-1`} value={draft.brand_id || ''} onChange={(e) => update({ brand_id: e.target.value })} disabled={loading || Boolean(error)}><option value="">No brand selected</option>{options.brands.map((option) => <option key={option.id} value={option.id}>{option.text}</option>)}</select></label>
-      <label className="text-xs font-semibold">Message encoding<select className={`${inputClass} mt-1`} value={draft.message_type} onChange={(e) => update({ message_type: e.target.value as SmsDltDraft['message_type'] })}><option value="">Choose message encoding</option><option value="1">ASCII / English</option><option value="2">Unicode (including English with ₹)</option></select></label>
-    </div>
-    <label className="block text-xs font-semibold">Exact DLT template body<textarea rows={4} className={`${inputClass} mt-1 font-mono`} value={draft.text} onChange={(e) => update({ text: e.target.value })} /></label>
-    <p className="text-[11px] text-gray-500">Text is preserved exactly unless you apply a preparation preview below. VILPOWER accepts {'{#num#}, {#alp#}, {#urg#}, {#uro#}, {#cbn#}, {#eml#}'} (maximum 15). A sample must replace each variable with a real example and preserve all surrounding copy, including ₹ and whitespace.</p>
-    <label className="block text-xs font-semibold">Filled sample message (not variable tokens)<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
+    {settingsOnly ? providerFields : <>
+    <details className="rounded-lg border border-gray-200 p-3 text-xs">
+      <summary className="cursor-pointer font-medium">Template settings · {draft.header || 'Use batch settings above'} · {draft.message_type === '2' ? 'Unicode' : draft.message_type === '1' ? 'ASCII' : 'Encoding not set'}</summary>
+      <div className="mt-3 space-y-3">
+        <label className="block font-semibold">Template name<input className={`${inputClass} mt-1`} value={draft.template_name} onChange={(e) => update({ template_name: e.target.value })} /></label>
+        {providerFields}
+      </div>
+    </details>
+    <label className="block text-xs font-semibold">Message<textarea rows={4} className={`${inputClass} mt-1 font-mono`} value={draft.text} onChange={(e) => update({ text: e.target.value })} /></label>
+    <label className="block text-xs font-semibold">Filled sample<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
     {draft.brief && <label className="flex gap-2 text-xs font-semibold"><input type="checkbox" checked={draft.brief.acknowledged} disabled={!applySmsBriefDecisions(draft.brief)} onChange={(event) => onChange({ ...draft, brief: { ...draft.brief!, acknowledged: event.target.checked } })} />I reviewed every source, campaign, language, warning and token decision, and the exact final body and explicit sample. These selected sources are intended for SMS; no month or approval status was inferred.</label>}
-    {!loading && !error && !valid && <p className="text-xs text-amber-800">Choose valid portal category, header and service type (if applicable) before review. Imported IDs must match current Tata options.</p>}
+    {!loading && !error && !valid && <p className="text-xs text-amber-800">Apply shared DLT settings above, or open Template settings for this message.</p>}
+    </>}
   </fieldset>;
 }
 
@@ -186,6 +193,8 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const [tasks, setTasks] = useState<JobTask[]>([]);
   const [jobStatus, setJobStatus] = useState('');
   const [pollRevision, setPollRevision] = useState(0);
+  const [sharedSettings, setSharedSettings] = useState(() => smsDltDraft({ template_name: 'Batch settings', text: '' }));
+  const [sharedSettingsReady, setSharedSettingsReady] = useState(false);
   const active = useRef(true);
   const requestVersion = useRef(0);
   const signature = JSON.stringify(drafts);
@@ -243,8 +252,8 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   }
   if (!destinationValid) return <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">SMS DLT whitelisting requires the explicit Tata Capital (tata) · SMS destination. Select it in Whitelisting for. Other accounts are not integrated and cannot use Tata credentials.</p>;
   return <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
-    <div className="flex flex-wrap justify-between gap-3"><h2 className="text-sm font-bold">Review Tata Capital · SMS DLT · VILPOWER</h2><a href="/" className="text-xs text-blue-700 underline">Template history and approval status</a></div>
-    <p className="text-xs text-gray-600">Register templates only; no recipients or SMS sending. Select provider fields explicitly, then validate and confirm the exact message and sample. A queued or pending template is not approved.</p>
+    <div className="flex flex-wrap justify-between gap-3"><h2 className="text-sm font-bold">SMS whitelisting</h2><a href="/" className="text-xs text-blue-700 underline">History &amp; approval status</a></div>
+    <p className="text-xs text-gray-600">Tata Capital · VILPOWER. Apply DLT settings once, review each message, then confirm. This registers templates; it never sends SMS.</p>
     {!batch && <details className="rounded-lg border border-gray-200 p-3 text-xs">
       <summary className="cursor-pointer font-semibold">VILPOWER variable types and limits</summary>
       <div className="mt-3 overflow-x-auto"><table className="w-full text-left">
@@ -260,15 +269,10 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
         ].map(([tag, purpose, length]) => <tr key={tag} className="border-t border-gray-100"><th scope="row" className="p-2 font-mono">{tag}</th><td className="p-2">{purpose}</td><td className="whitespace-nowrap p-2">{length}</td></tr>)}</tbody>
       </table></div>
     </details>}
-    {!batch && drafts.map((draft, index) => <SmsDltEditor key={index} draft={draft} disabled={busy} onReady={(value, category = '') => {
-      setReady((prev) => prev[index] === value ? prev : { ...prev, [index]: value });
-      setCategoryLabels((prev) => prev[index] === category ? prev : { ...prev, [index]: category });
-    }} onChange={(value) => { setReviewed(null); setDrafts((prev) => prev.map((item, idx) => idx === index ? value : item)); }} />)}
-    {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800"><p>{error}</p><p className="mt-1">For portal authentication errors, <a href="/settings" className="underline">replace the Tata SMS session in Settings</a>. Check <a href="/" className="underline">History</a> before retrying a submission.</p></div>}
-    {!batch && <>
-      <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs">
-        <p>Prepare imported copy for VILPOWER: convert known name/link placeholders and legacy typed aliases, generate filled example samples, choose ASCII/Unicode without changing ₹ or punctuation, and give conflicting names distinct suffixes. Unknown placeholders still need your decision. Native brief variable decisions are preserved.</p>
-        <button type="button" disabled={busy} className={buttonClass} onClick={() => setPreparation({ signature, drafts: prepareSmsDltDrafts(drafts) })}>Preview portal-ready preparation</button>
+      {!batch && <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs">
+        <p className="font-semibold">Need to prepare imported messages?</p>
+        <p>Preview fixes for known name/link placeholders, filled samples, encoding and duplicate names. Exact surrounding copy stays unchanged; nothing is applied or submitted automatically.</p>
+        <button type="button" disabled={busy} className={buttonClass} onClick={() => setPreparation({ signature, drafts: prepareSmsDltDrafts(drafts) })}>Prepare messages for review</button>
         {preparation?.signature === signature && <>
           {preparation.drafts.every((draft, index) => draft === drafts[index]) ? <p role="status">No preparation changes needed. Validate the drafts below.</p> : <>
             {preparation.drafts.map((draft, index) => draft === drafts[index] ? null : <div key={index} className="space-y-2 rounded border border-blue-200 bg-white p-3">
@@ -280,25 +284,53 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
               </div>)}
             </div>)}
             <p>Generated names and sample values are suggestions, not customer data or approved URLs. Applying does not submit anything; edit the results if needed, then validate and confirm every exact body and sample.</p>
-            <button type="button" disabled={busy} className={buttonClass} onClick={() => { setDrafts(preparation.drafts); setPreparation(null); setReviewed(null); setConfirmed(false); }}>Apply preparation to drafts</button>
+            <button type="button" disabled={busy} className={buttonClass} onClick={() => { setDrafts(preparation.drafts); setPreparation(null); setReviewed(null); setConfirmed(false); }}>Apply suggested changes</button>
           </>}
         </>}
+      </div>}
+    {!batch && <>
+      <details className="space-y-3 rounded-xl border border-gray-200 p-4" open={!drafts.every((draft) => draft.template_type && draft.category_id && draft.header_id && draft.header && draft.message_type) || undefined}>
+        <summary className="cursor-pointer text-sm font-semibold">1. DLT settings for all messages</summary>
+        <p className="text-xs text-gray-600">Choose these once for this batch. Applying replaces existing routing settings, not message copy. Each template can still be customized below.</p>
+        <SmsDltEditor settingsOnly draft={sharedSettings} disabled={busy} onChange={setSharedSettings} onReady={(value) => setSharedSettingsReady(value)} />
+        <button type="button" className={buttonClass} disabled={busy || !sharedSettingsReady} onClick={() => {
+          setDrafts((current) => applySmsDltSettings(current, sharedSettings));
+          setReviewed(null); setConfirmed(false);
+        }}>Apply settings to all {drafts.length} messages</button>
+      </details>
+      <h3 className="text-sm font-semibold">2. Review messages ({drafts.length})</h3>
+    </>}
+    {!batch && drafts.map((draft, index) => <SmsDltEditor key={index} draft={draft} disabled={busy} onReady={(value, category = '') => {
+      setReady((prev) => prev[index] === value ? prev : { ...prev, [index]: value });
+      setCategoryLabels((prev) => prev[index] === category ? prev : { ...prev, [index]: category });
+    }} onChange={(value) => { setReviewed(null); setDrafts((prev) => prev.map((item, idx) => idx === index ? value : item)); }} />)}
+    {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800"><p>{error}</p><p className="mt-1">For portal authentication errors, <a href="/settings" className="underline">replace the Tata SMS session in Settings</a>. Check <a href="/" className="underline">History</a> before retrying a submission.</p></div>}
+    {!batch && <>
+      <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 pr-20 shadow-sm">
+        <button type="button" disabled={busy || !fieldsValid} onClick={review} className={buttonClass}>{busy ? 'Checking…' : `Review & whitelist (${drafts.length})`}</button>
+        {!fieldsValid && <p className="text-xs text-gray-600">Complete DLT settings, message samples and any source decisions to continue.</p>}
+        {onClose && <button type="button" disabled={busy} onClick={onClose} className="text-xs font-semibold text-gray-600 underline">Back to source</button>}
       </div>
-      <div className="flex flex-wrap gap-3"><button type="button" disabled={busy || !fieldsValid} onClick={review} className={buttonClass}>{busy ? 'Processing…' : 'Validate and review DLT drafts'}</button>{onClose && <button type="button" disabled={busy} onClick={onClose} className="text-xs font-semibold text-gray-600 underline">Back to source drafts</button>}</div>
-      {reviewedCurrent && <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-4">
-        <p className="text-xs font-bold">Destination: Tata Capital (tata) · SMS · VILPOWER</p>
+      {reviewedCurrent && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="sms-confirmation-title">
+        <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-5 space-y-4">
+        <h3 id="sms-confirmation-title" className="font-semibold">3. Confirm SMS whitelisting</h3>
+        <p className="text-xs font-bold">Destination: Tata Capital · SMS · VILPOWER</p>
         {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-lg border border-blue-100 bg-white p-3 text-xs">
           <p className="font-bold">{draft.template_name} · {draft.template_type ? typeLabels[draft.template_type] : ''}</p>
-          <p>Header: {draft.header} (ID {draft.header_id}) · Category: {categoryLabels[index]} (ID {draft.category_id}) · Encoding: {draft.message_type === '1' ? 'ASCII' : 'Unicode'}{draft.service_type ? ` · Service type: ${draft.service_type}` : ''}{draft.brand_id ? ` · Brand ID: ${draft.brand_id}` : ''}</p>
+          <p>Header: {draft.header} · Category: {categoryLabels[index]} · Encoding: {draft.message_type === '1' ? 'ASCII' : 'Unicode'}</p>
+          <details className="text-gray-500"><summary className="cursor-pointer">Provider IDs</summary><p className="mt-1 break-all">Header ID: {draft.header_id} · Category ID: {draft.category_id}{draft.service_type ? ` · Service type: ${draft.service_type}` : ''}{draft.brand_id ? ` · Brand ID: ${draft.brand_id}` : ''}</p></details>
           {draft.brief && <div className="space-y-1"><p className="font-semibold">Sources: {draft.source_file} · {draft.source_ref}</p>{draft.brief.sources.map((source, idx) => <p key={idx}>{source.sheet}!{source.cell} · Campaign: {source.campaign || 'Not specified'} · Segment: {source.segment || 'Not specified'} · Language: {source.language || 'Not specified'}</p>)}{draft.brief.warnings.map((warning, idx) => <p key={idx} className="text-amber-800">{warning}</p>)}</div>}
           <p className="font-semibold">Exact body</p><pre className="whitespace-pre-wrap break-words font-mono">{draft.text}</pre>
           <p className="font-semibold">Sample message</p><pre className="whitespace-pre-wrap break-words font-mono">{draft.sample_message || '(No variables; no sample supplied)'}</pre>
           {reviewed.previews[index]?.already_exists_on_waba && <p className="text-amber-800">Already registered; duplicate skipping is enabled.</p>}
           {reviewed.previews[index]?.compliance_warnings?.map((warning, idx) => <p key={idx} role={warning.severity === 'error' ? 'alert' : undefined} className={warning.severity === 'error' ? 'text-red-700' : 'text-amber-800'}>{warning.severity}: {warning.issue}</p>)}
         </div>)}
-        <label className="flex gap-2 text-xs font-semibold"><input type="checkbox" checked={confirmed} disabled={busy || hasErrors} onChange={(e) => setConfirmed(e.target.checked)} />I confirm Tata Capital / VILPOWER, the selected header and category, and every exact body and sample above. Register these DLT templates; do not send SMS.</label>
-        <button type="button" className={buttonClass} disabled={busy || hasErrors || !confirmed || !fieldsValid} onClick={submit}>Confirm and queue DLT whitelisting</button>
-      </div>}
+        <label className="flex gap-2 text-xs font-semibold"><input type="checkbox" checked={confirmed} disabled={busy || hasErrors} onChange={(e) => setConfirmed(e.target.checked)} />I reviewed the destination, DLT settings, and every message and filled sample. Register these templates; do not send SMS.</label>
+        <div className="flex flex-wrap gap-3">
+          <button type="button" disabled={busy} onClick={() => { setReviewed(null); setConfirmed(false); }} className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold">Back to editing</button>
+          <button type="button" className={buttonClass} disabled={busy || hasErrors || !confirmed || !fieldsValid} onClick={submit}>Confirm &amp; whitelist</button>
+        </div>
+      </div></div>}
     </>}
     {batch && <div className="space-y-3 text-xs">
       <p role="status" className="font-bold">Tata Capital · VILPOWER · {jobStatus || batch.status}{batch.job_id ? ` · Job ${batch.job_id}` : ''}</p>

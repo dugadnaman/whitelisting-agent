@@ -74,6 +74,22 @@ export function editSmsBriefDraft(draft: SmsDltDraft, patch: Partial<SmsDltDraft
   return next;
 }
 
+/** Batch routing never changes copy or source evidence; each message keeps its own encoding. */
+export function applySmsDltSettings(
+  drafts: SmsDltDraft[],
+  settings: Pick<SmsDltDraft, 'template_type' | 'category_id' | 'header_id' | 'header' | 'brand_id' | 'service_type' | 'message_type'>,
+): SmsDltDraft[] {
+  return drafts.map((draft) => editSmsBriefDraft(draft, {
+    template_type: settings.template_type,
+    category_id: settings.category_id,
+    header_id: settings.header_id,
+    header: settings.header,
+    brand_id: settings.brand_id || '',
+    service_type: settings.service_type || '',
+    message_type: settings.message_type || (/[^\x00-\x7F]/.test(draft.text + draft.sample_message) ? '2' : '1'),
+  }));
+}
+
 /** Explicit, reviewable preparation; submission itself never rewrites source copy. */
 export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
   const aliases: Record<string, string> = { name: 'alp', alphanumeric: 'alp', url: 'urg', link: 'urg' };

@@ -183,17 +183,16 @@ export default function Nav() {
             const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
             return (
               <Link key={link.href} href={href} onClick={() => setMobileOpen(false)} aria-current={active ? 'page' : undefined}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${active ? 'font-semibold bg-blue-50 text-blue-700' : 'font-medium text-gray-600 hover:bg-gray-100'}`}>
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${active ? 'font-semibold bg-blue-50 text-blue-700' : index === 0 ? 'font-semibold text-gray-800 hover:bg-gray-100' : 'font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800'}`}>
                 <span className="shrink-0">{link.icon}</span>
                 <span>{link.href === '/submit' ? 'Upload templates' : link.label}</span>
               </Link>
             );
           });
           return index === 0 ? <div key="primary" className="space-y-1">{items}</div> : (
-            <details key="tools" open={group.some((link) => pathname.startsWith(link.href) || (link.href === '/moengage-campaigns' && pathname.startsWith('/apparel/campaigns'))) || undefined}>
-              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-500">More tools</summary>
-              <div className="space-y-1 pt-1">{items}</div>
-            </details>
+            <div key="secondary" className="space-y-1 border-t border-gray-200 pt-3">
+              {items}
+            </div>
           );
         })}
 

@@ -12,7 +12,7 @@ function load(name, globals = {}) {
   }).outputText, { exports, module: { exports }, require: require('./test-typescript.cjs'), ...globals });
   return exports;
 }
-const { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts } = load('sms-brief.ts');
+const { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts, applySmsDltSettings } = load('sms-brief.ts');
 const row = (id, patch = {}) => ({
   id, sheet: 'Historical SMS', cell: `B${id}`, text: 'Exact offer <Name>.', campaign: 'Historical campaign',
   segment: 'Returning', language: 'English', scope: 'Historical', source_kind: 'SMS',
@@ -148,4 +148,23 @@ test('DLT preparation separates conflicting names while exact repeated drafts re
   assert.deepEqual(plain(result.map((draft) => draft.template_name)), ['offer', 'offer', 'offer_3', 'offer_2']);
   assert.equal(result[2].sample_message, 'Second.');
   assert.deepEqual(plain(prepareSmsDltDrafts(result)), plain(result));
+});
+
+test('batch settings preserve exact message evidence and choose encoding separately for every message', () => {
+  const native = prepareSmsBriefDrafts([row('1', { text: ' Hi ₹{#num#}.\r\n ', variables: ['{#num#}'] })], ['1'], 'source.xlsx')[0];
+  native.sample_message = ' Hi ₹1200.\r\n ';
+  native.brief.acknowledged = true;
+  const ascii = { ...native, template_name: 'ascii_offer', text: 'Your offer.', sample_message: 'Your offer.', brief: undefined };
+  const settings = {
+    template_type: '1', category_id: 'finance', header_id: 'sender', header: 'PLTATA',
+    message_type: '', template_name: 'Do not copy', text: 'Do not copy', sample_message: 'Do not copy',
+  };
+  const result = applySmsDltSettings([native, ascii], settings);
+  assert.deepEqual(plain(result.map((draft) => [draft.template_name, draft.text, draft.sample_message, draft.source_ref])),
+    plain([native, ascii].map((draft) => [draft.template_name, draft.text, draft.sample_message, draft.source_ref])));
+  assert.deepEqual(plain(result.map((draft) => draft.message_type)), ['2', '1']);
+  assert.equal(result[0].brief.acknowledged, false);
+  assert.equal(native.brief.acknowledged, true);
+  assert.deepEqual(plain(result[0].brief.sources), plain(native.brief.sources));
+  assert.equal(applySmsDltSettings([ascii], { ...settings, message_type: '2' })[0].message_type, '2');
 });

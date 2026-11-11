@@ -2938,13 +2938,14 @@ export default function JiraBriefsPage() {
                         }} />
                       ) : <>
                       <div className="space-y-3 rounded-xl border border-purple-200 bg-purple-50 p-4 text-xs">
-                        <p className="font-bold">Tata Capital · SMS DLT · VILPOWER whitelisting</p>
-                        <p>Select SMS drafts below, then choose the provider-required header, category, type and sample during review. Exact SMS text is preserved; typed DLT variables must be edited explicitly. This never sends SMS.</p>
+                        <p className="font-semibold">SMS whitelisting</p>
+                        <p>Select messages, apply shared DLT settings once, then review and confirm. No SMS is sent.</p>
+                        {smsTemplates.length > 0 && <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={smsTemplates.every((_, index) => selectedSms.has(index))} onChange={(event) => setSelectedSms(event.target.checked ? new Set(smsTemplates.map((_, index) => index)) : new Set())} />Select all {smsTemplates.length} messages</label>}
                         {(account !== 'tata' || channel !== 'sms') && <p role="alert" className="text-amber-900">Select Tata Capital (tata) · SMS in Whitelisting for. Other SMS accounts are not integrated; no Tata credentials or Bajaj routing will be inferred.</p>}
                         <button type="button" className="rounded-lg bg-purple-700 px-4 py-2 font-semibold text-white disabled:opacity-50" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || !smsTemplates.some((_, index) => selectedSms.has(index))} onClick={() => {
                           if (account !== 'tata' || channel !== 'sms' || selectedKey !== brief.issue_key) return;
                           setSmsReview({ issueKey: brief.issue_key, drafts: smsTemplates.filter((_, index) => selectedSms.has(index)).map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text })), revision: Date.now() });
-                        }}>Review selected SMS for DLT whitelisting ({smsTemplates.filter((_, index) => selectedSms.has(index)).length})</button>
+                        }}>Review &amp; whitelist SMS ({smsTemplates.filter((_, index) => selectedSms.has(index)).length})</button>
                       </div>
                       {smsTemplates.length === 0 ? (
                         <p className="py-8 text-center text-xs text-gray-400">No SMS variants detected in this brief.</p>
