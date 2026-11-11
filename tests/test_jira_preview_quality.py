@@ -163,6 +163,7 @@ def test_jira_submission_rechecks_media_and_preserves_valid_siblings(preview_cas
 
     def submit(submission, client):
         submitted_names.append(submission.template_name)
+        assert all(component.type != "HEADER" for component in submission.components)
         return SubmissionResult(
             source_ref=submission.source_ref, template_name=submission.template_name,
             status=SubmissionStatus.SUBMITTED, provider_ref_id="confirmed-local-reference", client=client,
@@ -176,10 +177,15 @@ def test_jira_submission_rechecks_media_and_preserves_valid_siblings(preview_cas
         patch("submission_client.submit_template", side_effect=submit),
         patch("tracker.log_result"),
     ):
+        preview = client.post("/api/jira/preview", json={
+            "account": "tcl_promo", "whatsapp_templates": [valid], "rcs_templates": [],
+        })
         response = client.post(f"/api/jira/submit/{brief.issue_key}", json={
             "account": "tcl_promo", "channels": ["whatsapp"], "whatsapp_templates": [blocked, valid],
         })
     assert response.status_code == 200, response.text
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["whatsapp_templates"][0]["aspect_ratio_blocked"] is False
     results = {row["template_name"]: row for row in response.json()["whatsapp_submitted"]}
     assert results[blocked["template_name"]]["status"] in {"blocked", "blocked_aspect_ratio"}
     assert results[valid["template_name"]]["status"] == "submitted"

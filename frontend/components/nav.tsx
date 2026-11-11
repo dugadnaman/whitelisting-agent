@@ -136,6 +136,16 @@ export default function Nav() {
     currentUser.tenant_id === 'tata' ||
     (canViewAll && ['all', 'tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(account))
   ));
+  const canViewJira = Boolean(currentUser && (currentUser.tenant_id === 'tata' ||
+    (canViewAll && ['all', 'tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(account))));
+  const primaryRoutes = canViewJira ? ['/briefs', '/', '/activity', '/settings'] : ['/', '/submit', '/activity', '/settings'];
+  const visibleLinks = links.filter((link) => {
+    if (link.href === '/briefs' && !canViewJira) return false;
+    if (link.href === '/apparel/attribution' && !canUseApparelAttribution(currentUser, account)) return false;
+    if (link.href === '/tata/click-count' && !canViewTataClickCounts) return false;
+    if (link.href === '/moengage-ops' && currentUser?.tenant_id !== 'tata' && !canViewAll) return false;
+    return true;
+  });
 
   if (pathname === '/login' || pathname === '/signup') {
     return null;
@@ -165,35 +175,25 @@ export default function Nav() {
 
 
       {/* Navigation Links */}
-      <nav onClick={() => setMobileOpen(false)} className="flex-1 px-3 py-4 space-y-1">
-        {links.map((link) => {
-          if (link.href === '/apparel/attribution' && !canUseApparelAttribution(currentUser, account)) return null;
-          if (link.href === '/tata/click-count' && !canViewTataClickCounts) return null;
-          const href = link.href === '/moengage-campaigns' && canUseApparelAttribution(currentUser, account) ? '/apparel/campaigns' : link.href;
-          const active =
-            href === '/'
-              ? pathname === '/'
-              : pathname.startsWith(href);
-          return (
-            <Link
-              key={link.href}
-              href={href}
-              className={
-                active
-                  ? 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold bg-blue-50 text-blue-700 shadow-xs'
-                  : 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors'
-              }
-            >
-              <span className={link.subtitle ? 'shrink-0 mt-0.5 self-start' : 'shrink-0'}>{link.icon}</span>
-              <div className="min-w-0">
-                <div className="leading-tight">{link.label}</div>
-                {link.subtitle && (
-                  <div className={`text-[10px] font-normal mt-0.5 truncate ${active ? 'text-blue-600' : 'text-gray-400'}`}>
-                    {href === '/apparel/campaigns' ? 'WhatsApp brief-to-draft' : link.subtitle}
-                  </div>
-                )}
-              </div>
-            </Link>
+      <nav className="flex-1 px-3 py-4 space-y-3" aria-label="Main navigation">
+        {[primaryRoutes.flatMap((href) => visibleLinks.filter((link) => link.href === href)),
+          visibleLinks.filter((link) => !primaryRoutes.includes(link.href))].map((group, index) => {
+          const items = group.map((link) => {
+            const href = link.href === '/moengage-campaigns' && canUseApparelAttribution(currentUser, account) ? '/apparel/campaigns' : link.href;
+            const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
+            return (
+              <Link key={link.href} href={href} onClick={() => setMobileOpen(false)} aria-current={active ? 'page' : undefined}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${active ? 'font-semibold bg-blue-50 text-blue-700' : 'font-medium text-gray-600 hover:bg-gray-100'}`}>
+                <span className="shrink-0">{link.icon}</span>
+                <span>{link.href === '/submit' ? 'Upload templates' : link.label}</span>
+              </Link>
+            );
+          });
+          return index === 0 ? <div key="primary" className="space-y-1">{items}</div> : (
+            <details key="tools" open={group.some((link) => pathname.startsWith(link.href) || (link.href === '/moengage-campaigns' && pathname.startsWith('/apparel/campaigns'))) || undefined}>
+              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-500">More tools</summary>
+              <div className="space-y-1 pt-1">{items}</div>
+            </details>
           );
         })}
 

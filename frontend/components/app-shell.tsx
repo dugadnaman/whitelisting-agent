@@ -47,6 +47,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const [openTabs, setOpenTabs] = useTabState<string[]>('workspace_open_tabs', ['/']);
   const scopeKey = `${currentUser?.id ?? ''}:${currentUser?.tenant_id ?? ''}:${account}:${channel}`;
+  const visibleTabs = openTabs.filter((path) => path !== '/login' && path !== '/signup');
   const previousScope = useRef(scopeKey);
   useEffect(() => {
     if (authLoading || isAuthPage) return;
@@ -115,8 +116,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <div className="sticky top-14 md:top-0 z-20 bg-white border-b border-gray-200">
               <DestinationSwitcher />
             {/* Workspace Tab Bar */}
-            <div className="bg-gray-50/95 border-t border-gray-100 px-4 sm:px-6 pt-2 flex items-center gap-1.5 overflow-x-auto">
-              {openTabs.map((path) => {
+            {visibleTabs.length > 1 && <div className="bg-gray-50/95 border-t border-gray-100 px-4 sm:px-6 pt-2 flex items-center gap-1.5 overflow-x-auto">
+              {visibleTabs.map((path) => {
                 const meta = TAB_META[path] || { label: path.replace(/^\//, ''), icon: '📌' };
                 const isActive = pathname === path;
                 return (
@@ -154,7 +155,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   </div>
                 );
               })}
-            </div>
+            </div>}
             </div>
 
             {/* Page Content */}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
+import Link from 'next/link';
 import {
   fetchStats,
   fetchTemplates,
@@ -81,6 +82,7 @@ function ActivityIcon({ action }: { action: string }) {
 
 export default function DashboardPage() {
   const { account, channel, user, mounted, getAccountLabel } = useApp();
+  const jiraWhitelisting = ['tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(account);
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [statsLoading, setStatsLoading] = useState(true);
@@ -549,6 +551,10 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {jiraWhitelisting && <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
+        <div><h2 className="font-semibold text-gray-900">Whitelist from a Jira brief</h2><p className="mt-1 text-sm text-gray-600">Choose a ticket, review the content, then confirm.</p></div>
+        <Link href="/briefs" className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">Open Jira Briefs</Link>
+      </section>}
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
@@ -1122,14 +1128,14 @@ export default function DashboardPage() {
                               ? 'Refresh after the service recovers.'
                               : stats?.error
                                 ? 'Check credentials in Settings, then refresh.'
-                                : 'Upload a spreadsheet on the Submit Templates page to whitelist your first template.'}
+                                : jiraWhitelisting ? 'Open a Jira brief to review and whitelist your templates.' : 'Upload a spreadsheet on the Submit Templates page to whitelist your first template.'}
                           </p>
                           {!stats?.error && !templatesError && (
                             <a
-                              href="/submit"
+                              href={jiraWhitelisting ? '/briefs' : '/submit'}
                               className="text-xs font-semibold text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center gap-1"
                             >
-                              Go to Submit Templates →
+                              {jiraWhitelisting ? 'Open Jira Briefs →' : 'Go to Submit Templates →'}
                             </a>
                           )}
                         </div>

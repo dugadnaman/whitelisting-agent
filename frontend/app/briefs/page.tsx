@@ -51,6 +51,8 @@ function isAspectBlocked(draft: DraftWarnings) {
 }
 
 function DraftWarningList({ draft, showAspectWarnings = true }: { draft: DraftWarnings; showAspectWarnings?: boolean }) {
+  const suggestions = draft.compliance_warnings?.filter((warning) => warning.severity !== 'error') || [];
+  const suggestionCount = suggestions.length + (draft.grammar_warnings?.length || 0);
   return (
     <div className="space-y-2 text-xs">
       {showAspectWarnings && isAspectBlocked(draft) && (
@@ -65,12 +67,19 @@ function DraftWarningList({ draft, showAspectWarnings = true }: { draft: DraftWa
           {warning.error && warning.action && <p>{warning.action}</p>}
         </div>
       ))}
-      {draft.compliance_warnings?.map((warning, index) => (
-        <div key={`compliance-${index}`} className={`p-2 rounded border ${warning.severity === 'error' ? 'border-rose-200 bg-rose-50 text-rose-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+      {draft.compliance_warnings?.filter((warning) => warning.severity === 'error').map((warning, index) => (
+        <div role="alert" key={`compliance-${index}`} className="p-2 rounded border border-rose-200 bg-rose-50 text-rose-900">
           <p className="font-semibold">{warning.component ? `${warning.component}: ` : ''}{warning.severity === 'error' ? 'Compliance error' : 'Compliance warning'}: {warning.issue}</p>
           {warning.recommendation && <p>{warning.recommendation}</p>}
         </div>
       ))}
+      {suggestionCount > 0 && <details className="rounded-lg border border-gray-200 p-2 text-gray-600">
+        <summary className="cursor-pointer font-medium">Suggestions ({suggestionCount})</summary>
+        <div className="mt-2 space-y-2">
+        {suggestions.map((warning, index) => <div key={`suggestion-${index}`} className="rounded border border-amber-200 bg-amber-50 p-2 text-amber-900">
+          <p>{warning.component ? `${warning.component}: ` : ''}{warning.issue}</p>
+          {warning.recommendation && <p>{warning.recommendation}</p>}
+        </div>)}
       {draft.grammar_warnings?.map((warning, index) => (
         <div key={`grammar-${index}`} className="p-2 rounded border border-blue-200 bg-blue-50 text-blue-900">
           <p className="font-semibold">{warning.component ? `${warning.component}: ` : ''}Grammar: {warning.issue}</p>
@@ -79,6 +88,8 @@ function DraftWarningList({ draft, showAspectWarnings = true }: { draft: DraftWa
           {warning.replacement && <p>Suggested: {warning.replacement}</p>}
         </div>
       ))}
+        </div>
+      </details>}
       {draft.duplicate_warning && (
         <p className="p-2 rounded border border-amber-200 bg-amber-50 text-amber-900">
           Duplicate: {draft.duplicate_warning.message}
@@ -140,6 +151,7 @@ export default function JiraBriefsPage() {
   }, []);
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(true);
+  const [showTicketPicker, setShowTicketPicker] = useState(false);
   const [projectsList, setProjectsList] = useState<JiraProjectItem[]>([
     { key: 'ALL', name: 'All Tata Projects Combined' },
     { key: 'TCN', name: 'Tata Capital New' },
@@ -507,6 +519,7 @@ export default function JiraBriefsPage() {
   const handleSelectIssue = (key: string) => {
     const cleanKey = key.trim().toUpperCase();
     setSelectedKey(cleanKey);
+    setShowTicketPicker(false);
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('key', cleanKey);
@@ -1337,6 +1350,19 @@ export default function JiraBriefsPage() {
     setSelectedRcs(select ? new Set(rcsTemplates.flatMap((_, idx) => isRcsEligible(idx) ? [idx] : [])) : new Set());
   };
 
+  const removeWaCreative = (idx: number) => {
+    if (submitting || uploadingCreative[`wa_${idx}`]) return;
+    setWaTemplates((prev) => prev.map((draft, index) => index === idx ? {
+      ...draft,
+      header_type: 'NONE',
+      header_text: null,
+      media_file: null,
+      media_filename: null,
+      media_attachment_id: null,
+    } : draft));
+    setFeedback({ message: 'Creative removed. Header is None; no header will be submitted.', type: 'success' });
+  };
+
   const handleReplaceWaCreative = async (idx: number, file: File) => {
     const key = `wa_${idx}`;
     const issueKey = brief?.issue_key;
@@ -1483,17 +1509,6 @@ export default function JiraBriefsPage() {
     }
   };
 
-  const emailCount = issues.filter((i) => i.is_email).length;
-  const messagingCount = issues.length - emailCount;
-
-  const statusCounts = {
-    all: issues.length,
-    pending: issues.filter((i) => (i.brief_status || 'Pending').toLowerCase().trim() === 'pending').length,
-    in_progress: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'in progress').length,
-    completed: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'completed').length,
-    failed: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'failed').length,
-    not_generated: issues.filter((i) => (i.brief_status || '').toLowerCase().trim() === 'not generated').length,
-  };
 
   const filteredIssues = issues.filter((i) => {
     if (campaignTypeFilter === 'messaging' && i.is_email) return false;
@@ -1523,10 +1538,10 @@ export default function JiraBriefsPage() {
     <>
       <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-gray-200">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">Jira Campaign Briefing Agent</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold text-gray-900">Jira Briefs</h1>
             <select
               value={project}
               onChange={(e) => {
@@ -1547,13 +1562,9 @@ export default function JiraBriefsPage() {
                 </option>
               ))}
             </select>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-              tatacapital-team.atlassian.net
-            </span>
           </div>
           <p className="text-sm text-gray-500 mt-1">
-            Review and selectively whitelist WhatsApp/RCS templates through Karix or Tata SMS DLT templates through VILPOWER.
+            Choose a ticket, review its templates, then confirm whitelisting.
           </p>
         </div>
 
@@ -1563,7 +1574,7 @@ export default function JiraBriefsPage() {
             disabled={loadingIssues}
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 shadow-2xs transition disabled:opacity-50"
           >
-            🔄 Refresh Tickets
+            Refresh tickets
           </button>
         </div>
       </div>
@@ -1588,95 +1599,31 @@ export default function JiraBriefsPage() {
       )}
 
       {/* Main Grid: Ticket Selector (Left) + Brief Inspector (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Left Column: Jira Issues List */}
-        <div className="lg:col-span-4 bg-white rounded-xl border border-gray-200/80 shadow-2xs p-4 space-y-3">
+        <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 p-4 space-y-3">
           <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-            <h2 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Active Jira Briefs</h2>
-            <span className="text-[11px] text-gray-400 font-medium font-mono">{issues.length} tickets</span>
+            <h2 className="text-sm font-semibold text-gray-900">1. Choose a ticket</h2>
+            <span className="hidden lg:inline text-[11px] text-gray-400">{issues.length} tickets</span>
+            <button type="button" aria-expanded={showTicketPicker || !selectedKey} aria-controls="jira-ticket-picker" onClick={() => setShowTicketPicker((open) => !open)} className="lg:hidden text-xs font-semibold text-blue-700">{showTicketPicker ? 'Hide tickets' : 'Change ticket'}</button>
           </div>
+          <div id="jira-ticket-picker" className={`${showTicketPicker || !selectedKey ? 'block' : 'hidden'} lg:block space-y-3`}>
 
-          {/* Segmented Campaign Filter Pills */}
-          <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-lg text-xs font-semibold">
-            <button
-              onClick={() => setCampaignTypeFilter('all')}
-              className={`flex-1 py-1 px-1.5 rounded-md transition text-center text-[11px] ${
-                campaignTypeFilter === 'all'
-                  ? 'bg-white text-gray-900 shadow-2xs font-bold'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              All ({issues.length})
-            </button>
-            <button
-              onClick={() => setCampaignTypeFilter('messaging')}
-              className={`flex-1 py-1 px-1.5 rounded-md transition text-center text-[11px] ${
-                campaignTypeFilter === 'messaging'
-                  ? 'bg-white text-emerald-700 shadow-2xs font-bold'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              🟢 Messaging ({messagingCount})
-            </button>
-            <button
-              onClick={() => setCampaignTypeFilter('email')}
-              className={`flex-1 py-1 px-1.5 rounded-md transition text-center text-[11px] ${
-                campaignTypeFilter === 'email'
-                  ? 'bg-white text-purple-700 shadow-2xs font-bold'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              📧 Email ({emailCount})
-            </button>
-          </div>
-          {/* Jira Brief Status Filter */}
-          <div className="space-y-1.5 pt-1 border-t border-gray-100">
-            <div className="flex items-center justify-between text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-              <span>Jira Brief Status</span>
-              {briefStatusFilter !== 'all' && (
-                <button
-                  type="button"
-                  onClick={() => setBriefStatusFilter('all')}
-                  className="text-blue-600 hover:text-blue-800 text-[10px] font-semibold cursor-pointer"
-                >
-                  Reset
-                </button>
-              )}
+          <details className="text-xs text-gray-600" open={campaignTypeFilter !== 'all' || briefStatusFilter !== 'all' || undefined}>
+            <summary className="cursor-pointer font-medium">Filter tickets{campaignTypeFilter !== 'all' || briefStatusFilter !== 'all' ? ' · active' : ''}</summary>
+            <div className="grid gap-3 pt-3">
+              <label>Campaign type
+                <select value={campaignTypeFilter} onChange={(event) => setCampaignTypeFilter(event.target.value as typeof campaignTypeFilter)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2">
+                  <option value="all">All campaigns</option><option value="messaging">Messaging</option><option value="email">Email</option>
+                </select>
+              </label>
+              <label>Ticket status
+                <select value={briefStatusFilter} onChange={(event) => setBriefStatusFilter(event.target.value as typeof briefStatusFilter)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2">
+                  <option value="all">All statuses</option><option value="pending">Pending</option><option value="in_progress">In progress</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="not_generated">Not generated</option>
+                </select>
+              </label>
             </div>
-            <div className="flex flex-wrap gap-1">
-              {[
-                { id: 'all', label: 'All', count: statusCounts.all },
-                { id: 'pending', label: '🟡 Pending', count: statusCounts.pending },
-                { id: 'in_progress', label: '🔵 In Progress', count: statusCounts.in_progress },
-                { id: 'completed', label: '🟢 Completed', count: statusCounts.completed },
-                { id: 'failed', label: '🔴 Failed', count: statusCounts.failed },
-                { id: 'not_generated', label: '⚪ Not Generated', count: statusCounts.not_generated },
-              ].map((tab) => {
-                const active = briefStatusFilter === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setBriefStatusFilter(tab.id as typeof briefStatusFilter)}
-                    className={`px-2 py-1 rounded-md text-[10px] font-semibold transition border flex items-center gap-1 cursor-pointer ${
-                      active
-                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs font-bold'
-                        : 'bg-gray-50 hover:bg-gray-100 text-gray-600 border-gray-200'
-                    }`}
-                  >
-                    <span>{tab.label}</span>
-                    <span
-                      className={`px-1 py-0.2 rounded-full text-[9px] font-bold ${
-                        active ? 'bg-white/20 text-white' : 'bg-gray-200/80 text-gray-700'
-                      }`}
-                    >
-                      {tab.count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          </details>
           <input
             type="text"
             placeholder="Search key, title, assignee..."
@@ -1789,10 +1736,11 @@ export default function JiraBriefsPage() {
               })()
             )}
           </div>
+          </div>
         </div>
 
         {/* Right Column: Interactive Brief Inspector */}
-        <div className="lg:col-span-8 space-y-4">
+        <div className="lg:col-span-9 min-w-0 space-y-4">
           {loadingBrief ? (
             <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs p-16 text-center text-xs text-gray-400 space-y-2">
               <div className="animate-spin text-xl">⏳</div>
@@ -1805,7 +1753,7 @@ export default function JiraBriefsPage() {
           ) : (
             <div className="space-y-4">
               {/* Ticket Overview Card */}
-              <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs p-5 space-y-4">
+              <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
@@ -1815,96 +1763,28 @@ export default function JiraBriefsPage() {
                       <h2 className="text-base font-bold text-gray-900">{brief.summary}</h2>
                       <BriefStatusBadge status={brief.brief_status} />
                     </div>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                    <details className="text-xs text-gray-500">
+                      <summary className="cursor-pointer font-medium">Ticket details</summary>
+                      <div className="mt-2 flex flex-wrap gap-3">
                       <span>Detected account (suggestion): <strong className="text-gray-800">{destinationAccountLabel(brief.account, getAccountLabel(brief.account))}</strong></span>
                       <span>👤 Reporter: <strong>{brief.reporter}</strong></span>
                       <span>🛠️ Assignee: <strong>{brief.assignee}</strong></span>
                       {brief.duedate && <span>📅 Due Date: <strong>{formatDate(brief.duedate)}</strong></span>}
-                    </div>
-                    {/* Channel-Wise Campaign Count Summary Bar */}
-                    <div className="p-3 bg-gradient-to-r from-gray-50 via-blue-50/20 to-indigo-50/15 rounded-xl border border-gray-200/90 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-gray-900 uppercase tracking-wide">
-                            📊 Total Campaigns in Ticket:
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-blue-600 text-white shadow-2xs">
-                            {brief.channel_counts?.total ?? (waTemplates.length + rcsTemplates.length + smsTemplates.length + (brief.email_templates?.length || 0) + (brief.channel_counts?.push ?? 0))}
-                          </span>
-                        </div>
-                        <span className="text-[11px] text-gray-500 font-medium">Channel-wise Breakdown</span>
                       </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-0.5">
-                        {/* WhatsApp */}
-                        <div className={`p-2 rounded-lg border text-center transition ${waTemplates.length > 0 ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
-                          <div className="text-[10px] font-bold uppercase tracking-wider">🟢 WhatsApp</div>
-                          <div className="text-base font-extrabold">{waTemplates.length}</div>
-                          <div className="text-[9px] text-gray-500">{waTemplates.length === 1 ? 'template' : 'templates'}</div>
-                        </div>
-
-                        {/* RCS */}
-                        <div className={`p-2 rounded-lg border text-center transition ${rcsTemplates.length > 0 ? 'bg-blue-50/90 border-blue-200 text-blue-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
-                          <div className="text-[10px] font-bold uppercase tracking-wider">🔵 RCS (DLT)</div>
-                          <div className="text-base font-extrabold">{rcsTemplates.length}</div>
-                          <div className="text-[9px] text-gray-500">{rcsTemplates.length === 1 ? 'card' : 'cards'}</div>
-                        </div>
-
-                        {/* SMS */}
-                        <div className={`p-2 rounded-lg border text-center transition ${smsTemplates.length > 0 ? 'bg-purple-50/90 border-purple-200 text-purple-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
-                          <div className="text-[10px] font-bold uppercase tracking-wider">🟣 SMS (DLT)</div>
-                          <div className="text-base font-extrabold">{smsTemplates.length}</div>
-                          <div className="text-[9px] text-gray-500">{smsTemplates.length === 1 ? 'template' : 'templates'}</div>
-                        </div>
-
-                        {/* Email */}
-                        <div className={`p-2 rounded-lg border text-center transition ${(brief.email_templates?.length || 0) > 0 ? 'bg-amber-50/90 border-amber-200 text-amber-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
-                          <div className="text-[10px] font-bold uppercase tracking-wider">📧 Email</div>
-                          <div className="text-base font-extrabold">{brief.email_templates?.length || 0}</div>
-                          <div className="text-[9px] text-gray-500">{(brief.email_templates?.length || 0) === 1 ? 'campaign' : 'campaigns'}</div>
-                        </div>
-
-                        {/* Push / App is a channel count, not the presence of a MoEngage staging draft. */}
-                        <div className={`p-2 rounded-lg border text-center transition ${(brief.channel_counts?.push ?? 0) > 0 ? 'bg-indigo-50/90 border-indigo-200 text-indigo-900 shadow-2xs' : 'bg-gray-50/40 border-gray-200/60 text-gray-400'}`}>
-                          <div className="text-[10px] font-bold uppercase tracking-wider">📱 Push / App</div>
-                          <div className="text-base font-extrabold">{brief.channel_counts?.push ?? 0}</div>
-                          <div className="text-[9px] text-gray-500">campaign</div>
-                        </div>
-                      </div>
-                    </div>
+                    </details>
                   </div>
                     <div className="flex flex-wrap items-center gap-2 pt-1.5">
-                      <span className="text-xs font-bold text-gray-700">Reviewed whitelisting destination: {selectedDestinationLabel}</span>
-                      <span className="text-[11px] text-gray-500">Only the shared workspace channel can be submitted. Other channel drafts remain available to review.</span>
+                      <span className="text-xs font-medium text-gray-700">Destination: {selectedDestinationLabel}</span>
                     </div>
 
                     {/* Dedicated RCS Destination Card when RCS templates are present */}
                     {channel === 'rcs' && rcsTemplates.length > 0 && (
-                      <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-xl space-y-2 text-xs text-blue-950 shadow-2xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-pulse" />
-                            <span className="font-bold uppercase tracking-wider text-[11px] text-blue-900">
-                              🔵 Karix RCS Whitelisting Target:
-                            </span>
-                            <span className="px-2 py-0.5 rounded font-extrabold bg-blue-600 text-white shadow-2xs text-xs">
-                              {currentRcs.botName}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px]">
-                            <span className="font-mono text-blue-900 bg-blue-100/90 px-2 py-0.5 rounded border border-blue-200 font-bold">
-                              Bot ID: {currentRcs.botId || 'Not configured'}
-                            </span>
-                            <span className="font-mono text-blue-800 bg-blue-100/80 px-2 py-0.5 rounded border border-blue-200">
-                              User: {currentRcs.rcsUser}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-blue-900">
-                          <span>🏢 Account: <strong>{currentRcs.name}</strong> ({targetAccount.toUpperCase()})</span>
-                          <span>🏛️ DLT Entity: <strong>{currentRcs.entity}</strong></span>
-                          <span>📡 API: <strong className="font-mono">Karix RCS Bot Builder</strong></span>
-                        </div>
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950 space-y-2">
+                        <p className="font-medium">RCS bot: {currentRcs.botName}</p>
+                        <details>
+                          <summary className="cursor-pointer text-blue-800">Connection details</summary>
+                          <p className="mt-2 break-words">Bot ID: {currentRcs.botId || 'Not configured'} · User: {currentRcs.rcsUser} · Entity: {currentRcs.entity}</p>
+                        </details>
                         {!currentRcs.botId && (
                           <p role="alert" className="font-semibold text-amber-800">
                             RCS submission is unavailable: this account has no verified Karix bot. Refresh account settings.
@@ -1951,84 +1831,13 @@ export default function JiraBriefsPage() {
                     </button>
                   )}
 
-                  {/* Selective Submission Action Controls */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {brief.is_email_campaign ? (
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-50 text-purple-800 border border-purple-200 shadow-2xs">
-                        <span>📧</span>
-                        <span>Direct ESP / MoEngage Deployment (No Karix Whitelisting Needed)</span>
-                      </span>
-                    ) : (
-                      <>
-                        {waTemplates.length > 0 && (
-                          <button
-                            onClick={() => requestWhitelist('whatsapp')}
-                            disabled={channel !== 'whatsapp' || !destinationAvailable || submitting || !validationReady || selectedWaCount === 0}
-                            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
-                            title="Submit only the checked WhatsApp templates"
-                          >
-                            <span>🟢 Whitelist WhatsApp Only</span>
-                            <span className="bg-emerald-500 px-1.5 py-0.2 rounded text-[10px]">
-                              {selectedWaCount}
-                            </span>
-                          </button>
-                        )}
-
-                        {rcsTemplates.length > 0 && (
-                          <button
-                            onClick={() => requestWhitelist('rcs')}
-                            disabled={channel !== 'rcs' || !destinationAvailable || submitting || !validationReady || selectedRcsCount === 0 || !currentRcs.botId}
-                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-xs font-semibold rounded-lg shadow-2xs transition flex items-center gap-1.5"
-                            title={`Submit ${selectedRcsCount} RCS template(s) to Karix RCS Bot '${currentRcs.botName}' (ID: ${currentRcs.botId})`}
-                          >
-                            <span>🔵 Whitelist RCS Only</span>
-                            <span className="bg-blue-500 px-1.5 py-0.2 rounded text-[10px] font-bold">
-                              {selectedRcsCount}
-                            </span>
-                            <span className="text-[10px] bg-blue-700/90 px-1.5 py-0.2 rounded font-normal opacity-95">
-                              ➔ {currentRcs.botName}
-                            </span>
-                          </button>
-                        )}
-
-                        {channel !== 'sms' && <button
-                          onClick={() => requestWhitelist('all')}
-                          disabled={!destinationAvailable || submitting || !validationReady || totalSelectedCount === 0 || (channel === 'rcs' && !currentRcs.botId)}
-                          className="px-4 py-2 bg-gray-900 hover:bg-black disabled:bg-gray-400 text-white text-xs font-semibold rounded-lg shadow-sm transition flex items-center gap-2"
-                        >
-                          {submitting ? (
-                            <>
-                              <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
-                              <span>Submitting...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>Whitelist Selected to {selectedDestinationLabel}</span>
-                              <span className="bg-gray-800 px-1.5 py-0.2 rounded text-[10px]">
-                                {totalSelectedCount}
-                              </span>
-                            </>
-                          )}
-                        </button>}
-                      </>
-                    )}
-                  </div>
+                  {brief.is_email_campaign && <p className="text-xs text-purple-800">Email campaigns do not need Karix whitelisting. Open More tools for MoEngage staging.</p>}
                 </div>
 
                 {/* Creatives Attachment Strip & Image Preview Gallery */}
                 {brief.attachments_mapped.length > 0 && (
-                  <div className="pt-3 border-t border-gray-100 space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">🖼️</span>
-                        <span className="font-bold text-gray-800 uppercase tracking-wider text-[11px]">
-                          Attached Creatives & Assets ({brief.attachments_mapped.length}):
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-gray-400">
-                        Click any image thumbnail to inspect full-size preview
-                      </span>
-                    </div>
+                  <details className="pt-3 border-t border-gray-100 text-xs">
+                    <summary className="cursor-pointer font-medium text-gray-600">Source attachments ({brief.attachments_mapped.length})</summary>
 
                     <div className="flex items-center gap-3 overflow-x-auto pb-1.5 scrollbar-thin">
                       {brief.attachments_mapped.map((att) => {
@@ -2127,7 +1936,7 @@ export default function JiraBriefsPage() {
                         );
                       })}
                     </div>
-                  </div>
+                  </details>
                 )}
               </div>
 
@@ -2167,7 +1976,8 @@ export default function JiraBriefsPage() {
 
               {/* Multi-Channel Content Tabs */}
               <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs overflow-hidden">
-                <div className="flex border-b border-gray-200 bg-gray-50/70">
+                <div className="flex flex-wrap items-center border-b border-gray-200 bg-gray-50/70">
+                  <p className="w-full px-4 pt-4 pb-1 text-sm font-semibold text-gray-900">2. Review templates</p>
                   {brief.is_email_campaign ? (
                     <>
                       <button
@@ -2192,12 +2002,14 @@ export default function JiraBriefsPage() {
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>💬 Ticket Comments</span>
+                        <span>Comments</span>
                         <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
                           {brief.comments?.length || 0}
                         </span>
                       </button>
 
+                      <details className="relative px-3 text-xs">
+                        <summary className="cursor-pointer py-3 text-gray-500">More tools</summary>
                       <button
                         onClick={() => setActiveTab('moengage')}
                         className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
@@ -2211,6 +2023,7 @@ export default function JiraBriefsPage() {
                           Draft
                         </span>
                       </button>
+                      </details>
                     </>
                   ) : (
                     <>
@@ -2222,7 +2035,7 @@ export default function JiraBriefsPage() {
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>🟢 WhatsApp</span>
+                        <span>WhatsApp</span>
                         <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
                           {selectedWaCount}/{waTemplates.length}
                         </span>
@@ -2236,7 +2049,7 @@ export default function JiraBriefsPage() {
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>🔵 RCS (DLT)</span>
+                        <span>RCS</span>
                         <span className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
                           {selectedRcsCount}/{rcsTemplates.length}
                         </span>
@@ -2250,7 +2063,7 @@ export default function JiraBriefsPage() {
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>🟣 SMS (DLT)</span>
+                        <span>SMS</span>
                         <span className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
                           {smsTemplates.length}
                         </span>
@@ -2264,12 +2077,14 @@ export default function JiraBriefsPage() {
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>💬 Comments</span>
+                        <span>Comments</span>
                         <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
                           {brief.comments?.length || 0}
                         </span>
                       </button>
 
+                      <details className="relative px-3 text-xs">
+                        <summary className="cursor-pointer py-3 text-gray-500">More tools</summary>
                       <button
                         onClick={() => setActiveTab('moengage')}
                         className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
@@ -2283,24 +2098,22 @@ export default function JiraBriefsPage() {
                           Draft
                         </span>
                       </button>
+                      </details>
                     </>
                   )}
                 </div>
 
                 {/* Tab Content Panels */}
-                <div className="p-5 space-y-4">
+                <div className="p-4 space-y-4">
                   {(activeTab === 'whatsapp' || activeTab === 'rcs' || activeTab === 'sms') && (
-                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100">
-                      <p className="text-xs text-gray-500">
-                        Two messages in one template? Add a separate template, then edit the original.
-                      </p>
+                    <div className="flex flex-wrap items-center justify-end gap-3">
                       <button
                         type="button"
                         onClick={() => addTemplate(activeTab)}
                         disabled={submitting}
                         className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       >
-                        Add template content
+                        Add template
                       </button>
                     </div>
                   )}
@@ -2421,7 +2234,7 @@ export default function JiraBriefsPage() {
                                     </span>
                                   ) : (
                                     <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
-                                      {validationReady ? 'Ready to Whitelist' : 'Validation required'}
+                                      {warnings.compliance_warnings?.some((warning) => warning.severity === 'error') ? 'Needs attention' : validationReady ? 'Ready for review' : 'Checking…'}
                                     </span>
                                   )}
 
@@ -2433,9 +2246,9 @@ export default function JiraBriefsPage() {
                                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                     }`}
                                   >
-                                    {isEditing ? '✓ Done Editing' : '✏️ Edit'}
+                                    {isEditing ? 'Done editing' : 'Edit'}
                                   </button>
-                                  <select
+                                  {isEditing && <select
                                     defaultValue=""
                                     onChange={(e) => {
                                       const target = e.target.value as 'rcs' | 'sms';
@@ -2450,12 +2263,12 @@ export default function JiraBriefsPage() {
                                     <option value="" disabled>⇄ Move Channel...</option>
                                     <option value="rcs">🔵 Move to RCS (DLT)</option>
                                     <option value="sms">🟣 Move to SMS (DLT)</option>
-                                  </select>
+                                  </select>}
                                 </div>
                               </div>
                               <DraftWarningList draft={warnings} showAspectWarnings={false} />
 
-                              {/* Header Creative (Image / Media) — Download & Replace */}
+                              {/* Header Creative — Download, Replace or Remove */}
                               <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
                                   <span className="flex items-center gap-1.5 font-medium">
@@ -2463,7 +2276,7 @@ export default function JiraBriefsPage() {
                                     {wa.media_filename ? (
                                       <strong className="text-gray-900 font-mono">{wa.media_filename}</strong>
                                     ) : (
-                                      <span className="text-gray-400 italic">None attached</span>
+                                      <span className="text-gray-400 italic">{wa.header_type === 'NONE' ? 'Header: None' : 'None attached'}</span>
                                     )}
                                   </span>
                                   <div className="flex items-center gap-1.5">
@@ -2472,6 +2285,17 @@ export default function JiraBriefsPage() {
                                         source={source}
                                         className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] shadow-2xs transition"
                                       />
+                                    )}
+                                    {(wa.header_type && wa.header_type !== 'NONE' || wa.header_text || wa.media_file || wa.media_filename || wa.media_attachment_id) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => removeWaCreative(idx)}
+                                        disabled={submitting || uploadingCreative[`wa_${idx}`]}
+                                        aria-label={`Remove creative from ${wa.template_name}`}
+                                        className="px-2 py-1 rounded bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 font-semibold text-[10px] disabled:opacity-50"
+                                      >
+                                        Remove creative
+                                      </button>
                                     )}
                                     <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
                                       <span>{uploadingCreative[`wa_${idx}`] ? '⏳ Uploading...' : wa.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
@@ -2489,9 +2313,10 @@ export default function JiraBriefsPage() {
                                     </label>
                                   </div>
                                 </div>
-                                <p className="text-gray-500">
-                                  WhatsApp whitelisting has no image dimension or aspect ratio requirements. A placeholder sample is used for an IMAGE header when no creative is attached.
-                                </p>
+                                <details className="text-gray-500">
+                                  <summary className="cursor-pointer">Header help</summary>
+                                  <p className="pt-1">{wa.header_type === 'NONE' ? 'No header will be submitted. Upload a creative to add an image header again.' : 'WhatsApp whitelisting has no image dimension or aspect ratio requirements. A placeholder sample is used for an IMAGE header when no creative is attached. Remove creative sets the header to None instead.'}</p>
+                                </details>
                                 {(wa.media_file || wa.media_attachment_id) && (
                                   <div className="pt-1">
                                     <JiraCreativeImage
@@ -2751,7 +2576,7 @@ export default function JiraBriefsPage() {
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  <button
+                                  {isEditing && <button
                                     onClick={() => handleSyncRcsToMoEngage(rcs)}
                                     disabled={syncingRcs[rcs.template_name]}
                                     className={`px-2.5 py-1 rounded text-xs font-semibold border transition flex items-center gap-1.5 ${
@@ -2766,7 +2591,7 @@ export default function JiraBriefsPage() {
                                       : syncedRcs[rcs.template_name]
                                       ? '✓ In MoEngage'
                                       : '🔄 Sync to MoEngage'}
-                                  </button>
+                                  </button>}
 
                                   <button
                                     onClick={() => toggleEditCard(`rcs-${idx}`)}
@@ -2776,9 +2601,9 @@ export default function JiraBriefsPage() {
                                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                     }`}
                                   >
-                                    {isEditing ? '✓ Done Editing' : '✏️ Edit'}
+                                    {isEditing ? 'Done editing' : 'Edit'}
                                   </button>
-                                  <select
+                                  {isEditing && <select
                                     defaultValue=""
                                     onChange={(e) => {
                                       const target = e.target.value as 'whatsapp' | 'sms';
@@ -2793,7 +2618,7 @@ export default function JiraBriefsPage() {
                                     <option value="" disabled>⇄ Move Channel...</option>
                                     <option value="whatsapp">🟢 Move to WhatsApp</option>
                                     <option value="sms">🟣 Move to SMS (DLT)</option>
-                                  </select>
+                                  </select>}
                                 </div>
                               </div>
                               <DraftWarningList draft={warnings} />
@@ -3167,9 +2992,9 @@ export default function JiraBriefsPage() {
                                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                     }`}
                                   >
-                                    {isEditing ? '✓ Done Editing' : '✏️ Edit'}
+                                    {isEditing ? 'Done editing' : 'Edit'}
                                   </button>
-                                  <select
+                                  {isEditing && <select
                                     defaultValue=""
                                     onChange={(e) => {
                                       const target = e.target.value as 'whatsapp' | 'rcs';
@@ -3184,7 +3009,7 @@ export default function JiraBriefsPage() {
                                     <option value="" disabled>⇄ Move Channel...</option>
                                     <option value="whatsapp">🟢 Move to WhatsApp</option>
                                     <option value="rcs">🔵 Move to RCS (DLT)</option>
-                                  </select>
+                                  </select>}
                                 </div>
                               </div>
 
@@ -3326,7 +3151,7 @@ export default function JiraBriefsPage() {
                               Copy ID
                             </button>
                             <a
-                              href={account === 'apparel' ? '/apparel/campaigns' : '/moengage-campaigns'}
+                              href="/moengage-campaigns"
                               className="text-[11px] font-bold text-emerald-700 hover:underline ml-2"
                             >
                               View in MoEngage Campaigns Builder ➔
@@ -3637,6 +3462,22 @@ export default function JiraBriefsPage() {
                   )}
                 </div>
               </div>
+              {!brief.is_email_campaign && channel !== 'sms' && (activeTab === 'whatsapp' || activeTab === 'rcs') && (
+                <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 pr-20 shadow-lg" aria-label="Whitelisting review">
+                  <button
+                    type="button"
+                    onClick={() => requestWhitelist(channel === 'rcs' ? 'rcs' : 'whatsapp')}
+                    disabled={activeTab !== channel || !destinationAvailable || submitting || !validationReady || totalSelectedCount === 0 || (channel === 'rcs' && !currentRcs.botId)}
+                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:bg-gray-300 disabled:text-gray-600"
+                  >
+                    {submitting ? 'Submitting…' : `Review & whitelist (${totalSelectedCount})`}
+                  </button>
+                  <div className="min-w-0 text-xs text-gray-600">
+                    <p className="font-semibold text-gray-900">3. Confirm · {selectedDestinationLabel}</p>
+                    <p>{activeTab !== channel ? 'This tab is read-only. Change the whitelisting destination to submit this channel.' : !validationReady ? 'Waiting for current validation.' : totalSelectedCount === 0 ? 'Select at least one template.' : hasValidationErrors ? 'Review the highlighted issues before continuing.' : 'Only checked templates are included. Nothing is sent before confirmation.'}</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
