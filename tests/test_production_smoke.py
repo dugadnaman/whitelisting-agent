@@ -39,6 +39,7 @@ def test_health_endpoints():
     assert r_api_health.json()["status"] == "ok"
 
 
+@pytest.mark.live_deployment
 @pytest.mark.skipif(not os.environ.get("KARIX_PRODUCTION_SMOKE_URL"), reason="Requires an explicitly selected deployment")
 def test_public_origin_serves_jira_ui_and_api():
     """A healthy API alone must not let backend port discovery hide the frontend."""

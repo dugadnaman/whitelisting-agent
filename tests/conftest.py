@@ -39,7 +39,7 @@ def pytest_sessionfinish(session, exitstatus):
 @pytest.fixture(autouse=True)
 def local_network_only(request, monkeypatch):
     """Real provider checks are opt-in; unit tests can use loopback HTTP servers."""
-    if request.node.get_closest_marker("live_karix") or request.node.get_closest_marker("live_moengage"):
+    if any(request.node.get_closest_marker(name) for name in ("live_karix", "live_moengage", "live_deployment")):
         return
     original_connect = socket.socket.connect
     original_resolve = socket.getaddrinfo
