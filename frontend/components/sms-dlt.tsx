@@ -143,7 +143,7 @@ function SmsDltEditor({ draft, onChange, disabled, onReady }: {
       {draft.brief.variables.map((decision, index) => <div key={index} className="grid gap-2 rounded border border-amber-200 p-2 sm:grid-cols-3">
         <p className="break-words font-mono">Occurrence {index + 1}: {decision.token}</p>
         <label>Interpretation<select className={`${inputClass} mt-1`} value={decision.kind} onChange={(event) => update({ brief: { ...draft.brief!, variables: draft.brief!.variables.map((item, idx) => idx === index ? { ...item, kind: event.target.value as SmsBriefDecision['kind'] } : item) } })}>
-          <option value="">Choose literal or variable</option><option value="literal">Keep exact literal text</option><option value="num">num · number</option><option value="alp">alp · alphanumeric text</option><option value="urg">urg · URL</option><option value="uro">uro · URL</option><option value="cbn">cbn · callback number</option><option value="eml">eml · email</option>
+          <option value="">Choose literal or variable</option><option value="literal">Keep exact literal text</option><option value="num">num · numeric · max 40</option><option value="alp">alp · mixed text · max 40</option><option value="urg">urg · website URL · max 120</option><option value="uro">uro · app / OTT download URL · max 120</option><option value="cbn">cbn · callback number · 3–14 digits</option><option value="eml">eml · email · max 40</option>
         </select></label>
         {decision.kind && decision.kind !== 'literal' && <label>Explicit sample value<input className={`${inputClass} mt-1`} value={decision.sample} onChange={(event) => update({ brief: { ...draft.brief!, variables: draft.brief!.variables.map((item, idx) => idx === index ? { ...item, sample: event.target.value } : item) } })} /></label>}
       </div>)}
@@ -245,6 +245,21 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   return <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
     <div className="flex flex-wrap justify-between gap-3"><h2 className="text-sm font-bold">Review Tata Capital · SMS DLT · VILPOWER</h2><a href="/" className="text-xs text-blue-700 underline">Template history and approval status</a></div>
     <p className="text-xs text-gray-600">Register templates only; no recipients or SMS sending. Select provider fields explicitly, then validate and confirm the exact message and sample. A queued or pending template is not approved.</p>
+    {!batch && <details className="rounded-lg border border-gray-200 p-3 text-xs">
+      <summary className="cursor-pointer font-semibold">VILPOWER variable types and limits</summary>
+      <div className="mt-3 overflow-x-auto"><table className="w-full text-left">
+        <caption className="mb-2 text-left text-gray-600">Limits apply to each filled variable value, not the full SMS. Surrounding message copy must stay identical in the sample.</caption>
+        <thead><tr><th scope="col" className="p-2">Variable tag</th><th scope="col" className="p-2">Purpose / usage</th><th scope="col" className="p-2">Length</th></tr></thead>
+        <tbody>{[
+          ['{#num#}', 'Strictly numeric: OTPs, amounts and counts; no special characters.', '1–40 digits'],
+          ['{#alp#}', 'Mixed text: reference IDs, ticket / booking numbers and addresses. www, http and https are restricted.', '1–40 characters'],
+          ['{#urg#}', 'Website URLs, such as tracking links or portals.', '1–120 characters'],
+          ['{#uro#}', 'OTT or mobile application download links.', '1–120 characters'],
+          ['{#cbn#}', 'Callback or support contact numbers.', '3–14 digits'],
+          ['{#eml#}', 'Email addresses mentioned in the SMS.', '1–40 characters'],
+        ].map(([tag, purpose, length]) => <tr key={tag} className="border-t border-gray-100"><th scope="row" className="p-2 font-mono">{tag}</th><td className="p-2">{purpose}</td><td className="whitespace-nowrap p-2">{length}</td></tr>)}</tbody>
+      </table></div>
+    </details>}
     {!batch && drafts.map((draft, index) => <SmsDltEditor key={index} draft={draft} disabled={busy} onReady={(value, category = '') => {
       setReady((prev) => prev[index] === value ? prev : { ...prev, [index]: value });
       setCategoryLabels((prev) => prev[index] === category ? prev : { ...prev, [index]: category });

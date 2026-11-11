@@ -73,6 +73,18 @@ silently redirects credentials or submissions to another account.
    The identification panel compares exact copy and can hand missing templates
    directly into review. Identical names with different DLT IDs remain separate.
 
+   The SMS editor's **VILPOWER variable types and limits** reference follows the
+   portal's Variables Description. Limits are per filled variable value:
+
+   | Tag | Usage | Length |
+   | --- | --- | --- |
+   | `{#num#}` | Numeric only (OTPs, amounts, counts); no special characters | 1–40 digits |
+   | `{#alp#}` | Mixed text (IDs, bookings, addresses); no `www`, `http`, `https` | 1–40 characters |
+   | `{#urg#}` | Website URLs (tracking links, portals) | Up to 120 characters |
+   | `{#uro#}` | OTT or mobile-app download links | Up to 120 characters |
+   | `{#cbn#}` | Callback / support contact numbers | 3–14 digits |
+   | `{#eml#}` | Email addresses | Up to 40 characters |
+
 The portal session expires and requires normal human sign-in again. Reloading the
 inventory then captures the renewed session; reconnecting the extension is not
 required. There is no automatic login, paid API activation, or automatic registration replay.

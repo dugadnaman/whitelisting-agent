@@ -240,6 +240,29 @@ def test_typed_sample_examples_follow_observed_portal_rules(kind, example, valid
     assert bool(errors) is not valid
 
 
+@pytest.mark.parametrize("kind,example,valid", [
+    ("num", "9" * 40, True), ("num", "9" * 41, False),
+    ("num", "1,200", False), ("num", "+1200", False),
+    ("alp", "A" * 40, True), ("alp", "A" * 41, False),
+    ("alp", "Flat 12/B, Main Road", True),
+    ("alp", "www.example.test", False), ("alp", "HTTP://example.test", False),
+    ("urg", "https://example.test/" + "a" * 99, True),
+    ("urg", "https://example.test/" + "a" * 100, False),
+    ("uro", "https://example.test/" + "a" * 99, True),
+    ("uro", "https://example.test/" + "a" * 100, False),
+    ("cbn", "123", True), ("cbn", "1" * 14, True),
+    ("cbn", "12", False), ("cbn", "1" * 15, False), ("cbn", "+911234567890", False),
+    ("eml", "a" * 27 + "@example.test", True),
+    ("eml", "a" * 28 + "@example.test", False),
+])
+def test_typed_sample_limits_match_vilpower_variable_description(kind, example, valid):
+    draft = {**DRAFT, "text": f"Value: {{#{kind}#}}.", "sample_message": f"Value: {example}."}
+    original = dict(draft)
+    errors = vilpower.validate_sms_template(draft)
+    assert (errors == []) is valid
+    assert draft == original
+
+
 def test_single_registration_uses_portal_form_transport_and_verifies_created_record(monkeypatch):
     import threading
     from email import policy
