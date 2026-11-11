@@ -25,13 +25,13 @@ export default function DestinationSwitcher() {
   };
 
   return (
-    <section aria-label="Whitelisting destination" className="px-4 sm:px-6 py-3">
+    <section aria-label="Whitelisting destination" className="px-4 sm:px-6 xl:px-8 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">{campaignPage ? 'Campaign workspace · Draft only' : account === 'all' ? 'Viewing overview' : 'Whitelisting for'}</p>
-          <p id="current-destination" aria-live="polite" className="text-sm sm:text-base font-semibold text-gray-900 break-words">{label}</p>
+          <p className="text-xs font-medium text-gray-500">{campaignPage ? 'Campaign workspace · Draft only' : account === 'all' ? 'Viewing overview' : 'Whitelisting for'}</p>
+          <p id="current-destination" aria-live="polite" className="text-sm font-semibold text-gray-900 break-words">{label}</p>
         </div>
-        <button type="button" onClick={open} aria-haspopup="dialog" className="shrink-0 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 focus-visible:ring-2 focus-visible:ring-blue-500">Change</button>
+        <button type="button" onClick={open} aria-haspopup="dialog" className="shrink-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Change <span aria-hidden="true" className="ml-1 text-gray-400">⌄</span></button>
       </div>
       <dialog ref={dialog} aria-labelledby="destination-dialog-title" onClick={(event) => { if (event.target === event.currentTarget) dialog.current?.close(); }} className="m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl border border-gray-200 bg-white p-0 text-gray-900 shadow-xl backdrop:bg-black/40">
         <form className="p-5 sm:p-6 space-y-5" onSubmit={(event) => {
@@ -40,7 +40,7 @@ export default function DestinationSwitcher() {
           else setMessage('Destination unchanged. Your current work has been kept.');
         }}>
           <div>
-            <h2 id="destination-dialog-title" className="text-lg font-bold">Where are you whitelisting?</h2>
+            <h2 id="destination-dialog-title" className="text-xl font-semibold tracking-tight">Choose a destination</h2>
             <p className="mt-1 text-sm text-gray-500">Choose the account and channel together. Nothing is submitted by changing this selection.</p>
             {campaignPage && <p className="text-sm text-blue-700">WhatsApp drafting is independent of the template-whitelisting channel below. Changing this destination does not publish or send campaigns.</p>}
           </div>

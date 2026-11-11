@@ -39,6 +39,7 @@ import { SmsDltReview, smsDltDraft } from '@/components/sms-dlt';
 import { TATA_CTA_URL, isUrlCta, normalizeWhatsAppCtas, normalizeRcsCtas, resolveCtaUrl } from '@/lib/cta';
 import { CAMPAIGN_NAME_HINT, campaignRowName, normalizeCampaignFields, normalizeCampaignName, requireCampaignName } from '@/lib/campaign-name';
 import type { SmsDltDraft } from '@/lib/api';
+import { BRIEF_SMS_PAGE_SIZE, BRIEF_SMS_REVIEW_LIMIT, matchingBriefSmsIndices, briefSmsPage, selectBriefSmsIndices, selectedBriefSmsDrafts } from '@/lib/brief-sms';
 
 const UNCHECKED_WARNINGS: DraftWarnings = {
   aspect_ratio_warnings: [],
@@ -118,7 +119,7 @@ function BriefStatusBadge({ status }: { status?: string }) {
     label = 'Completed';
   } else if (s === 'in progress' || s === 'in_progress' || s === 'review' || s === 'test sent' || s === 'submitted') {
     colorClass = 'bg-blue-50 text-blue-800 border-blue-200';
-    dotColor = 'bg-blue-500 animate-pulse';
+    dotColor = 'bg-blue-500';
     label = 'In Progress';
   } else if (s === 'failed' || s === 'rejected' || s === 'error') {
     colorClass = 'bg-rose-50 text-rose-800 border-rose-200';
@@ -177,6 +178,10 @@ export default function JiraBriefsPage() {
   const [waTemplates, setWaTemplates] = useTabState<JiraWhatsAppDraft[]>('briefs_wa_templates', []);
   const [rcsTemplates, setRcsTemplates] = useTabState<SelectableRcsDraft[]>('briefs_rcs_templates', []);
   const [smsTemplates, setSmsTemplates] = useTabState<JiraSmsDraft[]>('briefs_sms_templates', []);
+  const [smsSearch, setSmsSearch] = useState('');
+  const [smsPageNumber, setSmsPageNumber] = useState(1);
+  const matchingSmsIndices = useMemo(() => matchingBriefSmsIndices(smsTemplates, smsSearch), [smsTemplates, smsSearch]);
+  const smsPage = useMemo(() => briefSmsPage(matchingSmsIndices, smsPageNumber), [matchingSmsIndices, smsPageNumber]);
   useEffect(() => {
     // Migrate cached editable drafts once, without rewriting URL keystrokes.
     setWaTemplates((drafts) => drafts.map((draft) => normalizeWhatsAppCtas(draft, account)));
@@ -185,6 +190,10 @@ export default function JiraBriefsPage() {
   const [selectedWa, setSelectedWa] = useTabState<Set<number>>('briefs_selected_wa', new Set());
   const [selectedRcs, setSelectedRcs] = useTabState<Set<number>>('briefs_selected_rcs', new Set());
   const [selectedSms, setSelectedSms] = useTabState<Set<number>>('briefs_selected_sms', new Set());
+  const selectedSmsDrafts = useMemo(() => selectedBriefSmsDrafts(smsTemplates, selectedSms), [smsTemplates, selectedSms]);
+  const selectedSmsCount = selectedSmsDrafts.length;
+  const smsPageSelected = smsPage.indices.length > 0 && smsPage.indices.every((index) => selectedSms.has(index));
+  const smsPageAdditionCount = smsPage.indices.filter((index) => !selectedSms.has(index)).length;
   const [smsReview, setSmsReview] = useTabState<{ issueKey: string; drafts: SmsDltDraft[]; revision: number } | null>('briefs_sms_dlt_review', null);
   const [editingCard, setEditingCard] = useTabState<Record<string, boolean>>('briefs_editing_card', {});
   const [syncingRcs, setSyncingRcs] = useState<Record<string, boolean>>({});
@@ -571,6 +580,8 @@ export default function JiraBriefsPage() {
       setSmsTemplates(smsList);
       setSelectedSms(new Set());
       setSmsReview(null);
+      setSmsSearch('');
+      setSmsPageNumber(1);
       setSelectedWa(new Set(waList.map((_, idx) => idx)));
       setSelectedRcs(new Set(rcsList.map((_, idx) => idx)));
       setEditingCard({});
@@ -857,6 +868,8 @@ export default function JiraBriefsPage() {
         variables: [],
         raw_source: '',
       }]);
+      setSmsSearch('');
+      setSmsPageNumber(Math.floor(smsTemplates.length / BRIEF_SMS_PAGE_SIZE) + 1);
     }
 
     setEditingCard((prev) => ({ ...prev, [cardId]: true }));
@@ -1510,6 +1523,7 @@ export default function JiraBriefsPage() {
   };
 
 
+  const normalizedTicketSearch = searchQuery.trim().toLowerCase();
   const filteredIssues = issues.filter((i) => {
     if (campaignTypeFilter === 'messaging' && i.is_email) return false;
     if (campaignTypeFilter === 'email' && !i.is_email) return false;
@@ -1520,9 +1534,9 @@ export default function JiraBriefsPage() {
     }
 
     return (
-      i.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      i.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (i.assignee || '').toLowerCase().includes(searchQuery.toLowerCase())
+      i.key.toLowerCase().includes(normalizedTicketSearch) ||
+      i.summary.toLowerCase().includes(normalizedTicketSearch) ||
+      (i.assignee || '').toLowerCase().includes(normalizedTicketSearch)
     );
   });
   const selectedWaCount = waTemplates.filter((_, index) => selectedWa.has(index)).length;
@@ -1533,51 +1547,60 @@ export default function JiraBriefsPage() {
   const hasValidationErrors = rcsTemplates.some((_, index) => isAspectBlocked(getRcsWarnings(index)))
     || [...waTemplates.map((_, index) => getWaWarnings(index)), ...rcsTemplates.map((_, index) => getRcsWarnings(index))]
       .some((draft) => draft.compliance_warnings?.some((warning) => warning.severity === 'error'));
+  const loadedCurrentBrief = Boolean(brief && selectedKey === brief.issue_key && !loadingBrief);
+  const workflowStep = !loadedCurrentBrief ? 1 : confirmationMode ? 3 : 2;
+  const ticketFiltersActive = Boolean(searchQuery || project !== 'ALL' || campaignTypeFilter !== 'all' || briefStatusFilter !== 'all');
+  const resetTicketFilters = () => {
+    setSearchQuery('');
+    setCampaignTypeFilter('all');
+    setBriefStatusFilter('all');
+    setProject('ALL');
+    if (typeof window !== 'undefined') localStorage.setItem('briefs_project', 'ALL');
+  };
 
   return (
     <>
-      <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-gray-200">
-        <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-semibold text-gray-900">Jira Briefs</h1>
-            <select
-              value={project}
-              onChange={(e) => {
-                const newP = e.target.value;
-                setProject(newP);
-                setSelectedKey('');
-                setBrief(null);
-                if (typeof window !== 'undefined') {
-                  localStorage.setItem('briefs_project', newP);
-                }
-              }}
-              className="text-xs font-semibold bg-white border border-blue-200 text-blue-700 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-              aria-label="Jira project"
-            >
-              {projectsList.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.key} — {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <p className="text-sm text-gray-500 mt-1">
-            Choose a ticket, review its templates, then confirm whitelisting.
-          </p>
+      <div className="workspace-page space-y-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <p className="workspace-eyebrow">Campaign operations</p>
+          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 sm:text-3xl">Jira briefs</h1>
+          <p className="max-w-2xl text-sm leading-relaxed text-gray-500">From ticket to reviewed template. Keep the source in view and confirm only what you choose.</p>
         </div>
+        <button type="button" onClick={() => loadIssues(searchQuery, briefStatusFilter)} disabled={loadingIssues}
+          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50">
+          {loadingIssues ? 'Refreshing…' : 'Refresh tickets'}
+        </button>
+      </header>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => loadIssues()}
-            disabled={loadingIssues}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 shadow-2xs transition disabled:opacity-50"
-          >
-            Refresh tickets
-          </button>
-        </div>
-      </div>
+      <nav aria-label="Jira review progress" className="rounded-xl border border-gray-200 bg-white px-3 py-4 sm:px-5">
+        <ol className="flex items-start">
+          {[
+            { label: 'Choose ticket', detail: loadedCurrentBrief ? brief?.issue_key : loadingBrief ? 'Loading brief…' : 'Find your source' },
+            { label: 'Review', detail: workflowStep === 3 ? 'Review prepared' : loadedCurrentBrief ? (smsReview?.issueKey === brief?.issue_key && activeTab === 'sms' ? 'DLT review open' : 'Check copy & selection') : 'After loading' },
+            { label: 'Confirm', detail: workflowStep === 3 ? 'Awaiting your confirmation' : brief?.is_email_campaign && loadedCurrentBrief ? 'No whitelisting required' : smsReview?.issueKey === brief?.issue_key && activeTab === 'sms' ? 'Within DLT review' : 'Final approval required' },
+          ].map((step, index) => (
+            <li key={step.label} aria-current={workflowStep === index + 1 ? 'step' : undefined} className="relative flex min-w-0 flex-1 gap-2 last:flex-none last:w-[30%] sm:gap-3">
+              {index < 2 && <span aria-hidden="true" className={`absolute left-8 right-2 top-4 h-px ${workflowStep > index + 1 ? 'bg-blue-300' : 'bg-gray-200'}`} />}
+              <span aria-hidden="true" className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${workflowStep >= index + 1 ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-400'}`}>{index + 1}</span>
+              <div className="relative min-w-0 bg-white pr-2 pt-1">
+                <p className={`text-sm font-semibold ${workflowStep === index + 1 ? 'text-blue-800' : workflowStep > index + 1 ? 'text-gray-800' : 'text-gray-500'}`}>{step.label}</p>
+                <p className="mt-1 hidden text-xs leading-relaxed text-gray-500 sm:block">{step.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </nav>
+
+      <details className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+        <summary className="cursor-pointer font-medium text-gray-700">New to Jira review? A quick guide</summary>
+        <ol className="mt-4 grid list-inside list-decimal gap-3 leading-relaxed sm:grid-cols-2">
+          <li><strong className="text-gray-900">Choose a destination.</strong> Use “Whitelisting for” to explicitly select the account and channel. A ticket’s detected account is only a suggestion.</li>
+          <li><strong className="text-gray-900">Check the connection.</strong> Open <a href="/settings" className="font-medium text-blue-700 underline underline-offset-2">Settings</a> for the matching provider session. A selected destination does not mean it is connected.</li>
+          <li><strong className="text-gray-900">Select and review.</strong> Find a ticket, check exact copy and creatives, then select templates. SMS uses shared DLT settings in the next review.</li>
+          <li><strong className="text-gray-900">Confirm deliberately.</strong> Resolve blocking errors and review the destination. Whitelisting requires a final confirmation; SMS registration does not send messages.</li>
+        </ol>
+      </details>
 
       {/* Feedback Banner */}
       {feedback && (
@@ -1601,15 +1624,29 @@ export default function JiraBriefsPage() {
       {/* Main Grid: Ticket Selector (Left) + Brief Inspector (Right) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         {/* Left Column: Jira Issues List */}
-        <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-          <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-            <h2 className="text-sm font-semibold text-gray-900">1. Choose a ticket</h2>
-            <span className="hidden lg:inline text-[11px] text-gray-400">{issues.length} tickets</span>
-            <button type="button" aria-expanded={showTicketPicker || !selectedKey} aria-controls="jira-ticket-picker" onClick={() => setShowTicketPicker((open) => !open)} className="lg:hidden text-xs font-semibold text-blue-700">{showTicketPicker ? 'Hide tickets' : 'Change ticket'}</button>
+        <section className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 space-y-4 lg:col-span-4 xl:col-span-3" aria-labelledby="ticket-picker-heading">
+          <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
+            <h2 id="ticket-picker-heading" className="text-sm font-semibold text-gray-900">Choose a ticket</h2>
+            <button type="button" aria-expanded={showTicketPicker || !selectedKey} aria-controls="jira-ticket-picker" onClick={() => setShowTicketPicker((open) => !open)} className="rounded-lg px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 lg:hidden">{showTicketPicker ? 'Hide tickets' : 'Change ticket'}</button>
           </div>
           <div id="jira-ticket-picker" className={`${showTicketPicker || !selectedKey ? 'block' : 'hidden'} lg:block space-y-3`}>
 
-          <details className="text-xs text-gray-600" open={campaignTypeFilter !== 'all' || briefStatusFilter !== 'all' || undefined}>
+          <label className="block text-sm font-medium text-gray-700">Jira project
+            <select value={project} onChange={(event) => {
+              const nextProject = event.target.value;
+              setProject(nextProject);
+              setSelectedKey('');
+              setBrief(null);
+              if (typeof window !== 'undefined') localStorage.setItem('briefs_project', nextProject);
+            }} className="mt-1.5 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+              {projectsList.map((item) => <option key={item.key} value={item.key}>{item.key === 'ALL' ? 'All projects' : `${item.key} — ${item.name}`}</option>)}
+            </select>
+          </label>
+          <label className="block text-sm font-medium text-gray-700">Search tickets
+            <input type="search" placeholder="Key, title or assignee" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+          </label>
+          <details className="text-sm text-gray-600" open={campaignTypeFilter !== 'all' || briefStatusFilter !== 'all' || undefined}>
             <summary className="cursor-pointer font-medium">Filter tickets{campaignTypeFilter !== 'all' || briefStatusFilter !== 'all' ? ' · active' : ''}</summary>
             <div className="grid gap-3 pt-3">
               <label>Campaign type
@@ -1624,72 +1661,62 @@ export default function JiraBriefsPage() {
               </label>
             </div>
           </details>
-          <input
-            type="text"
-            placeholder="Search key, title, assignee..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          {ticketFiltersActive && <div className="flex flex-wrap gap-2" aria-label="Active ticket filters">
+            {project !== 'ALL' && <button type="button" aria-label={`Remove project filter ${project}`} onClick={() => { setProject('ALL'); localStorage.setItem('briefs_project', 'ALL'); }} className="workspace-filter-chip inline-flex items-center gap-2 rounded-lg border border-gray-200 px-2 py-1 text-sm text-gray-700">Project: {project}<span aria-hidden="true">×</span></button>}
+            {searchQuery && <button type="button" aria-label="Clear ticket search" onClick={() => setSearchQuery('')} className="workspace-filter-chip inline-flex max-w-full items-center gap-2 rounded-lg border border-gray-200 px-2 py-1 text-sm text-gray-700"><span className="truncate">Search: {searchQuery}</span><span aria-hidden="true">×</span></button>}
+            {campaignTypeFilter !== 'all' && <button type="button" aria-label="Remove campaign type filter" onClick={() => setCampaignTypeFilter('all')} className="workspace-filter-chip inline-flex items-center gap-2 rounded-lg border border-gray-200 px-2 py-1 text-sm capitalize text-gray-700">{campaignTypeFilter}<span aria-hidden="true">×</span></button>}
+            {briefStatusFilter !== 'all' && <button type="button" aria-label="Remove ticket status filter" onClick={() => setBriefStatusFilter('all')} className="workspace-filter-chip inline-flex items-center gap-2 rounded-lg border border-gray-200 px-2 py-1 text-sm capitalize text-gray-700">{briefStatusFilter.replace(/_/g, ' ')}<span aria-hidden="true">×</span></button>}
+            <button type="button" onClick={resetTicketFilters} className="px-1 py-1 text-sm font-medium text-blue-700 hover:underline">Reset filters</button>
+          </div>}
+          <p role="status" className="text-xs text-gray-500">{loadingIssues ? 'Updating results…' : `${filteredIssues.length} matching ticket${filteredIssues.length === 1 ? '' : 's'} in this queue`}<span className="block mt-1">Up to 50 tickets loaded. Search Jira to narrow results.</span></p>
+          {selectedKey && !filteredIssues.some((issue) => issue.key === selectedKey) && <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-600">Open ticket <strong>{selectedKey}</strong> is outside these results. Its review stays open.</p>}
 
           <div className="space-y-2 max-h-[640px] overflow-y-auto pr-1">
             {loadingIssues && issues.length === 0 ? (
               <div className="py-12 text-center text-xs text-gray-400">Loading Jira queue...</div>
-            ) : filteredIssues.length === 0 && !selectedKey ? (
-              <div className="py-12 text-center text-xs text-gray-400">No matching Jira tickets found.</div>
+            ) : filteredIssues.length === 0 ? (
+              <div className="space-y-3 rounded-lg bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
+                <p className="font-semibold text-gray-900">No matching tickets</p>
+                <p>Try a ticket key, a different project, or fewer filters.</p>
+                {ticketFiltersActive && <button type="button" onClick={resetTicketFilters} className="rounded-lg border border-gray-200 bg-white px-3 py-2 font-medium text-gray-700 hover:bg-gray-100">Clear search &amp; filters</button>}
+              </div>
             ) : (
-              (() => {
-                const isSelectedInList = filteredIssues.some((i) => i.key === selectedKey);
-                const displayIssues = [...filteredIssues];
-                if (selectedKey && !isSelectedInList && brief && (brief.issue_key === selectedKey || selectedKey.endsWith(brief.issue_key.split('-')[1] || ''))) {
-                  displayIssues.unshift({
-                    key: brief.issue_key,
-                    id: brief.issue_key,
-                    summary: brief.summary,
-                    status: brief.status || 'In Progress',
-                    assignee: brief.assignee || 'Unassigned',
-                    reporter: brief.reporter || 'Anonymous',
-                    attachment_count: brief.attachments_mapped?.length || 0,
-                    attachments: [],
-                    is_email: brief.is_email_campaign,
-                  });
-                }
-                return displayIssues.map((issue) => {
+              filteredIssues.map((issue) => {
                   const isSelected = issue.key === selectedKey;
                   return (
                     <button
                       key={issue.key}
                       onClick={() => handleSelectIssue(issue.key)}
-                      className={`w-full text-left p-3 rounded-lg border transition text-xs space-y-1.5 ${
+                      className={`w-full text-left p-3 rounded-lg border transition-colors text-sm space-y-2 ${
                         isSelected
                           ? 'bg-blue-50/80 border-blue-300 ring-1 ring-blue-400/40 shadow-xs'
                           : 'bg-white border-gray-200 hover:bg-gray-50/80'
                       }`}
                     >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-bold font-mono text-blue-700">{issue.key}</span>
                         {issue.is_email ? (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                            📧 Email
+                          <span className="rounded bg-purple-50 px-1.5 py-0.5 text-xs font-medium text-purple-700">
+                            Email
                           </span>
                         ) : (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            🟢 WA/RCS
+                          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
+                            Messaging
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-[10px] px-1.5 py-0.2 rounded font-semibold bg-gray-100 text-gray-600">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
                           {issue.status}
                         </span>
                         <BriefStatusBadge status={issue.brief_status} />
                       </div>
                     </div>
                     <p className="font-semibold text-gray-800 line-clamp-2 leading-snug">{issue.summary}</p>
-                    <div className="flex items-center justify-between text-[10px] text-gray-400 pt-1">
-                      <span>👤 {issue.assignee}</span>
-                      <span>📎 {issue.attachment_count} creatives</span>
+                    <div className="flex flex-wrap items-center justify-between gap-1 pt-1 text-xs text-gray-500">
+                      <span>{issue.assignee || 'Unassigned'}</span>
+                      <span>{issue.attachment_count} creatives</span>
                     </div>
                     {/* Channel-Wise Campaign Breakdown */}
                     {(() => {
@@ -1732,15 +1759,14 @@ export default function JiraBriefsPage() {
                     })()}
                     </button>
                   );
-                });
-              })()
+                })
             )}
           </div>
           </div>
-        </div>
+        </section>
 
         {/* Right Column: Interactive Brief Inspector */}
-        <div className="lg:col-span-9 min-w-0 space-y-4">
+        <div className="min-w-0 space-y-4 lg:col-span-8 xl:col-span-9">
           {loadingBrief ? (
             <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs p-16 text-center text-xs text-gray-400 space-y-2">
               <div className="animate-spin text-xl">⏳</div>
@@ -1756,11 +1782,11 @@ export default function JiraBriefsPage() {
               <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="text-sm font-bold font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
                         {brief.issue_key}
                       </span>
-                      <h2 className="text-base font-bold text-gray-900">{brief.summary}</h2>
+                      <h2 className="min-w-0 break-words text-base font-semibold text-gray-900">{brief.summary}</h2>
                       <BriefStatusBadge status={brief.brief_status} />
                     </div>
                     <details className="text-xs text-gray-500">
@@ -2937,47 +2963,90 @@ export default function JiraBriefsPage() {
                           if (window.confirm('Discard this DLT review and return to source drafts? Provider-field and body edits made in this review will be cleared; any queued batch remains in History.')) setSmsReview(null);
                         }} />
                       ) : <>
-                      <div className="space-y-3 rounded-xl border border-purple-200 bg-purple-50 p-4 text-xs">
-                        <p className="font-semibold">SMS whitelisting</p>
-                        <p>Select messages, apply shared DLT settings once, then review and confirm. No SMS is sent.</p>
-                        {smsTemplates.length > 0 && <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={smsTemplates.every((_, index) => selectedSms.has(index))} onChange={(event) => setSelectedSms(event.target.checked ? new Set(smsTemplates.map((_, index) => index)) : new Set())} />Select all {smsTemplates.length} messages</label>}
-                        {(account !== 'tata' || channel !== 'sms') && <p role="alert" className="text-amber-900">Select Tata Capital (tata) · SMS in Whitelisting for. Other SMS accounts are not integrated; no Tata credentials or Bajaj routing will be inferred.</p>}
-                        <button type="button" className="rounded-lg bg-purple-700 px-4 py-2 font-semibold text-white disabled:opacity-50" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || !smsTemplates.some((_, index) => selectedSms.has(index))} onClick={() => {
-                          if (account !== 'tata' || channel !== 'sms' || selectedKey !== brief.issue_key) return;
-                          setSmsReview({ issueKey: brief.issue_key, drafts: smsTemplates.filter((_, index) => selectedSms.has(index)).map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text })), revision: Date.now() });
-                        }}>Review &amp; whitelist SMS ({smsTemplates.filter((_, index) => selectedSms.has(index)).length})</button>
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="space-y-1">
+                            <h3 className="font-semibold text-gray-900">Prepare an SMS review</h3>
+                            <p className="max-w-xl leading-relaxed text-gray-600">Select source messages here. Next, apply shared DLT settings once and review exact copy before confirming registration. No SMS is sent.</p>
+                            <p className="font-medium text-gray-800">{selectedSmsCount.toLocaleString()} selected across all pages · maximum {BRIEF_SMS_REVIEW_LIMIT} per review</p>
+                          </div>
+                          <button type="button" className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-800 disabled:bg-gray-200 disabled:text-gray-500" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT} onClick={() => {
+                            if (account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT) return;
+                            setSmsReview({ issueKey: brief.issue_key, drafts: selectedSmsDrafts.map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text })), revision: Date.now() });
+                          }}>Review selected SMS ({selectedSmsCount})</button>
+                        </div>
+                        {(account !== 'tata' || channel !== 'sms') && <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">Select Tata Capital (tata) · SMS in Whitelisting for. Other SMS accounts are not integrated; no Tata credentials or Bajaj routing will be inferred.</p>}
+                        {selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT && <p role="alert" className="mt-3 text-rose-800">This saved selection exceeds {BRIEF_SMS_REVIEW_LIMIT} messages. Deselect messages or clear the selection before opening a review. No drafts have been removed.</p>}
                       </div>
+                      {smsTemplates.length > 0 && <div className="space-y-3 rounded-xl border border-gray-200 p-4">
+                        <label className="block text-sm font-medium text-gray-700" htmlFor="sms-draft-search">Search all SMS drafts</label>
+                        <input id="sms-draft-search" type="search" value={smsSearch} onChange={(event) => { setSmsSearch(event.target.value); setSmsPageNumber(1); }} placeholder="Template name, exact copy or variant"
+                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <p role="status" className="text-sm text-gray-600">{matchingSmsIndices.length.toLocaleString()} of {smsTemplates.length.toLocaleString()} messages match{matchingSmsIndices.length > 0 ? ` · showing ${(smsPage.start + 1).toLocaleString()}–${(smsPage.start + smsPage.indices.length).toLocaleString()}` : ''}</p>
+                          {smsSearch && <button type="button" onClick={() => { setSmsSearch(''); setSmsPageNumber(1); }} className="text-sm font-medium text-blue-700 hover:underline">Clear SMS search</button>}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-gray-100 pt-3 text-sm">
+                          <label className="flex items-center gap-2 font-medium text-gray-700">
+                            <input type="checkbox" checked={smsPageSelected} disabled={smsPage.indices.length === 0 || (!smsPageSelected && selectedSmsCount + smsPageAdditionCount > BRIEF_SMS_REVIEW_LIMIT)}
+                              onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => selectBriefSmsIndices(previous, smsPage.indices, select)); }} className="h-4 w-4 rounded border-gray-300 text-blue-700" />
+                            Select this page ({smsPage.indices.length})
+                          </label>
+                          {smsTemplates.length <= BRIEF_SMS_REVIEW_LIMIT && <label className="flex items-center gap-2 text-gray-700">
+                            <input type="checkbox" checked={selectedSmsCount === smsTemplates.length} onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => select ? selectBriefSmsIndices(previous, smsTemplates.map((_, index) => index), true) : new Set()); }} className="h-4 w-4 rounded border-gray-300 text-blue-700" />
+                            Select entire brief ({smsTemplates.length})
+                          </label>}
+                          {selectedSmsCount > 0 && <button type="button" onClick={() => setSelectedSms(new Set())} className="font-medium text-gray-600 hover:text-gray-900 hover:underline">Clear all selections ({selectedSmsCount})</button>}
+                        </div>
+                        <p className="text-xs leading-relaxed text-gray-500">Page selection affects only the {BRIEF_SMS_PAGE_SIZE} or fewer visible messages. Search and paging keep other selections. {smsTemplates.length > BRIEF_SMS_REVIEW_LIMIT ? `Select up to ${BRIEF_SMS_REVIEW_LIMIT} messages across pages for each review; entire-brief selection is unavailable above that limit.` : 'Entire-brief selection includes messages hidden by search.'}</p>
+                        {!smsPageSelected && selectedSmsCount + smsPageAdditionCount > BRIEF_SMS_REVIEW_LIMIT && <p role="status" className="text-sm text-amber-800">Selecting this whole page would exceed {BRIEF_SMS_REVIEW_LIMIT}. Select individual messages within the remaining capacity, or clear other selections.</p>}
+                        <nav aria-label="SMS draft pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 pt-3">
+                          <label className="flex items-center gap-2 text-sm text-gray-600">Page
+                            <input type="number" min={1} max={smsPage.pageCount} value={smsPage.page} aria-label="SMS draft page number" onChange={(event) => { const page = Number(event.target.value); if (Number.isInteger(page) && page >= 1) setSmsPageNumber(Math.min(page, smsPage.pageCount)); }} className="w-20 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm" />
+                            of {smsPage.pageCount.toLocaleString()}
+                          </label>
+                          <div className="flex gap-2">
+                            <button type="button" disabled={smsPage.page <= 1} onClick={() => setSmsPageNumber(smsPage.page - 1)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40">Previous</button>
+                            <button type="button" disabled={smsPage.page >= smsPage.pageCount} onClick={() => setSmsPageNumber(smsPage.page + 1)} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40">Next</button>
+                          </div>
+                        </nav>
+                      </div>}
                       {smsTemplates.length === 0 ? (
-                        <p className="py-8 text-center text-xs text-gray-400">No SMS variants detected in this brief.</p>
+                        <p className="py-8 text-center text-sm text-gray-500">No SMS variants detected in this brief.</p>
+                      ) : matchingSmsIndices.length === 0 ? (
+                        <div className="space-y-3 rounded-xl border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-600">
+                          <p className="font-semibold text-gray-900">No SMS messages match this search</p>
+                          <p>Try another name or phrase. All source drafts and selections are unchanged.</p>
+                          <button type="button" onClick={() => { setSmsSearch(''); setSmsPageNumber(1); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 font-medium text-gray-700 hover:bg-gray-50">Show all SMS drafts</button>
+                        </div>
                       ) : (
-                        smsTemplates.map((sms, idx) => {
+                        smsPage.indices.map((idx) => {
+                          const sms = smsTemplates[idx];
                           const isEditing = editingCard[`sms-${idx}`] || false;
                           return (
                             <div key={`sms-card-${idx}`} className="p-4 rounded-xl border border-gray-200 bg-white space-y-2.5 shadow-2xs">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  <input type="checkbox" aria-label={`Select ${sms.template_name} for SMS DLT whitelisting`} checked={selectedSms.has(idx)} onChange={() => setSelectedSms((previous) => {
-                                    const next = new Set(previous);
-                                    if (next.has(idx)) next.delete(idx); else next.add(idx);
-                                    return next;
-                                  })} />
+                                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                  <input type="checkbox" aria-label={`Select source message ${idx + 1}: ${sms.template_name} for SMS DLT whitelisting`} checked={selectedSms.has(idx)} disabled={!selectedSms.has(idx) && selectedSmsCount >= BRIEF_SMS_REVIEW_LIMIT}
+                                    onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => selectBriefSmsIndices(previous, [idx], select)); }} className="h-4 w-4 rounded border-gray-300 text-blue-700" />
+                                  <span className="text-xs tabular-nums text-gray-500">#{idx + 1}</span>
                                   {isEditing ? (
                                     <input
                                       type="text"
                                       value={sms.template_name}
                                       onChange={(e) => updateSmsField(idx, 'template_name', e.target.value)}
-                                      className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
+                                      aria-label={`Template name for source message ${idx + 1}`} className="min-w-0 max-w-full rounded-lg border border-gray-300 bg-white px-2 py-1 font-mono text-sm"
                                     />
                                   ) : (
-                                    <span className="font-mono font-bold text-xs text-gray-900">{sms.template_name}</span>
+                                    <span className="break-all font-mono text-sm font-semibold text-gray-900">{sms.template_name}</span>
                                   )}
-                                  <span className="text-[10px] px-2 py-0.2 rounded bg-purple-100 text-purple-800 font-semibold">
+                                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
                                     {sms.variant}
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span
-                                    className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                                    className={`rounded px-2 py-0.5 font-mono text-xs font-medium ${
                                       sms.char_count <= 160
                                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                         : 'bg-amber-50 text-amber-700 border border-amber-200'
@@ -2987,7 +3056,7 @@ export default function JiraBriefsPage() {
                                   </span>
                                   <button
                                     onClick={() => toggleEditCard(`sms-${idx}`)}
-                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
+                                    className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
                                       isEditing
                                         ? 'bg-purple-50 text-purple-700 border-purple-300'
                                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
@@ -3004,7 +3073,7 @@ export default function JiraBriefsPage() {
                                         e.target.value = '';
                                       }
                                     }}
-                                    className="text-[11px] font-semibold bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition shadow-2xs"
+                                    className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm font-medium text-gray-700"
                                     title="Move this template to another channel"
                                   >
                                     <option value="" disabled>⇄ Move Channel...</option>
@@ -3019,10 +3088,10 @@ export default function JiraBriefsPage() {
                                   rows={4}
                                   value={sms.text}
                                   onChange={(e) => updateSmsField(idx, 'text', e.target.value)}
-                                  className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-purple-500"
+                                  aria-label={`Message body for source message ${idx + 1}`} className="w-full rounded-lg border border-gray-300 bg-white p-3 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                               ) : (
-                                <div className="bg-gray-50 p-3.5 rounded-lg border border-gray-200/80 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                <div className="whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-50 p-3.5 font-mono text-sm leading-relaxed text-gray-800">
                                   {sms.text}
                                 </div>
                               )}

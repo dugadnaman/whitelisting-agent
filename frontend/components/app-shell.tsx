@@ -10,18 +10,18 @@ import Nav from '@/components/nav';
 import ChatWidget from '@/components/chat-widget';
 import DestinationSwitcher from '@/components/DestinationSwitcher';
 
-const TAB_META: Record<string, { label: string; icon: string }> = {
-  '/': { label: 'Dashboard', icon: '📊' },
-  '/submit': { label: 'Submit Templates', icon: '🚀' },
-  '/moengage-campaigns': { label: 'MoEngage Campaigns', icon: '🎯' },
-  '/activity': { label: 'Activity Logs', icon: '🕒' },
-  '/briefs': { label: 'Jira Briefs', icon: '📄' },
-  '/work-management': { label: 'Work Management', icon: '📋' },
-  '/moengage-ops': { label: 'MoEngage Ops', icon: '⚙️' },
-  '/apparel/attribution': { label: 'Apparel Attribution', icon: '👔' },
-  '/apparel/campaigns': { label: 'Apparel WhatsApp Drafts', icon: '' },
-  '/settings': { label: 'Settings', icon: '⚙️' },
-  '/tata/click-count': { label: 'Tata Clicks', icon: '📈' },
+const TAB_META: Record<string, { label: string }> = {
+  '/': { label: 'Dashboard' },
+  '/submit': { label: 'Upload templates' },
+  '/moengage-campaigns': { label: 'MoEngage Campaigns' },
+  '/activity': { label: 'Activity Logs' },
+  '/briefs': { label: 'Jira Briefs' },
+  '/work-management': { label: 'Work Management' },
+  '/moengage-ops': { label: 'MoEngage Ops' },
+  '/apparel/attribution': { label: 'Apparel Attribution' },
+  '/apparel/campaigns': { label: 'Apparel WhatsApp Drafts' },
+  '/settings': { label: 'Settings' },
+  '/tata/click-count': { label: 'Tata Clicks' },
 };
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -107,34 +107,31 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      {!isAuthPage && <a href="#workspace-main" className="workspace-skip-link">Skip to content</a>}
       {!isAuthPage && <Nav />}
-      <main className={isAuthPage ? 'min-h-screen' : 'min-w-0 md:ml-64'}>
+      <main id="workspace-main" tabIndex={-1} className={isAuthPage ? 'min-h-screen' : 'workspace-shell min-w-0 md:ml-64 focus:outline-none'}>
         {isAuthPage ? (
           children
         ) : (
           <div className="flex flex-col min-h-screen">
-            <div className="sticky top-14 md:top-0 z-20 bg-white border-b border-gray-200">
+            <div className="workspace-chrome sticky top-14 md:top-0 z-20 border-b border-gray-200">
               <DestinationSwitcher />
             {/* Workspace Tab Bar */}
-            {visibleTabs.length > 1 && <div className="bg-gray-50/95 border-t border-gray-100 px-4 sm:px-6 pt-2 flex items-center gap-1.5 overflow-x-auto">
+            {visibleTabs.length > 1 && <div aria-label="Open workspace pages" className="border-t border-gray-100 px-4 sm:px-6 xl:px-8 flex items-center gap-1 overflow-x-auto">
               {visibleTabs.map((path) => {
-                const meta = TAB_META[path] || { label: path.replace(/^\//, ''), icon: '📌' };
+                const meta = TAB_META[path] || { label: path.replace(/^\//, '') };
                 const isActive = pathname === path;
                 return (
                   <div
                     key={path}
-                    className={`group inline-flex items-center gap-2 px-3 py-1.5 rounded-t-lg text-xs font-medium border border-b-0 transition-colors ${
+                    className={`group inline-flex items-center gap-2 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                       isActive
-                        ? 'bg-white border-gray-200 text-blue-700 font-semibold shadow-2xs -mb-px'
-                        : 'bg-gray-100/70 border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-200/50'
+                        ? 'border-blue-600 text-blue-700 font-semibold'
+                        : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
                     }`}
                   >
                     <Link href={path} aria-current={isActive ? 'page' : undefined} className="inline-flex items-center gap-1.5 truncate max-w-[160px]">
-                      {path === '/' ? (
-                        <img src="/logo.svg" alt="" className="w-3.5 h-3.5 rounded-xs shrink-0" />
-                      ) : (
-                        <span>{meta.icon}</span>
-                      )}
+                      <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? 'bg-blue-600' : 'bg-gray-300'}`} />
                       <span className="truncate">{meta.label}</span>
                     </Link>
                     {openTabs.length > 1 && (
@@ -145,7 +142,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                           e.stopPropagation();
                           closeTab(path);
                         }}
-                        className="text-gray-400 hover:text-red-600 rounded p-0.5 transition-colors text-[10px]"
+                        className="text-gray-500 hover:text-red-700 rounded p-1 transition-colors text-xs"
                         title={`Close ${meta.label} tab`}
                         aria-label={`Close ${meta.label} tab`}
                       >
@@ -159,7 +156,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Page Content */}
-            <div key={scopeKey} className="p-4 sm:p-8 flex-1 min-w-0">{children}</div>
+            <div key={scopeKey} className="workspace-content p-4 sm:p-6 xl:p-8 flex-1 min-w-0">{children}</div>
           </div>
         )}
       </main>

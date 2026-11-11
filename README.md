@@ -4,6 +4,21 @@ Automated enterprise messaging template submission, validation, and lifecycle st
 
 Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must be registered and approved ("whitelisted") across regulatory registries (DLT) and carrier/meta platforms. This platform automates the end-to-end ingestion, compliance validation, API submission, Jira workflow tracking, and MoEngage synchronization.
 
+## Workspace experience
+
+- All authorized sidebar links remain visible. Jira Briefs leads the Tata workflow;
+  secondary tools have quieter styling, not an extra menu.
+- Jira review shows **Choose ticket → Review → Confirm**, with an optional quick
+  guide. Choosing an account/channel never implies a live provider connection.
+- Jira and inventory searches show removable active filters and reset actions.
+  SMS search covers the entire source brief, displaying 25 messages per page;
+  selections retain their original source identities across pages and searches.
+- The overview groups real template health, inventory and team activity. Missing
+  or unavailable counts are not presented as successful zeroes.
+- Restrained transitions respect reduced motion; navigation supports keyboard
+  focus, a mobile drawer and a skip-to-content link. Typography, warm-neutral
+  surfaces and a single indigo action accent are shared across the workspace.
+
 ## Tata Capital SMS DLT — VILPOWER portal
 
 SMS whitelisting registers **content templates**, not messages to recipients. Choose
@@ -53,10 +68,13 @@ silently redirects credentials or submissions to another account.
    candidate with its sheet/cell provenance. Select between 1 and 500 candidates, then
    decide every placeholder as literal text or a typed variable with explicit samples
    before confirming registration.
-5. In **Jira Briefs → SMS**, select messages individually or use **Select all**,
-   then **Review & whitelist SMS**. The same shared setup, message editor and final
-   confirmation are used for Jira and file uploads. Edits stay in the current tab
-   until cleared or the destination changes.
+5. In **Jira Briefs → SMS**, select individual messages or **Select this page**.
+   Briefs with at most 500 messages also offer **Select entire brief**; larger
+   briefs remain fully searchable and paginated, with a maximum of 500 selected
+   messages per review. Search/paging never clears other selections or rewrites
+   exact copy. Choose **Review selected SMS** for the shared DLT setup, message
+   editor and final confirmation. Edits stay in the current tab until cleared
+   or the destination changes.
 6. Use **Prepare messages for review** for imported/Jira drafts containing
    `<name>`, `<link>`, `<url>`, `{#alphanumeric#}`, `{#url#}` or `{#link#}`.
    Inspect the before/after body, filled sample, encoding and any renamed conflicts,

@@ -31,32 +31,32 @@ function StatusBadge({ status }: { status: string }) {
   };
   const s = (status || 'unknown').toLowerCase();
   return (
-    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${colors[s] || colors.unknown}`}>
+    <span className={`inline-flex px-2 py-0.5 rounded-md text-xs font-medium ${colors[s] || colors.unknown}`}>
       {status || 'unknown'}
     </span>
   );
 }
 
 function LiveBadge({ live, existsOnWaba, channel }: { live?: boolean; existsOnWaba?: boolean; channel?: string }) {
-  if (channel === 'sms' && (live || existsOnWaba)) return <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700" title="Found in the VILPOWER DLT inventory; see approval status separately">On DLT portal</span>;
+  if (channel === 'sms' && (live || existsOnWaba)) return <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700" title="Found in the VILPOWER DLT inventory; see approval status separately">On DLT portal</span>;
   if (live) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200" title="Synced live from the Karix WABA">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200" title="Synced live from the Karix WABA">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
         Live on WABA
       </span>
     );
   }
   if (existsOnWaba) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200" title="Found on Karix WABA">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200" title="Found on Karix WABA">
         <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
         On WABA
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-gray-50 text-gray-500 border border-gray-200" title="Recorded locally at submission time">
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-500 border border-gray-200" title="Recorded locally at submission time">
       Local Log
     </span>
   );
@@ -98,6 +98,8 @@ export default function DashboardPage() {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [activityStats, setActivityStats] = useState<ActivityStats | null>(null);
+  const [activityLoading, setActivityLoading] = useState(true);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -369,6 +371,7 @@ export default function DashboardPage() {
   const loadActivity = useCallback(async () => {
     if (!mounted) return;
     const requestVersion = requestVersionRef.current;
+    setActivityLoading(true);
     try {
       const [logs, activitySummary] = await Promise.all([
         fetchActivityLogs({ limit: 6 }),
@@ -377,8 +380,13 @@ export default function DashboardPage() {
       if (requestVersion !== requestVersionRef.current) return;
       setActivities(logs);
       setActivityStats(activitySummary);
-    } catch {
-      // Activity feed is non-critical; keep the dashboard alive if it fails
+      setActivityError(null);
+    } catch (err) {
+      if (requestVersion === requestVersionRef.current) {
+        setActivityError(err instanceof Error ? err.message : 'Activity is unavailable');
+      }
+    } finally {
+      if (requestVersion === requestVersionRef.current) setActivityLoading(false);
     }
   }, [mounted]);
 
@@ -516,6 +524,12 @@ export default function DashboardPage() {
   const visibleTemplates = operatorFilter === 'all'
     ? templates
     : templates.filter(t => (t.submitted_by || '—') === operatorFilter);
+  const hasFilters = Boolean(search || statusFilter || operatorFilter !== 'all');
+  const resetFilters = () => {
+    setSearch('');
+    setStatusFilter('');
+    setOperatorFilter('all');
+  };
 
   // Distribution bar segments
   const total = stats?.total ?? 0;
@@ -550,158 +564,87 @@ export default function DashboardPage() {
       ];
 
   return (
-    <div className="space-y-6">
-      {jiraWhitelisting && <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 p-4">
-        <div><h2 className="font-semibold text-gray-900">Whitelist from a Jira brief</h2><p className="mt-1 text-sm text-gray-600">Choose a ticket, review the content, then confirm.</p></div>
-        <Link href="/briefs" className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800">Open Jira Briefs</Link>
-      </section>}
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
-        <div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-            <span
-              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                channel === 'whatsapp'
-                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                  : 'bg-blue-100 text-blue-800 border border-blue-200'
-              }`}
-            >
-              {accountLabel} &bull; {channelLabel}
-            </span>
-            {/* Connection status chip */}
+    <div className="workspace-page space-y-6">
+      <header className="space-y-5 border-b border-gray-200 pb-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="workspace-eyebrow mb-2">Campaign operations</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-gray-900">Overview</h1>
+            <p className="mt-2 text-sm text-gray-600">{accountLabel} <span className="mx-1 text-gray-300">/</span> {channelLabel}</p>
+          </div>
+          {jiraWhitelisting && (
+            <Link href="/briefs" className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-800">
+              Open Jira Briefs <span aria-hidden="true">→</span>
+            </Link>
+          )}
+        </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
             {stats?.error || statsError || templatesError ? (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200" title={formatError(statsError || templatesError || stats?.error || '')}>
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700" title={formatError(statsError || templatesError || stats?.error || '')}>
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
                 {templatesError && !stats?.error && !statsError ? 'Dashboard Degraded' : `${channel === 'sms' ? 'VILPOWER' : 'Karix'} Degraded`}
               </span>
             ) : stats ? (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 {channel === 'sms' ? 'VILPOWER' : 'Karix'} Synced{lastSynced ? ` · ${relativeTime(lastSynced)}` : ''}
               </span>
             ) : (
-              <span className="text-[11px] text-gray-500">Checking {channel === 'sms' ? 'VILPOWER' : 'Karix'} connection…</span>
+              <span className="text-sm text-gray-500">Checking {channel === 'sms' ? 'VILPOWER' : 'Karix'} connection…</span>
             )}
             {stats?.karix_health && (
               <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border shadow-2xs ${
-                  stats.karix_health.status === 'optimal'
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : stats.karix_health.status === 'moderate'
-                    ? 'bg-blue-50 text-blue-800 border-blue-200'
-                    : stats.karix_health.status === 'degraded'
-                    ? 'bg-amber-50 text-amber-800 border-amber-200'
-                    : 'bg-rose-50 text-rose-800 border-rose-200'
+                className={`rounded-md border px-2 py-1 text-xs font-medium ${
+                  stats.karix_health.status === 'optimal' ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : stats.karix_health.status === 'moderate' ? 'border-blue-200 bg-blue-50 text-blue-800'
+                    : stats.karix_health.status === 'degraded' ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : 'border-rose-200 bg-rose-50 text-rose-800'
                 }`}
                 title={`Average Latency: ${stats.karix_health.avg_latency_sec}s, Optimal Concurrency: ${stats.karix_health.optimal_workers} parallel workers, Pacing: ${stats.karix_health.pacing_delay_sec}s`}
               >
-                <span
-                  className={`w-1.5 h-1.5 rounded-full ${
-                    stats.karix_health.status === 'optimal'
-                      ? 'bg-emerald-500 animate-pulse'
-                      : stats.karix_health.status === 'moderate'
-                      ? 'bg-blue-500'
-                      : stats.karix_health.status === 'degraded'
-                      ? 'bg-amber-500'
-                      : 'bg-rose-500'
-                  }`}
-                />
-                <span>
-                  Karix API: {stats.karix_health.status.toUpperCase()} ({stats.karix_health.avg_latency_sec}s · {stats.karix_health.optimal_workers}w)
-                </span>
+                Karix API: {stats.karix_health.status.toUpperCase()} ({stats.karix_health.avg_latency_sec}s · {stats.karix_health.optimal_workers}w)
               </span>
             )}
           </div>
-          <p className="text-sm text-gray-500 mt-1">
-            Overview of template submission and whitelisting status for {accountLabel} on {channelLabel}.
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            {(channel === 'whatsapp' || (channel === 'sms' && account === 'tata')) && (
+              <button onClick={handlePoll} disabled={polling} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50">
+                {polling ? 'Polling…' : channel === 'sms' ? 'Refresh DLT Approvals' : 'Poll Pending'}
+              </button>
+            )}
+            {channel === 'rcs' && account !== 'apparel' && (
+              <button
+                onClick={handleSyncRcsToMoEngage}
+                disabled={syncBusy || !syncDestinationReady}
+                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                title="Pull approved RCS templates from Karix and register them in MoEngage Settings"
+              >
+                {syncingRcs ? `Syncing to ${syncDestinationLabel}…` : `Sync to ${syncDestinationLabel}`}
+              </button>
+            )}
+            <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-600">
+              <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+              Auto-refresh
+            </label>
+          </div>
         </div>
-
-        <div className="flex items-center gap-3">
-          {(channel === 'whatsapp' || (channel === 'sms' && account === 'tata')) && (
-            <button
-              onClick={handlePoll}
-              disabled={polling}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors disabled:opacity-50"
-            >
-              {polling ? (
-                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              )}
-              {polling ? 'Polling…' : channel === 'sms' ? 'Refresh DLT Approvals' : 'Poll Pending'}
-            </button>
-          )}
-
-          {channel === 'rcs' && (
-            <button
-              onClick={handleSyncRcsToMoEngage}
-              disabled={syncBusy || !syncDestinationReady}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition-colors disabled:opacity-50"
-              title="Pull approved RCS templates from Karix and register them in MoEngage Settings"
-            >
-              {syncingRcs ? (
-                <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                </svg>
-              ) : (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              )}
-              {syncingRcs ? `Syncing to ${syncDestinationLabel}…` : `Sync to ${syncDestinationLabel}`}
-            </button>
-          )}
-
-          <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-            />
-            Auto-refresh
-          </label>
-        </div>
-      </div>
+      </header>
 
       {/* APPAREL BRAND: DEDICATED KARIX RCS -> MOENGAGE SYNC STUDIO */}
       {account === 'apparel' && (
-        <div className="bg-gradient-to-br from-purple-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-xl border border-purple-800/40 space-y-5">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xl">👗</span>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/30">
-                  RCS Sync Only • Apparel Workspace
-                </span>
-                <span className="text-xs text-purple-300 font-medium">
-                  Karix RCS Bot &rarr; selected MoEngage workspace
-                </span>
-                <a
-                  href="/settings"
-                  className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/20 text-purple-200 border border-purple-500/40 hover:bg-purple-500/30 transition-colors"
-                >
-                  MoEngage connection settings
-                </a>
-              </div>
-              <h2 className="text-xl font-bold text-white tracking-tight">
-                Apparel Brand — Karix RCS to MoEngage Sync Hub
-              </h2>
-              <p className="text-xs text-purple-200 max-w-2xl leading-relaxed">
-                Pull approved RCS rich cards from Karix into the MoEngage workspace you select below. Duplicate detection and sender mapping use that destination only.
+        <section className="workspace-panel p-5">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-xl">
+              <p className="workspace-eyebrow mb-2">Apparel · RCS only</p>
+              <h2 className="text-lg font-semibold tracking-tight text-gray-900">Sync to MoEngage</h2>
+              <p className="mt-2 text-sm leading-relaxed text-gray-600">
+                Pull approved Karix RCS templates into one selected destination. Duplicate detection and sender mapping stay scoped to that workspace.
               </p>
+              <a href="/settings" className="mt-3 inline-block text-sm font-medium text-blue-700 hover:underline">MoEngage connection settings →</a>
             </div>
-
-            <div className="flex min-w-0 flex-col gap-3 md:w-80 md:shrink-0">
-              <label className="text-xs font-semibold text-purple-100" htmlFor="rcs-sync-workspace">Destination MoEngage workspace</label>
+            <div className="flex min-w-0 flex-col gap-3 lg:w-96 lg:shrink-0">
+              <label className="text-sm font-medium text-gray-700" htmlFor="rcs-sync-workspace">Destination MoEngage workspace</label>
               <select
                 id="rcs-sync-workspace"
                 value={syncWorkspaceId}
@@ -712,7 +655,7 @@ export default function DashboardPage() {
                   setSyncRcsFeedback(null);
                 }}
                 disabled={workspaceLoading || syncBusy}
-                className="w-full min-w-0 max-w-full rounded-lg border border-purple-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:opacity-60"
+                className="w-full min-w-0 max-w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:opacity-60"
               >
                 <option value="">{workspaceLoading ? 'Loading workspaces…' : 'Select workspace…'}</option>
                 {syncWorkspaces.map((workspace) => (
@@ -720,30 +663,30 @@ export default function DashboardPage() {
                 ))}
               </select>
               {syncBotId && (
-                <p className="max-w-sm break-words text-xs text-purple-200">
+                <p className="max-w-sm break-words text-sm text-gray-600">
                   Karix Bot ID: <span className="font-mono">{syncBotId}</span>. Only templates from this matching bot sync to this workspace.
                 </p>
               )}
               {workspaceError ? (
-                <div role="alert" className="max-w-sm text-xs text-red-200">
+                <div role="alert" className="max-w-sm text-sm text-red-700">
                   {workspaceError}
                   <button type="button" disabled={syncBusy} onClick={() => setWorkspaceRevision((value) => value + 1)} className="ml-2 underline">Retry workspaces</button>
                 </div>
               ) : !workspaceLoading && syncWorkspaces.length === 0 ? (
-                <p className="max-w-sm text-xs text-purple-200">
+                <p className="max-w-sm text-sm text-gray-600">
                   No active workspaces available.
                   <button type="button" disabled={syncBusy} onClick={() => setWorkspaceRevision((value) => value + 1)} className="ml-2 underline">Retry workspaces</button>
                 </p>
               ) : null}
-              <p className="max-w-sm text-xs text-purple-200">Missing a destination? Check the saved Apparel session and organization in <a href="/settings" className="underline">MoEngage connection settings</a>.</p>
+              <p className="max-w-sm text-sm text-gray-500">Missing a destination? Check the saved Apparel session and organization in <a href="/settings" className="underline">MoEngage connection settings</a>.</p>
               <button
                 onClick={handleSyncRcsToMoEngage}
                 disabled={syncBusy || !syncDestinationReady}
-                className="px-5 py-3 rounded-xl text-xs font-bold bg-white text-purple-900 hover:bg-purple-50 shadow-lg transition-all flex items-center gap-2 active:scale-95 disabled:opacity-60 cursor-pointer"
+                className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-blue-700 text-white hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-60"
               >
                 {syncingRcs ? (
                   <>
-                    <svg className="animate-spin h-4 w-4 text-purple-900" viewBox="0 0 24 24" fill="none">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                     </svg>
@@ -751,7 +694,7 @@ export default function DashboardPage() {
                   </>
                 ) : (
                   <>
-                    <svg className="w-4 h-4 text-purple-900" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <svg className="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                     <span>Sync Approved RCS to {syncDestinationLabel}</span>
@@ -761,31 +704,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Features active */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="bg-white/5 border border-white/10 p-3 rounded-xl flex items-center gap-2.5">
-              <span className="text-base">💎</span>
-              <div>
-                <span className="font-bold text-white block">RCS Only Channel</span>
-                <span className="text-[11px] text-purple-200">WhatsApp and SMS disabled for Apparel</span>
-              </div>
-            </div>
-            <div className="bg-white/5 border border-white/10 p-3 rounded-xl flex items-center gap-2.5">
-              <span className="text-base">🧠</span>
-              <div>
-                <span className="font-bold text-white block">Semantic Deduplication</span>
-                <span className="text-[11px] text-purple-200">Auto-skips templates already present</span>
-              </div>
-            </div>
-            <div className="bg-white/5 border border-white/10 p-3 rounded-xl flex items-center gap-2.5">
-              <span className="text-base">🏷️</span>
-              <div>
-                <span className="font-bold text-white block">Attribute Auto-Mapping</span>
-                <span className="text-[11px] text-purple-200">Maps dynamic placeholders to MoEngage user tags</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        </section>
       )}
       {(statsError || templatesError || error) && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 text-sm text-red-700">
@@ -810,34 +729,42 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Clickable KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {kpiCards.map(card => {
-          const active = statusFilter === card.statusValue;
-          return (
-            <button
-              key={card.key}
-              type="button"
-              onClick={() => setStatusFilter(active ? '' : card.statusValue)}
-              className={`text-left bg-white rounded-xl border shadow-xs p-4 transition-all cursor-pointer ${
-                active ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200/80 hover:border-blue-300 hover:shadow-sm'
-              }`}
-              title={card.statusValue ? `Filter table: ${card.label}` : 'Show all'}
-            >
-              <div className="flex items-center justify-between">
-                <span className="flex items-center gap-2 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
-                  <span className={`w-2 h-2 rounded-full ${card.dot}`} />
+      <section aria-labelledby="template-health-heading" className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="template-health-heading" className="text-base font-semibold tracking-tight text-gray-900">Template health</h2>
+          <p className="text-sm text-gray-500">
+            {statsError ? stats ? 'Last available counts · sync degraded' : 'Counts unavailable · sync degraded' : statsLoading ? 'Refreshing counts…' : stats ? `${total.toLocaleString()} templates in this account and channel` : 'Counts unavailable'}
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {kpiCards.map(card => {
+            const active = Boolean(card.statusValue) && statusFilter === card.statusValue;
+            return (
+              <button
+                key={card.key}
+                type="button"
+                onClick={() => setStatusFilter(active ? '' : card.statusValue)}
+                aria-pressed={active}
+                className={`rounded-xl border bg-white p-4 text-left transition-colors ${
+                  active ? 'border-blue-400 bg-blue-50/40 ring-1 ring-blue-200' : 'border-gray-200 hover:border-gray-400'
+                }`}
+                title={card.statusValue ? `Filter table: ${card.label}` : 'Show all'}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-600">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${card.dot}`} />
                   {card.label}
                 </span>
-                {active && card.statusValue !== '' && <span className="text-[10px] font-bold text-blue-600 uppercase">Filtered</span>}
-              </div>
-              <div className="text-2xl font-bold text-gray-900 mt-1.5">
-                {statsLoading ? <div className="h-8 w-12 bg-gray-200 animate-pulse rounded" /> : card.value}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+                <span className="workspace-number mt-3 block text-3xl font-semibold tracking-tight text-gray-900">
+                  {statsLoading ? <span className="block h-9 w-14 rounded bg-gray-100" aria-label="Loading count" /> : stats ? card.value.toLocaleString() : '—'}
+                </span>
+                <span className={`mt-2 block text-xs ${active ? 'text-blue-700' : 'text-gray-500'}`}>
+                  {active ? 'Filter applied' : card.statusValue ? 'View templates →' : 'View all templates →'}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
       {/* Predictive Meta Approval SLA Countdown Banner */}
       {!statsLoading && stats?.sla_insights && stats.pending > 0 && Object.keys(stats.sla_insights.categories).length > 0 && (
         <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
@@ -850,14 +777,14 @@ export default function DashboardPage() {
               {Object.entries(stats.sla_insights.categories).map(([cat, count]) => (
                 <span
                   key={cat}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-white text-amber-900 border border-amber-300 shadow-3xs"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-white text-amber-900 border border-amber-200"
                 >
                   <span className="font-bold text-amber-700">{count}</span> {cat}
                 </span>
               ))}
             </div>
           </div>
-          <div className="text-[11px] text-amber-800/80 font-mono shrink-0">
+          <div className="text-xs text-amber-800 font-mono shrink-0">
             Next smart poll in ~{stats.sla_insights.next_recommended_poll_sec}s
           </div>
         </div>
@@ -866,10 +793,10 @@ export default function DashboardPage() {
 
       {/* Status distribution bar */}
       {!statsLoading && distTotal > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Status Pipeline</span>
-            <span className="text-[11px] text-gray-400">{distTotal} template{distTotal === 1 ? '' : 's'}</span>
+        <div className="workspace-panel p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <span className="text-sm font-medium text-gray-700">Status distribution</span>
+            <span className="text-xs text-gray-500">{distTotal.toLocaleString()} template{distTotal === 1 ? '' : 's'}</span>
           </div>
           <div className="flex h-2.5 w-full rounded-full overflow-hidden bg-gray-100">
             {segs.map(seg =>
@@ -885,7 +812,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2">
             {segs.map(seg => (
-              <span key={seg.key} className="flex items-center gap-1.5 text-[11px] text-gray-600">
+              <span key={seg.key} className="flex items-center gap-1.5 text-xs text-gray-600">
                 <span className={`w-2 h-2 rounded-full ${seg.color}`} />
                 {seg.label} <span className="font-bold text-gray-900">{seg.value}</span>
               </span>
@@ -895,68 +822,73 @@ export default function DashboardPage() {
       )}
 
       {/* Main grid: table + activity rail */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_19rem]">
         {/* Left: Templates table */}
-        <div className="xl:col-span-2 space-y-4">
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-xl border border-gray-200/80 shadow-xs">
-            <div className="flex flex-1 items-center gap-3 flex-wrap">
-              <div className="relative flex-1 min-w-[200px] max-w-sm">
-                <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <circle cx="9" cy="9" r="6" />
-                  <path d="M13.5 13.5L17 17" />
-                </svg>
+        <section aria-labelledby="inventory-heading" className="min-w-0 space-y-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="inventory-heading" className="text-base font-semibold tracking-tight text-gray-900">Template inventory</h2>
+            <span className="text-sm text-gray-500" aria-live="polite">
+              {templatesLoading ? 'Refreshing inventory…' : templatesError ? 'Inventory unavailable' : `${visibleTemplates.length.toLocaleString()} shown${operatorFilter !== 'all' ? ` of ${templates.length.toLocaleString()} fetched` : ''}`}
+            </span>
+          </div>
+          <div className="workspace-panel space-y-4 p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="min-w-0 flex-[2_1_240px]">
+                <label htmlFor="inventory-search" className="mb-1.5 block text-sm font-medium text-gray-700">Search inventory</label>
                 <input
-                  type="text"
+                  id="inventory-search"
+                  type="search"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                placeholder={channel === 'whatsapp' ? 'Search templates or ref IDs...' : channel === 'rcs' ? 'Search by name, DLT ID, or sender...' : 'Search by sender, ACK ID, or destination...'}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-gray-50/50 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  placeholder={channel === 'whatsapp' ? 'Template name or reference ID' : channel === 'rcs' ? 'Name, DLT ID, or sender' : 'Sender, ACK ID, or destination'}
+                  className="workspace-search w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 />
               </div>
-
-              <select
-                value={statusFilter}
-                onChange={e => setStatusFilter(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer"
-              >
-                <option value="">All Statuses</option>
-                {channel === 'whatsapp' ? (
-                  <>
-                    <option value="pending">Pending Review</option>
-                    <option value="approved">Approved</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="failed">Submission Failed</option>
-                  </>
-                ) : (
-                  <>
-                    <option value="submitted">Submitted</option>
-                    <option value="failed">Failed</option>
-                    <option value="duplicate">Duplicate</option>
-                  </>
-                )}
-              </select>
-
-              <select
-                value={operatorFilter}
-                onChange={e => setOperatorFilter(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer"
-              >
-                <option value="all">All Operators</option>
-                {operators.map(op => (
-                  <option key={op} value={op}>{op}</option>
-                ))}
-              </select>
+              <div className="min-w-0 flex-1 basis-40">
+                <label htmlFor="inventory-status" className="mb-1.5 block text-sm font-medium text-gray-700">Status</label>
+                <select id="inventory-status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option value="">All Statuses</option>
+                  {channel === 'whatsapp' ? (
+                    <>
+                      <option value="pending">Pending Review</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="failed">Submission Failed</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="approved">Approved</option>
+                      <option value="pending">Pending</option>
+                      <option value="submitted">Submitted</option>
+                      <option value="failed">Failed</option>
+                      <option value="duplicate">Duplicate</option>
+                    </>
+                  )}
+                </select>
+              </div>
+              <div className="min-w-0 flex-1 basis-40">
+                <label htmlFor="inventory-operator" className="mb-1.5 block text-sm font-medium text-gray-700">Submitted by</label>
+                <select id="inventory-operator" value={operatorFilter} onChange={e => setOperatorFilter(e.target.value)} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option value="all">All Operators</option>
+                  {operatorFilter !== 'all' && !operators.includes(operatorFilter) && <option value={operatorFilter}>{operatorFilter}</option>}
+                  {operators.map(op => <option key={op} value={op}>{op}</option>)}
+                </select>
+              </div>
             </div>
-
-            <div className="text-xs font-medium text-gray-500 whitespace-nowrap">
-              Showing {visibleTemplates.length} of {templates.length}
-            </div>
+            {hasFilters && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-3">
+                <span className="text-xs text-gray-500">Active filters</span>
+                {search && <button type="button" onClick={() => setSearch('')} className="workspace-filter-chip inline-flex max-w-full items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-sm text-gray-700" aria-label={`Remove search filter: ${search}`}><span className="truncate">Search: {search}</span><span aria-hidden="true">×</span></button>}
+                {statusFilter && <button type="button" onClick={() => setStatusFilter('')} className="workspace-filter-chip rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-sm text-gray-700" aria-label={`Remove status filter: ${statusFilter}`}>Status: {statusFilter} <span aria-hidden="true">×</span></button>}
+                {operatorFilter !== 'all' && <button type="button" onClick={() => setOperatorFilter('all')} className="workspace-filter-chip inline-flex max-w-full items-center gap-2 rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-sm text-gray-700" aria-label={`Remove operator filter: ${operatorFilter}`}><span className="truncate">Submitted by: {operatorFilter}</span><span aria-hidden="true">×</span></button>}
+                <button type="button" onClick={resetFilters} className="px-2 py-1 text-sm font-medium text-blue-700 hover:underline">Reset all</button>
+              </div>
+            )}
           </div>
 
           {/* Selection Actions & Delete Feedback Banner */}
           {deleteFeedback && (
-            <div className={`p-3.5 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-2xs ${
+            <div className={`p-3.5 rounded-xl border text-sm flex items-center justify-between gap-2 ${
               deleteFeedback.type === 'success'
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                 : 'bg-red-50 border-red-200 text-red-800'
@@ -965,13 +897,13 @@ export default function DashboardPage() {
                 <span>{deleteFeedback.type === 'success' ? '✅' : '⚠️'}</span>
                 <span className="font-semibold">{deleteFeedback.message}</span>
               </div>
-              <button onClick={() => setDeleteFeedback(null)} className="text-gray-400 hover:text-gray-600">&times;</button>
+              <button onClick={() => setDeleteFeedback(null)} className="text-gray-400 hover:text-gray-600" aria-label="Dismiss delete feedback">&times;</button>
             </div>
           )}
 
           {(channel === 'whatsapp' || channel === 'rcs') && (
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-gray-200/80 shadow-xs">
-              <div className="flex items-center gap-2 text-xs text-gray-600">
+            <div className="workspace-panel flex flex-wrap items-center justify-between gap-3 p-3">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
                 <span className="font-bold text-gray-900">{selectedTemplates.size}</span>
                 <span>of {visibleTemplates.length} selected</span>
                 {selectedTemplates.size > 0 && (
@@ -985,13 +917,13 @@ export default function DashboardPage() {
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {selectedTemplates.size > 0 && channel === 'rcs' && (
                   <button
                     type="button"
                     onClick={handleSyncSelectedRcsToMoEngage}
                     disabled={syncBusy || !syncDestinationReady}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {syncingRcs ? (
                       <>
@@ -1014,7 +946,7 @@ export default function DashboardPage() {
                     type="button"
                     onClick={handleDeleteSelected}
                     disabled={deleting}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-700 text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {deleting ? (
                       <>
@@ -1040,7 +972,7 @@ export default function DashboardPage() {
                     type="button"
                     onClick={() => setShowFileDeleteModal(true)}
                     disabled={deleting || fileDeleting}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 border border-gray-300 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 border border-gray-200 transition-colors cursor-pointer disabled:opacity-50"
                     title="Upload a spreadsheet (CSV/Excel) to delete all templates listed in it"
                   >
                     <svg className="w-3.5 h-3.5 text-red-500" viewBox="0 0 20 20" fill="currentColor">
@@ -1054,11 +986,11 @@ export default function DashboardPage() {
           )}
 
           {/* Table */}
-          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs overflow-hidden">
+          <div className="workspace-panel overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left">
+              <table className="w-full min-w-[840px] text-left">
                 <thead>
-                  <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                  <tr className="bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-600">
                     {(channel === 'whatsapp' || channel === 'rcs') && (
                       <th className="w-10 px-3 py-3 text-center">
                         <input
@@ -1067,6 +999,7 @@ export default function DashboardPage() {
                           onChange={handleSelectAll}
                           className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                           title="Select all visible templates"
+                          aria-label="Select all visible templates"
                         />
                       </th>
                     )}
@@ -1094,10 +1027,10 @@ export default function DashboardPage() {
                     )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200 text-xs text-gray-800">
+                <tbody className="divide-y divide-gray-200 text-sm text-gray-800">
                   {templatesLoading ? (
                     <tr>
-                      <td colSpan={(channel === 'whatsapp' || channel === 'rcs') ? 9 : 8} className="px-6 py-12 text-center text-gray-400">
+                      <td colSpan={channel === 'whatsapp' ? 9 : channel === 'rcs' ? 8 : 7} className="px-6 py-12 text-center text-gray-500">
                         <div className="flex items-center justify-center gap-2">
                           <svg className="animate-spin h-4 w-4 text-blue-600" viewBox="0 0 24 24" fill="none">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -1121,16 +1054,17 @@ export default function DashboardPage() {
                               ? 'Template history is unavailable.'
                               : stats?.error
                                 ? `${channel === 'sms' ? 'VILPOWER' : 'Karix'} connection degraded — showing local history only`
-                                : `No ${channelLabel} templates found for ${accountLabel}.`}
+                                : hasFilters ? 'No templates match these filters.' : `No ${channelLabel} templates found for ${accountLabel}.`}
                           </div>
-                          <p className="text-xs text-gray-400 max-w-xs text-center">
+                          <p className="text-sm text-gray-500 max-w-sm text-center">
                             {templatesError
                               ? 'Refresh after the service recovers.'
                               : stats?.error
                                 ? 'Check credentials in Settings, then refresh.'
-                                : jiraWhitelisting ? 'Open a Jira brief to review and whitelist your templates.' : 'Upload a spreadsheet on the Submit Templates page to whitelist your first template.'}
+                                : hasFilters ? 'Try another search or reset the filters to see the full inventory.' : account === 'apparel' ? 'Choose a MoEngage workspace above to sync approved Karix RCS templates.' : jiraWhitelisting ? 'Open a Jira brief to review and whitelist your templates.' : 'Upload a spreadsheet on the Submit Templates page to whitelist your first template.'}
                           </p>
-                          {!stats?.error && !templatesError && (
+                          {!stats?.error && !templatesError && hasFilters && <button type="button" onClick={resetFilters} className="text-sm font-medium text-blue-700 hover:underline">Reset all filters</button>}
+                          {!stats?.error && !templatesError && !hasFilters && account !== 'apparel' && (
                             <a
                               href={jiraWhitelisting ? '/briefs' : '/submit'}
                               className="text-xs font-semibold text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center gap-1"
@@ -1156,7 +1090,10 @@ export default function DashboardPage() {
                             onClick={() => toggleRow(key)}
                             role="button"
                             tabIndex={0}
+                            aria-expanded={isExpanded}
+                            aria-label={`${isExpanded ? 'Hide' : 'Show'} details for ${t.template_name}`}
                             onKeyDown={(e) => {
+                              if (e.target !== e.currentTarget) return;
                               if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
                                 toggleRow(key);
@@ -1172,15 +1109,16 @@ export default function DashboardPage() {
                                   onChange={() => handleToggleSelect(t.template_name)}
                                   className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                   title={`Select ${t.template_name}`}
+                                  aria-label={`Select ${t.template_name}`}
                                 />
                               </td>
                             )}
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-2">
-                                <span className="font-semibold text-gray-900 font-mono text-[11px]">{t.template_name}</span>
+                                <span className="font-medium text-gray-900 font-mono text-sm">{t.template_name}</span>
                                 <LiveBadge live={t.live} existsOnWaba={t.exists_on_waba} channel={channel} />
                               </div>
-                              <div className="text-[10px] text-gray-400 font-mono mt-0.5">
+                              <div className="text-xs text-gray-500 font-mono mt-1">
                                 {channel === 'whatsapp' ? (t.provider_ref_id ? `ID ${t.provider_ref_id}` : 'Not submitted yet') : ((t.template_id || t.provider_ref_id) ? `DLT ${t.template_id || t.provider_ref_id}` : '')}
                               </div>
                             </td>
@@ -1193,7 +1131,7 @@ export default function DashboardPage() {
                               <td className="px-4 py-3 text-gray-600">
                                 <div className="font-medium">{t.template_type || '—'}</div>
                                 {Array.isArray(t.sender_ids) && t.sender_ids.length > 0 && (
-                                  <div className="text-[10px] text-gray-400">{t.sender_ids.join(', ')}</div>
+                                  <div className="text-xs text-gray-500">{t.sender_ids.join(', ')}</div>
                                 )}
                               </td>
                             )}
@@ -1205,12 +1143,12 @@ export default function DashboardPage() {
                             <td className="px-4 py-3">
                               <StatusBadge status={t.approval_status || 'unknown'} />
                               {rejectionReason && (
-                                <div className="text-[10px] text-red-600 mt-1 max-w-[180px] truncate" title={rejectionReason}>
+                                <div className="text-xs text-red-600 mt-1 max-w-[180px] truncate" title={rejectionReason}>
                                   {truncate(rejectionReason, 60)}
                                 </div>
                               )}
                               {pipelineError && (
-                                <div className="text-[10px] text-rose-600 mt-1 max-w-[180px] truncate" title={pipelineError}>
+                                <div className="text-xs text-rose-600 mt-1 max-w-[180px] truncate" title={pipelineError}>
                                   {truncate(pipelineError, 60)}
                                 </div>
                               )}
@@ -1219,24 +1157,24 @@ export default function DashboardPage() {
                             <td className="px-4 py-3">
                               {t.submitted_by ? (
                                 <span className="inline-flex items-center gap-1.5">
-                                  <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 font-bold text-[10px] flex items-center justify-center shrink-0">
+                                  <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-600 font-medium text-xs flex items-center justify-center shrink-0">
                                     {t.submitted_by.charAt(0).toUpperCase()}
                                   </span>
-                                  <span className="text-[11px] font-semibold text-gray-700 truncate">{t.submitted_by}</span>
+                                  <span className="text-sm font-medium text-gray-700 truncate">{t.submitted_by}</span>
                                 </span>
                               ) : (
-                                <span className="text-[11px] text-gray-400">{channel === 'sms' ? 'VILPOWER Sync' : 'Karix Sync'}</span>
+                                <span className="text-sm text-gray-500">{channel === 'sms' ? 'VILPOWER Sync' : 'Karix Sync'}</span>
                               )}
                             </td>
 
                             {channel === 'whatsapp' && (
                               <td className="px-4 py-3">
                                 {t.source_file ? (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-50 border border-gray-200 text-[10px] font-mono text-gray-600 max-w-[130px] truncate" title={t.source_file}>
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-50 border border-gray-200 text-xs font-mono text-gray-600 max-w-[150px] truncate" title={t.source_file}>
                                     {truncate(t.source_file, 20)}
                                   </span>
                                 ) : (
-                                  <span className="text-[11px] text-gray-300">—</span>
+                                  <span className="text-sm text-gray-400">—</span>
                                 )}
                               </td>
                             )}
@@ -1252,10 +1190,10 @@ export default function DashboardPage() {
                                     type="button"
                                     onClick={() => handleSyncSingleRcsToMoEngage(t)}
                                     disabled={syncBusy || !syncDestinationReady}
-                                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition flex items-center gap-1 cursor-pointer ${
+                                    className={`px-2.5 py-1.5 rounded-lg text-sm font-medium border transition-colors flex items-center gap-1 cursor-pointer ${
                                       syncedSingleRcs[t.template_name]
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                        : 'bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-200'
+                                        : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-200'
                                     }`}
                                     title={`Sync this template to ${syncDestinationLabel}`}
                                   >
@@ -1266,21 +1204,24 @@ export default function DashboardPage() {
                                       : `🔄 Sync to ${syncDestinationLabel}`}
                                   </button>
                                 )}
-                                <span
-                                  className="text-blue-600 hover:text-blue-800 cursor-pointer text-xs"
+                                <button
+                                  type="button"
+                                  className="rounded px-2 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50"
                                   onClick={() => toggleRow(key)}
+                                  aria-expanded={isExpanded}
+                                  aria-label={`${isExpanded ? 'Hide' : 'Show'} details for ${t.template_name}`}
                                 >
-                                  {isExpanded ? '▲ Hide' : '▼ Details'}
-                                </span>
+                                  {isExpanded ? 'Hide' : 'Details'}
+                                </button>
                               </div>
                             </td>
                           </tr>
                           {/* Expandable detail panel */}
                           {isExpanded && (
                             <tr className="bg-gray-50/90 border-b border-gray-200">
-                              <td colSpan={(channel === 'whatsapp' || channel === 'rcs') ? 9 : 8} className="px-6 py-4">
+                              <td colSpan={channel === 'whatsapp' ? 9 : channel === 'rcs' ? 8 : 7} className="px-6 py-4">
                                 <div className="space-y-3">
-                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 text-sm break-words">
                                     <div>
                                       <span className="font-semibold text-gray-500">Template ID: </span>
                                       <span className="font-mono text-gray-800">
@@ -1317,17 +1258,17 @@ export default function DashboardPage() {
 
                                   {t.provider_response && Object.keys(t.provider_response).length > 0 && (
                                     <div>
-                                      <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
                                         Raw Provider Response
                                       </div>
-                                      <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg text-[11px] font-mono overflow-x-auto max-h-48">
+                                      <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-48">
                                         {JSON.stringify(t.provider_response, null, 2)}
                                       </pre>
                                     </div>
                                   )}
                                   {channel === 'rcs' && (
                                     <div className="pt-3 mt-2 border-t border-gray-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                                      <div className="text-[11px] text-gray-500">
+                                      <div className="text-sm text-gray-500">
                                         Register this approved Karix RCS template into MoEngage Settings &rarr; RCS Template Management.
                                       </div>
                                       <button
@@ -1373,16 +1314,17 @@ export default function DashboardPage() {
               </table>
             </div>
           </div>
-        </div>
+        </section>
 
         {/* Right rail: live team activity */}
-        <div className="space-y-6">
-          {/* Operator leaderboard */}
-          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Team Activity</h3>
-              <span className="text-[11px] text-gray-400">{activityStats?.total_users ?? 0} operators</span>
+        <aside className="min-w-0 space-y-4" aria-label="Workspace activity">
+          {activityError && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{activityError}{activityStats ? ' · Showing last available activity.' : ''}</p>}
+          <section className="workspace-panel p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
+              <h2 className="text-base font-semibold tracking-tight text-gray-900">Team activity</h2>
+              <span className="text-xs text-gray-500">{activityStats ? `${activityStats.total_users} operators` : '—'}</span>
             </div>
+            <p className="mb-4 text-xs text-gray-500">Across workspace accounts and channels</p>
             {activityStats && activityStats.user_activity.length > 0 ? (
               <div className="space-y-3">
                 {activityStats.user_activity.slice(0, 4).map(u => (
@@ -1392,8 +1334,8 @@ export default function DashboardPage() {
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-gray-900 truncate">{u.user}</span>
-                        <span className="text-[10px] text-gray-400 font-medium">{u.actions} action{u.actions === 1 ? '' : 's'}</span>
+                        <span className="text-sm font-medium text-gray-900 truncate">{u.user}</span>
+                        <span className="ml-2 text-xs text-gray-500 whitespace-nowrap">{u.actions} action{u.actions === 1 ? '' : 's'}</span>
                       </div>
                       <div className="h-1 bg-gray-100 rounded-full mt-1">
                         <div
@@ -1406,15 +1348,15 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-400">No team activity recorded yet.</p>
+              <p className="text-sm text-gray-500">{activityLoading ? 'Loading team activity…' : activityError ? 'Team activity is unavailable.' : 'No team activity recorded yet.'}</p>
             )}
-          </div>
+          </section>
 
           {/* Recent activity feed */}
-          <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-5">
+          <section className="workspace-panel p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">Live Feed</h3>
-              <a href="/activity" className="text-[11px] font-semibold text-blue-600 hover:text-blue-800">
+              <h2 className="text-base font-semibold tracking-tight text-gray-900">Recent activity</h2>
+              <a href="/activity" className="text-sm font-medium text-blue-700 hover:underline">
                 View all →
               </a>
             </div>
@@ -1424,15 +1366,15 @@ export default function DashboardPage() {
                   <div key={a.id} className="flex items-start gap-2.5">
                     <ActivityIcon action={a.action} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-800">
+                      <p className="text-sm leading-relaxed text-gray-800">
                         <span className="font-semibold">{a.user}</span>{' '}
-                        {a.action === 'TEMPLATE_SUBMISSION' && <>submitted {a.details.count ?? 0} template{(a.details.count ?? 0) === 1 ? '' : 's'}</>}
+                        {a.action === 'TEMPLATE_SUBMISSION' && (a.details.count == null ? <>submitted templates</> : <>submitted {a.details.count} template{a.details.count === 1 ? '' : 's'}</>)}
                         {a.action === 'TEMPLATE_PREVIEW' && <>previewed {a.details.filename || 'a file'}</>}
-                        {a.action === 'STATUS_POLL' && <>polled {a.details.checked_count ?? 0} pending</>}
+                        {a.action === 'STATUS_POLL' && (a.details.checked_count == null ? <>polled pending templates</> : <>polled {a.details.checked_count} pending</>)}
                         {a.action === 'CREDENTIALS_UPDATE' && <>updated credentials</>}
                         {a.action === 'CREDENTIALS_TEST' && <>tested credentials</>}
                       </p>
-                      <p className="text-[10px] text-gray-400 mt-0.5">
+                      <p className="text-xs text-gray-500 mt-1">
                         {getAccountLabel(a.account)} • {formatChannel(a.channel)} • {relativeTime(a.timestamp)}
                       </p>
                     </div>
@@ -1441,15 +1383,15 @@ export default function DashboardPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-gray-400">Waiting for team activity…</p>
+              <p className="text-sm text-gray-500">{activityLoading ? 'Loading recent activity…' : activityError ? 'Recent activity is unavailable.' : 'No recent activity recorded.'}</p>
             )}
-          </div>
-        </div>
+          </section>
+        </aside>
       </div>
       {/* Delete from Spreadsheet Modal */}
       {showFileDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-2xl max-w-lg w-full p-6 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+          <div role="dialog" aria-modal="true" aria-labelledby="file-delete-heading" className="bg-white rounded-xl border border-gray-200 shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 space-y-5">
             <div className="flex items-center justify-between pb-3 border-b border-gray-100">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-red-50 text-red-600 flex items-center justify-center">
@@ -1458,20 +1400,21 @@ export default function DashboardPage() {
                   </svg>
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-gray-900">Delete Templates from Spreadsheet</h3>
-                  <p className="text-[11px] text-gray-500">Target Account: <span className="font-semibold text-gray-800">{accountLabel}</span></p>
+                  <h3 id="file-delete-heading" className="text-base font-semibold tracking-tight text-gray-900">Delete Templates from Spreadsheet</h3>
+                  <p className="text-sm text-gray-500">Target Account: <span className="font-semibold text-gray-800">{accountLabel}</span> · {channelLabel}</p>
                 </div>
               </div>
               <button
                 onClick={() => { setShowFileDeleteModal(false); setDeleteFile(null); }}
                 className="text-gray-400 hover:text-gray-600 text-lg leading-none cursor-pointer"
                 disabled={fileDeleting}
+                aria-label="Close delete dialog"
               >
                 &times;
               </button>
             </div>
 
-            <div className="space-y-4 text-xs">
+            <div className="space-y-4 text-sm">
               <p className="text-gray-600 leading-relaxed">
                 Upload the spreadsheet (<strong>.csv</strong>, <strong>.xlsx</strong>, or <strong>.xls</strong>) containing the templates you want to delete. The system will parse every template name from the file and delete only those from Karix/Meta.
               </p>
@@ -1486,10 +1429,10 @@ export default function DashboardPage() {
                       setDeleteFile(e.target.files[0]);
                     }
                   }}
-                  className="hidden"
+                  className="peer sr-only"
                   disabled={fileDeleting}
                 />
-                <label htmlFor="delete-file-input" className="cursor-pointer block space-y-2">
+                <label htmlFor="delete-file-input" className="cursor-pointer block space-y-2 rounded-lg peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-blue-500">
                   <div className="w-10 h-10 mx-auto rounded-full bg-red-50 text-red-500 flex items-center justify-center">
                     <svg className="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
@@ -1497,20 +1440,19 @@ export default function DashboardPage() {
                   </div>
                   {deleteFile ? (
                     <div>
-                      <span className="font-bold text-gray-900 font-mono text-xs">{deleteFile.name}</span>
-                      <p className="text-[10px] text-gray-400 mt-0.5">{(deleteFile.size / 1024).toFixed(1)} KB — Click to change file</p>
+                      <span className="font-semibold text-gray-900 font-mono text-sm break-all">{deleteFile.name}</span>
+                      <p className="text-xs text-gray-500 mt-1">{(deleteFile.size / 1024).toFixed(1)} KB — Click to change file</p>
                     </div>
                   ) : (
                     <div>
                       <span className="font-semibold text-blue-600 hover:underline">Choose a file</span>
-                      <span className="text-gray-500"> or drag and drop</span>
-                      <p className="text-[10px] text-gray-400 mt-1">CSV or Excel (.xlsx, .xls)</p>
+                      <p className="text-xs text-gray-500 mt-1">CSV or Excel (.xlsx, .xls)</p>
                     </div>
                   )}
                 </label>
               </div>
 
-              <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-xl text-amber-900 text-[11px] leading-relaxed">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-sm leading-relaxed">
                 <strong>⚠️ Warning:</strong> This will permanently delete all templates defined in this file from your active WABA on Karix and Meta.
               </div>
             </div>
@@ -1520,7 +1462,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={() => { setShowFileDeleteModal(false); setDeleteFile(null); }}
                 disabled={fileDeleting}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -1528,7 +1470,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={handleDeleteFromFile}
                 disabled={!deleteFile || fileDeleting}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-700 shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {fileDeleting ? (
                   <>
