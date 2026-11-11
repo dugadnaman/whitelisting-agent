@@ -440,7 +440,7 @@ app.post('/send-message', async (req, res) => {
 });
 
 // Start Express server and initiate Baileys
-app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, process.env.WHATSAPP_GATEWAY_HOST || '0.0.0.0', async () => {
   console.log(`[WhatsApp Gateway] HTTP API listening on port ${PORT}`);
   console.log(`[WhatsApp Gateway] Scan QR webview at: http://localhost:${PORT}/qr.html`);
   await restoreSessionFromDatabase();

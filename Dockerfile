@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for Karix Template Whitelisting Web Platform
-# Runs FastAPI Backend on port 8000 and Next.js Frontend on port 3000
+# Next.js is the only public listener; FastAPI and the gateway stay on loopback.
 
 # ==========================================
 # Stage 1: Build Next.js Frontend
@@ -25,12 +25,14 @@ WORKDIR /app
 ENV PYTHONPATH=/app/backend:/app \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     NODE_ENV=production \
+    PORT=3000 \
     BACKEND_INTERNAL_URL=http://127.0.0.1:8000 \
     KARIX_DB_PATH=/app/data/karix_store.db \
     MOENGAGE_DRAFT_TATA_CATALOG_FILE=/app/tata_catalog.json \
     WHATSAPP_GATEWAY_URL=http://127.0.0.1:5005 \
     WHATSAPP_SESSION_DIR=/app/data/whatsapp_session \
     WHATSAPP_GATEWAY_PORT=5005 \
+    WHATSAPP_GATEWAY_HOST=127.0.0.1 \
     WHATSAPP_SLA_GROUP_NAME=Internal_TCL<>Att \
     WHATSAPP_SLA_GROUP_ID=120363413267146720@g.us
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -61,7 +63,7 @@ COPY --from=frontend-builder /app/frontend /app/frontend
 COPY --from=frontend-builder /app/whatsapp-gateway /app/whatsapp-gateway
 COPY docker-entrypoint.py /app/docker-entrypoint.py
 
-# Setup supervisord configuration to run both FastAPI (8000) and Next.js (3000)
+# Only Next.js binds publicly, on the platform's PORT (3000 by default).
 RUN mkdir -p /var/log/supervisor /etc/supervisor/conf.d
 RUN echo '[supervisord]\n\
 nodaemon=true\n\
@@ -70,7 +72,7 @@ pidfile=/tmp/supervisord.pid\n\
 \n\
 [program:fastapi]\n\
 directory=/app\n\
-command=python3 -m uvicorn api:app --app-dir /app/backend --host 0.0.0.0 --port 8000\n\
+command=python3 -m uvicorn api:app --app-dir /app/backend --host 127.0.0.1 --port 8000\n\
 autostart=true\n\
 autorestart=true\n\
 stderr_logfile=/var/log/supervisor/fastapi.err.log\n\
@@ -78,7 +80,7 @@ stdout_logfile=/var/log/supervisor/fastapi.out.log\n\
 \n\
 [program:nextjs]\n\
 directory=/app/frontend\n\
-command=/usr/local/bin/node node_modules/next/dist/bin/next start -p 3000 -H 0.0.0.0\n\
+command=/usr/local/bin/node node_modules/next/dist/bin/next start -p %(ENV_PORT)s -H 0.0.0.0\n\
 autostart=true\n\
 autorestart=true\n\
 stderr_logfile=/var/log/supervisor/nextjs.err.log\n\
@@ -93,11 +95,11 @@ stderr_logfile=/var/log/supervisor/whatsapp.err.log\n\
 stdout_logfile=/var/log/supervisor/whatsapp.out.log\n\
 ' > /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 3000 8000 5005
+EXPOSE 3000
 
 # The frontend proxy must reach the backend before this image is ready.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl --fail --silent --show-error http://127.0.0.1:3000/api/health || exit 1
+    CMD curl --fail --silent --show-error "http://127.0.0.1:${PORT}/api/health" || exit 1
 
 VOLUME ["/app/data"]
 

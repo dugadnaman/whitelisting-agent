@@ -330,6 +330,14 @@ The root Docker image includes the attribution module and Google dependencies. D
 
 Set Render's **Health Check Path** to `/api/health`, not just the frontend port. Supervisor uses `/tmp/supervisord.pid`, writable by the container's non-root user. Wait for active attribution jobs before deploying; rolling instances do not share an in-memory queue or filesystem lock.
 
+Only Next.js listens publicly, on Render's `PORT` (default `3000` outside Render).
+FastAPI (`127.0.0.1:8000`) and the WhatsApp gateway (`127.0.0.1:5005`) are internal;
+do not expose them as additional public listeners. Multiple public listeners let
+Render rediscover port `8000` as primary, returning API `{"detail":"Not Found"}`
+for `/briefs` even while `/api/health` passes. Compose pins `PORT=3000` to match its
+local port mapping. Verify both paths after deployment:
+`KARIX_PRODUCTION_SMOKE_URL=https://whitelisting-agent.onrender.com python -m pytest tests/test_production_smoke.py::test_public_origin_serves_jira_ui_and_api -q`.
+
 Keep the existing persistent `JWT_SECRET` and credential database. For durable file-based setup/key uploads, point `APPAREL_ATTRIBUTION_STORAGE_DIR` at a persistent disk directory. Without a disk, use `APPAREL_GOOGLE_SERVICE_ACCOUNT_JSON`, `APPAREL_GOOGLE_SPREADSHEET_URL` and `APPAREL_GOOGLE_WORKSHEET_NAME` as deployment configuration; uploaded keys/setup on an ephemeral filesystem do not survive redeployment. Environment-installed Google keys are sealed against portal replacement.
 
 Connect only Apparel's MoEngage session through Settings/Auth Sync. On restart, reconnect the sheet and rerun with overwrite off: sheet results persist, but in-memory job history/CSV downloads do not. See the [runtime and verification notes](docs/APPAREL_ATTRIBUTION_PAUSED.md) for production evidence and brand-specific rules.

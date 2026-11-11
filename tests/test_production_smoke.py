@@ -9,9 +9,13 @@ Validates:
 
 from __future__ import annotations
 
+import os
+
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+import pytest
+import requests
 
 import api
 from db_queue import get_db, init_queue_db, update_template_approval_monotonic
@@ -33,6 +37,19 @@ def test_health_endpoints():
     r_api_health = client.get("/api/health")
     assert r_api_health.status_code == 200
     assert r_api_health.json()["status"] == "ok"
+
+
+@pytest.mark.skipif(not os.environ.get("KARIX_PRODUCTION_SMOKE_URL"), reason="Requires an explicitly selected deployment")
+def test_public_origin_serves_jira_ui_and_api():
+    """A healthy API alone must not let backend port discovery hide the frontend."""
+    origin = os.environ["KARIX_PRODUCTION_SMOKE_URL"].rstrip("/")
+    page = requests.get(f"{origin}/briefs", timeout=30)
+    assert page.status_code == 200
+    assert page.headers.get("Content-Type", "").startswith("text/html")
+    health = requests.get(f"{origin}/api/health", timeout=30)
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+    assert health.json()["service"] == "karix-whitelisting-api"
 
 
 

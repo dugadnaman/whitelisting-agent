@@ -12,6 +12,7 @@ services:
         required: false
     environment:
       - PYTHONUNBUFFERED=1
+      - PORT=3000
       - PYTHONPATH=/app/backend:/app
       - BACKEND_INTERNAL_URL=http://127.0.0.1:8000
       - JWT_SECRET=${JWT_SECRET:?Set a strong persistent JWT_SECRET in .env}
