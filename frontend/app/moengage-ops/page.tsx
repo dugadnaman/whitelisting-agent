@@ -137,6 +137,7 @@ export default function MoEngageOpsPage() {
       const list = await fetchMoEngageWorkspaces();
       setWorkspaces(list);
       setSelectedWs(list[0] || null);
+      setShowWorkspacesModal(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not fetch workspaces');
     }
@@ -167,18 +168,18 @@ export default function MoEngageOpsPage() {
   };
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto pb-16">
+    <div className="workspace-page min-w-0 space-y-6 max-w-7xl mx-auto pb-16">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 pb-6">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900">MoEngage Operations Dashboard</h1>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              Live API
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="workspace-heading">MoEngage Operations Dashboard</h1>
+            <span className="inline-flex flex-wrap items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+              <span className="w-2 h-2 rounded-full bg-blue-500 " />
+              Tata Capital
             </span>
           </div>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="workspace-description mt-2">
             Campaigns, flows, and flow nodes built by Attributics across Tata Capital verticals.
           </p>
         </div>
@@ -186,7 +187,7 @@ export default function MoEngageOpsPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={openWorkspaces}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 shadow-sm transition-all"
+            className="workspace-button"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
@@ -200,7 +201,7 @@ export default function MoEngageOpsPage() {
             href="/api/moengage/ops/export-excel"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 shadow-sm transition-all"
+            className="workspace-button"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -219,7 +220,7 @@ export default function MoEngageOpsPage() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-purple-300 bg-purple-50 text-purple-800 hover:bg-purple-100 shadow-sm transition-all"
+            className="workspace-button"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -232,8 +233,8 @@ export default function MoEngageOpsPage() {
           <button
             onClick={handleSync}
             disabled={syncing}
-            className={`inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg text-white shadow-sm transition-all ${
-              syncing ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+            className={`workspace-button-primary ${
+              syncing ? 'cursor-wait' : ''
             }`}
           >
             <svg
@@ -255,7 +256,7 @@ export default function MoEngageOpsPage() {
       </div>
 
       {error && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-3">
+        <div role="alert" className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex flex-wrap items-center gap-3">
           <svg className="w-5 h-5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
@@ -265,13 +266,14 @@ export default function MoEngageOpsPage() {
 
       {/* Date Filter Bar */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
+        <div className="workspace-toolbar min-w-0">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider mr-2">Date Range:</span>
           {(['last_week', 'last_month', 'custom'] as const).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${
+              aria-pressed={mode === m}
+              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold capitalize transition-colors ${
                 mode === m
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -280,12 +282,13 @@ export default function MoEngageOpsPage() {
               {m.replace('_', ' ')}
             </button>
           ))}
-          <div className="flex items-center gap-2 border-l border-gray-200 pl-3 ml-1">
+          <div className="flex flex-wrap items-center gap-2 border-l border-gray-200 pl-3 ml-1">
             <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Workspace:</span>
             <select
               value={workspaceFilter}
+              aria-label="MoEngage workspace scope"
               onChange={(e) => setWorkspaceFilter(e.target.value)}
-              className="border border-gray-300 rounded-lg px-2.5 py-1 text-xs font-semibold bg-gray-50 text-gray-800"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 workspace-select max-w-full"
             >
               <option value="all">All Combined</option>
               <option value="TCL">Tata Capital (TCL)</option>
@@ -299,19 +302,21 @@ export default function MoEngageOpsPage() {
         </div>
 
         {mode === 'custom' && (
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             <input
               type="date"
+              aria-label="MoEngage start date"
               value={customStart}
               onChange={(e) => setCustomStart(e.target.value)}
-              className="border border-gray-300 rounded-lg px-2.5 py-1 text-gray-800"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 border border-gray-300 rounded-lg px-2.5 py-1 text-gray-800"
             />
-            <span className="text-gray-400">to</span>
+            <span className="text-gray-500">to</span>
             <input
               type="date"
+              aria-label="MoEngage end date"
               value={customEnd}
               onChange={(e) => setCustomEnd(e.target.value)}
-              className="border border-gray-300 rounded-lg px-2.5 py-1 text-gray-800"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 border border-gray-300 rounded-lg px-2.5 py-1 text-gray-800"
             />
           </div>
         )}
@@ -326,11 +331,18 @@ export default function MoEngageOpsPage() {
             <span className="font-semibold text-gray-800">
               {data.date_filter.end_date}
             </span>{' '}
-            <span className="text-gray-400 ml-1">({mode})</span>
+            <span className="text-gray-500 ml-1">({mode})</span>
           </div>
         )}
+        {(mode !== 'last_week' || workspaceFilter !== 'all' || customStart || customEnd) && (
+          <button type="button" className="workspace-button" onClick={() => { setMode('last_week'); setCustomStart(''); setCustomEnd(''); setWorkspaceFilter('all'); }}>Reset filters</button>
+        )}
+      </div>
+      <div className="workspace-guide text-sm text-gray-600">
+        Scope: Tata Capital · {workspaceFilter === 'all' ? 'all combined workspaces' : workspaceFilter}. Counts reflect the selected period and available imported or synced records. Sync availability depends on workspace configuration.
       </div>
 
+      {loading && data && <p className="text-sm text-gray-600" role="status">Updating the selected operations view…</p>}
       {loading && !data ? (
         <div className="py-24 text-center">
           <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -338,9 +350,16 @@ export default function MoEngageOpsPage() {
         </div>
       ) : data ? (
         <>
+          {data.in_scope_active_count === 0 && (
+            <div className="workspace-empty space-y-2">
+              <h2 className="text-base font-semibold text-gray-900">No records in this view</h2>
+              <p>Try another period or workspace. Import an existing export or sync configured workspaces to load operations data.</p>
+              <button type="button" className="workspace-button" onClick={() => { setMode('last_week'); setCustomStart(''); setCustomEnd(''); setWorkspaceFilter('all'); }}>Reset filters</button>
+            </div>
+          )}
           {/* Executive Overview Cards */}
           <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
               Account Overview ({data.account_overview.title})
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -355,7 +374,7 @@ export default function MoEngageOpsPage() {
                       </svg>
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-gray-900 mt-2">
+                  <div className="text-3xl font-semibold text-gray-900 mt-2">
                     {data.account_overview.total_campaigns}
                   </div>
                 </div>
@@ -363,7 +382,7 @@ export default function MoEngageOpsPage() {
                   {Object.entries(data.account_overview.campaigns_channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                      className={`text-xs font-semibold px-1.5 py-0.5 rounded border ${
                         channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                       }`}
                     >
@@ -384,11 +403,11 @@ export default function MoEngageOpsPage() {
                       </svg>
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-gray-900 mt-2">
+                  <div className="text-3xl font-semibold text-gray-900 mt-2">
                     {data.account_overview.total_flows}
                   </div>
                 </div>
-                <p className="text-[11px] text-gray-500 mt-3 pt-3 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100">
                   Multi-step customer journeys & automations
                 </p>
               </div>
@@ -404,7 +423,7 @@ export default function MoEngageOpsPage() {
                       </svg>
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-gray-900 mt-2">
+                  <div className="text-3xl font-semibold text-gray-900 mt-2">
                     {data.account_overview.total_flow_nodes}
                   </div>
                 </div>
@@ -412,7 +431,7 @@ export default function MoEngageOpsPage() {
                   {Object.entries(data.account_overview.nodes_channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                      className={`text-xs font-semibold px-1.5 py-0.5 rounded border ${
                         channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                       }`}
                     >
@@ -423,17 +442,17 @@ export default function MoEngageOpsPage() {
               </div>
 
               {/* Card 4: Total Omnichannel Delivery */}
-              <div className="bg-white border border-blue-200 rounded-xl p-4 shadow-sm bg-gradient-to-br from-blue-50/50 to-white flex flex-col justify-between">
+              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-blue-700 uppercase tracking-wider">Total Touchpoints</span>
+                    <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Total Touchpoints</span>
                     <span className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
                       <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     </span>
                   </div>
-                  <div className="text-3xl font-extrabold text-blue-900 mt-2">
+                  <div className="text-3xl font-semibold text-blue-900 mt-2">
                     {data.account_overview.total_touchpoints || (data.account_overview.total_campaigns + data.account_overview.total_flow_nodes)}
                   </div>
                 </div>
@@ -441,7 +460,7 @@ export default function MoEngageOpsPage() {
                   {Object.entries(data.account_overview.channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
-                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                      className={`text-xs font-semibold px-1.5 py-0.5 rounded border ${
                         channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                       }`}
                     >
@@ -455,7 +474,7 @@ export default function MoEngageOpsPage() {
 
           {/* Vertical Breakdown Grid */}
           <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-3">
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
               Vertical Breakdown (Tata Capital Business Units)
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -466,9 +485,9 @@ export default function MoEngageOpsPage() {
                 >
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-base font-bold text-gray-900">{verticalName}</h3>
+                      <h3 className="text-base font-semibold text-gray-900">{verticalName}</h3>
                       <span
-                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                        className={`text-xs font-semibold uppercase px-2 py-0.5 rounded-full ${
                           vdata.in_account_total
                             ? 'bg-blue-50 text-blue-700 border border-blue-200'
                             : 'bg-amber-50 text-amber-700 border border-amber-200'
@@ -480,27 +499,27 @@ export default function MoEngageOpsPage() {
 
                     <div className="grid grid-cols-3 gap-2 py-3 bg-gray-50 rounded-lg text-center mb-3">
                       <div>
-                        <div className="text-lg font-bold text-gray-900">{vdata.campaigns_total}</div>
-                        <div className="text-[10px] text-gray-500 uppercase font-semibold">Campaigns</div>
+                        <div className="text-lg font-semibold text-gray-900">{vdata.campaigns_total}</div>
+                        <div className="text-xs text-gray-500 uppercase font-semibold">Campaigns</div>
                       </div>
                       <div>
-                        <div className="text-lg font-bold text-gray-900">{vdata.flows_total}</div>
-                        <div className="text-[10px] text-gray-500 uppercase font-semibold">Flows</div>
+                        <div className="text-lg font-semibold text-gray-900">{vdata.flows_total}</div>
+                        <div className="text-xs text-gray-500 uppercase font-semibold">Flows</div>
                       </div>
                       <div>
-                        <div className="text-lg font-bold text-gray-900">{vdata.flow_nodes_total}</div>
-                        <div className="text-[10px] text-gray-500 uppercase font-semibold">Nodes</div>
+                        <div className="text-lg font-semibold text-gray-900">{vdata.flow_nodes_total}</div>
+                        <div className="text-xs text-gray-500 uppercase font-semibold">Nodes</div>
                       </div>
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-[11px] font-semibold text-gray-400 mb-1.5 uppercase">Channel Breakdown:</div>
+                    <div className="text-xs font-semibold text-gray-500 mb-1.5 uppercase">Channel Breakdown:</div>
                     <div className="flex flex-wrap gap-1.5">
                       {Object.entries(vdata.channels).filter(([_, count]) => count > 0).map(([ch, count]) => (
                         <span
                           key={ch}
-                          className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
+                          className={`text-xs font-semibold px-2 py-0.5 rounded border ${
                             channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                           }`}
                         >
@@ -519,15 +538,16 @@ export default function MoEngageOpsPage() {
       {/* Workspace Management Modal */}
       {showWorkspacesModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full p-6 border border-gray-200 max-h-[90vh] overflow-y-auto">
+          <div role="dialog" aria-modal="true" aria-label="MoEngage workspaces" className="bg-white rounded-xl shadow-xl max-w-2xl min-w-0 w-full p-6 border border-gray-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
               <div>
-                <h3 className="text-lg font-bold text-gray-900">MoEngage Workspaces</h3>
+                <h3 className="text-lg font-semibold text-gray-900">MoEngage Workspaces</h3>
                 <p className="text-xs text-gray-500">Configure Workspace IDs and API Keys for each Tata Capital vertical.</p>
               </div>
               <button
                 onClick={() => setShowWorkspacesModal(false)}
-                className="p-1 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600"
+                aria-label="Close workspaces"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-1 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-600"
               >
                 ✕
               </button>
@@ -538,7 +558,7 @@ export default function MoEngageOpsPage() {
                 <button
                   key={ws.vertical}
                   onClick={() => setSelectedWs(ws)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors ${
                     selectedWs?.vertical === ws.vertical
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -549,50 +569,55 @@ export default function MoEngageOpsPage() {
               ))}
             </div>
 
+            {workspaces.length === 0 && <div className="workspace-empty">No workspaces are available to configure.</div>}
             {selectedWs && (
               <form onSubmit={handleSaveWorkspace} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Workspace Name</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Workspace Name</label>
                   <input
                     type="text"
                     value={selectedWs.workspace_name}
+                    aria-label="Workspace name"
                     onChange={(e) => setSelectedWs({ ...selectedWs, workspace_name: e.target.value })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs"
+                    className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">Workspace ID (App ID)</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Workspace ID (App ID)</label>
                   <input
                     type="text"
                     value={selectedWs.workspace_id}
+                    aria-label="Workspace ID"
                     onChange={(e) => setSelectedWs({ ...selectedWs, workspace_id: e.target.value })}
                     placeholder="e.g. PLBRDCVUS0YE8ME3E8XSHV5D"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono"
+                    className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">API Key</label>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">API Key</label>
                   <input
                     type="text"
                     value={selectedWs.api_key}
+                    aria-label="Workspace API key"
                     onChange={(e) => setSelectedWs({ ...selectedWs, api_key: e.target.value })}
                     placeholder="e.g. F9ED1AC8BB3449E8B6D94E5C"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono"
+                    className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono"
                     required
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Data Center</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Data Center</label>
                     <select
                       value={selectedWs.data_center}
+                    aria-label="Workspace data center"
                       onChange={(e) => setSelectedWs({ ...selectedWs, data_center: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs"
+                      className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     >
                       <option value="03">DC-03 (India - api-03.moengage.com)</option>
                       <option value="01">DC-01 (US - api-01.moengage.com)</option>
@@ -601,11 +626,12 @@ export default function MoEngageOpsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-gray-700 mb-1">Status</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Status</label>
                     <select
                       value={selectedWs.is_active ? 'active' : 'inactive'}
+                    aria-label="Workspace sync status"
                       onChange={(e) => setSelectedWs({ ...selectedWs, is_active: e.target.value === 'active' })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs"
+                      className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     >
                       <option value="active">Active (Include in Ops Sync)</option>
                       <option value="inactive">Inactive</option>
@@ -617,14 +643,14 @@ export default function MoEngageOpsPage() {
                   <button
                     type="button"
                     onClick={() => setShowWorkspacesModal(false)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50"
                   >
                     Close
                   </button>
                   <button
                     type="submit"
                     disabled={savingWs}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 shadow-sm"
+                    className="workspace-button-primary"
                   >
                     {savingWs ? 'Saving...' : 'Save Workspace'}
                   </button>

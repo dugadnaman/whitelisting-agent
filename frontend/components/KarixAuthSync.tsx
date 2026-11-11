@@ -386,7 +386,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
   const statusLabel = statusError ? 'Unable to check' : !target || (browser && !status) ? 'Checking…'
     : target.mode === 'unsupported' ? 'Not available' : target.mode === 'setup_required' ? 'Setup needed'
       : validated ? 'Session verified' : invalid ? 'Login needs updating' : 'Not verified yet';
-  const buttonClass = 'px-3 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
+  const buttonClass = 'workspace-button';
   const portal = integration === 'moengage' ? 'MoEngage' : integration === 'sms' ? 'VILPOWER' : 'Karix';
   const moeOrigin = typeof target?.identity.base_url === 'string' && /^https:\/\/dashboard(?:-\d{2})?\.moengage\.com\/?$/.test(target.identity.base_url)
     ? target.identity.base_url.replace(/\/$/, '') : null;
@@ -395,7 +395,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       : integration === 'rcs' ? 'https://rcmui.instaalerts.zone/bot_builder_gui/#/campaign-management/templates-list'
         : 'https://www.karix.solutions/lounge/LoungePage/index.php';
 
-  const primaryClass = 'px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
+  const primaryClass = 'workspace-button-primary';
   const refreshStatus = () => { void perform('refresh', refresh); };
   let primary = { label: 'Refresh status', onClick: refreshStatus };
   if (browser && !statusError) {
@@ -414,8 +414,8 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     <section aria-labelledby={titleId} aria-busy={disabled} className="rounded-xl border border-gray-200 bg-white p-5 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 id={titleId} className="text-base font-bold text-gray-900">{portal} connection</h3>
-          <p className="mt-1 text-xs text-gray-500">{accountTitle} · {integrationTitle}</p>
+          <h3 id={titleId} className="text-lg font-semibold text-gray-900">{portal} connection</h3>
+          <p className="mt-1 text-sm text-gray-600">{accountTitle} · {integrationTitle}</p>
         </div>
         <span role="status" className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${validated ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : invalid ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>{statusLabel}</span>
       </div>
@@ -446,8 +446,8 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       {feedback && <p role={feedback.type === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-xs ${feedback.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-blue-200 bg-blue-50 text-blue-800'}`}>{feedback.message}</p>}
 
       {browser && <details className="border-t border-gray-100 pt-3">
-        <summary className="cursor-pointer text-xs font-semibold text-gray-600">Setup help</summary>
-        <ol className="mt-3 list-decimal pl-5 text-xs text-gray-600 space-y-2">
+        <summary className="cursor-pointer text-sm font-medium text-gray-700">Setup help · browser → portal → verify</summary>
+        <ol className="mt-3 list-decimal pl-5 text-sm leading-relaxed text-gray-600 space-y-3">
           {installed === false && <li>Download and unzip the extension. Open <code>chrome://extensions</code>, enable Developer mode, choose <strong>Load unpacked</strong>, and select the folder containing <code>manifest.json</code>.</li>}
           <li>{installed === true ? 'The extension is already detected. Choose' : installed === null ? 'Wait for extension detection, then choose' : 'Reload this page and choose'} <strong>Connect this browser</strong> if this target is not connected. Each account and channel needs its own connection.</li>
           <li>In {portal}, select this account’s {integration === 'rcs' ? 'configured Sender ID' : integration === 'whatsapp' ? 'configured WABA' : integration === 'sms' ? 'Content Templates' : 'configured workspace'} and reload its {integration === 'moengage' ? 'dashboard' : 'template list'}. Sign in manually, including OTP, only if the portal asks.</li>
@@ -466,7 +466,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
       </details>}
 
       <details className="border-t border-gray-100 pt-3">
-        <summary className="cursor-pointer text-xs font-semibold text-gray-600">Advanced connection details</summary>
+        <summary className="cursor-pointer text-sm font-medium text-gray-700">Advanced connection details</summary>
         <div className="mt-3 space-y-3">
           {browser && <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div><dt className="font-semibold text-gray-500">Saved session</dt><dd className="mt-1 text-gray-800">{statusError ? 'Unable to check' : status?.validation_state === 'valid' ? 'Passed last check (not a live guarantee)' : status?.validation_state === 'invalid' ? 'Last check failed' : 'Not checked yet'}</dd></div>

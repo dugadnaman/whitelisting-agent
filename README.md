@@ -18,6 +18,14 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 - Restrained transitions respect reduced motion; navigation supports keyboard
   focus, a mobile drawer and a skip-to-content link. Typography, warm-neutral
   surfaces and a single indigo action accent are shared across the workspace.
+- The same layout and control system covers sign-in/access requests, Settings,
+  uploads, campaign builders, activity/work management, MoEngage operations,
+  attribution/click reporting and gateway pairing—not only Jira and the overview.
+  Contextual setup guides stay optional; account permissions, connection checks,
+  draft-only boundaries and submission confirmations remain explicit.
+- Upload dropzones support keyboard activation. Catalog and SMS source filters
+  expose reset actions without clearing source selections; the copilot uses a
+  quiet launcher rather than an animated, implied-live status indicator.
 
 ## Tata Capital SMS DLT — VILPOWER portal
 

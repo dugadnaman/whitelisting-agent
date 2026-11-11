@@ -12,9 +12,9 @@ import {
   type MoEngageDraftPreview, type MoEngageDraftBatch, type MoEngageDraftRow,
 } from '@/lib/api';
 
-const panel = 'rounded-xl border border-gray-200 bg-white p-5 shadow-sm';
-const input = 'mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100';
-const button = 'rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
+const panel = 'workspace-panel min-w-0 p-5 sm:p-6';
+const input = 'workspace-input mt-2 w-full disabled:bg-gray-50 disabled:text-gray-500';
+const button = 'workspace-button';
 const editableFields = ['campaign_name', 'segment_name', 'exclude_segment_name', 'scheduled_at', 'whatsapp_template_id', 'whatsapp_placeholders', 'whatsapp_image_url', 'whatsapp_cta_links'] as const;
 const fieldLabels: Record<typeof editableFields[number], string> = {
   campaign_name: 'Campaign name', segment_name: 'Include segment', exclude_segment_name: 'Exclude segment',
@@ -26,11 +26,12 @@ const complete = (row: MoEngageDraftRow) => row.status === 'VERIFIED' && Boolean
 
 export default function ApparelCampaignsPage() {
   const { account, currentUser, mounted, authLoading } = useApp();
-  if (!mounted || authLoading) return <div className="p-8" role="status">Checking your access…</div>;
-  if (!canUseApparelAttribution(currentUser, account)) return <div className="p-8"><div className={panel}>
-    <h1 className="text-xl font-bold">Apparel campaigns access denied</h1>
-    <p className="my-3">Authorised Apparel operators and admins only. Platform superadmins must select Apparel in the account selector.</p>
-    <Link href="/" className="text-blue-600">Return to dashboard</Link>
+  if (!mounted || authLoading) return <div className="workspace-page p-6 text-sm text-gray-600" role="status">Checking your access…</div>;
+  if (!canUseApparelAttribution(currentUser, account)) return <div className="workspace-page mx-auto max-w-3xl"><div className={panel}>
+    <p className="workspace-eyebrow mb-2">Apparel · WhatsApp</p>
+    <h1 className="workspace-heading">Apparel campaigns access denied</h1>
+    <p className="workspace-description my-3">Authorised Apparel operators and admins only. Platform superadmins must select Apparel in the account selector.</p>
+    <Link href="/" className="workspace-button inline-flex">Return to dashboard</Link>
   </div></div>;
   return <Workspace key={`${currentUser?.id}:${currentUser?.role}:${account}`} userId={String(currentUser?.id)} />;
 }
@@ -242,23 +243,26 @@ function Workspace({ userId }: { userId: string }) {
     });
   }
 
-  return <div className="mx-auto max-w-6xl space-y-5">
-    <header className="space-y-2">
-      <div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-bold text-gray-900">WhatsApp campaign drafts</h1><span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">Draft only · No sending</span></div>
-      <p className="text-sm text-gray-600">Save the supplied content as MoEngage drafts, then complete missing details directly in MoEngage. Missing launch settings do not block draft saving. Template names and sender numbers resolve to approved workspace IDs; no sheet edits are needed.</p>
-      <details className="text-sm text-gray-600"><summary className="cursor-pointer font-medium">Scheduling and goal-tracking rules</summary><p className="mt-2">Yearless sheet dates use the client-confirmed 2026 brief year; explicit sheet years take precedence. Approved-template CTAs do not need duplicate entries in the brief. Planned IST times are draft metadata, not activated schedules, and past dates are not moved forward. Goal tracking uses elapsed end − start from delivery: 29 October to 1 November is 3 days. Crocs, AGIPL, R&amp;B and CK have no conversion goals. No publishing, test sends or SMS fallback creation.</p></details>
+  return <div className="workspace-page mx-auto min-w-0 max-w-6xl space-y-6 pb-10">
+    <header className="space-y-3">
+      <p className="workspace-eyebrow">Apparel · MoEngage · WhatsApp</p>
+      <div className="flex flex-wrap items-start justify-between gap-3"><h1 className="workspace-heading">WhatsApp campaign drafts</h1><span className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700">Draft only · No sending</span></div>
+      <p className="workspace-description max-w-3xl">Save the supplied content as MoEngage drafts, then complete missing details directly in MoEngage. Missing launch settings do not block draft saving. Template names and sender numbers resolve to approved workspace IDs; no sheet edits are needed.</p>
+      <details className="workspace-guide text-sm text-gray-600"><summary className="cursor-pointer font-medium text-gray-900">Before you begin: scheduling and goal-tracking rules</summary><p className="mt-3 leading-relaxed">Yearless sheet dates use the client-confirmed 2026 brief year; explicit sheet years take precedence. Approved-template CTAs do not need duplicate entries in the brief. Planned IST times are draft metadata, not activated schedules, and past dates are not moved forward. Goal tracking uses elapsed end − start from delivery: 29 October to 1 November is 3 days. Crocs, AGIPL, R&amp;B and CK have no conversion goals. No publishing, test sends or SMS fallback creation.</p></details>
     </header>
-    <ol aria-label="Draft workflow progress" className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+    <ol aria-label="Draft workflow progress" className="grid grid-cols-1 gap-2 text-sm min-[400px]:grid-cols-2 sm:grid-cols-4">
       {['Brand & brief', 'Review campaigns', 'Stage for approval', 'Save drafts'].map((label, index) => {
         const step = batch ? 3 : reviewed ? 2 : preview ? 1 : 0;
-        return <li key={label} aria-current={step === index ? 'step' : undefined} className={`rounded-lg border px-3 py-2 ${step === index ? 'border-blue-200 bg-blue-50 font-semibold text-blue-800' : 'border-gray-200 text-gray-500'}`}>{index + 1}. {label}{allVerified && index === 3 ? ' · Complete' : ''}</li>;
+        return <li key={label} aria-current={step === index ? 'step' : undefined} className={`rounded-lg border px-3 py-3 ${step === index ? 'border-indigo-200 bg-indigo-50 font-medium text-indigo-800' : 'border-gray-200 bg-white text-gray-600'}`}>{index + 1}. {label}{allVerified && index === 3 ? ' · Complete' : ''}</li>;
       })}
     </ol>
     {error && <div ref={errorRef} tabIndex={-1} role="alert" className="scroll-mt-40 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"><p className="font-semibold">Action needed</p><p className="mt-1">{error}</p></div>}
     {notice && <div role="status" className="rounded-lg bg-green-50 p-4 text-sm text-green-800">{notice}</div>}
     {busy && <p role="status" className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800"><span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />{busy}… {brand ? 'Live MoEngage checks may take up to 3 minutes. Please keep this page open.' : ''}</p>}
+    <div className="grid min-w-0 items-start gap-6 lg:grid-cols-2">
     <fieldset disabled={Boolean(busy)} className={`${panel} space-y-4`}>
       <legend className="px-1 text-base font-semibold">1. Choose your brand</legend>
+      <p className="text-sm leading-relaxed text-gray-600">Select the destination first. Audiences, approved templates and goals remain scoped to this brand’s workspace.</p>
       <label className="block text-sm">Brand<select className={input} value={brand} onChange={(event) => {
         const nextBrand = event.target.value;
         invalidate(); setBrand(nextBrand); setReference(''); setNameAttribute(''); setOverrides({}); setImageFiles({}); setDriveChoices({}); setSelectedDriveFiles({}); setCatalog(null); setPreview(null);
@@ -268,7 +272,7 @@ function Workspace({ userId }: { userId: string }) {
       }}>
         <option value="">Select brand</option>{brands.map((item) => <option key={item.brand} value={item.brand}>{item.brand} · {item.workspace_name}</option>)}
       </select></label>
-      {brand && <p className="text-sm">Workspace: {catalog?.workspace_name || catalog?.workspace_id || 'Loading…'}</p>}
+      {brand && <p className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700 [overflow-wrap:anywhere]"><span className="font-medium">Destination workspace:</span> {catalog?.workspace_name || catalog?.workspace_id || 'Loading…'}</p>}
       {!busy && !catalog && <button type="button" className={button} onClick={() => setCatalogRevision((old) => old + 1)}>Reload brand details</button>}
       {brand && !noGoals && <label className="block text-sm">Existing campaign goal reference (optional)<select className={input} value={reference} onChange={(event) => { invalidate(); setReference(event.target.value); }}>
         <option value="">Set goals later in MoEngage</option>{catalog?.reference_campaigns?.filter((item) => item.has_goals).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.status.replace(/<br\s*\/?>/gi, ' ')}</option>)}
@@ -277,22 +281,23 @@ function Workspace({ userId }: { userId: string }) {
       {brand && <details className="text-sm"><summary className="cursor-pointer font-medium">Customer-name personalization{ nameAttribute ? ` · ${nameAttribute}` : ' (when the template needs it)'}</summary>
         <label className="mt-3 block text-sm">Customer name field<select className={input} value={nameAttribute} onChange={(event) => { invalidate(); setNameAttribute(event.target.value); }}>
           <option value="">Choose a verified name field, if required</option>{catalog?.user_attributes?.map((attribute) => <option key={attribute} value={attribute}>{attribute}</option>)}
-        </select></label><p className="mt-2 text-xs text-gray-500">Choose First Name or the correct name attribute for this brand. The brief must explicitly provide a fallback for missing names.</p>
+        </select></label><p className="mt-2 text-sm leading-relaxed text-gray-600">Choose First Name or the correct name attribute for this brand. The brief must explicitly provide a fallback for missing names.</p>
       </details>}
     </fieldset>
     {brand && <fieldset disabled={Boolean(busy) || !catalog} className={`${panel} space-y-4`}>
       <legend className="px-1 text-base font-semibold">2. Choose your brief</legend>
+      <p className="text-sm leading-relaxed text-gray-600">Preview reads the brief without creating a campaign. Review the exact content before staging it for your approval.</p>
       <label className="block text-sm">Source<select className={input} value={sourceType} onChange={(event) => { resetSourceReview(); setColumns(''); setSourceType(event.target.value); }}><option value="file">XLSX / CSV upload</option><option value="sheet">Google Sheet URL</option></select></label>
       {sourceType === 'file' ? <label className="block text-sm">Brief file<input className={input} type="file" accept=".xlsx,.csv" onChange={(event) => { resetSourceReview(); setFile(event.target.files?.[0]); }} /></label> : <>
         <label className="block text-sm">Google Sheet URL<input className={input} type="url" value={sheet} onChange={(event) => { resetSourceReview(); setSheet(event.target.value); }} /></label>
         {/^https:\/\/docs\.google\.com\/spreadsheets\//.test(sheet) && <a href={sheet} target="_blank" rel="noopener noreferrer" className="inline-block text-sm font-semibold text-blue-700 underline">Open source sheet ↗</a>}
-        <p className="text-sm text-gray-600">Share the Google Sheet with Viewer access to {catalog?.google_service_account_email ? <strong>{catalog.google_service_account_email}</strong> : 'the configured Google service account (ask your administrator for its address)'}. Do not make the sheet public.</p>
+        <p className="break-words text-sm leading-relaxed text-gray-600">Share the Google Sheet with Viewer access to {catalog?.google_service_account_email ? <strong>{catalog.google_service_account_email}</strong> : 'the configured Google service account (ask your administrator for its address)'}. Do not make the sheet public.</p>
       </>}
       <label className="block text-sm">Campaign columns (up to 100)<input className={input} value={columns} aria-describedby="campaign-columns-help" aria-invalid={!validColumns} onChange={(event) => { invalidate(); setColumns(event.target.value); }} placeholder={sourceType === 'file' ? 'For example C, D — use the columns in your uploaded file' : 'For example ON, OO — use the columns in your brand sheet'} /></label>
-      <p id="campaign-columns-help" className={`text-xs ${validColumns ? 'text-gray-500' : 'text-red-700'}`}>{validColumns ? 'Use spreadsheet column letters, not row numbers. Blank reads detected columns; yearly briefs can exceed the 100-campaign limit, so choose only the campaigns you need. Uploaded samples may use C rather than ON.' : 'Enter 1–100 column letters separated by spaces or commas; ranges such as C:F are not supported.'}</p>
+      <p id="campaign-columns-help" className={`text-sm leading-relaxed ${validColumns ? 'text-gray-600' : 'text-red-700'}`}>{validColumns ? 'Use spreadsheet column letters, not row numbers. Blank reads detected columns; yearly briefs can exceed the 100-campaign limit, so choose only the campaigns you need. Uploaded samples may use C rather than ON.' : 'Enter 1–100 column letters separated by spaces or commas; ranges such as C:F are not supported.'}</p>
       <p className="text-sm text-gray-500">Saving always creates a new draft. Existing campaign IDs are kept for reference; existing campaigns are not changed.</p>
       {previewHelp && <p className="text-sm text-amber-800">{previewHelp}</p>}
-      <button type="button" className={`${button} bg-blue-600 text-white`} disabled={!readyForPreview} onClick={() => void run('Previewing brief', async (version) => {
+      <button type="button" className="workspace-button-primary" disabled={!readyForPreview} onClick={() => void run('Previewing brief', async (version) => {
         setReviewed(false); setBatch(null); setConfirmed(false);
         previewRevision.current = -1;
         const result = await previewApparelWhatsAppBrief(source, options);
@@ -301,9 +306,10 @@ function Workspace({ userId }: { userId: string }) {
         previewRevision.current = version; setPreview(result); setHalted(false);
       })}>Preview campaigns</button>
     </fieldset>}
+    </div>
     {preview && <section ref={reviewRef} tabIndex={-1} aria-labelledby="campaign-review-heading" className={`${panel} scroll-mt-40 space-y-4 outline-none`}>
       <h2 id="campaign-review-heading" className="text-base font-semibold">3. Review campaigns</h2>
-      <details className="text-xs text-gray-500"><summary className="cursor-pointer">Source verification details</summary><p className="mt-2 break-all">Digest: {preview.source_digest} · Catalog verified: {String(preview.catalog_verified)}</p></details>
+      <details className="text-sm text-gray-600"><summary className="cursor-pointer">Source verification details</summary><p className="mt-2 break-all">Digest: {preview.source_digest} · Catalog verified: {String(preview.catalog_verified)}</p></details>
       <p className={`rounded-lg p-3 text-sm font-semibold ${preview.blocked ? 'bg-amber-50 text-amber-900' : 'bg-emerald-50 text-emerald-800'}`}>{preview.ready} ready to save as drafts · {preview.blocked} cannot be saved{preview.blocked ? ' — these rows are skipped; other drafts can proceed.' : ' — unfinished details can be completed in MoEngage.'}</p>
       {previewRevision.current !== revision.current && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900" role="status">This preview is out of date. Select Preview campaigns again before reviewing or staging.</p>}
       <p className="text-sm text-amber-800">Warnings do not block saving. Nothing is published or sent. Edits require a fresh preview; complete unfinished settings in MoEngage before launch.</p>
@@ -314,8 +320,8 @@ function Workspace({ userId }: { userId: string }) {
           const creativeUrl = overrides[column]?.whatsapp_image_url ?? fields.whatsapp_image_url ?? '';
           const choices = driveChoices[column];
           const showChoices = choices?.brand === brand && choices.source === creativeUrl;
-          return <details key={`${row.source_ref}:${row.row_id}`} open className="rounded-lg border border-gray-200 p-4">
-            <summary className="cursor-pointer font-semibold">{row.row_id} · {campaignRowName(row) || 'Unnamed campaign'} · {row.status === 'preview_ready' ? 'Ready to save as draft' : 'Cannot save this row'}</summary>
+          return <details key={`${row.source_ref}:${row.row_id}`} open className="min-w-0 rounded-xl border border-gray-200 p-4 sm:p-5">
+            <summary className="cursor-pointer break-words text-sm font-semibold leading-relaxed text-gray-900">{row.row_id} · {campaignRowName(row) || 'Unnamed campaign'} · {row.status === 'preview_ready' ? 'Ready to save as draft' : 'Cannot save this row'}</summary>
             <dl className="my-3 grid gap-2 text-sm md:grid-cols-2">{[
               ['Physical column', column.split('!').pop() || column], ['Template', fields.whatsapp_template_id], ['Sender phone', fields.whatsapp_sender],
               ['Include', fields.segment_name], ['Exclude', fields.exclude_segment_name], ['Planned time', fields.scheduled_at || [fields.send_date, fields.send_time].filter(Boolean).join(' · ')],
@@ -328,7 +334,7 @@ function Workspace({ userId }: { userId: string }) {
             {row.issues.length > 0 && <ul className="mb-3 list-inside list-disc text-sm text-red-700">{row.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
             {Boolean(row.warnings?.length) && <div className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900"><p className="font-semibold">Complete in MoEngage — draft saving is allowed</p><ul className="mt-1 list-inside list-disc">{row.warnings?.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
             <details><summary className="cursor-pointer text-sm font-semibold">Edit campaign details and creative</summary><div className="mt-3 grid gap-3 md:grid-cols-2">
-              {editableFields.map((field) => <label key={field} className="block text-xs">{fieldLabels[field]}{field.endsWith('links') || field.endsWith('placeholders') ? ' (JSON)' : ''}
+              {editableFields.map((field) => <label key={field} className="block min-w-0 text-sm font-medium text-gray-700">{fieldLabels[field]}{field.endsWith('links') || field.endsWith('placeholders') ? ' (JSON)' : ''}
                 <textarea className={input} rows={2} value={overrides[column]?.[field] ?? fields[field] ?? ''} onChange={(event) => { const value = event.target.value; invalidate(); setOverrides((old) => ({ ...old, [column]: { ...old[column], [field]: value } })); }}
                   aria-describedby={field === 'campaign_name' ? `campaign-name-rule-${column}` : undefined}
                   onBlur={field === 'campaign_name' ? (event) => {
@@ -337,17 +343,17 @@ function Workspace({ userId }: { userId: string }) {
                     invalidate();
                     setOverrides((old) => ({ ...old, [column]: { ...old[column], campaign_name: value } }));
                   } : undefined} />
-                {field === 'campaign_name' && <p id={`campaign-name-rule-${column}`} className="mt-1 text-xs text-gray-500">{CAMPAIGN_NAME_HINT}</p>}
+                {field === 'campaign_name' && <p id={`campaign-name-rule-${column}`} className="mt-2 text-sm font-normal text-gray-600">{CAMPAIGN_NAME_HINT}</p>}
               </label>)}
               <div className="space-y-3 rounded-lg border border-gray-200 p-3 text-sm md:col-span-2">
                 <p className="font-semibold">Explicit creative upload / Drive resolution</p>
-                <p className="text-xs text-gray-600">Uploads only image media to MoEngage, never a campaign. A successful upload replaces this column’s image override with a durable CDN URL and requires a fresh preview.</p>
-                <label className="block text-xs">Choose JPG or PNG<input className={input} type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={(event) => { invalidate(); const chosen = event.target.files?.[0]; setImageFiles((old) => ({ ...old, [column]: chosen })); }} /></label>
+                <p className="text-sm leading-relaxed text-gray-600">Uploads only image media to MoEngage, never a campaign. A successful upload replaces this column’s image override with a durable CDN URL and requires a fresh preview.</p>
+                <label className="block text-sm">Choose JPG or PNG<input className={input} type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={(event) => { invalidate(); const chosen = event.target.files?.[0]; setImageFiles((old) => ({ ...old, [column]: chosen })); }} /></label>
                 <button type="button" className={button} disabled={!brand || !imageFiles[column]} onClick={() => void uploadCreative(column, { file: imageFiles[column] })}>Upload selected image</button>
-                <p className="break-all text-xs">Current image / Drive URL: {creativeUrl || 'Not set — enter a Drive file or folder URL in Image or Drive URL above.'}</p>
+                <p className="break-all text-sm text-gray-600">Current image / Drive URL: {creativeUrl || 'Not set — enter a Drive file or folder URL in Image or Drive URL above.'}</p>
                 <button type="button" className={button} disabled={!brand || !creativeUrl} onClick={() => void uploadCreative(column, { drive_url: creativeUrl })}>Resolve Drive creative</button>
                 {showChoices && <div className="space-y-2">
-                  <label className="block text-xs">Choose the exact Drive file<select className={input} value={selectedDriveFiles[column] || ''} onChange={(event) => { invalidate(); const id = event.target.value; setSelectedDriveFiles((old) => ({ ...old, [column]: id })); }}>
+                  <label className="block text-sm">Choose the exact Drive file<select className={input} value={selectedDriveFiles[column] || ''} onChange={(event) => { invalidate(); const id = event.target.value; setSelectedDriveFiles((old) => ({ ...old, [column]: id })); }}>
                     <option value="">Select a creative — no default</option>
                     {choices.files.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.mime_type} · {item.id}</option>)}
                   </select></label>
@@ -358,8 +364,8 @@ function Workspace({ userId }: { userId: string }) {
             <details className="mt-3"><summary className="cursor-pointer text-sm">Resolved creative and draft payload</summary><pre className="overflow-auto bg-gray-50 p-3 text-xs">{JSON.stringify(row.candidate_v5_payload, null, 2)}</pre></details>
           </details>;
         })}
-        <label className="flex gap-2 text-sm"><input type="checkbox" disabled={previewRevision.current !== revision.current} checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />I reviewed the supplied content. Save ready rows as new drafts; I will complete unfinished settings directly in MoEngage.</label>
-        <button type="button" className={button} disabled={!canStage} onClick={() => void run('Staging reviewed preview', async (version) => {
+        <label className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed"><input className="mt-1 h-4 w-4 shrink-0 accent-indigo-600" type="checkbox" disabled={previewRevision.current !== revision.current} checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} />I reviewed the supplied content. Save ready rows as new drafts; I will complete unfinished settings directly in MoEngage.</label>
+        <button type="button" className="workspace-button-primary" disabled={!canStage} onClick={() => void run('Staging reviewed preview', async (version) => {
           if (!preview?.source_digest || !canStage) return;
           const result = validateBatch(await stageApparelWhatsAppBrief(source, { ...options, expected_source_digest: preview.source_digest }));
           if (!current(version)) return;
@@ -374,10 +380,10 @@ function Workspace({ userId }: { userId: string }) {
       {!batch && <p className="text-sm text-gray-500">Already staged a batch? Select its brand above, then restore it here. This only reads saved work; it does not create a campaign.</p>}
       {batch && <>
         <p className="text-sm font-semibold">{batch.items.length} campaigns · {brand} · {catalog?.workspace_name}</p>
-        <details className="text-xs text-gray-500"><summary className="cursor-pointer">Batch verification details</summary><p className="mt-2 break-all">Batch: {batch.batch_id} · Account: {batch.account} · Workspace: {batch.workspace_id}</p></details>
+        <details className="text-sm text-gray-600"><summary className="cursor-pointer">Batch verification details</summary><p className="mt-2 break-all">Batch: {batch.batch_id} · Account: {batch.account} · Workspace: {batch.workspace_id}</p></details>
         {allVerified && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">All {batch.items.length} drafts are saved and verified in MoEngage. Nothing was published, sent or activated.</p>}
         {halted && <p role="alert" className="text-sm text-amber-800">Creation stopped after an uncertain or unknown result. Reconcile with MoEngage before any further action. Reading the batch does not retry creation.</p>}
-        <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Column / campaign</th><th className="p-2">Status / issues</th><th className="p-2">Real campaign ID</th><th className="p-2">Readback</th></tr></thead><tbody>{batch.items.map((row) => <tr key={row.row_id} className="border-t">
+        <div className="overflow-x-auto rounded-lg border border-gray-200"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-gray-50 text-gray-600"><tr><th scope="col" className="p-3 font-medium">Column / campaign</th><th scope="col" className="p-3 font-medium">Status / issues</th><th scope="col" className="p-3 font-medium">Real campaign ID</th><th scope="col" className="p-3 font-medium">Readback</th></tr></thead><tbody>{batch.items.map((row) => <tr key={row.row_id} className="border-t border-gray-200 align-top">
           <td className="p-2">{row.row_id}<br />{campaignRowName(row)}</td><td className="p-2">{row.status}<br />{row.issue || row.issues.join('; ')}{Boolean(row.warnings?.length) && <p className="mt-1 text-amber-800">Complete in MoEngage: {row.warnings?.join('; ')}</p>}</td><td className="break-all p-2">{row.campaign_id || '—'}</td>
           <td className="p-2">{row.status === 'CREATED' && row.campaign_id && <button type="button" className={button} disabled={Boolean(busy)} onClick={() => void run('Rechecking saved draft read-only', async (version) => {
             const result = validateBatch(await createMoEngageDraftRow(batch.batch_id, row.row_id, 'apparel'), batch.batch_id);
@@ -390,11 +396,11 @@ function Workspace({ userId }: { userId: string }) {
             setNotice('Saved draft readback completed; no new draft was requested.');
           })}>Recheck saved draft only</button>}{['UNCERTAIN', 'UNKNOWN', 'MAYBE_SENT'].includes(row.status) && <div className="space-y-1">
             <button type="button" className={button} disabled={Boolean(busy)} onClick={() => void reconcileRow(row)}>Check MoEngage for this draft</button>
-            <p className="text-xs text-gray-500">Read-only check. No new draft request.</p>
+            <p className="text-sm text-gray-600">Read-only check. No new draft request.</p>
           </div>}</td>
         </tr>)}</tbody></table></div>
-        {!allVerified && <><label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={Boolean(busy) || halted || !readyRows} checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />I authorise saving only the {readyRows} ready WhatsApp drafts. Nothing may be published, sent, activated or created as SMS fallback.</label>
-        <button type="button" className={`${button} bg-blue-600 text-white`} disabled={Boolean(busy) || !confirmed || halted || !readyRows} onClick={() => void createReady()}>Save {readyRows} drafts to MoEngage</button></>}
+        {!allVerified && <><label className="flex items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed"><input className="mt-1 h-4 w-4 shrink-0 accent-indigo-600" type="checkbox" disabled={Boolean(busy) || halted || !readyRows} checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />I authorise saving only the {readyRows} ready WhatsApp drafts. Nothing may be published, sent, activated or created as SMS fallback.</label>
+        <button type="button" className="workspace-button-primary" disabled={Boolean(busy) || !confirmed || halted || !readyRows} onClick={() => void createReady()}>Save {readyRows} drafts to MoEngage</button></>}
       </>}
     </section>}
   </div>;

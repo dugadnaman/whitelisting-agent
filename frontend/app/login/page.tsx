@@ -81,21 +81,21 @@ export default function LoginPage() {
 
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 via-gray-50 to-blue-50/40 p-4 sm:p-6 font-sans">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-200/80 p-6 sm:p-8 space-y-6">
+    <div className="workspace-page min-h-screen w-full flex items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 sm:py-12">
+      <main className="w-full max-w-md bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-8 space-y-6">
         {/* Brand Header */}
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center">
-            <img src="/logo.svg" alt="Attributics" className="w-12 h-12 rounded-xl shadow-md" />
+        <div className="space-y-3">
+          <div className="inline-flex items-center gap-3">
+            <img src="/logo.svg" alt="" className="w-10 h-10 rounded-lg" />
+            <span className="workspace-eyebrow">Attributics · Campaign operations</span>
           </div>
-          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Attributics Campaign Operations</h1>
-          <p className="text-xs text-gray-500">Sign in to your organization workspace</p>
+          <h1 className="workspace-heading">Welcome back</h1>
+          <p className="workspace-description">Sign in to your organization workspace. Access is limited to the accounts assigned to you.</p>
         </div>
 
         {/* Error Alert */}
         {error && (
-          <div role="alert" className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium flex items-start gap-2.5">
-            <span className="text-sm shrink-0 mt-0.5">⚠️</span>
+          <div role="alert" id="login-error" className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
             <div className="flex-1 leading-relaxed">
               <span className="font-semibold">Sign in failed: </span>
               <span>{error}</span>
@@ -104,9 +104,9 @@ export default function LoginPage() {
         )}
 
         {/* Sign In Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading} aria-describedby={error ? 'login-error' : undefined}>
           <div>
-            <label htmlFor="login-organization" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="login-organization" className="block text-sm font-semibold text-gray-700  mb-1.5">
               Organization
             </label>
             <select
@@ -114,7 +114,7 @@ export default function LoginPage() {
               value={organization}
               onChange={(e) => setOrganization(e.target.value)}
               disabled={loading}
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition bg-white disabled:bg-gray-100"
+              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition bg-white disabled:bg-gray-100"
             >
               <option value="">Use my account&apos;s organization</option>
               <option value="bajaj">Bajaj Finserv</option>
@@ -123,9 +123,8 @@ export default function LoginPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="login-email" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-              <span>Work Email</span>
-              <span className="text-[10px] text-blue-600 font-normal">e.g. @attributics.com</span>
+            <label htmlFor="login-email" className="block text-sm font-semibold text-gray-700 mb-1.5">
+              <span>Work email</span>
             </label>
             <input
               id="login-email"
@@ -135,13 +134,13 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="e.g. namandugad@attributics.com"
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-sans"
+              placeholder="you@company.com"
+              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition font-sans"
             />
           </div>
 
           <div>
-            <label htmlFor="login-password" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+            <label htmlFor="login-password" className="block text-sm font-semibold text-gray-700  mb-1.5">
               Password
             </label>
             <div className="relative">
@@ -154,16 +153,17 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
-                className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 pr-10 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition font-sans"
+                className="workspace-input w-full pr-16"
               />
               <button
                 type="button"
                 disabled={loading}
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-medium p-1"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-900 text-sm font-medium p-1 rounded focus-visible:outline-2 focus-visible:outline-indigo-500"
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
               >
-                {showPassword ? '👁️' : '👁️‍🗨️'}
+                {showPassword ? 'Hide' : 'Show'}
               </button>
             </div>
           </div>
@@ -171,7 +171,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center justify-center gap-2 mt-2"
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-semibold shadow-sm transition flex items-center justify-center gap-2 mt-2"
           >
             {loading ? (
               <>
@@ -179,7 +179,7 @@ export default function LoginPage() {
                 <span>Signing in...</span>
               </>
             ) : (
-              <span>Sign In to Workspace →</span>
+              <span>Sign in to workspace</span>
             )}
           </button>
         </form>
@@ -188,16 +188,17 @@ export default function LoginPage() {
           disabled={loading}
           onCredential={(credential, signal) => signIn(() => loginWithGoogle(credential, signal))}
         />
+        <p className="workspace-guide text-sm text-gray-600">New to the workspace? Request company access below. An administrator must approve your request before company data becomes available.</p>
 
 
         {/* Sign up link */}
-        <div className="text-center text-xs text-gray-500 pt-1 border-t border-gray-100">
+        <div className="text-center text-sm text-gray-500 pt-1 border-t border-gray-100">
           <span>Don&apos;t have an account? </span>
-          <Link href="/signup" className="text-blue-600 hover:underline font-semibold">
+          <Link href="/signup" className="text-indigo-600 hover:underline font-semibold">
             Request company access
           </Link>
         </div>
-      </div>
+      </main>
     </div>
   );
 }

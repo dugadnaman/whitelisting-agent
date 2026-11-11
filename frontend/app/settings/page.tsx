@@ -554,40 +554,46 @@ export default function SettingsPage() {
   if (!hasAccountAccess) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-bold text-gray-900">Account settings</h1>
+        <h1 className="text-2xl font-semibold text-gray-900">Account settings</h1>
         <div className="rounded-2xl border border-gray-200 bg-white p-6 space-y-2">
           <p className="text-sm font-semibold text-gray-900">{currentUser?.name}</p>
           <p className="text-sm text-gray-600">{currentUser?.email}</p>
           <p className="text-sm text-gray-600">Organization: {getAccountLabel(currentUser?.tenant_id)}</p>
-          <p className="text-xs text-gray-500">Your account is pending administrator approval before you can access organization workspaces and credentials.</p>
+          <p className="text-sm text-gray-500">Your account is pending administrator approval before you can access organization workspaces and credentials.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="workspace-page min-w-0 space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Settings &amp; Credentials</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Manage connections for the destination selected in Whitelisting for above.
+          <p className="workspace-eyebrow">Workspace configuration</p>
+          <h1 className="workspace-heading">Settings &amp; connections</h1>
+          <p className="workspace-description mt-2">
+            Configure integrations for the account and channel selected in “Whitelisting for” above.
           </p>
         </div>
       </div>
+      {banner && (
+        <div role={banner.type === 'error' ? 'alert' : 'status'} className={`flex items-start gap-3 rounded-xl border p-4 text-sm ${banner.type === 'error' ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+          <p className="min-w-0 flex-1 break-words">{banner.message}</p>
+          <button type="button" onClick={() => setBanner(null)} aria-label="Dismiss notification" className="workspace-button shrink-0">Dismiss</button>
+        </div>
+      )}
 
       {/* Tenant Security Notice */}
       {isTenantLocked && (
-        <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-blue-800 flex items-center justify-between shadow-2xs">
-          <div className="flex items-center gap-2.5">
-            <span className="text-base">🔒</span>
+        <div className="workspace-guide flex flex-wrap items-start justify-between gap-3 text-sm text-gray-600">
+          <div className="min-w-0 flex-1 break-words">
             <div>
-              <span className="font-bold">Multi-Tenant Boundary Active: </span>
+              <span className="font-semibold text-gray-900">Organization access: </span>
               <span>Logged in as <strong>{currentUser?.name}</strong> ({currentUser?.email}). Scoped exclusively to <strong>{getAccountLabel(currentUser?.tenant_id)}</strong>.</span>
             </div>
           </div>
-          <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-100 text-blue-900 uppercase">
+          <span className="px-2 py-0.5 rounded text-sm font-mono font-semibold bg-blue-100 text-blue-900 uppercase">
             {currentUser?.role || 'Operator'}
           </span>
         </div>
@@ -595,7 +601,7 @@ export default function SettingsPage() {
 
 
       <section aria-labelledby="connections-heading" className="space-y-3">
-        <h2 id="connections-heading" className="text-lg font-bold text-gray-900">Connections</h2>
+        <h2 id="connections-heading" className="text-lg font-semibold text-gray-900">Connections</h2>
         <p className="text-sm text-gray-500">
           Connection management follows Whitelisting for. Opening an integration does not change your delivery destination or the extension’s active target.
         </p>
@@ -605,10 +611,10 @@ export default function SettingsPage() {
           </div>
         ) : (
           <div className="flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2">
-            <button type="button" aria-pressed={!showMoEngage} onClick={() => showConnection(false)} className={`rounded-lg px-4 py-2 text-xs font-bold ${!showMoEngage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button type="button" aria-pressed={!showMoEngage} onClick={() => showConnection(false)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${!showMoEngage ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
               {isSms ? 'VILPOWER · SMS DLT' : `Karix · ${channelTitle}`}
             </button>
-            <button type="button" aria-pressed={showMoEngage} onClick={() => showConnection(true)} className={`rounded-lg px-4 py-2 text-xs font-bold ${showMoEngage ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button type="button" aria-pressed={showMoEngage} onClick={() => showConnection(true)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${showMoEngage ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
               MoEngage integration
             </button>
           </div>
@@ -618,16 +624,16 @@ export default function SettingsPage() {
       {isAssigned && <>
 
       {/* Target Info Banner */}
-      <div className="flex items-center justify-between p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs uppercase">
+          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-semibold text-sm uppercase">
             {showMoEngage ? 'MO' : accountTitle.slice(0, 2)}
           </div>
           <div>
-            <div className="text-xs font-bold text-gray-900">
+            <div className="text-sm font-semibold text-gray-900">
               {showMoEngage ? `MoEngage integration · ${accountTitle}` : `${isSms ? 'VILPOWER DLT' : 'Karix'} connection · ${accountTitle} · ${channelTitle}`}
             </div>
-            <div className="text-[11px] text-gray-500">
+            <div className="text-sm text-gray-500">
               {showMoEngage
                 ? 'MoEngage dashboard session used to sync approved Karix RCS templates into MoEngage Settings'
                 : isWhatsApp
@@ -642,7 +648,21 @@ export default function SettingsPage() {
       </div>
 
       {/* Credential Form Card */}
-      <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-6 space-y-5">
+      <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 space-y-6">
+        <div className="workspace-guide space-y-2">
+          <h3 className="text-sm font-semibold text-gray-900">Set up this connection</h3>
+          <p className="text-sm leading-relaxed text-gray-600">
+            {showMoEngage
+              ? 'Save the workspace identifiers first, then use Auth Sync to connect that workspace. Use Test Connection to verify access; saving metadata alone does not confirm a live connection.'
+              : isSms
+                ? 'Use the VILPOWER session setup below for this Tata Capital SMS destination. This connection is for DLT whitelisting, not message sending.'
+                : 'Confirm and save the account routing identifiers first, then pair Auth Sync. Manual session replacement is optional. Test Connection checks access without saving your edits.'}
+          </p>
+          {hasUnsavedSettings && <p role="status" className="text-sm font-medium text-amber-800">You have unsaved connection edits.</p>}
+        </div>
+        {((showMoEngage && moeLoadedScope !== settingsScope) || (!showMoEngage && !isSms && loadedScope !== settingsScope)) && banner?.type !== 'error' && (
+          <p role="status" className="text-sm text-gray-600">Loading saved settings for this account… Connection actions will be available when loading completes.</p>
+        )}
         {isAssigned && currentUser && (!isSms || showMoEngage) && (
           <KarixAuthSync key={`${settingsScope}:${syncRevision}`} account={selectedAccount} integration={showMoEngage ? 'moengage' : selectedChannel} />
         )}
@@ -650,7 +670,7 @@ export default function SettingsPage() {
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="moe_base_url" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="moe_base_url" className="block text-sm font-semibold text-gray-700  mb-1">
                   MoEngage Dashboard URL
                 </label>
                 <input
@@ -659,14 +679,14 @@ export default function SettingsPage() {
                   value={moeBaseUrl}
                   onChange={(e) => setMoeBaseUrl(e.target.value)}
                   placeholder="https://dashboard-XX.moengage.com"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  className="workspace-input w-full font-mono"
                 />
-                <p className="text-[11px] text-gray-400 mt-1">
+                <p className="text-sm text-gray-500 mt-1">
                   The dashboard domain shown in the browser URL bar for this brand's MoEngage workspace.
                 </p>
               </div>
               <div>
-                <label htmlFor="moe_sender_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="moe_sender_id" className="block text-sm font-semibold text-gray-700  mb-1">
                   MoEngage Sender Profile ID
                 </label>
                 <input
@@ -675,20 +695,23 @@ export default function SettingsPage() {
                   value={moeSenderId}
                   onChange={(e) => setMoeSenderId(e.target.value)}
                   placeholder="MoEngage Sender Profile ID or Karix Bot ID (e.g. P7hzkqCcW3x96I6T)"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                  className="workspace-input w-full font-mono"
                 />
-                <p className="text-[11px] text-gray-400 mt-1">
+                <p className="text-sm text-gray-500 mt-1">
                   The <code>sender_ids</code> value from MoEngage → Settings → SMS & RCS → Sender configuration.
                 </p>
               </div>
               <div className="sm:col-span-2">
-                <label htmlFor="moe_workspace_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">MoEngage Internal Workspace ID</label>
-                <input id="moe_workspace_id" type="text" value={moeWorkspaceId} onChange={(event) => setMoeWorkspaceId(event.target.value)} placeholder="24-character alphanumeric ID from listApps / changeApp" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none" />
-                <p className="text-[11px] text-gray-500 mt-1">The portal’s 24-character alphanumeric workspace ID from listApps or changeApp. Preserve its exact case and confirm it belongs to this account; unknown workspaces are never adopted from browsing.</p>
+                <label htmlFor="moe_workspace_id" className="block text-sm font-semibold text-gray-700  mb-1">MoEngage Internal Workspace ID</label>
+                <input id="moe_workspace_id" type="text" value={moeWorkspaceId} onChange={(event) => setMoeWorkspaceId(event.target.value)} placeholder="24-character alphanumeric ID from listApps / changeApp" className="workspace-input w-full font-mono" />
+                <p className="text-sm text-gray-500 mt-1">The portal’s 24-character alphanumeric workspace ID from listApps or changeApp. Preserve its exact case and confirm it belongs to this account; unknown workspaces are never adopted from browsing.</p>
               </div>
             </div>
-            <p className="text-xs text-gray-600">For first-time setup, save Dashboard URL, Internal Workspace ID, and Sender Profile ID with manual override off. Then refresh Auth Sync and connect, or explicitly enter a complete session for that configured workspace. Editing metadata never resubmits saved tokens or cookies.</p>
-            <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+            <details className="rounded-lg border border-gray-200 p-3 text-sm text-gray-600">
+              <summary className="cursor-pointer font-medium text-gray-900">First-time MoEngage setup</summary>
+              <p className="pt-3 leading-relaxed">Save Dashboard URL, Internal Workspace ID, and Sender Profile ID with manual override off. Then refresh Auth Sync and connect, or explicitly enter a complete session for that configured workspace. Editing metadata never resubmits saved tokens or cookies.</p>
+            </details>
+            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
               <input type="checkbox" checked={manualMoeSession} onChange={(event) => {
                 setManualMoeSession(event.target.checked);
                 setMoeBearerToken('');
@@ -700,7 +723,7 @@ export default function SettingsPage() {
             {manualMoeSession && <>
 
             <div>
-              <label htmlFor="moe_bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+              <label htmlFor="moe_bearer_token" className="block text-sm font-semibold text-gray-700  mb-1">
                 MoEngage Bearer Token
               </label>
               <input
@@ -710,15 +733,15 @@ export default function SettingsPage() {
                 autoComplete="off"
                 onChange={(event) => setMoeBearerToken(event.target.value)}
                 placeholder="Paste the Authorization: Bearer <JWT> header from MoEngage DevTools..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="workspace-input w-full font-mono"
               />
-              <p className="text-[11px] text-gray-400 mt-1">
+              <p className="text-sm text-gray-500 mt-1">
                 Copy the Authorization bearer header from a read-only request for the configured workspace. Copy Refresh Token and Cookie from that same request; do not mix sessions.
               </p>
             </div>
 
             <div>
-              <label htmlFor="moe_refresh_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+              <label htmlFor="moe_refresh_token" className="block text-sm font-semibold text-gray-700  mb-1">
                 MoEngage Refresh Token
               </label>
               <input
@@ -728,15 +751,15 @@ export default function SettingsPage() {
                 value={moeRefreshToken}
                 onChange={(event) => setMoeRefreshToken(event.target.value)}
                 placeholder="Copy the refreshtoken request header from MoEngage DevTools"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="workspace-input w-full font-mono"
               />
-              <p className="text-[11px] text-gray-400 mt-1">
+              <p className="text-sm text-gray-500 mt-1">
                 Copy <code>refreshtoken</code> from the same request as the bearer token and cookie.
               </p>
             </div>
 
             <div>
-              <label htmlFor="moe_cookie" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+              <label htmlFor="moe_cookie" className="block text-sm font-semibold text-gray-700  mb-1">
                 MoEngage Session Cookie
               </label>
               <input
@@ -746,18 +769,18 @@ export default function SettingsPage() {
                 autoComplete="off"
                 onChange={(event) => setMoeCookie(event.target.value)}
                 placeholder="Copy the complete Cookie header from the same request"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+                className="workspace-input w-full font-mono"
               />
-              <p className="text-[11px] text-gray-400 mt-1">
+              <p className="text-sm text-gray-500 mt-1">
                 Session cookies (<code>moe_uuid</code>, <code>moe_i_m</code>, <code>AWSALBTG</code>, etc.) that keep the dashboard session alive.
               </p>
             </div>
 
             <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
-              <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+              <div className="text-sm font-semibold text-amber-900 flex items-center gap-1.5">
                 Manual snapshot instructions
               </div>
-              <ol className="space-y-1 text-[11px] text-amber-800 list-decimal list-inside">
+              <ol className="space-y-1 text-sm text-amber-800 list-decimal list-inside">
                 <li>Open MoEngage dashboard in Chrome (logged in)</li>
                 <li>Press F12 → Network tab → reload the page</li>
                 <li>Open a read-only inventory request on this account’s configured dashboard host and confirm its internal workspace ID.</li>
@@ -768,7 +791,7 @@ export default function SettingsPage() {
             </>}
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
-              <div className="text-[11px] text-gray-400">
+              <div className="text-sm text-gray-500">
                 Enables the <span className="font-semibold text-gray-600">🔄 Sync to MoEngage</span> button on RCS template cards in Jira Briefs.
               </div>
               <div className="flex items-center gap-3">
@@ -776,7 +799,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={handleTestMoEngage}
                   disabled={testing || saving || !isAssigned || moeLoadedScope !== settingsScope}
-                  className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {testing ? 'Testing...' : 'Test Connection'}
                 </button>
@@ -784,7 +807,7 @@ export default function SettingsPage() {
                   type="button"
                   onClick={handleSaveMoEngage}
                   disabled={saving || testing || !isAssigned || moeLoadedScope !== settingsScope}
-                  className="flex-1 sm:flex-none px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {saving ? 'Saving...' : 'Save MoEngage Credentials'}
                 </button>
@@ -797,22 +820,22 @@ export default function SettingsPage() {
           <>
             {/* Active / Expiring Portal Session Section */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                  <h4 className="text-sm font-semibold text-gray-900 flex flex-wrap items-center gap-2">
                     <span>Manual Karix Portal Session Override</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                    <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                       Optional — replaces this scope’s session
                     </span>
                   </h4>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-sm text-gray-500">
                     Leave manual override off to preserve the latest synced session. Saved portal credentials are never copied into this form. Configure and save account identifiers before replacing the session.
                   </p>
                 </div>
               </div>
 
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
                     <input
                       type="checkbox"
                       checked={manualPortalSession}
@@ -822,17 +845,17 @@ export default function SettingsPage() {
                         setSession('');
                         setUser('');
                       }}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                     />
                     Explicitly replace this account’s WhatsApp portal session manually
                   </label>
-                  {manualPortalSession && <p className="text-xs text-amber-800">Paste all three headers from one request. Test checks this draft; Save validates and replaces only this account’s WhatsApp session. A later extension capture can replace it again. Cancel to discard this draft.</p>}
+                  {manualPortalSession && <p className="text-sm text-amber-800">Paste all three headers from one request. Test checks this draft; Save validates and replaces only this account’s WhatsApp session. A later extension capture can replace it again. Cancel to discard this draft.</p>}
                 </div>
 
               {manualPortalSession && (
               <div className="space-y-4 p-4 bg-gray-50/70 rounded-xl border border-gray-200">
                 <div>
-                  <label htmlFor="bearer_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  <label htmlFor="bearer_token" className="block text-sm font-semibold text-gray-700  mb-1">
                     Current Portal Bearer Token ({envPrefix}_KARIX_BEARER_TOKEN)
                   </label>
                   <input
@@ -841,16 +864,16 @@ export default function SettingsPage() {
                     value={bearerToken}
                     onChange={(e) => setBearerToken(e.target.value)}
                     placeholder="Paste Authorization: Bearer eyJhbGciOi... from rcsgui.karix.solutions DevTools"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                    className="workspace-input w-full font-mono"
                   />
-                  <p className="text-[11px] text-gray-500 mt-1">
+                  <p className="text-sm text-gray-500 mt-1">
                     Accepts the token alone, <code>Bearer …</code>, or <code>Authorization: Bearer …</code>. Test Connection checks this portal session, not the separate WABA API token. Copy Session ID and User from the same request.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="session" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="session" className="block text-sm font-semibold text-gray-700  mb-1">
                       Portal Session ID ({envPrefix}_KARIX_SESSION)
                     </label>
                     <input
@@ -859,12 +882,12 @@ export default function SettingsPage() {
                       value={session}
                       onChange={(e) => setSession(e.target.value)}
                       placeholder="Paste Session header from DevTools..."
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
 
                   <div>
-                    <label htmlFor="user" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="user" className="block text-sm font-semibold text-gray-700  mb-1">
                       Portal User Header ({envPrefix}_KARIX_USER)
                     </label>
                     <input
@@ -873,7 +896,7 @@ export default function SettingsPage() {
                       value={user}
                       onChange={(e) => setUser(e.target.value)}
                       placeholder="Paste User header from DevTools..."
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                 </div>
@@ -883,66 +906,66 @@ export default function SettingsPage() {
 
             {/* Permanent Account Identifiers & Static API Token (Pre-Configured) */}
             <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                    <span>🔒 Permanent Account Constants &amp; API Token</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                  <h4 className="text-sm font-semibold text-gray-900 flex flex-wrap items-center gap-2">
+                    <span>Account identifiers &amp; WABA API token</span>
+                    <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                       One-time setup
                     </span>
                   </h4>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-sm text-gray-500">
                     Existing WABA service/API token and account identifiers require one-time provider setup. Auth Sync transfers only the separate renewable browser session; it cannot generate service keys.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setEditPermanent((prev) => !prev)}
-                  className="px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
+                  className="px-2.5 py-1 text-sm font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
                 >
-                  {editPermanent ? 'Done' : '✏️ Override'}
+                  {editPermanent ? 'Done' : 'Edit identifiers'}
                 </button>
               </div>
 
               {!editPermanent ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pt-1">
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Official WABA Token</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">
+                    <div className="text-sm font-semibold text-gray-500 ">Official WABA Token</div>
+                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">
                       {wabaAuthToken ? 'New value entered' : 'Saved value not displayed'}
                     </div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-managed API token</div>
+                    <div className="text-sm text-gray-500 font-medium mt-0.5">Provider-managed API token</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">WABA ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{wabaId || 'Not configured'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured account identity</div>
+                    <div className="text-sm font-semibold text-gray-500 ">WABA ID</div>
+                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{wabaId || 'Not configured'}</div>
+                    <div className="text-sm text-gray-500 font-medium mt-0.5">Configured account identity</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Entity ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
+                    <div className="text-sm font-semibold text-gray-500 ">DLT Entity ID</div>
+                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
+                    <div className="text-sm text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Namespace ID</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{templateNamespaceId || 'Not configured'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Account namespace</div>
+                    <div className="text-sm font-semibold text-gray-500 ">Namespace ID</div>
+                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{templateNamespaceId || 'Not configured'}</div>
+                    <div className="text-sm text-gray-500 font-medium mt-0.5">Account namespace</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">WhatsApp ESME Address</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured WhatsApp routing identity</div>
+                    <div className="text-sm font-semibold text-gray-500 ">WhatsApp ESME Address</div>
+                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
+                    <div className="text-sm text-gray-500 font-medium mt-0.5">Configured WhatsApp routing identity</div>
                   </div>
                   <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Portal User</div>
-                    <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{portalUsername || 'Standard'}</div>
-                    <div className="text-[10px] text-gray-500 font-medium mt-0.5">Karix Workspace</div>
+                    <div className="text-sm font-semibold text-gray-500 ">Portal User</div>
+                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{portalUsername || 'Standard'}</div>
+                    <div className="text-sm text-gray-500 font-medium mt-0.5">Karix Workspace</div>
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div className="sm:col-span-2">
-                    <label htmlFor="waba_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="waba_auth_token" className="block text-sm font-semibold text-gray-700  mb-1">
                       Official Permanent WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
                     </label>
                     <input
@@ -953,12 +976,12 @@ export default function SettingsPage() {
                       value={wabaAuthToken}
                       onChange={(e) => setWabaAuthToken(e.target.value)}
                       placeholder="Leave blank to preserve saved token..."
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
-                    <p className="text-[11px] text-gray-500 mt-1">Leave blank to keep the saved key. A value entered here is tested exactly as an official API token, not as a portal session. Save rejects invalid replacements and preserves the previous key.</p>
+                    <p className="text-sm text-gray-500 mt-1">Leave blank to keep the saved key. A value entered here is tested exactly as an official API token, not as a portal session. Save rejects invalid replacements and preserves the previous key.</p>
                   </div>
                   <div>
-                    <label htmlFor="waba_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="waba_id" className="block text-sm font-semibold text-gray-700  mb-1">
                       WABA ID
                     </label>
                     <input
@@ -967,16 +990,16 @@ export default function SettingsPage() {
                       value={wabaId}
                       onChange={(e) => setWabaId(e.target.value)}
                       placeholder="e.g. 286109054585247"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                   <div>
-                    <label htmlFor="whatsapp_esmeaddr" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">WhatsApp ESME Address</label>
-                    <input id="whatsapp_esmeaddr" type="text" value={esmeaddr} onChange={(event) => setEsmeaddr(event.target.value)} placeholder="Provider-configured ESME address for this WhatsApp account" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none" />
-                    <p className="text-[11px] text-gray-500 mt-1">Save this account’s ESME and WABA identifiers before pairing Auth Sync. This is separate from RCS routing.</p>
+                    <label htmlFor="whatsapp_esmeaddr" className="block text-sm font-semibold text-gray-700  mb-1">WhatsApp ESME Address</label>
+                    <input id="whatsapp_esmeaddr" type="text" value={esmeaddr} onChange={(event) => setEsmeaddr(event.target.value)} placeholder="Provider-configured ESME address for this WhatsApp account" className="workspace-input w-full font-mono" />
+                    <p className="text-sm text-gray-500 mt-1">Save this account’s ESME and WABA identifiers before pairing Auth Sync. This is separate from RCS routing.</p>
                   </div>
                   <div>
-                    <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="entity_id" className="block text-sm font-semibold text-gray-700  mb-1">
                       DLT Principal Entity ID
                     </label>
                     <input
@@ -985,11 +1008,11 @@ export default function SettingsPage() {
                       value={entityId}
                       onChange={(e) => setEntityId(e.target.value)}
                       placeholder="e.g. 1001490234791338781"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                   <div>
-                    <label htmlFor="template_namespace_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="template_namespace_id" className="block text-sm font-semibold text-gray-700  mb-1">
                       Template Namespace ID
                     </label>
                     <input
@@ -998,11 +1021,11 @@ export default function SettingsPage() {
                       value={templateNamespaceId}
                       onChange={(e) => setTemplateNamespaceId(e.target.value)}
                       placeholder="e.g. 42eec6e7_6287_4b1d_8ec8_52f4a80c23b5"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                   <div>
-                    <label htmlFor="portal_username" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="portal_username" className="block text-sm font-semibold text-gray-700  mb-1">
                       Portal Username
                     </label>
                     <input
@@ -1011,7 +1034,7 @@ export default function SettingsPage() {
                       value={portalUsername}
                       onChange={(e) => setPortalUsername(e.target.value)}
                       placeholder="e.g. TATACAPPROMO"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                 </div>
@@ -1024,22 +1047,22 @@ export default function SettingsPage() {
           <>
             {/* RCS requests use bearer authentication, not the legacy Lounge cookie. */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-xs font-bold text-gray-900">
+                  <h4 className="text-sm font-semibold text-gray-900">
                     Karix RCS Authorization
                   </h4>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-sm text-gray-500">
                     Leave manual override off to keep the latest saved RCS session. WhatsApp credentials are never used for RCS. Configure and save routing identifiers before replacing the session.
                   </p>
                 </div>
                 {rcsAuthToken && (
-                  <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 shrink-0">
+                  <span className="text-sm font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 shrink-0">
                     Token entered — test to verify
                   </span>
                 )}
               </div>
-              <label className="flex items-center gap-2 text-xs font-semibold text-gray-700">
+              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
                 <input type="checkbox" checked={manualPortalSession} onChange={(event) => {
                   setManualPortalSession(event.target.checked);
                   setRcsAuthToken('');
@@ -1050,7 +1073,7 @@ export default function SettingsPage() {
               </label>
               {manualPortalSession && (
               <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
-                <label htmlFor="rcs_auth_token" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="rcs_auth_token" className="block text-sm font-semibold text-gray-700  mb-1">
                   Current RCS Bearer Token ({envPrefix}_RCS_AUTH_TOKEN)
                 </label>
                 <input
@@ -1060,18 +1083,18 @@ export default function SettingsPage() {
                   value={rcsAuthToken}
                   onChange={(e) => setRcsAuthToken(e.target.value)}
                   placeholder="Paste the token, Bearer token, or Authorization: Bearer token"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors bg-white"
+                  className="workspace-input w-full font-mono"
                 />
-                <p className="text-[11px] text-gray-400 mt-1">
+                <p className="text-sm text-gray-500 mt-1">
                   Test Connection checks this token against the RCS template API without saving it.
                   After a successful test, save it to use for whitelisting. A Lounge session cookie is not an RCS bearer token.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                  <label className="text-xs text-gray-700">Session header (if present on that request)
-                    <input type="password" autoComplete="off" value={session} onChange={(event) => setSession(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono" />
+                  <label className="text-sm text-gray-700">Session header (if present on that request)
+                    <input type="password" autoComplete="off" value={session} onChange={(event) => setSession(event.target.value)} className="workspace-input w-full font-mono" />
                   </label>
-                  <label className="text-xs text-gray-700">User header (if present on that request)
-                    <input type="password" autoComplete="off" value={user} onChange={(event) => setUser(event.target.value)} className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono" />
+                  <label className="text-sm text-gray-700">User header (if present on that request)
+                    <input type="password" autoComplete="off" value={user} onChange={(event) => setUser(event.target.value)} className="workspace-input w-full font-mono" />
                   </label>
                 </div>
               </div>
@@ -1080,24 +1103,24 @@ export default function SettingsPage() {
 
             {/* RCS routing identifiers are separate from the editable bearer token. */}
             <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                  <h4 className="text-sm font-semibold text-gray-900 flex flex-wrap items-center gap-2">
                     <span>RCS Routing Identifiers</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                    <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                       Account routing
                     </span>
                   </h4>
-                  <p className="text-[11px] text-gray-500">
+                  <p className="text-sm text-gray-500">
                     Bot ID, ESME routing address, and entity ID for {accountTitle}.
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setEditPermanent((prev) => !prev)}
-                  className="px-2.5 py-1 text-[11px] font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
+                  className="px-2.5 py-1 text-sm font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
                 >
-                  {editPermanent ? 'Done' : '✏️ Override'}
+                  {editPermanent ? 'Done' : 'Edit identifiers'}
                 </button>
               </div>
 
@@ -1105,26 +1128,26 @@ export default function SettingsPage() {
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
                     <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                        {selectedAccount === 'apparel' ? 'RCS Bot IDs (10 Bots Active)' : 'RCS Bot ID'}
+                      <div className="text-sm font-semibold text-gray-500 ">
+                        {selectedAccount === 'apparel' ? 'RCS bot IDs (10 configured)' : 'RCS Bot ID'}
                       </div>
-                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Not configured'}</div>
-                      <div className="text-[10px] text-gray-500 font-medium mt-0.5">Configured brand bot</div>
+                      <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Not configured'}</div>
+                      <div className="text-sm text-gray-500 font-medium mt-0.5">Configured brand bot</div>
                     </div>
                     <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Karix ESME Address</div>
-                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
-                      <div className="text-[10px] text-gray-500 font-medium mt-0.5">ESME routing address</div>
+                      <div className="text-sm font-semibold text-gray-500 ">Karix ESME Address</div>
+                      <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
+                      <div className="text-sm text-gray-500 font-medium mt-0.5">ESME routing address</div>
                     </div>
                     <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">DLT Principal Entity ID</div>
-                      <div className="text-xs font-mono font-bold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
-                      <div className="text-[10px] text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
+                      <div className="text-sm font-semibold text-gray-500 ">DLT Principal Entity ID</div>
+                      <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
+                      <div className="text-sm text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
                     </div>
                   </div>
                   {selectedAccount === 'apparel' && (
                     <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs space-y-1.5 mt-2">
-                      <div className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                      <div className="text-sm font-semibold text-gray-500 ">
                         All Configured Apparel RCS Sender IDs (10 Karix Bot IDs)
                       </div>
                       <div className="flex flex-wrap gap-1.5 pt-1">
@@ -1140,13 +1163,13 @@ export default function SettingsPage() {
                           "Wk4lBploJGyg1Dlr",
                           "Wk5ESRsm6mAwxjZo"
                         ].map((id) => (
-                          <span key={id} className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono bg-purple-50 text-purple-700 border border-purple-200">
+                          <span key={id} className="inline-flex items-center px-2 py-0.5 rounded text-sm font-mono bg-gray-50 text-gray-700 border border-gray-200">
                             {id}
                           </span>
                         ))}
                       </div>
-                      <p className="text-[10px] text-gray-400">
-                        All 10 sender IDs are active for Karix inventory queries, template sync, and MoEngage routing.
+                      <p className="text-sm text-gray-500">
+                        These configured sender IDs are used for Karix inventory queries, template sync, and MoEngage routing.
                       </p>
                     </div>
                   )}
@@ -1154,7 +1177,7 @@ export default function SettingsPage() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
                   <div>
-                    <label htmlFor="rcs_bot_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="rcs_bot_id" className="block text-sm font-semibold text-gray-700  mb-1">
                       Karix RCS Bot ID
                     </label>
                     <input
@@ -1163,11 +1186,11 @@ export default function SettingsPage() {
                       value={rcsBotId}
                       onChange={(e) => setRcsBotId(e.target.value)}
                       placeholder="e.g. Uv9tdd0KNADbq3pX"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                   <div>
-                    <label htmlFor="esmeaddr" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="esmeaddr" className="block text-sm font-semibold text-gray-700  mb-1">
                       Karix ESME Address
                     </label>
                     <input
@@ -1176,11 +1199,11 @@ export default function SettingsPage() {
                       value={esmeaddr}
                       onChange={(e) => setEsmeaddr(e.target.value)}
                       placeholder="e.g. 72434700000000"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                   <div>
-                    <label htmlFor="entity_id" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    <label htmlFor="entity_id" className="block text-sm font-semibold text-gray-700  mb-1">
                       DLT Entity ID
                     </label>
                     <input
@@ -1189,7 +1212,7 @@ export default function SettingsPage() {
                       value={entityId}
                       onChange={(e) => setEntityId(e.target.value)}
                       placeholder="e.g. 1001490234791338781"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                 </div>
@@ -1199,19 +1222,19 @@ export default function SettingsPage() {
         )}
 
         {/* Action Buttons */}
-        {!isSms && <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
-          <div className="text-[11px] text-gray-400">
+        {!isSms && <div className="flex flex-col items-stretch gap-4 pt-4 border-t border-gray-200">
+          <div className="text-sm text-gray-500">
             Current operator: <span className="font-semibold text-gray-600">{currentOperator}</span>
           </div>
-          <p className="text-[11px] text-gray-500">Test Connection checks unsaved edits when present; otherwise it checks the saved connection. Testing does not save credentials.</p>
+          <p className="text-sm text-gray-500">Test Connection checks unsaved edits when present; otherwise it checks the saved connection. Testing does not save credentials.</p>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={() => { setLoadedScope(''); setSyncRevision((revision) => revision + 1); }} disabled={testing || saving || !isAssigned || loadedScope !== settingsScope} className="px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Discard unsaved edits</button>
+            <button type="button" onClick={() => { setLoadedScope(''); setSyncRevision((revision) => revision + 1); }} disabled={testing || saving || !isAssigned || loadedScope !== settingsScope} className="px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Discard unsaved edits</button>
             <button
               type="button"
               onClick={handleTest}
               disabled={testing || saving || !isAssigned || loadedScope !== settingsScope}
-              className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {testing ? (
                 <>
@@ -1230,7 +1253,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleSave}
               disabled={saving || testing || !isAssigned || loadedScope !== settingsScope}
-              className="flex-1 sm:flex-none px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {saving ? (
                 <>
@@ -1251,22 +1274,22 @@ export default function SettingsPage() {
       </div>
 
       {/* Gemini Semantic Decision Engine */}
-      {currentUser?.role === 'superadmin' && <div className="bg-white rounded-xl border border-violet-200 shadow-xs p-6 space-y-4">
-        <div className="flex items-start justify-between gap-4">
+      {currentUser?.role === 'superadmin' && <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-6 space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h3 className="text-sm font-bold text-gray-900">Gemini Semantic Decision Engine</h3>
-            <p className="text-[11px] text-gray-500 mt-1">
-              Uses Google Gemini for supreme semantic decisions on identified components: category, language,
+            <h3 className="text-sm font-semibold text-gray-900">Gemini Semantic Decision Engine</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Uses Google Gemini for semantic checks on identified components: category, language,
               template completeness, and rejecting internal workflow identifiers (like ticket keys and sheet names) from customer headings.
             </p>
           </div>
-          <span className="shrink-0 px-2 py-1 rounded-md bg-violet-50 text-violet-700 text-[10px] font-bold uppercase tracking-wide">
+          <span className="shrink-0 px-2 py-1 rounded-md bg-violet-50 text-violet-700 text-sm font-semibold uppercase tracking-wide">
             AI-assisted
           </span>
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1">
-            <label htmlFor="gemini_api_key" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+            <label htmlFor="gemini_api_key" className="block text-sm font-semibold text-gray-700  mb-1">
               Google AI Studio API Key
             </label>
             <input
@@ -1275,7 +1298,7 @@ export default function SettingsPage() {
               value={geminiApiKey}
               onChange={(e) => setGeminiApiKey(e.target.value)}
               placeholder="Paste GEMINI_API_KEY"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-violet-500 focus:border-violet-500 outline-none transition-colors"
+              className="workspace-input w-full font-mono"
             />
           </div>
           <div className="flex items-end">
@@ -1283,23 +1306,23 @@ export default function SettingsPage() {
               type="button"
               onClick={handleTestGemini}
               disabled={geminiTesting || saving || !geminiApiKey.trim()}
-              className="w-full sm:w-auto px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-800 text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+              className="w-full sm:w-auto px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-800 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
             >
               {geminiTesting ? 'Testing...' : 'Test Gemini'}
             </button>
-            <button type="button" onClick={handleSaveGemini} disabled={saving || geminiTesting || !isAssigned || !geminiApiKey.trim()} className="ml-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-xs font-semibold disabled:opacity-50">
+            <button type="button" onClick={handleSaveGemini} disabled={saving || geminiTesting || !isAssigned || !geminiApiKey.trim()} className="ml-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-semibold disabled:opacity-50">
               {saving ? 'Saving...' : 'Save Gemini key'}
             </button>
           </div>
         </div>
-        <p className="text-[11px] text-gray-400">
+        <p className="text-sm text-gray-500">
           One-time setup with an existing Google AI Studio API key; the browser cannot generate it.
           Save the key to encrypted server storage. Leave it blank to preserve the saved key.
         </p>
       </div>}
       </>}
       <details className="rounded-2xl border border-gray-200 bg-white p-6">
-        <summary className="cursor-pointer text-sm font-bold text-gray-900">Team &amp; administration</summary>
+        <summary className="cursor-pointer text-sm font-semibold text-gray-900">Team &amp; administration</summary>
         <div className="pt-5 space-y-4">
         {!isTenantLocked && (
           <button
@@ -1307,7 +1330,7 @@ export default function SettingsPage() {
               setShowAddModal(true);
               setCreateError(null);
             }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1316,20 +1339,20 @@ export default function SettingsPage() {
           </button>
         )}
           {!isTenantLocked && isCustomAccount && selectedAccountItem && (
-            <button type="button" onClick={() => setAccountToDelete({ id: selectedAccountItem.id, name: selectedAccountItem.name })} className="rounded-lg border border-red-200 px-3.5 py-2 text-xs font-semibold text-red-700 hover:bg-red-50">
+            <button type="button" onClick={() => setAccountToDelete({ id: selectedAccountItem.id, name: selectedAccountItem.name })} className="rounded-lg border border-red-200 px-3.5 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">
               Delete {accountTitle} account
             </button>
           )}
           <div className="space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100">
           <div>
-            <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
-              <span>👥 Organization Team Directory</span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+              <span>Organization team</span>
+              <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-blue-50 text-blue-700 border border-blue-200">
                 {teamMembers.length} Members
               </span>
             </h3>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="text-sm text-gray-500 mt-0.5">
               Team accounts registered for <strong>{teamTenant ? getAccountLabel(teamTenant) : 'all organizations'}</strong>.
             </p>
           </div>
@@ -1337,17 +1360,17 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={() => setShowInviteModal(true)}
-              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition flex items-center gap-1.5"
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold shadow-2xs transition flex items-center gap-1.5"
             >
-              <span>➕ Add Colleague</span>
+              <span>Add colleague</span>
             </button>
           )}
         </div>
 
         {loadingTeam ? (
-          <div className="py-6 text-center text-xs text-gray-400">Loading team members...</div>
+          <div className="py-6 text-center text-sm text-gray-500">Loading team members...</div>
         ) : teamMembers.length === 0 ? (
-          <div className="py-6 text-center text-xs text-gray-400">No team members registered yet for this organization.</div>
+          <div className="py-6 text-center text-sm text-gray-500">No team members registered yet for this organization.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {teamMembers.map((member) => (
@@ -1355,14 +1378,14 @@ export default function SettingsPage() {
                 key={member.id || member.email}
                 className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/50 flex items-start gap-3 hover:bg-white hover:border-blue-300 transition"
               >
-                <div className="w-8 h-8 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
+                <div className="w-8 h-8 rounded-full bg-indigo-600 text-white font-semibold text-sm flex items-center justify-center shrink-0 shadow-2xs">
                   {(member.name || member.email || 'U').charAt(0).toUpperCase()}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-1">
-                    <h4 className="text-xs font-bold text-gray-900 truncate">{member.name}</h4>
+                  <div className="flex flex-wrap items-center justify-between gap-3 gap-1">
+                    <h4 className="text-sm font-semibold text-gray-900 truncate">{member.name}</h4>
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase font-mono ${
+                      className={`px-1.5 py-0.5 rounded text-sm font-semibold uppercase font-mono ${
                         member.role === 'superadmin'
                           ? 'bg-emerald-100 text-emerald-800'
                           : member.role === 'admin'
@@ -1373,8 +1396,8 @@ export default function SettingsPage() {
                       {member.role || 'Operator'}
                     </span>
                   </div>
-                  <p className="text-[11px] text-gray-500 font-mono truncate">{member.email}</p>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-gray-400">
+                  <p className="text-sm text-gray-500 font-mono truncate">{member.email}</p>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
                     <span className="font-semibold text-gray-600">{getAccountLabel(member.tenant_id)}</span>
                   </div>
                 </div>
@@ -1387,13 +1410,13 @@ export default function SettingsPage() {
           <section className="border-t border-gray-100 pt-4 space-y-3" aria-labelledby="access-requests-heading">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h4 id="access-requests-heading" className="text-sm font-bold text-gray-900">Pending access requests</h4>
-                <p className="text-xs text-gray-500">Approval grants operator access only to the requested organization.</p>
+                <h4 id="access-requests-heading" className="text-sm font-semibold text-gray-900">Pending access requests</h4>
+                <p className="text-sm text-gray-500">Approval grants operator access only to the requested organization.</p>
               </div>
               {currentUser?.role === 'superadmin' && (
                 <div>
-                  <label htmlFor="access-request-filter" className="block text-xs font-semibold text-gray-600 mb-1">Requested organization</label>
-                  <select id="access-request-filter" value={requestFilter} disabled={Boolean(approvingUserId)} onChange={(e) => setRequestFilter(e.target.value as RequestedTenant | '')} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs">
+                  <label htmlFor="access-request-filter" className="block text-sm font-semibold text-gray-600 mb-1">Requested organization</label>
+                  <select id="access-request-filter" value={requestFilter} disabled={Boolean(approvingUserId)} onChange={(e) => setRequestFilter(e.target.value as RequestedTenant | '')} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
                     <option value="">All organizations</option>
                     <option value="bajaj">Bajaj Finserv</option>
                     <option value="tata">Tata Capital</option>
@@ -1402,21 +1425,21 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
-            {requestError && <p role="alert" className="text-xs text-red-700">{requestError}</p>}
+            {requestError && <p role="alert" className="text-sm text-red-700">{requestError}</p>}
             {loadingRequests ? (
-              <p role="status" className="py-3 text-xs text-gray-500">Loading access requests...</p>
+              <p role="status" className="py-3 text-sm text-gray-500">Loading access requests...</p>
             ) : pendingRequests.length === 0 ? (
-              <p className="py-3 text-xs text-gray-500">No pending requests for {requestTenant ? getAccountLabel(requestTenant) : 'any organization'}.</p>
+              <p className="py-3 text-sm text-gray-500">No pending requests for {requestTenant ? getAccountLabel(requestTenant) : 'any organization'}.</p>
             ) : (
               <div className="space-y-2">
                 {pendingRequests.map((applicant) => (
                   <div key={applicant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3">
                     <div className="min-w-0">
-                      <p className="text-xs font-bold text-gray-900">{applicant.name}</p>
-                      <p className="text-xs text-gray-600 break-all">{applicant.email}</p>
-                      <p className="text-xs text-blue-700 mt-1">Requested: {getAccountLabel(applicant.requested_tenant_id || '')}</p>
+                      <p className="text-sm font-semibold text-gray-900">{applicant.name}</p>
+                      <p className="text-sm text-gray-600 break-all">{applicant.email}</p>
+                      <p className="text-sm text-blue-700 mt-1">Requested: {getAccountLabel(applicant.requested_tenant_id || '')}</p>
                     </div>
-                    <button type="button" disabled={Boolean(approvingUserId)} onClick={() => handleApprove(applicant)} aria-label={`Approve ${applicant.name || applicant.email} for ${getAccountLabel(applicant.requested_tenant_id || '')}`} className="rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 px-3.5 py-2 text-xs font-semibold text-white">
+                    <button type="button" disabled={Boolean(approvingUserId)} onClick={() => handleApprove(applicant)} aria-label={`Approve ${applicant.name || applicant.email} for ${getAccountLabel(applicant.requested_tenant_id || '')}`} className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 px-3.5 py-2 text-sm font-semibold text-white">
                       {approvingUserId === applicant.id ? 'Approving...' : 'Approve'}
                     </button>
                   </div>
@@ -1432,16 +1455,17 @@ export default function SettingsPage() {
       {/* Invite Modal */}
       {showInviteModal && canManageTeam && teamTenant && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-gray-900">Add Team Colleague</h3>
-              <button onClick={() => setShowInviteModal(false)} className="text-gray-400 hover:text-gray-600 font-bold">
+          <div role="dialog" aria-label="Add team colleague" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-base font-semibold text-gray-900">Add Team Colleague</h3>
+              <button type="button" aria-label="Close colleague dialog" onClick={() => setShowInviteModal(false)} className="text-gray-500 hover:text-gray-600 font-semibold">
                 &times;
               </button>
             </div>
-            <p className="text-xs text-gray-500">
+            <p className="text-sm text-gray-500">
               Create a new user account for {getAccountLabel(teamTenant || selectedAccount)}. Share the initial password securely.
             </p>
+            {banner?.type === 'error' && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{banner.message}</p>}
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
@@ -1466,36 +1490,36 @@ export default function SettingsPage() {
               className="space-y-3"
             >
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="invite-name" className="block text-sm font-semibold text-gray-700  mb-1">
                   Full Name <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="invite-name"
                   type="text"
                   required
                   placeholder="e.g. Rahul Sharma"
                   value={inviteName}
                   onChange={(e) => setInviteName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="workspace-input w-full"
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="invite-email" className="block text-sm font-semibold text-gray-700  mb-1">
                   Work Email <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="invite-email"
                   type="email"
                   required
                   placeholder="e.g. rahul@attributics.com"
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="workspace-input w-full"
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="invite-password" className="block text-sm font-semibold text-gray-700  mb-1">
                   Initial Password <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="invite-password"
                   type="password"
                   required
                   minLength={12}
@@ -1503,17 +1527,17 @@ export default function SettingsPage() {
                   placeholder="At least 12 characters (maximum 72 UTF-8 bytes)"
                   value={invitePassword}
                   onChange={(e) => setInvitePassword(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="workspace-input w-full"
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="invite-role" className="block text-sm font-semibold text-gray-700  mb-1">
                   Role
                 </label>
-                <select
+                <select id="invite-role"
                   value={inviteRole}
                   onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  className="workspace-input w-full"
                 >
                   <option value="operator">Operator (Preview, Submit, Poll)</option>
                   <option value="admin">Admin (Manage Team & Credentials)</option>
@@ -1523,14 +1547,14 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setShowInviteModal(false)}
-                  className="px-3.5 py-2 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-3.5 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={inviting}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg text-xs font-semibold"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-semibold"
                 >
                   {inviting ? 'Creating...' : 'Create Account'}
                 </button>
@@ -1540,79 +1564,57 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Banner */}
-      {banner && (
-        <div
-          className={`p-4 rounded-xl text-xs font-medium flex items-start gap-3 border ${
-            banner.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-              : 'bg-red-50 text-red-800 border-red-200'
-          }`}
-        >
-          {banner.type === 'success' ? (
-            <svg className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-          ) : (
-            <svg className="w-4 h-4 text-red-600 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-          )}
-          <span className="flex-1 leading-relaxed">{banner.message}</span>
-          <button onClick={() => setBanner(null)} className="text-gray-400 hover:text-gray-600 text-sm font-bold">
-            &times;
-          </button>
-        </div>
-      )}
 
       {/* Add Account Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-gray-900">Add New Client Account</h3>
+          <div role="dialog" aria-label="Add client account" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-base font-semibold text-gray-900">Add New Client Account</h3>
               <button
+                type="button"
+                aria-label="Close account dialog"
                 onClick={() => setShowAddModal(false)}
-                className="text-gray-400 hover:text-gray-600 font-bold"
+                className="text-gray-500 hover:text-gray-600 font-semibold"
               >
                 &times;
               </button>
             </div>
 
-            <p className="text-xs text-gray-500">
+            <p className="text-sm text-gray-500">
               Create a new client environment (e.g. Kotak Mahindra, HDFC Bank, Axis, Groww). Each account maintains its own isolated credentials and template logs.
             </p>
 
             <form onSubmit={handleCreateAccount} className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                <label htmlFor="account-name" className="block text-sm font-semibold text-gray-700  mb-1">
                   Account Display Name <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="account-name"
                   type="text"
                   required
                   placeholder="e.g. Kotak Mahindra Bank"
                   value={newAccountName}
                   onChange={(e) => setNewAccountName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  className="workspace-input w-full"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-                  Account Identifier Slug <span className="text-gray-400 font-normal">(Optional)</span>
+                <label htmlFor="account-slug" className="block text-sm font-semibold text-gray-700  mb-1">
+                  Account Identifier Slug <span className="text-gray-500 font-normal">(Optional)</span>
                 </label>
-                <input
+                <input id="account-slug"
                   type="text"
                   placeholder="e.g. kotak (auto-generated if empty)"
                   value={newAccountId}
                   onChange={(e) => setNewAccountId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                  className="workspace-input w-full font-mono"
                 />
               </div>
 
               {createError && (
-                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
+                <div role="alert" className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
                   {createError}
                 </div>
               )}
@@ -1621,14 +1623,14 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors"
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={creatingAccount || !newAccountName.trim()}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
                 >
                   {creatingAccount ? 'Creating...' : 'Create Account'}
                 </button>
@@ -1641,7 +1643,7 @@ export default function SettingsPage() {
       {/* Delete Confirmation Modal */}
       {accountToDelete && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-gray-100 space-y-4">
+          <div className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-sm w-full p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex items-center gap-3 text-red-600">
               <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
                 <svg className="w-5 h-5 text-red-600" viewBox="0 0 20 20" fill="currentColor">
@@ -1649,13 +1651,13 @@ export default function SettingsPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-base font-bold text-gray-900">Delete Account?</h3>
-                <p className="text-xs text-gray-500">This action cannot be undone.</p>
+                <h3 className="text-base font-semibold text-gray-900">Delete Account?</h3>
+                <p className="text-sm text-gray-500">This action cannot be undone.</p>
               </div>
             </div>
 
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Are you sure you want to delete <span className="font-bold text-gray-900">&quot;{accountToDelete.name}&quot;</span>? All saved WABA tokens, IDs, and configurations for this brand will be removed.
+            <p className="text-sm text-gray-600 leading-relaxed">
+              Are you sure you want to delete <span className="font-semibold text-gray-900">&quot;{accountToDelete.name}&quot;</span>? All saved WABA tokens, IDs, and configurations for this brand will be removed.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">
@@ -1663,7 +1665,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => setAccountToDelete(null)}
                 disabled={deleting}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition-colors"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors"
               >
                 Cancel
               </button>
@@ -1671,7 +1673,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={handleConfirmDelete}
                 disabled={deleting}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
               >
                 {deleting ? 'Deleting...' : 'Delete Account'}
               </button>

@@ -13,8 +13,8 @@ import { formatError } from '@/lib/format';
 import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts, applySmsDltSettings } from '@/lib/sms-brief';
 import KarixAuthSync from '@/components/KarixAuthSync';
 
-const inputClass = 'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs disabled:bg-gray-100';
-const buttonClass = 'rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50';
+const inputClass = 'workspace-input';
+const buttonClass = 'workspace-button-primary';
 const emptyOptions: SmsDltOptions = { categories: [], headers: [], brands: [] };
 const typeLabels = { '1': 'Promotional', '2': 'Transactional', '3': 'Service' };
 
@@ -127,9 +127,9 @@ function SmsDltEditor({ draft, onChange, disabled, onReady, settingsOnly = false
     <label className="text-xs font-semibold">Message encoding<select className={`${inputClass} mt-1`} value={draft.message_type} onChange={(e) => update({ message_type: e.target.value as SmsDltDraft['message_type'] })}><option value="">{settingsOnly ? 'Automatic for each message' : 'Choose message encoding'}</option><option value="1">ASCII / English</option><option value="2">Unicode (including English with ₹)</option></select></label>
   </div>;
   return <fieldset disabled={disabled} className="rounded-xl border border-gray-200 p-4 space-y-3">
-    <legend className="px-1 text-xs font-bold">{settingsOnly ? 'Shared DLT settings' : draft.template_name || 'Unnamed template'}</legend>
-    {loading && <p role="status" className="text-xs text-gray-500">Loading Tata portal options…</p>}
-    {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+    <legend className="px-1 text-sm font-semibold">{settingsOnly ? 'Shared DLT settings' : draft.template_name || 'Unnamed template'}</legend>
+    {loading && <p role="status" className="text-sm text-gray-500">Loading Tata portal options…</p>}
+    {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
       <p className="font-semibold">Could not load VILPOWER categories and sender headers.</p>
       <p className="mt-1">{error}</p>
       <div className="mt-2 flex flex-wrap gap-3">
@@ -162,15 +162,15 @@ function SmsDltEditor({ draft, onChange, disabled, onReady, settingsOnly = false
       <p>You may edit the final body and sample below. The original and every matching source remain visible; review again after any edit. Use Unicode encoding for non-ASCII characters, including ₹ and smart punctuation, even in English copy.</p>
     </div>}
     {settingsOnly ? providerFields : <>
-    <details className="rounded-lg border border-gray-200 p-3 text-xs">
+    <details className="rounded-lg border border-gray-200 p-3 text-sm">
       <summary className="cursor-pointer font-medium">Template settings · {draft.header || 'Use batch settings above'} · {draft.message_type === '2' ? 'Unicode' : draft.message_type === '1' ? 'ASCII' : 'Encoding not set'}</summary>
       <div className="mt-3 space-y-3">
         <label className="block font-semibold">Template name<input className={`${inputClass} mt-1`} value={draft.template_name} onChange={(e) => update({ template_name: e.target.value })} /></label>
         {providerFields}
       </div>
     </details>
-    <label className="block text-xs font-semibold">Message<textarea rows={4} className={`${inputClass} mt-1 font-mono`} value={draft.text} onChange={(e) => update({ text: e.target.value })} /></label>
-    <label className="block text-xs font-semibold">Filled sample<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
+    <label className="block text-sm font-medium">Message<textarea rows={4} className={`${inputClass} mt-1 font-mono`} value={draft.text} onChange={(e) => update({ text: e.target.value })} /></label>
+    <label className="block text-sm font-medium">Filled sample<textarea rows={3} className={`${inputClass} mt-1 font-mono`} value={draft.sample_message} onChange={(e) => update({ sample_message: e.target.value })} /></label>
     {draft.brief && <label className="flex gap-2 text-xs font-semibold"><input type="checkbox" checked={draft.brief.acknowledged} disabled={!applySmsBriefDecisions(draft.brief)} onChange={(event) => onChange({ ...draft, brief: { ...draft.brief!, acknowledged: event.target.checked } })} />I reviewed every source, campaign, language, warning and token decision, and the exact final body and explicit sample. These selected sources are intended for SMS; no month or approval status was inferred.</label>}
     {!loading && !error && !valid && <p className="text-xs text-amber-800">Apply shared DLT settings above, or open Template settings for this message.</p>}
     </>}
@@ -252,8 +252,8 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   }
   if (!destinationValid) return <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">SMS DLT whitelisting requires the explicit Tata Capital (tata) · SMS destination. Select it in Whitelisting for. Other accounts are not integrated and cannot use Tata credentials.</p>;
   return <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
-    <div className="flex flex-wrap justify-between gap-3"><h2 className="text-sm font-bold">SMS whitelisting</h2><a href="/" className="text-xs text-blue-700 underline">History &amp; approval status</a></div>
-    <p className="text-xs text-gray-600">Tata Capital · VILPOWER. Apply DLT settings once, review each message, then confirm. This registers templates; it never sends SMS.</p>
+    <div className="workspace-toolbar justify-between"><h2 className="text-lg font-semibold">SMS whitelisting</h2><a href="/" className="text-sm font-medium text-blue-700 underline">History &amp; approval status</a></div>
+    <p className="workspace-description">Tata Capital · VILPOWER. Apply DLT settings once, review each message, then confirm. This registers templates; it never sends SMS.</p>
     {!batch && <details className="rounded-lg border border-gray-200 p-3 text-xs">
       <summary className="cursor-pointer font-semibold">VILPOWER variable types and limits</summary>
       <div className="mt-3 overflow-x-auto"><table className="w-full text-left">
@@ -291,7 +291,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     {!batch && <>
       <details className="space-y-3 rounded-xl border border-gray-200 p-4" open={!drafts.every((draft) => draft.template_type && draft.category_id && draft.header_id && draft.header && draft.message_type) || undefined}>
         <summary className="cursor-pointer text-sm font-semibold">1. DLT settings for all messages</summary>
-        <p className="text-xs text-gray-600">Choose these once for this batch. Applying replaces existing routing settings, not message copy. Each template can still be customized below.</p>
+        <p className="text-sm text-gray-600">Choose these once for this batch. Applying replaces existing routing settings, not message copy. Each template can still be customized below.</p>
         <SmsDltEditor settingsOnly draft={sharedSettings} disabled={busy} onChange={setSharedSettings} onReady={(value) => setSharedSettingsReady(value)} />
         <button type="button" className={buttonClass} disabled={busy || !sharedSettingsReady} onClick={() => {
           setDrafts((current) => applySmsDltSettings(current, sharedSettings));
@@ -398,10 +398,10 @@ export function SmsDltUpload() {
     finally { if (version === requestVersion.current) setBusy(false); }
   }
   if (account !== 'tata' || channel !== 'sms') return <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">SMS DLT whitelisting is available only for Tata Capital (tata) · SMS. Select it in Whitelisting for. Other accounts are not integrated; Tata credentials cannot be reused.</div>;
-  return <div className="space-y-5">
-    <div className="flex flex-wrap justify-between gap-3"><div><h1 className="text-2xl font-bold">Tata SMS DLT Whitelisting</h1><p className="mt-1 text-xs text-gray-600">VILPOWER portal · exact template registration, not SMS sending</p></div><a href={getSampleCsvUrl('sms')} download className="text-xs font-semibold text-blue-700 underline">Download SMS DLT sample CSV</a></div>
-    <p className="text-xs text-gray-600">Connect your <a href="/settings" className="text-blue-700 underline">Tata VILPOWER session in Settings</a>. Upload CSV or Excel with template_name and text plus any DLT fields; choose missing fields during review. No phone numbers, grammar correction, or placeholder substitution.</p>
-    {!drafts && <label className="block rounded-xl border-2 border-dashed border-gray-300 bg-white p-8 text-sm font-semibold">Upload DLT CSV / Excel<input type="file" accept=".csv,.xlsx,.xls" disabled={busy} className="mt-3 block text-xs" onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ''; }} /></label>}
+  return <div className="workspace-page min-w-0 space-y-6">
+    <header className="workspace-toolbar items-start justify-between border-b border-gray-200 pb-6"><div><p className="workspace-eyebrow mb-2">Template library · SMS</p><h1 className="workspace-heading">SMS DLT whitelisting</h1><p className="workspace-description">Tata Capital · VILPOWER. Register exact templates, not messages to recipients.</p></div><a href={getSampleCsvUrl('sms')} download className="workspace-button">Download sample CSV</a></header>
+    <details className="workspace-guide"><summary className="cursor-pointer font-medium text-gray-800">Start with your connection and source file</summary><p className="mt-3">Connect the <a href="/settings" className="text-blue-700 underline">Tata VILPOWER session in Settings</a>. Upload CSV or Excel containing template_name and text, or import an original client brief below. Choose missing DLT fields during review. No phone numbers, automatic grammar corrections or silent placeholder substitutions.</p></details>
+    {!drafts && <label className="block rounded-xl border-2 border-dashed border-gray-300 bg-white p-6 sm:p-8 text-sm font-semibold">Upload DLT CSV / Excel<input type="file" accept=".csv,.xlsx,.xls" disabled={busy} className="mt-3 block max-w-full text-sm" onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ''; }} /></label>}
     {!drafts && <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
       <h2 className="text-sm font-bold">Import native client brief · choose SMS source candidates</h2>
       <p className="text-xs text-gray-600">Upload the original multi-sheet .xlsx / .xls workbook without reshaping it. Extraction is offline: no portal session, registration or SMS sending. Historical and matching sources stay visible; nothing is selected automatically, and neither current month nor approval is inferred.</p>
@@ -415,6 +415,12 @@ export function SmsDltUpload() {
           <label className="text-xs">Campaign scope<select className={`${inputClass} mt-1`} disabled={busy} value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value)}><option value="">All scopes</option>{[...new Set(brief.candidates.map((candidate) => candidate.scope).filter(Boolean))].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
           <label className="text-xs">Campaign<select className={`${inputClass} mt-1`} disabled={busy} value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)}><option value="">All campaigns</option>{[...new Set(brief.candidates.map((candidate) => candidate.campaign).filter(Boolean))].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
         </div>
+        {(sheetFilter || scopeFilter || campaignFilter) && <div className="workspace-toolbar" aria-label="Active source filters">
+          {sheetFilter && <button type="button" disabled={busy} className="workspace-filter-chip" onClick={() => setSheetFilter('')}>Sheet: {sheetFilter} ×</button>}
+          {scopeFilter && <button type="button" disabled={busy} className="workspace-filter-chip" onClick={() => setScopeFilter('')}>Scope: {scopeFilter} ×</button>}
+          {campaignFilter && <button type="button" disabled={busy} className="workspace-filter-chip" onClick={() => setCampaignFilter('')}>Campaign: {campaignFilter} ×</button>}
+          <button type="button" disabled={busy} className="workspace-button" onClick={() => { setSheetFilter(''); setScopeFilter(''); setCampaignFilter(''); }}>Reset filters</button>
+        </div>}
         <p className="text-xs text-gray-600">Filters do not change selections. Only explicitly selected, exact-body duplicates with compatible type hints are grouped; all selected references and warnings are retained.</p>
         <button type="button" className="text-xs underline" disabled={busy || !selectedSources.length} onClick={() => setSelectedSources([])}>Clear all source selections</button>
         <div className="max-h-[36rem] space-y-3 overflow-y-auto">

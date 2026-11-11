@@ -47,7 +47,7 @@ function ActionBadge({ action }: { action: string }) {
   const item = map[action] || { label: action.replace(/_/g, ' '), color: 'bg-gray-100 text-gray-800 border-gray-200' };
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${item.color}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${item.color}`}>
       {item.label}
     </span>
   );
@@ -65,14 +65,14 @@ function UserAvatar({ name, isCurrentUser }: { name: string; isCurrentUser?: boo
 
   return (
     <div className="flex items-center gap-2">
-      <div className={`w-7 h-7 rounded-full ${color} text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs`}>
+      <div className={`w-7 h-7 rounded-full ${color} text-white font-semibold text-xs flex items-center justify-center shrink-0 shadow-xs`}>
         {initial}
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-xs font-semibold text-gray-900 truncate">{name}</span>
           {isCurrentUser && (
-            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.2 rounded border border-blue-200/60">
+            <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-1.5 py-0.2 rounded border border-blue-200/60">
               You
             </span>
           )}
@@ -208,29 +208,40 @@ export default function ActivityLogsPage() {
     document.body.removeChild(link);
   };
 
-  const usersList = stats?.user_activity.map(u => u.user) || [];
+  const hasActiveFilters = search.trim() !== '' || filterDateRange !== 'today' || filterUser !== 'all' || filterAction !== 'all' || filterAccount !== 'all' || filterChannel !== 'all';
+  const resetFilters = () => {
+    setSearch('');
+    setDebouncedSearch('');
+    setFilterDateRange('today');
+    setCustomStartDate('');
+    setCustomEndDate('');
+    setFilterUser('all');
+    setFilterAction('all');
+    setFilterAccount('all');
+    setFilterChannel('all');
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="workspace-page min-w-0 space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900">Activity Logs & Team Audit Trail</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="workspace-heading">Activity Logs & Team Audit Trail</h1>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
-              Live Team Audit
+              Team audit trail
             </span>
           </div>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="workspace-description mt-2">
             Real-time attribution log showing who submitted templates, ran status polls, and updated credentials.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={handleExportCSV}
             disabled={!logs.length}
-            className="inline-flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3.5 py-2 rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:opacity-50"
+            className="workspace-button"
           >
             <svg className="w-4 h-4 text-gray-500" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M10 3v10M6 9l4 4 4-4M3 15h14" />
@@ -241,7 +252,7 @@ export default function ActivityLogsPage() {
           <button
             onClick={() => loadData()}
             disabled={loading}
-            className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:opacity-50"
+            className="workspace-button-primary"
           >
             <svg
               className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
@@ -258,6 +269,7 @@ export default function ActivityLogsPage() {
       </div>
 
       {/* KPI Stats Cards */}
+      <p className="workspace-eyebrow">Team overview · all recorded activity</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
           <div className="flex items-center justify-between">
@@ -270,8 +282,8 @@ export default function ActivityLogsPage() {
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-900">{stats?.total_actions || 0}</span>
-            <span className="text-xs text-gray-400">logged events</span>
+            <span className="text-2xl font-semibold text-gray-900">{stats?.total_actions || 0}</span>
+            <span className="text-xs text-gray-500">logged events</span>
           </div>
         </div>
 
@@ -286,7 +298,7 @@ export default function ActivityLogsPage() {
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-900">{stats?.total_users || 0}</span>
+            <span className="text-2xl font-semibold text-gray-900">{stats?.total_users || 0}</span>
             <span className="text-xs text-emerald-600 font-semibold truncate">
               Top: {stats?.top_user || 'None'}
             </span>
@@ -304,8 +316,8 @@ export default function ActivityLogsPage() {
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-gray-900">{stats?.total_templates_submitted || 0}</span>
-            <span className="text-xs text-gray-400">across team</span>
+            <span className="text-2xl font-semibold text-gray-900">{stats?.total_templates_submitted || 0}</span>
+            <span className="text-xs text-gray-500">across team</span>
           </div>
         </div>
 
@@ -319,8 +331,8 @@ export default function ActivityLogsPage() {
             </span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-base font-bold text-gray-900 truncate">{currentAppUser || 'Namann'}</span>
-            <span className="text-[10px] text-gray-400 uppercase font-semibold">Active Profile</span>
+            <span className="text-base font-semibold text-gray-900 truncate">{currentAppUser || 'Namann'}</span>
+            <span className="text-xs text-gray-500 uppercase font-semibold">Active Profile</span>
           </div>
         </div>
       </div>
@@ -331,7 +343,7 @@ export default function ActivityLogsPage() {
           {/* Search Input */}
           <div className="relative flex-1 max-w-md">
             <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500"
               viewBox="0 0 20 20"
               fill="none"
               stroke="currentColor"
@@ -341,10 +353,11 @@ export default function ActivityLogsPage() {
             </svg>
             <input
               type="text"
+              aria-label="Search activity"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search user, action, template name, details..."
-              className="w-full pl-9 pr-4 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
           </div>
 
@@ -353,14 +366,15 @@ export default function ActivityLogsPage() {
             {/* Date Range Filter (Default: Today to save memory/load) */}
             <select
               value={filterDateRange}
+              aria-label="Activity date range"
               onChange={(e) => setFilterDateRange(e.target.value)}
-              className={`text-xs border rounded-lg px-3 py-2 outline-none font-semibold transition-colors ${
+              className={`min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm border rounded-lg px-3 py-2 outline-none font-semibold transition-colors ${
                 filterDateRange === 'today'
                   ? 'bg-blue-50 border-blue-300 text-blue-800'
                   : 'bg-white border-gray-300 text-gray-700'
               }`}
             >
-              <option value="today">📅 Today (Default)</option>
+              <option value="today">Today (Default)</option>
               <option value="yesterday">Yesterday</option>
               <option value="7d">Past 7 Days</option>
               <option value="30d">Past 30 Days</option>
@@ -369,20 +383,22 @@ export default function ActivityLogsPage() {
             </select>
 
             {filterDateRange === 'custom' && (
-              <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1">
-                <span className="text-[10px] text-gray-500 uppercase font-bold">From:</span>
+              <div className="flex flex-wrap items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1">
+                <span className="text-xs text-gray-500 uppercase font-semibold">From:</span>
                 <input
                   type="date"
+              aria-label="Activity start date"
                   value={customStartDate}
                   onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="text-xs bg-white border border-gray-300 rounded px-1.5 py-0.5 text-gray-700"
+                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded px-1.5 py-0.5 text-gray-700"
                 />
-                <span className="text-[10px] text-gray-500 uppercase font-bold">To:</span>
+                <span className="text-sm text-gray-500 uppercase font-semibold">To:</span>
                 <input
                   type="date"
+              aria-label="Activity end date"
                   value={customEndDate}
                   onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="text-xs bg-white border border-gray-300 rounded px-1.5 py-0.5 text-gray-700"
+                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded px-1.5 py-0.5 text-gray-700"
                 />
               </div>
             )}
@@ -390,8 +406,9 @@ export default function ActivityLogsPage() {
             {/* User Filter */}
             <select
               value={filterUser}
+              aria-label="Filter by team member"
               onChange={(e) => setFilterUser(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Team Members</option>
               {users.map((u) => (
@@ -404,8 +421,9 @@ export default function ActivityLogsPage() {
             {/* Action Filter */}
             <select
               value={filterAction}
+              aria-label="Filter by action"
               onChange={(e) => setFilterAction(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Action Types</option>
               <option value="TEMPLATE_SUBMISSION">Template Submission</option>
@@ -421,8 +439,9 @@ export default function ActivityLogsPage() {
             {/* Account Filter */}
             <select
               value={filterAccount}
+              aria-label="Filter by account"
               onChange={(e) => setFilterAccount(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Accounts</option>
               {accounts.map((acc) => (
@@ -434,8 +453,9 @@ export default function ActivityLogsPage() {
             {/* Channel Filter */}
             <select
               value={filterChannel}
+              aria-label="Filter by channel"
               onChange={(e) => setFilterChannel(e.target.value)}
-              className="text-xs bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
               <option value="all">All Channels</option>
               <option value="whatsapp">WhatsApp</option>
@@ -444,22 +464,31 @@ export default function ActivityLogsPage() {
             </select>
 
             {/* Auto-refresh toggle */}
-            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer pl-1">
+            <label className="flex flex-wrap items-center gap-1.5 text-xs text-gray-600 cursor-pointer pl-1">
               <input
                 type="checkbox"
                 checked={autoRefresh}
                 onChange={(e) => setAutoRefresh(e.target.checked)}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <span>Live Sync</span>
+              <span>Auto-refresh · 15 seconds</span>
             </label>
           </div>
+        </div>
+        <div className="workspace-toolbar border-t border-gray-100 pt-3 text-sm text-gray-600" aria-live="polite">
+          <span>{loading ? 'Loading events…' : 'Showing ' + logs.length + ' events (up to 250)'}</span>
+          {filterUser !== 'all' && <span className="workspace-filter-chip">Operator: {filterUser}</span>}
+          {filterAction !== 'all' && <span className="workspace-filter-chip">Action: {filterAction.replace(/_/g, ' ')}</span>}
+          {filterAccount !== 'all' && <span className="workspace-filter-chip">Account: {getAccountLabel(filterAccount)}</span>}
+          {filterChannel !== 'all' && <span className="workspace-filter-chip">Channel: {formatChannel(filterChannel)}</span>}
+          {search.trim() && <span className="workspace-filter-chip break-all">Search: {search}</span>}
+          {hasActiveFilters && <button type="button" onClick={resetFilters} className="workspace-button">Reset to today</button>}
         </div>
       </div>
 
       {/* Error Banner */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-xs text-red-700">
+        <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-4 text-xs text-red-700">
           <span className="font-semibold">Error: </span>
           {error}
         </div>
@@ -468,19 +497,19 @@ export default function ActivityLogsPage() {
       {/* Activity Table */}
       <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs overflow-hidden">
         <div className="p-4 bg-gray-50/80 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <span className="w-2 h-2 rounded-full bg-blue-600" />
-            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+            <h3 className="text-base font-semibold text-gray-900 uppercase tracking-wider">
               Audit Trail ({logs.length} events)
             </h3>
             {filterDateRange === 'today' ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
-                <span>📅</span>
+              <span className="inline-flex flex-wrap items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                
                 <span>Today&apos;s Activity</span>
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
-                <span>🕒</span>
+              <span className="inline-flex flex-wrap items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                
                 <span>
                   {filterDateRange === 'yesterday'
                     ? 'Yesterday'
@@ -495,9 +524,9 @@ export default function ActivityLogsPage() {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-gray-500">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
             {filterDateRange === 'today' ? (
-              <span className="text-blue-700 font-medium">Memory saver active: showing today only</span>
+              <span className="text-gray-600 font-medium">Scope: today only · up to 250 events</span>
             ) : (
               <span>Newest events first</span>
             )}
@@ -505,9 +534,9 @@ export default function ActivityLogsPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full min-w-[760px] text-left text-sm">
             <thead>
-              <tr className="bg-gray-50/40 text-gray-500 font-semibold border-b border-gray-200 uppercase tracking-wider text-[11px]">
+              <tr className="bg-gray-50/40 text-gray-500 font-semibold border-b border-gray-200 uppercase tracking-wider text-xs">
                 <th className="px-5 py-3">Timestamp</th>
                 <th className="px-5 py-3">Team Member</th>
                 <th className="px-5 py-3">Action</th>
@@ -520,7 +549,7 @@ export default function ActivityLogsPage() {
             <tbody className="divide-y divide-gray-200">
               {loading && logs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-gray-400">
+                  <td colSpan={7} className="px-5 py-12 text-center text-gray-500">
                     <div className="flex flex-col items-center gap-2">
                       <svg className="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -532,33 +561,33 @@ export default function ActivityLogsPage() {
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-gray-400">
-                    {filterDateRange === 'today' ? (
+                  <td colSpan={7} className="px-5 py-12 text-center text-gray-500">
+                    {filterDateRange === 'today' && !hasActiveFilters ? (
                       <div className="flex flex-col items-center gap-2 max-w-sm mx-auto">
-                        <span className="text-2xl">☕</span>
-                        <p className="text-xs font-bold text-gray-700">No activity recorded today yet</p>
-                        <p className="text-[11px] text-gray-500 leading-relaxed">
-                          Audit trails default to today&apos;s activity to save memory and keep load light. Switch the period filter above to inspect past activity:
+                        <span className="workspace-eyebrow">Audit trail</span>
+                        <p className="text-xs font-semibold text-gray-700">No activity recorded today yet</p>
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                          Start with today’s activity, or choose a wider period to inspect earlier events.
                         </p>
-                        <div className="flex items-center gap-2 mt-2">
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
                           <button
                             type="button"
                             onClick={() => setFilterDateRange('7d')}
-                            className="px-3 py-1.5 text-xs font-semibold bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-300 shadow-2xs transition"
+                            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 text-sm font-semibold bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-300 shadow-2xs transition"
                           >
                             View Past 7 Days
                           </button>
                           <button
                             type="button"
                             onClick={() => setFilterDateRange('all')}
-                            className="px-3 py-1.5 text-xs font-semibold bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 shadow-2xs transition"
+                            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 text-sm font-semibold bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 shadow-2xs transition"
                           >
                             View All Past Activity
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <span>No activity logs found matching the selected filters.</span>
+                      <div className="space-y-3"><p>No activity matches the selected filters.</p><button type="button" onClick={resetFilters} className="workspace-button">Reset to today</button></div>
                     )}
                   </td>
                 </tr>
@@ -580,7 +609,7 @@ export default function ActivityLogsPage() {
                     >
                       <td className="px-5 py-3 font-mono text-gray-500 whitespace-nowrap">
                         <div className="font-semibold text-gray-800">{relative}</div>
-                        <div className="text-[10px] text-gray-400">{exact}</div>
+                        <div className="text-xs text-gray-500">{exact}</div>
                       </td>
 
                       <td className="px-5 py-3 whitespace-nowrap">
@@ -593,7 +622,7 @@ export default function ActivityLogsPage() {
 
                       <td className="px-5 py-3 whitespace-nowrap">
                         <span
-                          className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold ${
+                          className={`inline-flex flex-wrap items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold ${
                             log.channel === 'whatsapp'
                               ? 'bg-emerald-50 text-emerald-800 border border-emerald-200/60'
                               : log.channel === 'sms'
@@ -616,7 +645,7 @@ export default function ActivityLogsPage() {
                             <div className="font-semibold text-gray-900 text-xs">
                               Submitted {log.details.count || 0} template{log.details.count === 1 ? '' : 's'}
                             </div>
-                            <div className="text-[11px] text-gray-400 truncate">
+                            <div className="text-xs text-gray-500 truncate">
                               File: {log.details.filename || 'upload.csv'}
                               {Array.isArray(log.details.templates) && log.details.templates.length > 0 && (
                                 <> &bull; {log.details.templates.join(', ')}</>
@@ -652,7 +681,7 @@ export default function ActivityLogsPage() {
 
                       <td className="px-5 py-3 whitespace-nowrap">
                         <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
                             log.status === 'success'
                               ? 'bg-emerald-100 text-emerald-800'
                               : 'bg-red-100 text-red-800'
@@ -665,7 +694,7 @@ export default function ActivityLogsPage() {
                       <td className="px-5 py-3 text-right whitespace-nowrap">
                         <button
                           onClick={() => setSelectedLog(log)}
-                          className="px-2.5 py-1 bg-gray-100 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded font-semibold text-[11px] transition-colors"
+                          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 bg-gray-100 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded font-semibold text-sm transition-colors"
                         >
                           Inspect
                         </button>
@@ -682,24 +711,25 @@ export default function ActivityLogsPage() {
       {/* Inspect Modal Drawer */}
       {selectedLog && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-xl max-w-lg w-full max-h-[85vh] overflow-y-auto p-6 space-y-5">
+          <div role="dialog" aria-modal="true" aria-label="Event details" className="bg-white rounded-xl border border-gray-200 shadow-xl max-w-lg min-w-0 w-full max-h-[85vh] overflow-y-auto p-6 space-y-5">
             <div className="flex items-center justify-between pb-3 border-b border-gray-200">
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <ActionBadge action={selectedLog.action} />
-                <h3 className="text-sm font-bold text-gray-900">Event Details (ID: {selectedLog.id})</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Event Details (ID: {selectedLog.id})</h3>
               </div>
               <button
                 onClick={() => setSelectedLog(null)}
-                className="text-gray-400 hover:text-gray-600 text-lg font-bold p-1"
+                aria-label="Close event details"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-gray-500 hover:text-gray-600 text-lg font-semibold p-1"
               >
                 ✕
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm break-words">
               <div>
                 <span className="font-semibold text-gray-500">Operator: </span>
-                <span className="font-bold text-gray-900">{selectedLog.user}</span>
+                <span className="font-semibold text-gray-900">{selectedLog.user}</span>
               </div>
               <div>
                 <span className="font-semibold text-gray-500">Timestamp: </span>
@@ -715,7 +745,7 @@ export default function ActivityLogsPage() {
               </div>
               <div>
                 <span className="font-semibold text-gray-500">Outcome: </span>
-                <span className={`font-bold ${selectedLog.status === 'success' ? 'text-emerald-700' : 'text-red-700'}`}>
+                <span className={`font-semibold ${selectedLog.status === 'success' ? 'text-emerald-700' : 'text-red-700'}`}>
                   {selectedLog.status.toUpperCase()}
                 </span>
               </div>
@@ -737,7 +767,7 @@ export default function ActivityLogsPage() {
             <div className="pt-2 flex justify-end">
               <button
                 onClick={() => setSelectedLog(null)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-xs transition-colors"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition-colors"
               >
                 Close
               </button>

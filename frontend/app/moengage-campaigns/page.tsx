@@ -80,10 +80,10 @@ function RowCard({
     templateBody?.replace(/\{\{\d+\}\}/g, (slot) => whatsapp?.body_placeholders?.[slot] || whatsapp?.body_placeholders?.[slot.slice(2, -2)] || slot);
 
   return (
-    <article className="rounded-xl border border-gray-200 bg-white p-5 space-y-4 shadow-sm hover:border-gray-300 transition-colors">
-      <div className="flex flex-wrap justify-between items-start gap-2">
-        <div>
-          <h3 className="font-semibold text-gray-900 text-base mt-0.5">
+    <article className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
+      <div className="flex flex-wrap justify-between items-start gap-3">
+        <div className="min-w-0">
+          <h3 className="break-words font-semibold text-gray-900 text-base mt-0.5 [overflow-wrap:anywhere]">
             {campaignRowName(row) || 'Campaign name missing'}
           </h3>
         </div>
@@ -117,17 +117,17 @@ function RowCard({
         {row.workspace_name || source.workspace_name || source.workspace || 'Destination needs review'}
         {' · '}{segment?.name || source.segment_name || 'Audience needs review'}
       </p>
-      <div className="rounded-lg bg-gray-50 p-3 text-sm whitespace-pre-wrap">
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">
         {message || push?.message ||
           (isWhatsApp ? `Template: ${whatsapp?.template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'Not selected'}. Message preview unavailable; review the template in MoEngage.` : email?.subject || 'No message preview supplied.')}
       </div>
       {verified && <p className="text-sm font-medium text-emerald-800">Draft saved and verified. Not published or sent.</p>}
       <details className="text-sm">
         <summary className="cursor-pointer font-semibold text-gray-600">Details — source, IDs and configuration</summary>
-        <p className="mt-3 text-xs text-gray-500">{row.source_ref} · Row {row.row_id} · Workspace {row.workspace_id}</p>
+        <p className="mt-3 break-words text-sm text-gray-600">{row.source_ref} · Row {row.row_id} · Workspace {row.workspace_id}</p>
 
       {batch && row.updated_at && (
-        <p className="text-xs text-gray-400">
+        <p className="mt-2 text-sm text-gray-600">
           Last updated: {new Date(row.updated_at * 1000).toLocaleString(undefined, { timeZone: 'UTC', timeZoneName: 'short' })}. Stored draft record; no customer messages sent.
         </p>
       )}
@@ -202,7 +202,7 @@ function RowCard({
             </div>
             <div className="sm:col-span-2">
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Push Notification Body</dt>
-              <dd className="text-gray-900 mt-0.5 rounded-lg bg-gray-50 border border-gray-200 p-2.5 text-sm">
+              <dd className="mt-1 whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-900 [overflow-wrap:anywhere]">
                 {source.push_message || push?.message || 'Not set'}
               </dd>
             </div>
@@ -223,10 +223,10 @@ function RowCard({
               <dd className="text-gray-900 mt-0.5 font-medium flex flex-wrap items-center gap-1.5">
                 <span>📋 {whatsapp?.template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'Not supplied'}</span>
                 {(whatsapp?.template_id || source.matched_template_id) && (
-                  <span className="text-[11px] font-mono text-gray-500">({whatsapp?.template_id || source.matched_template_id})</span>
+                  <span className="text-xs font-mono text-gray-500">({whatsapp?.template_id || source.matched_template_id})</span>
                 )}
                 {source.matched_template_confidence && (
-                  <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
+                  <span className="text-xs font-medium bg-emerald-50 text-emerald-800 px-2 py-1 rounded">
                     🎯 {source.matched_template_confidence} Match
                   </span>
                 )}
@@ -256,7 +256,7 @@ function RowCard({
           }`}
         >
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="font-bold">
                 Reported MoEngage Campaign ID:
               </span>
@@ -277,7 +277,7 @@ function RowCard({
       {issues.length > 0 && (
         <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-900">
           <strong className="block font-semibold">Validation Issues:</strong>
-          <ul className="list-disc pl-5 mt-1 space-y-0.5 text-xs">
+          <ul className="list-disc pl-5 mt-2 space-y-1 text-sm">
             {issues.map((issue, index) => (
               <li key={`${index}-${issue}`}>{issue}</li>
             ))}
@@ -290,7 +290,7 @@ function RowCard({
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200">
           <div>
             <span>⚠️ Previous attempt was unconfirmed.</span>
-            <p className="text-xs text-amber-700 font-normal mt-0.5">
+            <p className="text-sm text-amber-800 font-normal mt-1">
               Refresh stored state and manually reconcile the campaign in MoEngage with an operator. Do not create it again: the previous request may already have saved a draft.
             </p>
           </div>
@@ -302,9 +302,9 @@ function RowCard({
           type="button"
           disabled={busy}
           onClick={() => onCreate(row)}
-          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50 transition-colors shadow-sm"
+          className="workspace-button-primary"
         >
-          Create Only This Draft…
+          Save this draft…
         </button>
       )}
       {batch && isWhatsApp && status === 'CREATED' && row.campaign_id && /^[a-f0-9]{24}$/i.test(row.campaign_id) && (
@@ -312,9 +312,9 @@ function RowCard({
           type="button"
           disabled={busy}
           onClick={() => onCreate(row)}
-          className="rounded-lg border border-blue-700 px-4 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-50 disabled:opacity-50"
+          className="workspace-button"
         >
-          Recheck Saved Draft…
+          Recheck saved draft…
         </button>
       )}
     </article>
@@ -328,7 +328,7 @@ export default function MoEngageCampaignsPage() {
   useEffect(() => {
     if (!authLoading && apparel) router.replace('/apparel/campaigns');
   }, [authLoading, apparel, router]);
-  if (authLoading || apparel) return <p className="p-8 text-center text-gray-500">Opening the authorized campaign workspace…</p>;
+  if (authLoading || apparel) return <p role="status" className="workspace-page p-6 text-sm text-gray-600">Opening the authorized campaign workspace…</p>;
   return <GeneralCampaignsPage />;
 }
 
@@ -559,7 +559,7 @@ function GeneralCampaignsPage() {
     try {
       const result = await stageMoEngageDraftBatch(file, account);
       showBatch(result, storageKey);
-      setNotice('Batch staged successfully. Review the destinations below, then use Create Ready WhatsApp Drafts Sequentially to process the ready rows.');
+      setNotice('Batch staged successfully. Review the destinations below, then use Save ready WhatsApp drafts sequentially to process the ready rows.');
       setFile(null);
       setPreview(null);
       if (fileRef.current) fileRef.current.value = '';
@@ -956,7 +956,7 @@ function GeneralCampaignsPage() {
     return batch.items.filter((item) => item.channel?.toUpperCase() === filterChannel);
   }, [batch, filterChannel]);
 
-  if (authLoading) return <p className="p-8 text-center text-gray-500">Checking credentials…</p>;
+  if (authLoading) return <p role="status" className="workspace-page p-6 text-sm text-gray-600">Checking credentials…</p>;
   if (!allowed) {
     return (
       <div className="max-w-3xl mx-auto rounded-xl bg-rose-50 border border-rose-200 p-8 text-rose-900 shadow-sm mt-8 text-center">
@@ -967,25 +967,21 @@ function GeneralCampaignsPage() {
   }
 
   return (
-    <main className="max-w-6xl mx-auto space-y-6 pb-24 px-4 sm:px-6">
+    <main className="workspace-page mx-auto min-w-0 max-w-6xl space-y-6 pb-12">
       {/* Top Header */}
-      <header className="space-y-3 border-b border-gray-200 pb-5 pt-2">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-blue-600 text-white font-bold text-sm">
-                ME
-              </span>
-              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">MoEngage Bulk Campaign Builder</h1>
-            </div>
-            <p className="text-sm text-gray-500 mt-1">
-              Upload a campaign spreadsheet, review every row, and create verified drafts in <strong>{account.toUpperCase()}</strong>. Publishing remains a human action in MoEngage.
+      <header className="space-y-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 max-w-3xl">
+            <p className="workspace-eyebrow mb-2">{account === 'tata' ? 'Tata Capital' : 'Bajaj Finserv'} · MoEngage</p>
+            <h1 className="workspace-heading">Campaign drafts</h1>
+            <p className="workspace-description mt-2">
+              Upload a campaign spreadsheet, review every row, and save verified drafts in <strong>{account.toUpperCase()}</strong>. Publishing remains a human action in MoEngage.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
             {superadmin && (
-              <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg">
+              <label className="inline-flex flex-wrap items-center gap-2 text-sm font-medium text-gray-700">
                 Account:
                 <select
                   value={selectedAccount}
@@ -996,7 +992,7 @@ function GeneralCampaignsPage() {
                     setPreview(null);
                     setBatch(null);
                   }}
-                  className="bg-white border border-gray-300 rounded px-2 py-0.5 font-bold text-gray-900"
+                  className="workspace-select"
                 >
                   <option value="tata">Tata Capital</option>
                   <option value="bajaj">Bajaj Finserv</option>
@@ -1004,60 +1000,61 @@ function GeneralCampaignsPage() {
               </label>
             )}
 
-            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg shadow-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              {singleChannel === 'WHATSAPP' ? `WhatsApp destination: ${waWorkspaces.find((workspace) => workspace.id === waWorkspace)?.name || waCatalog?.workspace_name || 'Select workspace'}${waWorkspace ? ` (${waWorkspace})` : ''}` : `Connected: ${catalog?.workspace_name || catalog?.workspace_id || 'Loading account catalog'}`}
+            <div className="max-w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 [overflow-wrap:anywhere]">
+              {activeTab !== 'single' ? 'WhatsApp destinations: explicit per spreadsheet row' : singleChannel === 'WHATSAPP' ? `WhatsApp destination: ${waWorkspaces.find((workspace) => workspace.id === waWorkspace)?.name || waCatalog?.workspace_name || 'Select workspace'}${waWorkspace ? ` (${waWorkspace})` : ''}` : `Account workspace: ${catalog?.workspace_name || catalog?.workspace_id || (catalogLoading ? 'Loading account catalog…' : 'Catalog unavailable')}`}
             </div>
           </div>
         </div>
 
         {/* Safety Banner */}
-        <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3.5 text-xs text-blue-950 flex items-start gap-2.5">
-          <span className="text-base select-none">🛡️</span>
+        <div className="workspace-guide flex items-start gap-3 text-sm leading-relaxed text-gray-700">
           <div>
-            <strong className="font-semibold text-blue-900">Draft-only workflow:</strong> Creation requests target
-            <code className="mx-1 px-1.5 py-0.5 rounded bg-blue-100 font-mono font-bold text-blue-900">DRAFT</code>
+            <strong className="font-semibold text-gray-900">Draft only, never a launch.</strong> Creation requests target
+            <code className="mx-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-mono text-xs text-gray-900">DRAFT</code>
             status. The builder never sends messages to customers, never publishes, and never schedules automated sends. Publishing requires manual review and sign-off in the MoEngage dashboard.
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-gray-200 gap-6 pt-2 text-sm font-semibold">
+        <nav aria-label="Campaign builder views" className="flex flex-wrap gap-x-5 gap-y-2 border-b border-gray-200 text-sm font-medium">
           <button
             type="button"
             onClick={() => setActiveTab('batch')}
-            className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
+            aria-pressed={activeTab === 'batch'}
+            className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'batch'
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-indigo-600 text-indigo-700'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
-            <span>📊</span> Bulk Campaign Upload
+            Bulk upload
             {batch && <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-blue-100 text-blue-800">{batch.items.length}</span>}
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('single')}
-            className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
+            aria-pressed={activeTab === 'single'}
+            className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'single'
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-indigo-600 text-indigo-700'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
-            Single Campaign (Optional)
+            Single campaign
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('templates')}
-            className={`pb-3 border-b-2 transition-colors flex items-center gap-2 ${
+            aria-pressed={activeTab === 'templates'}
+            className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'templates'
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-indigo-600 text-indigo-700'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
-            <span>📥</span> Sample Templates & CSVs
+            Templates &amp; setup
           </button>
-        </div>
+        </nav>
       </header>
 
       {/* Global Alerts */}
@@ -1065,104 +1062,105 @@ function GeneralCampaignsPage() {
         <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 flex items-start gap-2.5 shadow-xs">
           <span>⚠️</span>
           <div className="flex-1">{error}</div>
-          <button type="button" onClick={() => setError('')} className="text-rose-500 hover:text-rose-800 font-bold">✕</button>
+          <button type="button" aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded p-1 text-rose-700 hover:bg-rose-100">✕</button>
         </div>
       )}
       {notice && (
         <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 flex items-start gap-2.5 shadow-xs">
           <span>✅</span>
           <div className="flex-1 font-medium">{notice}</div>
-          <button type="button" onClick={() => setNotice('')} className="text-emerald-500 hover:text-emerald-800 font-bold">✕</button>
+          <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')} className="shrink-0 rounded p-1 text-emerald-700 hover:bg-emerald-100">✕</button>
         </div>
       )}
+      {busy && <p role="status" className="workspace-guide flex items-center gap-3 text-sm text-gray-700"><span aria-hidden="true" className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-gray-200 border-t-indigo-600" />{automatingWa ? 'Saving and verifying WhatsApp drafts sequentially. Results appear below.' : 'Processing your request. Keep this page open until the result is confirmed.'}</p>}
 
       {/* TAB 1: SINGLE CAMPAIGN BUILDER */}
       {activeTab === 'single' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid min-w-0 grid-cols-1 items-start gap-6 lg:grid-cols-12">
           {/* Left Form: 7 cols */}
-          <div className="lg:col-span-7 space-y-6">
+          <div className="min-w-0 space-y-6 lg:col-span-7">
             {/* Step 1: Channel selection */}
-            <section className="bg-white rounded-2xl border border-gray-200 p-5 shadow-xs space-y-3">
-              <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider">1. Select Channel</h2>
-              <div className="grid grid-cols-3 gap-3">
+            <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
+              <h2 className="text-base font-semibold text-gray-900">1. Select a channel</h2>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <button
                   type="button"
                   onClick={() => setSingleChannel('WHATSAPP')}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                  aria-pressed={singleChannel === 'WHATSAPP'}
+                  className={`rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                     singleChannel === 'WHATSAPP'
-                      ? 'border-emerald-500 bg-emerald-50/50 shadow-xs ring-2 ring-emerald-400/20'
+                      ? 'border-indigo-300 bg-indigo-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   }`}
                 >
-                  <div className="text-2xl mb-1">💬</div>
                   <div className="font-bold text-sm text-gray-900">WhatsApp</div>
-                  <div className="text-xs text-gray-500 mt-0.5">Workspace-approved Templates</div>
+                  <div className="mt-1 text-sm text-gray-600">Workspace-approved templates</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSingleChannel('PUSH')}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                  aria-pressed={singleChannel === 'PUSH'}
+                  className={`rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                     singleChannel === 'PUSH'
-                      ? 'border-purple-500 bg-purple-50/50 shadow-xs ring-2 ring-purple-400/20'
+                      ? 'border-indigo-300 bg-indigo-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   }`}
                 >
-                  <div className="text-2xl mb-1">🔔</div>
                   <div className="font-bold text-sm text-gray-900">Push App</div>
-                  <div className="text-xs text-gray-500 mt-0.5">Android & iOS Push</div>
+                  <div className="mt-1 text-sm text-gray-600">Android &amp; iOS push</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSingleChannel('EMAIL')}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                  aria-pressed={singleChannel === 'EMAIL'}
+                  className={`rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                     singleChannel === 'EMAIL'
-                      ? 'border-blue-500 bg-blue-50/50 shadow-xs ring-2 ring-blue-400/20'
+                      ? 'border-indigo-300 bg-indigo-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   }`}
                 >
-                  <div className="text-2xl mb-1">✉️</div>
                   <div className="font-bold text-sm text-gray-900">Email</div>
-                  <div className="text-xs text-gray-500 mt-0.5">SendGrid / HTML</div>
+                  <div className="mt-1 text-sm text-gray-600">SendGrid / HTML</div>
                 </button>
               </div>
             </section>
 
             {/* Step 2: Campaign basics */}
-            <section className="bg-white rounded-2xl border border-gray-200 p-5 shadow-xs space-y-4">
-              <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider">2. Campaign Details & Audience</h2>
+            <section className="workspace-panel min-w-0 space-y-5 p-5 sm:p-6">
+              <h2 className="text-base font-semibold text-gray-900">2. Campaign details &amp; audience</h2>
 
               {singleChannel === 'WHATSAPP' && (
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">WhatsApp destination workspace *</label>
-                  <select value={waWorkspace} onChange={(e) => { setWaWorkspace(e.target.value); setWaCatalog(null); setSingleSegment(''); setSingleWaSender(''); setSingleWaTemplate(''); }} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
+                  <label htmlFor="single-workspace" className="mb-2 block text-sm font-medium text-gray-700">WhatsApp destination workspace *</label>
+                  <select id="single-workspace" value={waWorkspace} onChange={(e) => { setWaWorkspace(e.target.value); setWaCatalog(null); setSingleSegment(''); setSingleWaSender(''); setSingleWaTemplate(''); }} className="workspace-select w-full">
                     <option value="">Select destination — required</option>
                     {waWorkspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.id})</option>)}
                   </select>
                 </div>
               )}
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Campaign Name *</label>
-                <input
+                <label htmlFor="single-name" className="mb-2 block text-sm font-medium text-gray-700">Campaign name *</label>
+                <input id="single-name"
                   type="text"
                   placeholder="e.g. att_TATA_FESTIVE_SPECIAL_OCT2026"
                   value={singleName}
                   onChange={(e) => setSingleName(e.target.value)}
                   onBlur={() => setSingleName(normalizeCampaignName(singleName))}
                   aria-describedby="single-campaign-name-rule"
-                  className="w-full rounded-lg border border-gray-300 px-3.5 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                  className="workspace-input w-full"
                 />
-                <p id="single-campaign-name-rule" className="mt-1 text-xs text-gray-500">{CAMPAIGN_NAME_HINT}</p>
+                <p id="single-campaign-name-rule" className="mt-2 text-sm text-gray-600">{CAMPAIGN_NAME_HINT}</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Target Audience Segment *</label>
-                  <select
+                  <label htmlFor="single-segment" className="mb-2 block text-sm font-medium text-gray-700">Target audience segment *</label>
+                  <select id="single-segment"
                     value={singleSegment}
                     onChange={(e) => setSingleSegment(e.target.value)}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                    className="workspace-select w-full"
                   >
                     <option value="" disabled>Select an account audience</option>
                     {formCatalog?.segments?.map((seg) => (
@@ -1174,31 +1172,31 @@ function GeneralCampaignsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Schedule Start Time (IST)</label>
-                  <input
+                  <label htmlFor="single-planning-date" className="mb-2 block text-sm font-medium text-gray-700">Planned start time (IST)</label>
+                  <input id="single-planning-date"
                     type="datetime-local"
                     value={singleDate}
                     onChange={(e) => setSingleDate(e.target.value)}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                    className="workspace-input w-full"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Planning time only. Confirm delivery settings in MoEngage before publishing.</p>
+                  <p className="mt-2 text-sm leading-relaxed text-gray-600">Planning time only. Confirm delivery settings in MoEngage before publishing.</p>
                 </div>
               </div>
             </section>
 
             {/* Step 3: Channel-specific content */}
-            <section className="bg-white rounded-2xl border border-gray-200 p-5 shadow-xs space-y-4">
-              <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider">3. {singleChannel} Content</h2>
+            <section className="workspace-panel min-w-0 space-y-5 p-5 sm:p-6">
+              <h2 className="text-base font-semibold text-gray-900">3. {singleChannel} content</h2>
 
               {singleChannel === 'WHATSAPP' && (
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">WhatsApp Sender{selectedWaSender?.provider ? ` (${selectedWaSender.provider})` : ''}</label>
-                    <select
+                    <label htmlFor="single-wa-sender" className="mb-2 block text-sm font-medium text-gray-700">WhatsApp sender{selectedWaSender?.provider ? ` (${selectedWaSender.provider})` : ''}</label>
+                    <select id="single-wa-sender"
                       value={singleWaSender}
                       disabled={!waCatalog || waCatalog.workspace_id !== waWorkspace}
                       onChange={(e) => { setSingleWaSender(e.target.value); setSingleWaTemplate(''); }}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"
+                      className="workspace-select w-full"
                     >
                       <option value="" disabled>Select an account sender</option>
                       {waCatalog?.whatsapp_senders?.map((s) => (
@@ -1210,18 +1208,18 @@ function GeneralCampaignsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Approved WhatsApp Template ID</label>
-                    <select value={singleWaTemplate} disabled={!selectedWaSender} onChange={(e) => setSingleWaTemplate(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500">
+                    <label htmlFor="single-wa-template" className="mb-2 block text-sm font-medium text-gray-700">Approved WhatsApp template ID</label>
+                    <select id="single-wa-template" value={singleWaTemplate} disabled={!selectedWaSender} onChange={(e) => setSingleWaTemplate(e.target.value)} className="workspace-select w-full disabled:bg-gray-50 disabled:text-gray-500">
                       <option value="">Select an approved sender template</option>
                       {waCatalog?.whatsapp_templates?.filter((template) => template.sender_ids.includes(singleWaSender)).map((template) => (
                         <option key={template.id} value={template.id}>{template.name} ({template.id})</option>
                       ))}
                     </select>
-                    <p className="text-xs text-gray-500 mt-1">{!selectedWaSender ? 'Select a workspace and sender first: approved templates are scoped to that sender.' : 'Only approved templates available to this workspace and sender are shown.'}</p>
+                    <p className="mt-2 text-sm leading-relaxed text-gray-600">{!selectedWaSender ? 'Select a workspace and sender first: approved templates are scoped to that sender.' : 'Only approved templates available to this workspace and sender are shown.'}</p>
                   </div>
                   {selectedWaSlots.map((slot) => (
                     <div key={slot}>
-                      <label htmlFor={`wa-variable-${slot.replace(/\D/g, '')}`} className="block text-xs font-semibold text-gray-700 mb-1">
+                      <label htmlFor={`wa-variable-${slot.replace(/\D/g, '')}`} className="mb-2 block text-sm font-medium text-gray-700">
                         Template variable {slot} *
                       </label>
                       <textarea
@@ -1229,7 +1227,7 @@ function GeneralCampaignsPage() {
                         value={singleWaPlaceholders[slot] || ''}
                         onChange={(event) => setSingleWaPlaceholders((values) => ({ ...values, [slot]: event.target.value }))}
                         rows={2}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                        className="workspace-input w-full"
                       />
                     </div>
                   ))}
@@ -1238,13 +1236,13 @@ function GeneralCampaignsPage() {
 
               {singleChannel === 'PUSH' && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">Platform</label>
-                      <select
+                      <label htmlFor="single-push-platform" className="mb-2 block text-sm font-medium text-gray-700">Platform</label>
+                      <select id="single-push-platform"
                         value={singlePushPlatform}
                         onChange={(e) => setSinglePushPlatform(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
+                        className="workspace-select w-full"
                       >
                         <option value="ANDROID">Android (general channel)</option>
                         <option value="IOS">iOS (APNS)</option>
@@ -1252,35 +1250,35 @@ function GeneralCampaignsPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">Deeplink / Click URL</label>
-                      <input
+                      <label htmlFor="single-push-url" className="mb-2 block text-sm font-medium text-gray-700">Deeplink / click URL</label>
+                      <input id="single-push-url"
                         type="url"
                         value={singleClickUrl}
                         onChange={(e) => setSingleClickUrl(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono text-xs focus:border-purple-500 focus:outline-none"
+                        className="workspace-input w-full font-mono"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Notification Title</label>
-                    <input
+                    <label htmlFor="single-push-title" className="mb-2 block text-sm font-medium text-gray-700">Notification title</label>
+                    <input id="single-push-title"
                       type="text"
                       placeholder="e.g. Exclusive Loan Offer Available!"
                       value={singlePushTitle}
                       onChange={(e) => setSinglePushTitle(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-purple-500 focus:outline-none"
+                      className="workspace-input w-full"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Notification Body</label>
-                    <textarea
+                    <label htmlFor="single-push-body" className="mb-2 block text-sm font-medium text-gray-700">Notification body</label>
+                    <textarea id="single-push-body"
                       rows={3}
                       placeholder="e.g. Check your pre-qualified offer up to ₹ 90 lacs with instant approval."
                       value={singlePushMessage}
                       onChange={(e) => setSinglePushMessage(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 p-3 text-sm focus:border-purple-500 focus:outline-none"
+                      className="workspace-input w-full"
                     />
                   </div>
                 </div>
@@ -1288,13 +1286,13 @@ function GeneralCampaignsPage() {
 
               {singleChannel === 'EMAIL' && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">Sender Address (SendGrid)</label>
-                      <select
+                      <label htmlFor="single-email-sender" className="mb-2 block text-sm font-medium text-gray-700">Sender address (SendGrid)</label>
+                      <select id="single-email-sender"
                         value={singleEmailSender}
                         onChange={(e) => setSingleEmailSender(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                        className="workspace-select w-full"
                       >
                         {catalog?.email_senders?.map((s) => (
                           <option key={s.from_address} value={s.from_address}>
@@ -1306,11 +1304,11 @@ function GeneralCampaignsPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">Content Type</label>
-                      <select
+                      <label htmlFor="single-email-type" className="mb-2 block text-sm font-medium text-gray-700">Content type</label>
+                      <select id="single-email-type"
                         value={singleContentType}
                         onChange={(e) => setSingleContentType(e.target.value)}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                        className="workspace-select w-full"
                       >
                         <option value="PROMOTIONAL">PROMOTIONAL</option>
                         <option value="TRANSACTIONAL">TRANSACTIONAL</option>
@@ -1319,23 +1317,23 @@ function GeneralCampaignsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Email Subject Line</label>
-                    <input
+                    <label htmlFor="single-email-subject" className="mb-2 block text-sm font-medium text-gray-700">Email subject line</label>
+                    <input id="single-email-subject"
                       type="text"
                       placeholder="e.g. Your Monthly Financial Statement is Ready"
                       value={singleSubject}
                       onChange={(e) => setSingleSubject(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+                      className="workspace-input w-full"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">HTML Email Content</label>
-                    <textarea
+                    <label htmlFor="single-email-html" className="mb-2 block text-sm font-medium text-gray-700">HTML email content</label>
+                    <textarea id="single-email-html"
                       rows={5}
                       value={singleHtml}
                       onChange={(e) => setSingleHtml(e.target.value)}
-                      className="w-full rounded-lg border border-gray-300 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+                      className="workspace-input w-full font-mono"
                     />
                   </div>
                 </div>
@@ -1346,37 +1344,36 @@ function GeneralCampaignsPage() {
                   type="button"
                   disabled={busy}
                   onClick={() => void handleCreateFromSingleForm()}
-                  className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50 transition-colors shadow-sm flex items-center justify-center gap-2"
+                  className="workspace-button-primary flex w-full items-center justify-center gap-2"
                 >
-                  {busy ? 'Staging Campaign…' : `Stage ${singleChannel} Campaign for Review →`}
+                  {busy ? 'Staging campaign…' : `Stage ${singleChannel} campaign for review`}
                 </button>
               </div>
             </section>
           </div>
 
           {/* Right Live Preview: 5 cols */}
-          <div className="lg:col-span-5 space-y-4 sticky top-6">
-            <h2 className="text-sm font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2">
-              <span>📱</span> Live Message Preview
-            </h2>
+          <aside aria-labelledby="message-preview-heading" className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:col-span-5">
+            <h2 id="message-preview-heading" className="text-base font-semibold text-gray-900">Message preview</h2>
+            <p className="text-sm leading-relaxed text-gray-600">Preview only. Staging saves a review queue in this app; a separate confirmation is required to save a MoEngage draft.</p>
 
             {singleChannel === 'WHATSAPP' && (
-              <div className="rounded-3xl border-4 border-gray-800 bg-[#EFEAE2] p-4 shadow-xl max-w-sm mx-auto overflow-hidden">
-                <div className="bg-[#075E54] text-white px-3 py-2 rounded-t-xl flex items-center gap-2 -m-4 mb-4">
-                  <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">WA</div>
+              <div className="workspace-panel min-w-0 overflow-hidden p-5">
+                <div className="mb-4 flex items-center gap-3 border-b border-gray-200 pb-4 text-gray-900">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold text-gray-700">WA</div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold truncate">{selectedWaSender?.name || 'Select a WhatsApp sender'}</div>
-                    <div className="text-[10px] text-emerald-200">{selectedWaSender?.provider || 'Workspace-scoped preview'}</div>
+                    <div className="break-words text-sm font-medium">{selectedWaSender?.name || 'Select a WhatsApp sender'}</div>
+                    <div className="text-sm text-gray-600">{selectedWaSender?.provider || 'Workspace-scoped preview'}</div>
                   </div>
                 </div>
 
-                <div className="bg-white rounded-lg p-3 shadow-xs space-y-2 text-xs text-gray-800 relative max-w-[90%]">
+                <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-800 [overflow-wrap:anywhere]">
                   {selectedWaTemplate ? (
                     <>
                       <div className="font-semibold text-gray-900">{selectedWaTemplate.display_name || selectedWaTemplate.name}</div>
-                      <p className="text-gray-700">Template: <code className="bg-gray-100 px-1 py-0.5 rounded text-[11px] font-mono">{selectedWaTemplate.id}</code></p>
-                      <p className="text-[11px] text-gray-600 whitespace-pre-wrap">{selectedWaTemplate.body?.replace(/\{\{\d+\}\}/g, (slot) => singleWaPlaceholders[slot] || slot) || 'The live template has no body text available for preview.'}</p>
-                      <p className="text-[10px] text-gray-400">Live template copy · Preview only, not sent</p>
+                      <p className="text-gray-700">Template: <code className="rounded bg-white px-1 py-0.5 font-mono text-xs">{selectedWaTemplate.id}</code></p>
+                      <p className="whitespace-pre-wrap text-sm text-gray-800">{selectedWaTemplate.body?.replace(/\{\{\d+\}\}/g, (slot) => singleWaPlaceholders[slot] || slot) || 'The live template has no body text available for preview.'}</p>
+                      <p className="text-xs text-gray-600">Live template copy · Preview only, not sent</p>
                     </>
                   ) : (
                     <p className="text-gray-500">Select a workspace, sender and approved template to preview its actual message body. No template selected.</p>
@@ -1386,21 +1383,21 @@ function GeneralCampaignsPage() {
             )}
 
             {singleChannel === 'PUSH' && (
-              <div className="rounded-3xl border-4 border-gray-800 bg-gray-100 p-4 shadow-xl max-w-sm mx-auto">
-                <div className="text-[11px] text-gray-500 font-semibold mb-2">Notification Center</div>
+              <div className="workspace-panel min-w-0 space-y-3 p-5">
+                <div className="text-sm font-medium text-gray-600">Notification preview</div>
                 <div className="bg-white rounded-xl p-3.5 shadow-sm border border-gray-200 flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
-                    TC
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold text-gray-700">
+                    {account === 'tata' ? 'TC' : 'BF'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between text-[11px] text-gray-500">
-                      <span className="font-bold text-gray-700 uppercase">Tata Capital</span>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                      <span className="font-medium text-gray-700">{account === 'tata' ? 'Tata Capital' : 'Bajaj Finserv'}</span>
                       <span>now</span>
                     </div>
-                    <div className="font-semibold text-gray-900 text-xs mt-0.5 truncate">
+                    <div className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold text-gray-900">
                       {singlePushTitle || 'Exclusive Offer Available'}
                     </div>
-                    <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">
+                    <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-600">
                       {singlePushMessage || 'Check your pre-qualified offer up to ₹ 90 lacs with instant approval.'}
                     </p>
                   </div>
@@ -1409,59 +1406,60 @@ function GeneralCampaignsPage() {
             )}
 
             {singleChannel === 'EMAIL' && (
-              <div className="rounded-2xl border border-gray-300 bg-white p-4 shadow-sm space-y-3">
-                <div className="border-b border-gray-200 pb-2 text-xs space-y-1">
+              <div className="workspace-panel min-w-0 space-y-4 p-5 [overflow-wrap:anywhere]">
+                <div className="space-y-2 border-b border-gray-200 pb-4 text-sm">
                   <div>
                     <span className="text-gray-500">From:</span>{' '}
-                    <span className="font-medium text-gray-900">Tata Capital &lt;{singleEmailSender || 'hello@info.tatacapital.co.in'}&gt;</span>
+                    <span className="font-medium text-gray-900">{singleEmailSender || 'No sender selected'}</span>
                   </div>
                   <div>
                     <span className="text-gray-500">Subject:</span>{' '}
-                    <span className="font-semibold text-gray-900">{singleSubject || 'Tata Capital Special Announcement'}</span>
+                    <span className="font-semibold text-gray-900">{singleSubject || 'No subject entered'}</span>
                   </div>
                 </div>
                 <div
-                  className="rounded-lg bg-gray-50 border border-gray-200 p-4 min-h-[160px] text-xs text-gray-800 prose prose-sm max-w-none"
+                  className="min-h-[160px] overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800 prose prose-sm max-w-none"
                   dangerouslySetInnerHTML={{ __html: singleHtml || '<p>Email preview will appear here.</p>' }}
                 />
               </div>
             )}
-          </div>
+          </aside>
         </div>
       )}
 
       {/* TAB 2: SPREADSHEET BATCH UPLOAD */}
       {activeTab === 'batch' && (
         <div className="space-y-6">
-          <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-xs space-y-4">
+          <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-bold text-gray-900">Bulk Upload — Review Rows — Create Drafts</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <h2 className="text-base font-semibold text-gray-900">1. Upload and preview your brief</h2>
+                <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-600">
                   Upload a <code>.csv</code> or <code>.xlsx</code> file. Every WhatsApp row requires its own exact <code>workspace</code> name or portal <code>workspace_id</code>; review each destination before creating.
                 </p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => downloadSampleCsv('all')}
-                  className="text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-100"
+                  className="workspace-button"
                 >
-                  📥 Download 3-Channel Sample CSV
+                  Download 3-channel sample CSV
                 </button>
               </div>
             </div>
 
-            <input
+            <label htmlFor="campaign-brief" className="block text-sm font-medium text-gray-700">Campaign brief · CSV or XLSX, up to 5 MiB</label>
+            <input id="campaign-brief"
               ref={fileRef}
               type="file"
               accept=".csv,.xlsx"
               disabled={busy}
               onChange={(e) => void chooseFile(e.target.files?.[0])}
-              className="block w-full text-sm file:mr-4 file:rounded-xl file:border-0 file:bg-blue-50 file:px-4 file:py-2.5 file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
+              className="workspace-input block w-full min-w-0 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:font-medium file:text-gray-800 hover:file:bg-gray-200"
             />
-            <button type="button" disabled={busy || loading || automatingWa} className="text-xs text-blue-700 underline disabled:opacity-50"
+            <button type="button" disabled={busy || loading || automatingWa} className="workspace-button"
               onClick={async () => {
                 if (busy || loading || automatingWa || createInFlight.current) return;
                 const id = localStorage.getItem(storageKey);
@@ -1485,12 +1483,12 @@ function GeneralCampaignsPage() {
           {/* Preview Section */}
           {preview?.account === account && (
             <section className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <div className="workspace-panel flex min-w-0 flex-wrap items-center justify-between gap-4 p-5">
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">
-                    Spreadsheet Preview · <span className="font-mono text-sm text-gray-600">{file?.name}</span>
+                  <h2 className="break-words text-base font-semibold text-gray-900">
+                    2. Review spreadsheet · <span className="font-mono text-sm text-gray-600">{file?.name}</span>
                   </h2>
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <p className="mt-2 text-sm text-gray-600">
                     Ready: <strong className="text-emerald-700">{preview.ready}</strong> · Blocked:{' '}
                     <strong className="text-rose-700">{preview.blocked}</strong> · WhatsApp destinations are shown per row.
                   </p>
@@ -1500,31 +1498,35 @@ function GeneralCampaignsPage() {
                   type="button"
                   disabled={busy}
                   onClick={() => void stage()}
-                  className="rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-800 disabled:opacity-50 transition-colors shadow-sm"
+                  className="workspace-button-primary"
                 >
-                  Stage Reviewed File →
+                  Stage reviewed file
                 </button>
               </div>
 
               {/* Channel Filter Chips */}
-              <div className="flex gap-2 text-xs font-semibold">
+              <div aria-label="Preview channel filter" className="flex flex-wrap gap-2 text-sm font-medium">
                 {(['ALL', 'WHATSAPP', 'EMAIL', 'PUSH'] as const).map((ch) => (
                   <button
                     key={ch}
                     type="button"
                     onClick={() => setFilterChannel(ch)}
-                    className={`px-3 py-1.5 rounded-lg border transition-colors ${
+                    aria-pressed={filterChannel === ch}
+                    className={`workspace-filter-chip ${
                       filterChannel === ch
-                        ? 'bg-blue-600 text-white border-blue-600'
+                        ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
                     {ch}
                   </button>
                 ))}
+                {filterChannel !== 'ALL' && <button type="button" className="workspace-button" onClick={() => setFilterChannel('ALL')}>Reset filter</button>}
+                <p className="self-center text-sm font-normal text-gray-600">{filteredPreviewItems.length} of {preview.items.length} rows</p>
               </div>
 
               <div className="space-y-4">
+                {filteredPreviewItems.length === 0 && <div className="workspace-empty"><p className="font-medium text-gray-900">{preview.items.length ? `No ${filterChannel.toLowerCase()} campaigns in this preview.` : 'No campaign rows found in this brief.'}</p><p className="mt-2 text-sm text-gray-600">{preview.items.length ? 'Choose another channel or show all rows.' : 'Check the sample format and upload a brief containing campaign rows.'}</p>{filterChannel !== 'ALL' && <button type="button" className="workspace-button mt-4" onClick={() => setFilterChannel('ALL')}>Reset channel filter</button>}</div>}
                 {filteredPreviewItems.map((row, index) => (
                   <RowCard key={`${row.source_ref}:${row.row_id}:${index}`} row={row} batch={false} busy={busy} uncertain={false} onCreate={createRow} templateBody={reviewBodies[`${row.workspace_id}:${row.candidate_v5_payload?.campaign_content?.content?.whatsapp?.template_id}`]} />
                 ))}
@@ -1533,16 +1535,16 @@ function GeneralCampaignsPage() {
           )}
 
           {/* Staged Batch Queue Section */}
-          {loading && <p className="text-center text-sm text-gray-500 py-6">Loading saved batch…</p>}
+          {loading && <p role="status" className="workspace-guide py-5 text-sm text-gray-600">Loading saved batch…</p>}
 
           {batchScope === storageKey && batch?.account === account && (
             <section className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+              <div className="workspace-panel flex min-w-0 flex-wrap items-center justify-between gap-4 p-5">
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">
-                    Campaign Results
+                  <h2 className="text-base font-semibold text-gray-900">
+                    3. Save and verify drafts
                   </h2>
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <p className="mt-2 break-words text-sm text-gray-600">
                     Source: <span className="font-mono">{batch.source_ref}</span> · Ready:{' '}
                     <strong className="text-emerald-700">{batch.ready}</strong> · Blocked:{' '}
                     <strong className="text-rose-700">{batch.blocked}</strong>
@@ -1550,18 +1552,18 @@ function GeneralCampaignsPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" disabled={busy || automatingWa} className="rounded-xl border border-blue-600 px-4 py-2 text-xs font-bold text-blue-700 disabled:opacity-50"
+                  <button type="button" disabled={busy || automatingWa} className="workspace-button"
                     onClick={() => {
                       setBatch(null); setBatchScope(''); setPreview(null); setFile(null); setNotice(''); setError('');
                       const url = new URL(window.location.href); url.searchParams.delete('batch');
                       window.history.replaceState(null, '', url.toString());
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                      window.scrollTo({ top: 0, behavior: 'auto' });
                     }}>New bulk upload</button>
                   <button
                     type="button"
                     disabled={busy || loading || automatingWa}
                     onClick={() => void removeBatch()}
-                    className="rounded-xl border border-rose-300 px-4 py-2 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                    className="workspace-button border-rose-200 text-rose-700 hover:bg-rose-50"
                   >
                     Remove batch
                   </button>
@@ -1570,40 +1572,45 @@ function GeneralCampaignsPage() {
                       type="button"
                       disabled={busy || automatingWa}
                       onClick={() => void handleAutomateWhatsApp()}
-                      className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 text-xs font-bold disabled:opacity-50 transition-colors shadow-xs flex items-center gap-1.5"
+                      className="workspace-button-primary"
                     >
-                      {automatingWa ? 'Creating Sequentially & Verifying…' : 'Create Ready WhatsApp Drafts Sequentially'}
+                      {automatingWa ? 'Saving and verifying sequentially…' : 'Save ready WhatsApp drafts sequentially'}
                     </button>
                   )}
                   <button
                     type="button"
                     disabled={busy || automatingWa}
                     onClick={() => void refreshBatch()}
-                    className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    className="workspace-button"
                   >
-                    🔄 Refresh Stored State
+                    Refresh stored state
                   </button>
                 </div>
               </div>
               {/* Channel Filter Chips */}
-              <div className="flex gap-2 text-xs font-semibold">
+              <p className="workspace-guide text-sm leading-relaxed text-gray-700">Staged rows are not yet remote drafts. Save only reviewed, ready rows. If a result is uncertain, refresh stored state and reconcile in MoEngage before any further creation; a refresh never retries creation.</p>
+              <div aria-label="Saved batch channel filter" className="flex flex-wrap gap-2 text-sm font-medium">
                 {(['ALL', 'WHATSAPP', 'EMAIL', 'PUSH'] as const).map((ch) => (
                   <button
                     key={ch}
                     type="button"
                     onClick={() => setFilterChannel(ch)}
-                    className={`px-3 py-1.5 rounded-lg border transition-colors ${
+                    aria-pressed={filterChannel === ch}
+                    className={`workspace-filter-chip ${
                       filterChannel === ch
-                        ? 'bg-blue-600 text-white border-blue-600'
+                        ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
                     {ch}
                   </button>
                 ))}
+                {filterChannel !== 'ALL' && <button type="button" className="workspace-button" onClick={() => setFilterChannel('ALL')}>Reset filter</button>}
+                <p className="self-center text-sm font-normal text-gray-600">{filteredBatchItems.length} of {batch.items.length} rows</p>
               </div>
 
               <div className="space-y-4">
+                {filteredBatchItems.length === 0 && <div className="workspace-empty"><p className="font-medium text-gray-900">{batch.items.length ? `No ${filterChannel.toLowerCase()} campaigns in this batch.` : 'No campaigns in this saved batch.'}</p><p className="mt-2 text-sm text-gray-600">{batch.items.length ? 'The other channel rows are unchanged. Show all rows to continue reviewing.' : 'Start a new bulk upload to review a campaign brief.'}</p>{filterChannel !== 'ALL' && <button type="button" className="workspace-button mt-4" onClick={() => setFilterChannel('ALL')}>Reset channel filter</button>}</div>}
                 {filteredBatchItems.map((row, index) => (
                   <RowCard
                     key={`${row.source_ref}:${row.row_id}:${index}`}
@@ -1624,8 +1631,8 @@ function GeneralCampaignsPage() {
       {/* TAB 3: SAMPLE TEMPLATES & DOCUMENTATION */}
       {activeTab === 'templates' && (
         <div className="space-y-6">
-          <section className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-            <h2 className="text-base font-bold text-gray-900">One-Click Sample CSV Templates</h2>
+          <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
+            <h2 className="text-base font-semibold text-gray-900">Sample CSV templates</h2>
             <p className="text-sm text-gray-600">
               Replace all sample placeholders before upload. Every WhatsApp row requires an explicit workspace and that workspace&apos;s audience, sender and approved template IDs; there is no default destination.
             </p>
@@ -1634,49 +1641,45 @@ function GeneralCampaignsPage() {
               <button
                 type="button"
                 onClick={() => downloadSampleCsv('all')}
-                className="p-4 rounded-xl border border-blue-200 bg-blue-50/50 hover:bg-blue-100/50 text-left transition-colors"
+                className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-2xl mb-1">📦</div>
-                <div className="font-bold text-sm text-blue-900">Combined 3-Channel</div>
-                <div className="text-xs text-blue-700 mt-1">WhatsApp + Push + Email</div>
+                <div className="text-sm font-semibold text-gray-900">Combined 3-channel</div>
+                <div className="mt-2 text-sm font-normal text-gray-600">WhatsApp + Push + Email</div>
               </button>
 
               <button
                 type="button"
                 onClick={() => downloadSampleCsv('whatsapp')}
-                className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 hover:bg-emerald-100/50 text-left transition-colors"
+                className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-2xl mb-1">💬</div>
-                <div className="font-bold text-sm text-emerald-900">WhatsApp Only</div>
-                <div className="text-xs text-gray-500 mt-1">Workspace-approved Senders</div>
+                <div className="text-sm font-semibold text-gray-900">WhatsApp only</div>
+                <div className="mt-2 text-sm font-normal text-gray-600">Workspace-approved senders</div>
               </button>
 
               <button
                 type="button"
                 onClick={() => downloadSampleCsv('push')}
-                className="p-4 rounded-xl border border-purple-200 bg-purple-50/50 hover:bg-purple-100/50 text-left transition-colors"
+                className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-2xl mb-1">🔔</div>
-                <div className="font-bold text-sm text-purple-900">Push Only</div>
-                <div className="text-xs text-purple-700 mt-1">Android App Push</div>
+                <div className="text-sm font-semibold text-gray-900">Push only</div>
+                <div className="mt-2 text-sm font-normal text-gray-600">Android app push</div>
               </button>
 
               <button
                 type="button"
                 onClick={() => downloadSampleCsv('email')}
-                className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50 hover:bg-indigo-100/50 text-left transition-colors"
+                className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-2xl mb-1">✉️</div>
-                <div className="font-bold text-sm text-indigo-900">Email Only</div>
-                <div className="text-xs text-indigo-700 mt-1">SendGrid HTML</div>
+                <div className="text-sm font-semibold text-gray-900">Email only</div>
+                <div className="mt-2 text-sm font-normal text-gray-600">SendGrid HTML</div>
               </button>
             </div>
           </section>
 
-          <section className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs space-y-4">
-            <h2 className="text-base font-bold text-gray-900">Spreadsheet Column Specifications</h2>
+          <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
+            <h2 className="text-base font-semibold text-gray-900">Spreadsheet column specifications</h2>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
+              <table className="w-full min-w-[640px] border-collapse text-left text-sm">
                 <thead>
                   <tr className="border-b border-gray-200 bg-gray-50 font-bold text-gray-700">
                     <th className="p-2.5">Column Header</th>

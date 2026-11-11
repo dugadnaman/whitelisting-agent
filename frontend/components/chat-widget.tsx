@@ -277,15 +277,12 @@ export default function ChatWidget() {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-4 py-2.5 bg-gray-900 hover:bg-black text-white text-xs font-semibold rounded-full shadow-2xl transition-all hover:scale-105 border border-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          className="fixed bottom-5 right-4 sm:right-6 z-40 workspace-button shadow-sm"
           aria-label="Open AI Copilot"
         >
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-          </span>
+          <svg aria-hidden="true" className="h-4 w-4 text-blue-700" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 4h14v10H8l-5 3V4Z" /></svg>
           <span>AI Copilot</span>
-          <kbd className="hidden sm:inline-block px-1.5 py-0.5 bg-gray-800 text-[10px] text-gray-300 rounded font-mono border border-gray-700">
+          <kbd className="hidden sm:inline-block px-1.5 py-0.5 bg-gray-50 text-xs text-gray-500 rounded font-mono border border-gray-200">
             ⌘K
           </kbd>
         </button>
@@ -293,7 +290,7 @@ export default function ChatWidget() {
 
       {/* Slide-over Agent Drawer */}
       {isOpen && (
-        <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white shadow-2xl border-l border-gray-200 flex flex-col transition-all duration-300 animate-in slide-in-from-right">
+        <div role="complementary" aria-label="AI Copilot" className="workspace-page fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white shadow-xl border-l border-gray-200 flex flex-col">
           {/* Header */}
           <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/70">
             <div className="flex items-center gap-2.5">
@@ -301,13 +298,8 @@ export default function ChatWidget() {
                 AI
               </div>
               <div>
-                <h3 className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
-                  Karix Whitelisting Agent
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    Live
-                  </span>
-                </h3>
-                <p className="text-[11px] text-gray-500 truncate max-w-[240px]">
+                <h3 className="text-sm font-semibold text-gray-900">AI Copilot</h3>
+                <p className="text-xs text-gray-500 truncate max-w-[240px]">
                   {getAccountLabel(account)} • {channel.toUpperCase()}
                 </p>
               </div>
@@ -316,6 +308,7 @@ export default function ChatWidget() {
               <button
                 onClick={handleClearHistory}
                 title="Clear Chat History"
+                aria-label="Clear chat history"
                 className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md text-xs transition"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -325,6 +318,7 @@ export default function ChatWidget() {
               <button
                 onClick={() => setIsOpen(false)}
                 title="Close Drawer (Esc)"
+                aria-label="Close AI Copilot"
                 className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-md text-xs transition"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -471,7 +465,8 @@ export default function ChatWidget() {
                   placeholder="e.g. Check why loan_oct_01 was rejected, fix it, and resubmit..."
                   rows={2}
                   disabled={loading}
-                  className="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none font-sans"
+                  aria-label="Message AI Copilot"
+                  className="workspace-input resize-none font-sans"
                 />
                 <span className="absolute bottom-1.5 right-2 text-[10px] text-gray-400 select-none">
                   ↵ Send
@@ -479,6 +474,7 @@ export default function ChatWidget() {
               </div>
               <button
                 type="submit"
+                aria-label="Send message"
                 disabled={!input.trim() || loading}
                 className="h-10 px-3.5 bg-gray-900 hover:bg-black disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-lg text-xs font-semibold flex items-center justify-center transition shadow-sm"
               >

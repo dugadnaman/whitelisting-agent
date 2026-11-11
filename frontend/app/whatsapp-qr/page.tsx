@@ -48,84 +48,64 @@ export default function WhatsAppQrPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full border border-gray-200 overflow-hidden text-center p-6 sm:p-8 space-y-6">
-        <div className="flex items-center justify-center gap-2">
-          <span className="text-3xl">📱</span>
-          <h1 className="text-xl font-bold text-gray-900">WhatsApp SLA Gateway</h1>
-        </div>
+    <main className="workspace-page min-h-screen bg-gray-50 px-4 py-8 sm:px-6 sm:py-12">
+      <div className="mx-auto w-full max-w-2xl space-y-6">
+        <header className="space-y-2">
+          <p className="workspace-eyebrow">Work management · SLA alerts</p>
+          <h1 className="workspace-heading">Connect WhatsApp gateway</h1>
+          <p className="workspace-description">Link the phone used by the SLA gateway. This connection is separate from your Karix campaign credentials.</p>
+        </header>
 
-        {loading ? (
-          <div className="py-12 text-sm text-gray-500 animate-pulse">
-            Connecting to WhatsApp Gateway...
-          </div>
-        ) : status?.connected ? (
-          <div className="space-y-4 py-6">
-            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-3xl mx-auto shadow-inner">
-              ✓
+        <section className="workspace-panel rounded-xl border border-gray-200 bg-white p-5 sm:p-8 space-y-6" aria-label="Gateway connection">
+          {loading ? (
+            <p role="status" className="py-12 text-center text-sm text-gray-600">Checking the WhatsApp gateway…</p>
+          ) : status?.connected ? (
+            <div className="space-y-4">
+              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800" role="status">WhatsApp linked</span>
+              <h2 className="text-lg font-semibold text-gray-900">Your gateway is connected</h2>
+              <p className="text-sm text-gray-600 break-words">Connected as <strong className="text-gray-900">{status.user?.name || status.user?.id || 'a WhatsApp user'}</strong>.</p>
+              <p className="text-sm text-gray-600">Return to Work Management to manage SLA work and alert settings.</p>
+              <a href="/work-management" className="workspace-button-primary inline-flex">Go to Work Management</a>
             </div>
-            <div>
-              <span className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 mb-2">
-                Connected &amp; Active
-              </span>
-              <h2 className="text-lg font-bold text-gray-900">WhatsApp Linked Successfully</h2>
-              <p className="text-xs text-gray-500 mt-1">
-                Connected as: <strong className="text-gray-800">{status.user?.name || status.user?.id || 'Connected User'}</strong>
-              </p>
-            </div>
-            <p className="text-xs text-emerald-700 bg-emerald-50/60 p-3 rounded-xl border border-emerald-100">
-              Your SLA alerts will dispatch autonomously to <strong>Internal_TCL&lt;&gt;Att</strong> at 10:00 AM, 1:00 PM, and 4:00 PM IST.
-            </p>
-            <a
-              href="/work-management"
-              className="inline-block px-5 py-2.5 bg-gray-900 hover:bg-black text-white text-xs font-bold rounded-xl transition shadow"
-            >
-              Go to Work Management &rarr;
-            </a>
-          </div>
-        ) : (
-          <div className="space-y-5">
-            <div className="text-left bg-gray-50 p-3.5 rounded-xl border border-gray-200 text-xs text-gray-600 space-y-1.5">
-              <span className="font-bold text-gray-900 block mb-1">How to Link:</span>
-              <ol className="list-decimal pl-4 space-y-1">
-                <li>Open <strong>WhatsApp</strong> on your phone</li>
-                <li>Tap <strong>Settings / Menu (⋮)</strong> &rarr; <strong>Linked Devices</strong></li>
-                <li>Tap <strong>Link a Device</strong></li>
-                <li>Scan the QR code below:</li>
-              </ol>
-            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="workspace-guide space-y-3">
+                <h2 className="text-sm font-semibold text-gray-900">Link your phone</h2>
+                <ol className="list-decimal pl-5 space-y-2 text-sm leading-relaxed text-gray-600">
+                  <li>Open WhatsApp on the phone you want to link.</li>
+                  <li>Open <strong>Settings / Menu (⋮)</strong>, then <strong>Linked Devices</strong>.</li>
+                  <li>Tap <strong>Link a Device</strong> and scan the QR code below.</li>
+                </ol>
+              </div>
 
-            <div className="w-64 h-64 mx-auto bg-gray-50 border border-gray-200 rounded-2xl flex items-center justify-center p-3 shadow-inner">
-              {qr?.qr_image ? (
-                <img src={qr.qr_image} alt="Scan QR Code" className="w-full h-full object-contain rounded-xl" />
-              ) : (
-                <div className="text-xs text-gray-400 p-4">
-                  {status?.status === 'OFFLINE' ? (
-                    <div className="space-y-1">
-                      <p className="font-bold text-amber-700">Gateway Offline</p>
-                      <p className="text-[11px] text-gray-500">The gateway container is starting up...</p>
-                    </div>
-                  ) : (
-                    'Generating pairing QR code...'
-                  )}
+              {(status?.error || qr?.error || !status?.ok || qr?.ok === false) && (
+                <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 break-words">
+                  <p className="font-semibold">Gateway connection unavailable</p>
+                  <p className="mt-1">{status?.error || qr?.error || 'The gateway could not provide a connection. Check that the gateway is running, then refresh its status.'}</p>
                 </div>
               )}
-            </div>
 
-            <div className="text-[11px] text-gray-400">
-              Auto-refreshing every 4 seconds • Status: <strong>{status?.status || 'INITIALIZING'}</strong>
+              <div className="mx-auto flex aspect-square w-full max-w-64 items-center justify-center rounded-xl border border-gray-200 bg-white p-3">
+                {status?.ok && qr?.ok && qr.qr_image ? (
+                  <img src={qr.qr_image} alt="WhatsApp pairing QR code. Scan from Linked Devices on your phone." className="w-full h-full object-contain" />
+                ) : (
+                  <p role="status" className="p-4 text-center text-sm leading-relaxed text-gray-600">
+                    {!status?.ok || qr?.ok === false ? 'QR code unavailable until the gateway responds.' : qr?.message || 'Waiting for the gateway to provide a pairing QR code…'}
+                  </p>
+                )}
+              </div>
+              <p className="text-sm text-gray-500 text-center">Keep this page open. The connection is checked every 4 seconds.</p>
             </div>
+          )}
 
-            <button
-              type="button"
-              onClick={checkConnection}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold rounded-lg transition"
-            >
-              🔄 Refresh Status
-            </button>
-          </div>
-        )}
+          {!loading && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4">
+              <p className="text-sm text-gray-600 break-words">Gateway status: <strong className="font-medium text-gray-900">{status?.status || 'Unknown'}</strong></p>
+              <button type="button" onClick={checkConnection} className="workspace-button">Refresh status</button>
+            </div>
+          )}
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
