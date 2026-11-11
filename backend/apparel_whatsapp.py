@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from apparel_whatsapp_brief import read_brief, tracking_window
+from campaign_names import normalize_campaign_name
 
 NO_GOALS = frozenset({"Crocs", "AGIPL", "R&B", "CK"})
 OVERRIDES = frozenset({"campaign_name", "segment_name", "exclude_segment_name", "scheduled_at", "whatsapp_template_id", "whatsapp_placeholders", "whatsapp_image_url", "whatsapp_cta_links"})
@@ -352,6 +353,7 @@ def prepare_source(filename: str | None, data: bytes | None, spreadsheet_url: st
         if not isinstance(values, dict) or set(values) - OVERRIDES or any(not isinstance(value, str) or len(value) > 20000 for value in values.values()):
             raise ValueError("Only supported string-valued campaign fields can be reviewed")
         row.update(values, workspace_id=info["workspace_id"], goal_reference_id=str(options.get("reference_campaign_id") or ""), whatsapp_name_attribute=str(options.get("name_attribute") or ""))
+        row["campaign_name"] = normalize_campaign_name(str(row.get("campaign_name") or ""))
     base = load_server_catalog("apparel")
     result = prepare_routed_batch(rows, "apparel", user, base, source_type="apparel_whatsapp_brief")
     digest = hashlib.sha256(json.dumps(

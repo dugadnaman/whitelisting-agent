@@ -21,6 +21,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from openpyxl import load_workbook
 
+from cta import resolve_cta_url
+from campaign_names import normalize_campaign_name, require_campaign_name
+
 _ROW_FIELDS = frozenset({
     "account", "workspace_id", "workspace", "source_ref", "row_id", "channel", "campaign_name",
     "segment_id", "segment_name", "scheduled_at", "timezone", "created_by",
@@ -384,9 +387,15 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
             other_fields = frozenset()
         if channel in ("EMAIL", "PUSH", "WHATSAPP") and any(row.get(field) not in (None, "", []) for field in other_fields):
             errors.append("Row contains non-empty fields for another channel")
-        name = _text(row, "campaign_name")
+        name = normalize_campaign_name(_text(row, "campaign_name"))
         if not name:
             errors.append("campaign_name is required; Jira summary is not campaign copy")
+        else:
+            try:
+                require_campaign_name(name)
+            except ValueError as exc:
+                errors.append(str(exc))
+        row = {**row, "campaign_name": name}
         if account == "apparel":
             from apparel_whatsapp import prepare_audience
             audience = prepare_audience(row, catalog, warnings)
@@ -404,6 +413,8 @@ def prepare_batch(rows: list[Any], account: str, catalog: dict[str, Any], creato
         if channel == "EMAIL":
             content = _email(row, catalog, name, errors)
         elif channel == "PUSH":
+            if _https_url(_text(row, "click_url")):
+                row = {**row, "click_url": resolve_cta_url(_text(row, "click_url"), account)}
             content = _push(row, catalog, name, errors)
         elif channel == "WHATSAPP":
             content = _whatsapp(row, catalog, name, errors)

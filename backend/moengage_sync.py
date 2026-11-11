@@ -21,6 +21,7 @@ from typing import Any
 import requests
 
 from config import _account_prefix, _load_env_file
+from cta import resolve_cta_url
 from rcs_config import APPAREL_RCS_WORKSPACE_BOTS
 
 logger = logging.getLogger(__name__)
@@ -134,6 +135,8 @@ def _rcs_workspace_context(account: str, workspace_id: str | None = None):
         if bot_id:
             cfg = {**cfg, "bot_id": bot_id, "sender_id": bot_id}
     return cfg, get_moengage_auth_headers_from_config(cfg)
+
+
 
 
 def check_moengage_session(
@@ -427,6 +430,38 @@ def _normalize_rcs_placeholders(text: str) -> str:
     )
 
 
+def _moengage_rcs_suggestions(raw_suggestions: list[dict], account: str, default_url: str) -> list[dict]:
+    suggestions = []
+    for suggestion in raw_suggestions:
+        kind = suggestion.get("suggestionType") or suggestion.get("type") or (
+            "url_action" if suggestion.get("url") else
+            "dialer_action" if suggestion.get("phoneNumber") or suggestion.get("phone_number") else "reply"
+        )
+        text = (suggestion.get("text") or suggestion.get("postbackData") or suggestion.get("postback_data") or "Explore")[:25]
+        action = {
+            "type": "REPLY",
+            "text": text,
+            "postback_data": suggestion.get("postbackData") or suggestion.get("postback_data") or text,
+        }
+        if kind in ("url_action", "OPEN_URL"):
+            url = resolve_cta_url(suggestion.get("url") or default_url, account)
+            if not url:
+                continue
+            action.update(
+                type="OPEN_URL",
+                url=url,
+                application="BROWSER",
+                webview_view_mode="",
+            )
+        elif kind in ("dialer_action", "DIAL_PHONE"):
+            action.update(
+                type="DIAL_PHONE",
+                phone_number=suggestion.get("phoneNumber") or suggestion.get("phone_number") or "+919999999999",
+            )
+        suggestions.append(action)
+    return suggestions
+
+
 def create_moengage_rcs_template(
     template_name: str,
     template_id: str,
@@ -443,6 +478,7 @@ def create_moengage_rcs_template(
     height: str = "MEDIUM",
     workspace_id: str | None = None,
     *,
+    suggestions: list[dict[str, Any]] | None = None,
     _context=None,
 ) -> dict[str, Any]:
     """
@@ -456,25 +492,20 @@ def create_moengage_rcs_template(
 
     resolved_sender = _resolve_rcs_sender(account, cfg, headers, sender_id)
 
-    resolved_cta_url = (cta_url or "").strip()
-    if account.strip().lower() != "apparel" and (
-        not resolved_cta_url or resolved_cta_url in ("https://u3.mnge.co/", "https://www.tatacapital.com")
-    ):
-        resolved_cta_url = "https://www.tatacapital.com"
-
-    suggestions = []
-    if resolved_cta_url:
-        resolved_cta_text = (cta_text or ("Visit Store" if account.lower() == "apparel" else "Explore Now"))[:25]
-        suggestions.append(
-            {
-                "type": "OPEN_URL",
-                "text": resolved_cta_text,
-                "postback_data": resolved_cta_text[:120],
-                "url": resolved_cta_url.strip(),
-                "application": "BROWSER",
-                "webview_view_mode": "",
-            }
-        )
+    resolved_cta_url = resolve_cta_url(cta_url or "", account)
+    resolved_cta_text = (cta_text or ("Visit Store" if account.lower() == "apparel" else "Explore Now"))[:25]
+    default_suggestions = [{
+        "type": "OPEN_URL",
+        "text": resolved_cta_text,
+        "postback_data": resolved_cta_text[:120],
+        "url": resolved_cta_url,
+        "application": "BROWSER",
+        "webview_view_mode": "",
+    }] if resolved_cta_url else []
+    standalone_suggestions = (
+        _moengage_rcs_suggestions(suggestions, account, resolved_cta_url)
+        if suggestions is not None else default_suggestions
+    )
 
     clean_media_url = (media_url or "").strip()
     is_carousel = (template_type or "").lower() == "carousel" or bool(carousel_cards and len(carousel_cards) >= 2)
@@ -501,47 +532,11 @@ def create_moengage_rcs_template(
             c_desc = (card.get("cardDescription") or card.get("description") or card.get("card_description") or card.get("body") or "")[:2000]
             c_media = card.get("mediaUrl") or card.get("media_url") or clean_media_url
 
-            card_suggs = []
             raw_suggs = card.get("suggestions", [])
-            if raw_suggs and isinstance(raw_suggs, list):
-                for s in raw_suggs:
-                    s_type = s.get("suggestionType") or s.get("type", "url_action")
-                    s_text = (s.get("text") or s.get("postbackData") or s.get("postback_data") or "Explore")[:25]
-                    s_url = s.get("url") or resolved_cta_url
-                    if s_type in ("url_action", "OPEN_URL") or s.get("url"):
-                        if not s_url.strip():
-                            continue
-                        card_suggs.append({
-                            "type": "OPEN_URL",
-                            "text": s_text,
-                            "postback_data": s.get("postbackData") or s_text,
-                            "url": s_url.strip(),
-                            "application": "BROWSER",
-                            "webview_view_mode": "",
-                        })
-                    elif s_type in ("dialer_action", "DIAL_PHONE") or s.get("phoneNumber"):
-                        card_suggs.append({
-                            "type": "DIAL_PHONE",
-                            "text": s_text,
-                            "postback_data": s.get("postbackData") or s_text,
-                            "phone_number": s.get("phoneNumber") or s.get("phone_number") or "+919999999999",
-                        })
-                    else:
-                        card_suggs.append({
-                            "type": "REPLY",
-                            "text": s_text,
-                            "postback_data": s.get("postbackData") or s_text,
-                        })
-
-            if not card_suggs and resolved_cta_url:
-                card_suggs.append({
-                    "type": "OPEN_URL",
-                    "text": resolved_cta_text,
-                    "postback_data": resolved_cta_text[:120],
-                    "url": resolved_cta_url.strip(),
-                    "application": "BROWSER",
-                    "webview_view_mode": "",
-                })
+            card_suggs = (
+                _moengage_rcs_suggestions(raw_suggs, account, resolved_cta_url)
+                if raw_suggs and isinstance(raw_suggs, list) else default_suggestions
+            )
 
             card_obj = {
                 "title": c_title,
@@ -606,7 +601,7 @@ def create_moengage_rcs_template(
                         "media_type": "STATIC",
                         "media_url": clean_media_url,
                     },
-                    "suggestions": suggestions,
+                    "suggestions": standalone_suggestions,
                 },
             },
         }
@@ -814,6 +809,7 @@ def sync_karix_rcs_to_moengage(
                 carousel_cards=carousel_cards if is_carousel else None,
                 width=vi.get("width") or "MEDIUM",
                 height=vi.get("height") or "MEDIUM",
+                suggestions=suggestions if not is_carousel else None,
                 **({"_context": context} if context else {}),
             )
             created.append({

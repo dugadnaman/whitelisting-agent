@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useApp } from '@/lib/context';
 import { canUseApparelAttribution } from '@/lib/apparel-attribution';
+import { CAMPAIGN_NAME_HINT, campaignRowName, normalizeCampaignName } from '@/lib/campaign-name';
 import {
   fetchApparelWhatsAppCatalog, previewApparelWhatsAppBrief, stageApparelWhatsAppBrief,
   fetchMoEngageDraftBatch, createMoEngageDraftRow, reconcileMoEngageDraftRow, uploadApparelWhatsAppImage, MoEngageDraftRequestError,
@@ -71,7 +72,10 @@ function Workspace({ userId }: { userId: string }) {
   const options: ApparelWhatsAppOptions = {
     brand, columns: columns.trim() ? columns.toUpperCase().split(/[\s,]+/).filter(Boolean) : undefined,
     reference_campaign_id: noGoals ? undefined : reference || undefined,
-    name_attribute: nameAttribute || undefined, overrides,
+    name_attribute: nameAttribute || undefined,
+    overrides: Object.fromEntries(Object.entries(overrides).map(([column, fields]) => [
+      column, fields.campaign_name === undefined ? fields : { ...fields, campaign_name: normalizeCampaignName(fields.campaign_name) },
+    ])),
   };
   const invalidate = () => {
     revision.current += 1;
@@ -311,7 +315,7 @@ function Workspace({ userId }: { userId: string }) {
           const choices = driveChoices[column];
           const showChoices = choices?.brand === brand && choices.source === creativeUrl;
           return <details key={`${row.source_ref}:${row.row_id}`} open className="rounded-lg border border-gray-200 p-4">
-            <summary className="cursor-pointer font-semibold">{row.row_id} · {fields.campaign_name || 'Unnamed campaign'} · {row.status === 'preview_ready' ? 'Ready to save as draft' : 'Cannot save this row'}</summary>
+            <summary className="cursor-pointer font-semibold">{row.row_id} · {campaignRowName(row) || 'Unnamed campaign'} · {row.status === 'preview_ready' ? 'Ready to save as draft' : 'Cannot save this row'}</summary>
             <dl className="my-3 grid gap-2 text-sm md:grid-cols-2">{[
               ['Physical column', column.split('!').pop() || column], ['Template', fields.whatsapp_template_id], ['Sender phone', fields.whatsapp_sender],
               ['Include', fields.segment_name], ['Exclude', fields.exclude_segment_name], ['Planned time', fields.scheduled_at || [fields.send_date, fields.send_time].filter(Boolean).join(' · ')],
@@ -325,7 +329,15 @@ function Workspace({ userId }: { userId: string }) {
             {Boolean(row.warnings?.length) && <div className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900"><p className="font-semibold">Complete in MoEngage — draft saving is allowed</p><ul className="mt-1 list-inside list-disc">{row.warnings?.map((warning, index) => <li key={index}>{warning}</li>)}</ul></div>}
             <details><summary className="cursor-pointer text-sm font-semibold">Edit campaign details and creative</summary><div className="mt-3 grid gap-3 md:grid-cols-2">
               {editableFields.map((field) => <label key={field} className="block text-xs">{fieldLabels[field]}{field.endsWith('links') || field.endsWith('placeholders') ? ' (JSON)' : ''}
-                <textarea className={input} rows={2} value={overrides[column]?.[field] ?? fields[field] ?? ''} onChange={(event) => { const value = event.target.value; invalidate(); setOverrides((old) => ({ ...old, [column]: { ...old[column], [field]: value } })); }} />
+                <textarea className={input} rows={2} value={overrides[column]?.[field] ?? fields[field] ?? ''} onChange={(event) => { const value = event.target.value; invalidate(); setOverrides((old) => ({ ...old, [column]: { ...old[column], [field]: value } })); }}
+                  aria-describedby={field === 'campaign_name' ? `campaign-name-rule-${column}` : undefined}
+                  onBlur={field === 'campaign_name' ? (event) => {
+                    const value = normalizeCampaignName(event.target.value);
+                    if (value === event.target.value) return;
+                    invalidate();
+                    setOverrides((old) => ({ ...old, [column]: { ...old[column], campaign_name: value } }));
+                  } : undefined} />
+                {field === 'campaign_name' && <p id={`campaign-name-rule-${column}`} className="mt-1 text-xs text-gray-500">{CAMPAIGN_NAME_HINT}</p>}
               </label>)}
               <div className="space-y-3 rounded-lg border border-gray-200 p-3 text-sm md:col-span-2">
                 <p className="font-semibold">Explicit creative upload / Drive resolution</p>
@@ -366,7 +378,7 @@ function Workspace({ userId }: { userId: string }) {
         {allVerified && <p role="status" className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">All {batch.items.length} drafts are saved and verified in MoEngage. Nothing was published, sent or activated.</p>}
         {halted && <p role="alert" className="text-sm text-amber-800">Creation stopped after an uncertain or unknown result. Reconcile with MoEngage before any further action. Reading the batch does not retry creation.</p>}
         <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">Column / campaign</th><th className="p-2">Status / issues</th><th className="p-2">Real campaign ID</th><th className="p-2">Readback</th></tr></thead><tbody>{batch.items.map((row) => <tr key={row.row_id} className="border-t">
-          <td className="p-2">{row.row_id}<br />{row.source_fields?.campaign_name}</td><td className="p-2">{row.status}<br />{row.issue || row.issues.join('; ')}{Boolean(row.warnings?.length) && <p className="mt-1 text-amber-800">Complete in MoEngage: {row.warnings?.join('; ')}</p>}</td><td className="break-all p-2">{row.campaign_id || '—'}</td>
+          <td className="p-2">{row.row_id}<br />{campaignRowName(row)}</td><td className="p-2">{row.status}<br />{row.issue || row.issues.join('; ')}{Boolean(row.warnings?.length) && <p className="mt-1 text-amber-800">Complete in MoEngage: {row.warnings?.join('; ')}</p>}</td><td className="break-all p-2">{row.campaign_id || '—'}</td>
           <td className="p-2">{row.status === 'CREATED' && row.campaign_id && <button type="button" className={button} disabled={Boolean(busy)} onClick={() => void run('Rechecking saved draft read-only', async (version) => {
             const result = validateBatch(await createMoEngageDraftRow(batch.batch_id, row.row_id, 'apparel'), batch.batch_id);
             if (!current(version)) return;

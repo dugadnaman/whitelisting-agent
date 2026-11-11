@@ -150,7 +150,7 @@ def test_url_action_validation():
 
     invalid_suggs = [{"suggestionType": "url_action", "text": "Bad", "url": "javascript:alert(1)"}]
     with pytest.raises(ValueError, match="absolute HTTP"):
-        _build_rcs_clean_suggestions(invalid_suggs, 1, [])
+        _build_rcs_clean_suggestions(invalid_suggs, 1, [], client="bajaj")
 
 
 def test_carousel_card_count_limits(monkeypatch):

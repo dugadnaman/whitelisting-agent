@@ -13,6 +13,7 @@ from typing import Any
 
 import requests
 
+from campaign_names import require_campaign_name
 from moengage_draft_batches import DraftBatchQueue
 from moengage_draft_creation import RateLimitError, load_server_catalog
 from moengage_drafts import authorize_draft_account
@@ -126,6 +127,8 @@ class WhatsAppDraftWriter:
         return prepared
 
     def create(self, payload: dict[str, Any], *, idempotency_key: str) -> dict[str, Any]:
+        details = payload.get("basic_details") if isinstance(payload, dict) else None
+        require_campaign_name(details.get("name") if isinstance(details, dict) else None)
         # The portal has no documented idempotency guarantee. DraftCreation's durable
         # reservation, not a speculative retry header, prevents a second POST.
         if self.prepare(payload) != payload:
@@ -242,7 +245,6 @@ class WhatsAppDraftWriter:
                     raise ValueError("MoEngage returned no real matching draft identity")
                 identities.add(identity)
         return sorted(identities)
-
 
 def automate_whatsapp_draft_batch(batch_id: str, account: str, user: dict[str, Any]) -> dict[str, Any]:
     """Use the same account-owned claims and verification as single-row creation."""

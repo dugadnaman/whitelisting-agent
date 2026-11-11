@@ -30,6 +30,7 @@ CAMPAIGN_ID = "1234567890abcdef12345678"
 INNER_ID = "abcdefabcdefabcdefabcdef"
 OTHER_SENDER_ID = "111111111111111111111111"
 OTHER_TEMPLATE_ID = "222222222222222222222222"
+KEY = "123e4567-e89b-42d3-a456-426614174000"
 
 
 @pytest.fixture
@@ -139,6 +140,55 @@ def writes(state):
     return [request for request in state["requests"] if request[:2] == ("POST", "/v1.0/campaigns/draft")]
 
 
+@pytest.mark.parametrize("name", [
+    "Release", "attRelease", "att-Release", "ATT_Release", "Att_Release", "aTt_Release",
+    "", " ", "att_", "ATT_", "att_ ", " att_Release", "att_Release ",
+    None, 123, False, {}, [],
+])
+def test_create_rejects_noncanonical_name_without_provider_reads_or_writes(provider, name):
+    state, writer = provider
+    requested = payload()
+    requested["basic_details"]["name"] = name
+    with pytest.raises(ValueError):
+        writer.create(requested, idempotency_key=KEY)
+    assert state["requests"] == []
+
+
+@pytest.mark.parametrize("details", [None, {}, [], "att_Release"])
+def test_create_rejects_missing_or_malformed_name_fields_without_network(provider, details):
+    state, writer = provider
+    requested = payload()
+    requested["basic_details"] = details
+    with pytest.raises(ValueError):
+        writer.create(requested, idempotency_key=KEY)
+    assert state["requests"] == []
+
+
+def test_direct_create_preserves_canonical_name_and_payload(provider):
+    state, writer = provider
+    requested = payload()
+    requested["basic_details"]["name"] = "att_MiXeD att_Release"
+    original = copy.deepcopy(requested)
+    assert writer.create(requested, idempotency_key=KEY) == {"id": CAMPAIGN_ID}
+    assert requested == original
+    assert state["created"]["campaignName"] == "att_MiXeD att_Release"
+    wa = state["created"]["whatsapp_data"]
+    assert wa["sender_id"] == SENDER_ID
+    assert wa["template_id"] == TEMPLATE_ID
+    assert wa["body_placeholders"] == json.loads(ROW_WA["whatsapp_placeholders"])
+
+
+def test_get_preserves_legacy_unprefixed_campaign_name(provider):
+    state, writer = provider
+    state["created"] = {
+        "campaignName": "Legacy Release",
+        "whatsapp_data": {"sender_id": SENDER_ID},
+    }
+    assert writer.get(CAMPAIGN_ID)["basic_details"]["name"] == "Legacy Release"
+    list_queries = [request[3] for request in state["requests"] if request[1] == "/draft/campaigns"]
+    assert list_queries[0]["c_name"] == "Legacy Release"
+    assert not writes(state)
+
 def test_exact_nonfirst_names_resolve_and_real_route_id_is_verified(provider):
     state, writer = provider
     requested = payload()
@@ -159,7 +209,7 @@ def test_exact_nonfirst_names_resolve_and_real_route_id_is_verified(provider):
     assert result["campaign_id"] == CAMPAIGN_ID != INNER_ID
     assert len(writes(state)) == 1
     saved = state["created"]
-    assert saved["campaignName"] == ROW_WA["campaign_name"]
+    assert saved["campaignName"] == "att_Tata Diwali WA Offer"
     list_queries = [request[3] for request in state["requests"] if request[1] == "/draft/campaigns"]
     assert list_queries
     assert all(query["filter_block"] == "drafts" and query["get_archived_campaigns"] is False for query in list_queries)
@@ -431,7 +481,7 @@ def test_same_name_with_another_draft_id_does_not_prove_membership(provider):
     state, writer = provider
     state["responses"] = {("POST", "/draft/campaigns"): (200, {
         "status": "success", "data": {"campaigns": [{
-            "_id": {"$oid": INNER_ID}, "name": ROW_WA["campaign_name"],
+            "_id": {"$oid": INNER_ID}, "name": "att_" + ROW_WA["campaign_name"],
             "channel": "WHATSAPP", "delivery_type": "ONE_TIME",
         }]},
     })}

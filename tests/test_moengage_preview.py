@@ -64,7 +64,7 @@ def test_mixed_rows_preserve_identity_and_produce_exact_candidate():
     email_payload = result["items"][0]["candidate_v5_payload"]
     assert email_payload == {
         "channel": "EMAIL", "campaign_delivery_type": "ONE_TIME", "created_by": USER["email"],
-        "basic_details": {"name": "October VIP", "content_type": "PROMOTIONAL", "subscription_category": "Offers"},
+        "basic_details": {"name": "att_October VIP", "content_type": "PROMOTIONAL", "subscription_category": "Offers"},
         "connector": {"connector_type": "SENDGRID", "connector_name": "Primary"},
         "campaign_content": {"content": {"email": {
             "html_content": "<p>Welcome VIP</p>", "subject": "Exclusive offer",
@@ -87,6 +87,56 @@ def test_mixed_rows_preserve_identity_and_produce_exact_candidate():
     assert result["items"][2]["candidate_v5_payload"] is None
     assert "Row account/workspace does not match" in result["items"][2]["issues"][0]
     assert result["items"][3]["status"] == "blocked"
+
+
+@pytest.mark.parametrize("account", ["tata", "bajaj", "apparel"])
+@pytest.mark.parametrize("channel", ["EMAIL", "PUSH", "WHATSAPP"])
+def test_all_campaign_previews_expose_canonical_names_without_renaming_templates(account, channel):
+    row = {
+        "account": account, "source_ref": "source.csv", "row_id": "4", "channel": channel,
+        "campaign_name": "  ATT_Launch  ", "segment_id": "seg-vip",
+        "scheduled_at": BASE["scheduled_at"], "timezone": BASE["timezone"],
+    }
+    if channel == "EMAIL":
+        row.update(content_type="PROMOTIONAL", subscription_category="Offers", from_address="mail@example.com",
+                   subject="Launch", html_content="<p>Launch</p>")
+    elif channel == "PUSH":
+        row.update(push_platform="WEB", push_title="Launch", push_message="Offer",
+                   click_url="https://www.tatacapital.com/offer")
+    else:
+        row.update(whatsapp_sender="Tata Capital Financial Services Limited", whatsapp_template_id="festive_wa_1")
+    catalog = copy.deepcopy({**CATALOG, "account": account})
+    if account == "apparel":
+        from apparel_whatsapp import brand_info
+
+        row["brand"] = "VS"
+        catalog["workspace_id"] = brand_info("VS")["workspace_id"]
+        catalog["whatsapp_senders"][0].update(
+            name="Tata Capital Financial Services Limited", number="+919876543210", sender_id="fixture-sender",
+        )
+    result = prepare_batch([row], account, catalog, USER["email"], source_type="json")
+    item = result["items"][0]
+    assert item["source_fields"]["campaign_name"] == "att_Launch"
+    if item["candidate_v5_payload"] is not None:
+        assert item["candidate_v5_payload"]["basic_details"]["name"] == "att_Launch"
+    assert item["source_ref"] == "source.csv" and item["row_id"] == "4"
+    assert row["campaign_name"] == "  ATT_Launch  "
+    if account == "apparel" and channel != "WHATSAPP":
+        assert item["status"] == "blocked"
+        assert "Apparel campaign drafting supports WhatsApp only" in item["issues"]
+        assert item["candidate_v5_payload"] is None
+        return
+    assert item["status"] == "preview_ready"
+    if channel == "WHATSAPP":
+        assert item["candidate_v5_payload"]["campaign_content"]["content"]["whatsapp"]["template_id"] == "festive_wa_1"
+
+
+@pytest.mark.parametrize("name", ["", "  ", "att_", "ATT_ "])
+def test_blank_or_prefix_only_campaign_names_remain_blocked(name):
+    item = preview([{**BASE, "campaign_name": name}])["items"][0]
+    assert item["status"] == "blocked"
+    assert item["candidate_v5_payload"] is None
+    assert any("campaign_name" in issue or "att_" in issue for issue in item["issues"])
 
 
 def test_ambiguous_audience_duplicate_ids_and_schedule_fail_closed():
@@ -128,6 +178,33 @@ def test_catalog_assets_and_platforms_require_exact_reviewed_values():
     assert attachments == [{"file_type": "URL", "url": "https://example.com/banner.png"}]
     mixed = {**BASE, "push_message": "Ignore me"}
     assert "another channel" in preview([mixed])["items"][0]["issues"][0]
+
+
+@pytest.mark.parametrize("platform", ["ANDROID", "IOS", "WEB"])
+@pytest.mark.parametrize("account", ["tata", "bajaj", "apparel"])
+def test_push_preview_matches_candidate_destination_and_preserves_media(platform, account):
+    row = {
+        "account": account, "source_ref": "push.json", "row_id": "1", "channel": "PUSH",
+        "campaign_name": "Account offer", "segment_id": "seg-vip",
+        "scheduled_at": BASE["scheduled_at"], "timezone": BASE["timezone"],
+        "push_platform": platform, "push_title": "Offer", "push_message": "Your offer",
+        "click_url": "https://u3.mnge.co/campaign", "push_image_asset_id": "asset-1",
+    }
+    catalog = {**CATALOG, "account": account}
+    result = prepare_batch([row], account, catalog, USER["email"], source_type="json")["items"][0]
+    if account == "apparel":
+        assert result["status"] == "blocked"
+        assert "Apparel campaign drafting supports WhatsApp only" in result["issues"]
+        assert result["source_fields"]["click_url"] == row["click_url"]
+        assert result["source_fields"]["push_image_asset_id"] == "asset-1"
+        assert result["candidate_v5_payload"] is None
+        return
+    expected = "https://www.tatacapital.com/" if account == "tata" else row["click_url"]
+    details = result["candidate_v5_payload"]["campaign_content"]["content"]["push"][platform.lower()]["basic_details"]
+    assert details["redirect_url" if platform == "WEB" else "default_click_action_value"] == expected
+    assert result["source_fields"]["click_url"] == expected
+    assert details["image_url"] == "https://example.com/banner.png"
+    assert row["click_url"] == "https://u3.mnge.co/campaign"
 
 
 def test_csv_and_xlsx_retaining_worksheet_and_multiline_line_numbers():
@@ -210,7 +287,7 @@ def test_jira_brief_whatsapp_templates_generate_v5_candidate_drafts_and_tata_sub
     assert batch["blocked"] == 0
     candidate = batch["items"][0]["candidate_v5_payload"]
     assert candidate["channel"] == "WHATSAPP"
-    assert candidate["basic_details"]["name"] == "festive_wa_1"
+    assert candidate["basic_details"]["name"] == "att_festive_wa_1"
     assert candidate["campaign_content"]["content"]["whatsapp"]["template_id"] == "festive_wa_1"
     assert candidate["campaign_content"]["content"]["whatsapp"]["sender_name"] == "Tata Capital Financial Services Limited"
 
@@ -300,7 +377,7 @@ def test_jira_brief_with_kv_table_extracts_campaign_fields():
     assert batch["ready"] == 1
     assert batch["blocked"] == 0
     candidate = batch["items"][0]["candidate_v5_payload"]
-    assert candidate["basic_details"]["name"] == "CSFD_EWP_Corporate_portal_Sept’26"
+    assert candidate["basic_details"]["name"] == "att_CSFD_EWP_Corporate_portal_Sept’26"
     assert candidate["scheduling_details"]["start_time"] == "2026-09-25T11:00:00"
     assert candidate["scheduling_details"]["timezone"] == "Asia/Kolkata"
     assert candidate["campaign_content"]["content"]["email"]["subject"] == "Our New Portal is Live!"

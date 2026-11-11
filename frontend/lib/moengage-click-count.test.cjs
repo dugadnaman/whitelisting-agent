@@ -16,6 +16,7 @@ const compiledClient = compile('moengage-click-count.ts');
 function sharedApiFor(fetchImpl, runtime = {}) {
   const shared = { exports: {} };
   vm.runInNewContext(compiledApi, {
+    require: require('./test-typescript.cjs'),
     exports: shared.exports, module: shared, Headers, AbortController, AbortSignal, DOMException, Promise, setTimeout, clearTimeout,
     process: { env: {} }, window: {}, fetch: fetchImpl,
     localStorage: { getItem: () => null }, ...runtime,

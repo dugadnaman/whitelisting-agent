@@ -14,6 +14,8 @@ from uuid import UUID
 
 import requests
 
+from campaign_names import require_campaign_name
+
 _ACCOUNT_ID = re.compile(r"[a-z][a-z0-9_]*\Z")
 _CAMPAIGN_ID = re.compile(r"[0-9a-fA-F]{24}\Z")
 _CREATE_FIELDS = frozenset({
@@ -107,6 +109,8 @@ class DraftWriter:
                 or not isinstance(payload.get("created_by"), str)
                 or not payload["created_by"].strip()):
             raise ValueError("One-time Email/Push and creator are required")
+        details = payload.get("basic_details")
+        require_campaign_name(details.get("name") if isinstance(details, dict) else None)
         key = self._operation_key(idempotency_key)
         data = self._request("POST", payload={**payload, "request_id": key}, idempotency_key=key)
         if str(data.get("status", "")).upper() != "DRAFT":

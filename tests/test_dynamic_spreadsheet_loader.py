@@ -73,8 +73,8 @@ def test_dynamic_loader_ignores_customer_data_without_message_content(tmp_path):
 @pytest.mark.parametrize("schema", ["flat", "semantic", "components"])
 @pytest.mark.parametrize("variable", ["", "{{1}}", "{{offer}}", "<offer>", "[offer]", "{offer}", "{#offer#}", "#offer#"])
 def test_sheet_url_ctas_are_dynamic_with_samples_and_reimport_is_idempotent(tmp_path, extension, schema, variable):
-    url = f"https://example.test/offers/{variable}"
-    sample = "https://example.test/offers/customer-offer"
+    url = f"https://www.tatacapital.com/offers/{variable}"
+    sample = "https://www.tatacapital.com/offers/customer-offer"
     body = "Your monthly statement is ready for review."
     if schema == "semantic":
         row = {
@@ -117,8 +117,8 @@ def test_sheet_url_ctas_are_dynamic_with_samples_and_reimport_is_idempotent(tmp_
     submission = submissions[0]
     buttons = _component(submission, "BUTTONS").buttons
     assert buttons[0] == {
-        "type": "URL", "text": "View", "url": "https://example.test/offers/{{1}}",
-        "example": [sample if variable else "https://example.test/offers/sample"],
+        "type": "URL", "text": "View", "url": "https://www.tatacapital.com/offers/{{1}}",
+        "example": [sample if variable else "https://www.tatacapital.com/offers/sample"],
     }
     if schema == "components":
         assert buttons[1:] == [

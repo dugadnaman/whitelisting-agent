@@ -36,6 +36,8 @@ import { carouselCardWarnings, carouselSelectionError, selectedRcsDraft, type Se
 import { newRcsTemplateName } from '@/lib/jira-template-name';
 import { destinationAccountLabel, destinationLabel } from '@/lib/destination';
 import { SmsDltReview, smsDltDraft } from '@/components/sms-dlt';
+import { TATA_CTA_URL, isUrlCta, normalizeWhatsAppCtas, normalizeRcsCtas, resolveCtaUrl } from '@/lib/cta';
+import { CAMPAIGN_NAME_HINT, campaignRowName, normalizeCampaignFields, normalizeCampaignName, requireCampaignName } from '@/lib/campaign-name';
 import type { SmsDltDraft } from '@/lib/api';
 
 const UNCHECKED_WARNINGS: DraftWarnings = {
@@ -163,6 +165,11 @@ export default function JiraBriefsPage() {
   const [waTemplates, setWaTemplates] = useTabState<JiraWhatsAppDraft[]>('briefs_wa_templates', []);
   const [rcsTemplates, setRcsTemplates] = useTabState<SelectableRcsDraft[]>('briefs_rcs_templates', []);
   const [smsTemplates, setSmsTemplates] = useTabState<JiraSmsDraft[]>('briefs_sms_templates', []);
+  useEffect(() => {
+    // Migrate cached editable drafts once, without rewriting URL keystrokes.
+    setWaTemplates((drafts) => drafts.map((draft) => normalizeWhatsAppCtas(draft, account)));
+    setRcsTemplates((drafts) => drafts.map((draft) => normalizeRcsCtas(draft, account)));
+  }, []);
   const [selectedWa, setSelectedWa] = useTabState<Set<number>>('briefs_selected_wa', new Set());
   const [selectedRcs, setSelectedRcs] = useTabState<Set<number>>('briefs_selected_rcs', new Set());
   const [selectedSms, setSelectedSms] = useTabState<Set<number>>('briefs_selected_sms', new Set());
@@ -198,12 +205,13 @@ export default function JiraBriefsPage() {
   const [commentBusy, setCommentBusy] = useState(false);
   const commentBusyRef = useRef(false);
   const [commentError, setCommentError] = useState<string | null>(null);
-  const effectiveRcsTemplates = useMemo(() => rcsTemplates.map(selectedRcsDraft), [rcsTemplates]);
+  const effectiveWaTemplates = useMemo(() => waTemplates.map((draft) => normalizeWhatsAppCtas(draft, targetAccount)), [waTemplates, targetAccount]);
+  const effectiveRcsTemplates = useMemo(() => rcsTemplates.map((draft) => normalizeRcsCtas(selectedRcsDraft(draft), targetAccount)), [rcsTemplates, targetAccount]);
   const previewPayload = useMemo(() => ({
     account: targetAccount,
-    whatsapp_templates: channel === 'whatsapp' ? waTemplates : [],
+    whatsapp_templates: channel === 'whatsapp' ? effectiveWaTemplates : [],
     rcs_templates: channel === 'rcs' ? effectiveRcsTemplates : [],
-  }), [targetAccount, channel, waTemplates, effectiveRcsTemplates]);
+  }), [targetAccount, channel, effectiveWaTemplates, effectiveRcsTemplates]);
   const previewSignature = useMemo<JiraPreviewSnapshot>(
     () => ({ selectedKey, issueKey: brief?.issue_key, payload: previewPayload, attempt: previewAttempt }),
     [selectedKey, brief?.issue_key, previewPayload, previewAttempt]
@@ -324,13 +332,14 @@ export default function JiraBriefsPage() {
       setMoeStagingStatus('STAGING');
       const scheduledVal = moeSchedule();
 
-      const rowDict: Record<string, string> = {
-        campaign_name: moeCampaignName || `${brief.issue_key} Campaign`,
+      const rowDict: Record<string, string> = normalizeCampaignFields({
+        campaign_name: moeCampaignName,
         channel: moeChannel,
         segment_id: moeChannel === 'WHATSAPP' ? moeSegmentId : moeSegmentId || 'Test_FSTP_Pranav_1602',
         scheduled_at: scheduledVal,
         timezone: moeTimezone || 'Asia/Kolkata',
-      };
+      });
+      setMoeCampaignName(requireCampaignName(rowDict.campaign_name));
 
       if (moeChannel === 'WHATSAPP') {
         rowDict.workspace_id = moeWorkspace;
@@ -355,6 +364,8 @@ export default function JiraBriefsPage() {
       const file = new File([csvData], `${brief.issue_key}_moengage_draft.csv`, { type: 'text/csv' });
 
       const batch = await stageMoEngageDraftBatch(file, targetAccount);
+      const stagedName = batch.items[0] && campaignRowName(batch.items[0]);
+      if (stagedName) setMoeCampaignName(stagedName);
       setMoeBatchId(batch.batch_id);
       setMoeStagingStatus(batch.ready > 0 && batch.blocked === 0 ? 'STAGED' : 'ERROR');
       const stageIssues = batch.items.flatMap((item) => item.issues || []).join('; ');
@@ -382,16 +393,17 @@ export default function JiraBriefsPage() {
       setMoeStagingStatus('CREATING');
       const scheduledVal = moeSchedule();
 
-      const rowDict: Record<string, any> = {
+      const rowDict: Record<string, any> = normalizeCampaignFields({
         account: targetAccount,
         source_ref: `jira_${brief.issue_key}.csv`,
         row_id: '1',
         channel: moeChannel,
-        campaign_name: moeCampaignName || `${brief.issue_key} Campaign`,
+        campaign_name: moeCampaignName,
         segment_id: moeChannel === 'WHATSAPP' ? moeSegmentId : moeSegmentId || 'Test_FSTP_Pranav_1602',
         scheduled_at: scheduledVal,
         timezone: moeTimezone || 'Asia/Kolkata',
-      };
+      });
+      setMoeCampaignName(requireCampaignName(rowDict.campaign_name));
 
       if (moeChannel === 'WHATSAPP') {
         rowDict.workspace_id = moeWorkspace;
@@ -538,8 +550,8 @@ export default function JiraBriefsPage() {
           window.history.replaceState({}, '', url.toString());
         }
       }
-      const waList = data.whatsapp_templates || [];
-      const rcsList = data.rcs_templates || [];
+      const waList = (data.whatsapp_templates || []).map((draft) => normalizeWhatsAppCtas(draft, account));
+      const rcsList = (data.rcs_templates || []).map((draft) => normalizeRcsCtas(draft, account));
       const smsList = data.sms_templates || [];
       setWaTemplates(waList);
       setRcsTemplates(rcsList);
@@ -549,8 +561,8 @@ export default function JiraBriefsPage() {
       setSelectedWa(new Set(waList.map((_, idx) => idx)));
       setSelectedRcs(new Set(rcsList.map((_, idx) => idx)));
       setEditingCard({});
+      setMoeCampaignName(normalizeCampaignName(data.moengage_campaign?.campaign_name || `${data.issue_key} - ${data.summary}`));
       if (data.moengage_campaign) {
-        setMoeCampaignName(data.moengage_campaign.campaign_name || `${data.issue_key} - ${data.summary}`);
         setMoePushTitle(data.moengage_campaign.push_title || `Tata Capital: ${data.summary?.slice(0, 30)}`);
         setMoePushBody(data.moengage_campaign.push_body || data.summary || '');
         setMoeScheduledAt(data.moengage_campaign.scheduled_date || '');
@@ -586,7 +598,7 @@ export default function JiraBriefsPage() {
         setLoadingBrief(false);
       }
     }
-  }, [channel, setActiveTab]);
+  }, [account, channel, setActiveTab]);
 
   useEffect(() => {
     if (selectedKey) {
@@ -695,7 +707,7 @@ export default function JiraBriefsPage() {
       let rcsToSubmit: JiraRcsDraft[] = [];
 
       if (channel === 'whatsapp' && (channelMode === 'all' || channelMode === 'whatsapp')) {
-        waToSubmit = waTemplates.filter((_, idx) => selectedWa.has(idx));
+        waToSubmit = effectiveWaTemplates.filter((_, idx) => selectedWa.has(idx));
         if (waToSubmit.length > 0) submitChannels.push('whatsapp');
       }
 
@@ -938,7 +950,7 @@ export default function JiraBriefsPage() {
             ? [{ type: draft.button_type, text: draft.button_text || '', url: draft.button_url || undefined, phone_number: draft.button_phone || undefined }]
             : []);
       if (!currentButtons[btnIdx]) {
-        currentButtons[btnIdx] = { type: 'URL', text: 'Explore Now', url: 'https://u3.mnge.co/' };
+        currentButtons[btnIdx] = { type: 'URL', text: 'Explore Now', url: TATA_CTA_URL };
       }
       currentButtons[btnIdx] = { ...currentButtons[btnIdx], ...patch };
       const waBtnText = patch.text ?? patch.label;
@@ -965,13 +977,13 @@ export default function JiraBriefsPage() {
             ? [{ type: draft.button_type, text: draft.button_text || '', url: draft.button_url || undefined, phone_number: draft.button_phone || undefined }]
             : []);
       if (currentButtons.length < 3) {
-        currentButtons.push({ type: 'URL', text: 'Explore Now', url: 'https://u3.mnge.co/' });
+        currentButtons.push({ type: 'URL', text: 'Explore Now', url: TATA_CTA_URL });
       }
       draft.buttons = currentButtons;
       if (currentButtons.length === 1) {
         draft.button_type = 'URL';
         draft.button_text = 'Explore Now';
-        draft.button_url = 'https://u3.mnge.co/';
+        draft.button_url = TATA_CTA_URL;
       }
       next[waIdx] = draft;
       return next;
@@ -1018,7 +1030,7 @@ export default function JiraBriefsPage() {
             ? [{ type: draft.action_type || 'URL', label: draft.action_label || '', text: draft.action_label || '', url: draft.action_url || '' }]
             : []);
       if (!currentSuggestions[sIdx]) {
-        currentSuggestions[sIdx] = { type: 'URL', label: 'Explore Now', text: 'Explore Now', url: 'https://u3.mnge.co/' };
+        currentSuggestions[sIdx] = { type: 'URL', label: 'Explore Now', text: 'Explore Now', url: TATA_CTA_URL };
       }
       currentSuggestions[sIdx] = { ...currentSuggestions[sIdx], ...patch };
       const rcsBtnLabel = patch.label ?? patch.text;
@@ -1047,12 +1059,12 @@ export default function JiraBriefsPage() {
             ? [{ type: draft.action_type || 'URL', label: draft.action_label || '', text: draft.action_label || '', url: draft.action_url || '' }]
             : []);
       if (currentSuggestions.length < 4) {
-        currentSuggestions.push({ type: 'URL', label: 'Explore Now', text: 'Explore Now', url: 'https://u3.mnge.co/' });
+        currentSuggestions.push({ type: 'URL', label: 'Explore Now', text: 'Explore Now', url: TATA_CTA_URL });
       }
       draft.suggestions = currentSuggestions;
       if (currentSuggestions.length === 1) {
         draft.action_label = 'Explore Now';
-        draft.action_url = 'https://u3.mnge.co/';
+        draft.action_url = TATA_CTA_URL;
         draft.action_type = 'URL';
       }
       next[rcsIdx] = draft;
@@ -1109,7 +1121,7 @@ export default function JiraBriefsPage() {
     let templateName = '';
 
     if (fromChannel === 'whatsapp') {
-      const wa = waTemplates[fromIndex];
+      const wa = effectiveWaTemplates[fromIndex];
       if (!wa) return;
       templateName = wa.template_name;
       setWaTemplates((prev) => prev.filter((_, i) => i !== fromIndex));
@@ -1135,7 +1147,7 @@ export default function JiraBriefsPage() {
           media_attachment_id: wa.media_attachment_id,
           action_type: wa.button_type || 'URL',
           action_label: wa.button_text || 'Check Offer',
-          action_url: wa.button_url || 'https://u3.mnge.co/',
+          action_url: wa.button_url || TATA_CTA_URL,
           variables: wa.variables || [],
           raw_source: wa.raw_source || wa.body,
           template_type: wa.media_file ? 'richcard' : 'text',
@@ -1159,7 +1171,7 @@ export default function JiraBriefsPage() {
         setActiveTab('sms');
       }
     } else if (fromChannel === 'rcs') {
-      const rcs = rcsTemplates[fromIndex];
+      const rcs = effectiveRcsTemplates[fromIndex];
       if (!rcs) return;
       templateName = rcs.template_name;
       setRcsTemplates((prev) => prev.filter((_, i) => i !== fromIndex));
@@ -1184,9 +1196,9 @@ export default function JiraBriefsPage() {
           media_file: rcs.media_file,
           media_filename: rcs.media_filename,
           media_attachment_id: rcs.media_attachment_id,
-          button_type: rcs.action_url ? 'URL' : 'NONE',
+          button_type: isUrlCta(rcs.action_type) ? (rcs.action_url ? 'URL' : 'NONE') : rcs.action_type,
           button_text: rcs.action_label || 'Check Offer',
-          button_url: rcs.action_url || 'https://u3.mnge.co/',
+          button_url: isUrlCta(rcs.action_type) ? resolveCtaUrl(rcs.action_url, targetAccount) : rcs.action_url,
           variables: rcs.variables || [],
           sample_values: [],
           raw_source: rcs.raw_source || rcs.body,
@@ -1246,7 +1258,7 @@ export default function JiraBriefsPage() {
           body: sms.text,
           action_type: 'URL',
           action_label: 'Check Offer',
-          action_url: 'https://u3.mnge.co/',
+          action_url: TATA_CTA_URL,
           variables: sms.variables || [],
           raw_source: sms.raw_source || sms.text,
           template_type: 'text',
@@ -1457,7 +1469,7 @@ export default function JiraBriefsPage() {
         card_title: rcs.card_title || brief?.summary || 'Tata Capital Offer',
         card_description: rcs.body,
         cta_text: rcs.action_label || 'Explore Now',
-        cta_url: rcs.action_url || 'https://u3.mnge.co/',
+        cta_url: isUrlCta(rcs.action_type) ? resolveCtaUrl(rcs.action_url, targetAccount) : rcs.action_url,
       });
       setSyncedRcs((prev) => ({ ...prev, [rcs.template_name]: res.moengage_id }));
       setFeedback({
@@ -2604,7 +2616,7 @@ export default function JiraBriefsPage() {
                                                     type="text"
                                                     value={btn.url || ''}
                                                     onChange={(e) => updateWaButton(idx, bIdx, { url: e.target.value })}
-                                                    placeholder="https://u3.mnge.co/"
+                                                    placeholder={TATA_CTA_URL}
                                                     disabled={btn.type === 'QUICK_REPLY'}
                                                     className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100 font-mono text-[11px]"
                                                   />
@@ -2623,11 +2635,11 @@ export default function JiraBriefsPage() {
                                     {wa.body}
                                   </div>
 
-                                  {((wa.buttons && wa.buttons.length > 0) ? wa.buttons : (wa.button_type === 'URL' ? [{ label: wa.button_text, text: wa.button_text, url: wa.button_url }] : [])).map((btn, bIdx) => (
+                                  {((wa.buttons && wa.buttons.length > 0) ? wa.buttons : (wa.button_type === 'URL' ? [{ type: 'URL', label: wa.button_text, text: wa.button_text, url: wa.button_url }] : [])).map((btn, bIdx) => (
                                     <div key={bIdx} className="flex flex-wrap items-center gap-2 text-xs">
                                       <span className="text-gray-400 font-medium">{(wa.buttons && wa.buttons.length > 1) ? `CTA ${bIdx + 1}:` : 'CTA Button:'}</span>
                                       <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60 break-all">
-                                        🔗 {('label' in btn && btn.label) || btn.text || 'Check Offer'} ({btn.url || 'https://u3.mnge.co/'})
+                                        {('label' in btn && btn.label) || btn.text || 'Check Offer'} {isUrlCta(btn.type) ? `(🔗 ${resolveCtaUrl(btn.url, targetAccount)})` : btn.type === 'PHONE_NUMBER' && 'phone_number' in btn ? `(${btn.phone_number || ''})` : ''}
                                       </span>
                                     </div>
                                   ))}
@@ -2906,7 +2918,7 @@ export default function JiraBriefsPage() {
                                                 type="text"
                                                 value={sugg.url || ''}
                                                 onChange={(e) => updateRcsSuggestion(idx, sIdx, { url: e.target.value })}
-                                                placeholder="https://u3.mnge.co/"
+                                                placeholder={TATA_CTA_URL}
                                                 className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono text-[11px]"
                                               />
                                             </div>
@@ -2922,13 +2934,13 @@ export default function JiraBriefsPage() {
                                   <p className="font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
                                     {rcs.body}
                                   </p>
-                                  {((rcs.suggestions && rcs.suggestions.length > 0) ? rcs.suggestions : ((rcs.action_label || rcs.action_url) ? [{ label: rcs.action_label, text: rcs.action_label, url: rcs.action_url }] : [])).map((sugg, sIdx) => (
+                                  {((rcs.suggestions && rcs.suggestions.length > 0) ? rcs.suggestions : ((rcs.action_label || rcs.action_url) ? [{ type: rcs.action_type, label: rcs.action_label, text: rcs.action_label, url: rcs.action_url }] : [])).map((sugg, sIdx) => (
                                     <div key={sIdx} className="pt-2 border-t border-gray-100 flex flex-wrap items-center gap-2 text-xs">
                                       <span className="text-gray-400 font-medium">
                                         {(rcs.suggestions && rcs.suggestions.length > 1) ? `CTA ${sIdx + 1}:` : 'CTA Button:'}
                                       </span>
                                       <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60 break-all">
-                                        🔗 {sugg.label || sugg.text || 'Explore Now'} ({sugg.url || 'https://u3.mnge.co/'})
+                                        {sugg.label || sugg.text || 'Explore Now'} {isUrlCta(sugg.type) ? `(🔗 ${resolveCtaUrl(sugg.url, targetAccount)})` : 'phone_number' in sugg ? `(${sugg.phone_number || ''})` : ''}
                                       </span>
                                     </div>
                                   ))}
@@ -3063,7 +3075,7 @@ export default function JiraBriefsPage() {
                                                         type="text"
                                                         value={card.button_url || ''}
                                                         onChange={(e) => updateCarouselCardField(idx, cIdx, 'button_url', e.target.value)}
-                                                        placeholder="https://u3.mnge.co/"
+                                                        placeholder={TATA_CTA_URL}
                                                         className="w-full text-xs px-2 py-1 border border-gray-300 rounded bg-white font-mono outline-none focus:ring-1 focus:ring-indigo-500"
                                                       />
                                                     </div>
@@ -3075,7 +3087,7 @@ export default function JiraBriefsPage() {
                                                   <p className="text-[11px] text-gray-700 line-clamp-3 whitespace-pre-wrap leading-relaxed">{card.card_description}</p>
                                                   <div className="text-[10px] text-blue-700 font-semibold bg-blue-50/50 p-1.5 rounded border border-blue-100 flex items-center gap-1">
                                                     <span>🔗 {card.button_text || 'Explore'}</span>
-                                                    <span className="text-gray-400 font-mono truncate font-normal">({card.button_url})</span>
+                                                    <span className="text-gray-400 font-mono truncate font-normal">({resolveCtaUrl(card.button_url, targetAccount)})</span>
                                                   </div>
                                                 </div>
                                               )}
@@ -3384,9 +3396,12 @@ export default function JiraBriefsPage() {
                               type="text"
                               value={moeCampaignName}
                               onChange={(e) => setMoeCampaignName(e.target.value)}
-                              placeholder="e.g. TCN-546 - Personal Loan Blast"
+                              onBlur={() => setMoeCampaignName(normalizeCampaignName(moeCampaignName))}
+                              aria-describedby="jira-campaign-name-rule"
+                              placeholder="e.g. att_TCN-546 - Personal Loan Blast"
                               className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
+                            <p id="jira-campaign-name-rule" className="mt-1 text-[11px] text-gray-500">{CAMPAIGN_NAME_HINT}</p>
                           </div>
 
                           {/* Channel Selector */}
@@ -3578,7 +3593,7 @@ export default function JiraBriefsPage() {
                             <button
                               type="button"
                               onClick={handleMoeCreateDraft}
-                              disabled={moeBusy || moeCreateAttempted || !moeCampaignName.trim()}
+                              disabled={moeBusy || moeCreateAttempted || !normalizeCampaignName(moeCampaignName).slice(4).trim()}
                               className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 shadow-2xs transition flex items-center gap-2"
                               title="Create real audited V5 draft in MoEngage Live workspace"
                             >
@@ -3589,7 +3604,7 @@ export default function JiraBriefsPage() {
                             <button
                               type="button"
                               onClick={handleMoeStageBatch}
-                              disabled={moeBusy || !moeCampaignName.trim()}
+                              disabled={moeBusy || !normalizeCampaignName(moeCampaignName).slice(4).trim()}
                               className="px-3.5 py-2 rounded-lg text-xs font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 shadow-2xs transition flex items-center gap-1.5"
                               title="Stage campaign in local workspace batch queue"
                             >

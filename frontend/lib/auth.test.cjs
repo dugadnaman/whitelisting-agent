@@ -13,6 +13,7 @@ function authApi(fetchImpl = async () => { throw new Error('Unexpected request')
   const storage = new Map();
   const exports = {};
   vm.runInNewContext(compiled, {
+    require: require('./test-typescript.cjs'),
     exports, module: { exports }, Headers, AbortController, AbortSignal, URLSearchParams, Promise, setTimeout, clearTimeout,
     Date: clock,
     process: { env: {} }, window: {}, fetch: fetchImpl,

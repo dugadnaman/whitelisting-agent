@@ -92,6 +92,19 @@ def test_single_draft_is_read_back_validated_and_idempotent(offline_db):
     assert stored["payload_hash"] and stored["campaign_id"] == first["campaign_id"]
 
 
+def test_campaign_prefix_is_canonical_before_hashing_and_creation(offline_db):
+    writer = FakeWriter()
+    worker = service(writer)
+    result = worker.create({**ROW, "campaign_name": "  VIP offer  "})
+    assert result["state"] == "VALIDATED"
+    saved = writer.payloads[result["campaign_id"]]
+    assert saved["basic_details"]["name"] == "att_VIP offer"
+    assert saved["campaign_content"]["content"]["email"]["subject"] == ROW["subject"]
+    # Equivalent canonical input must reuse the original claim, not send another POST.
+    assert worker.create({**ROW, "campaign_name": "ATT_VIP offer"}) == result
+    assert [name for name, _ in writer.calls].count("create") == 1
+
+
 def test_validation_failure_inside_success_response_is_blocking(offline_db):
     writer = FakeWriter(validation={"valid": False, "errors": [{"field": "connector", "issue": "Not configured"}]})
     result = service(writer).create(ROW)

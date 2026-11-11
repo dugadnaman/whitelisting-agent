@@ -21,7 +21,7 @@ from typing import Any
 
 import openpyxl
 
-from cta import ensure_dynamic_cta_url
+from cta import TATA_CTA_URL, ensure_dynamic_cta_url, resolve_cta_url
 from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class RcsTemplateDraft:
     media_attachment_id: str | None = None
     action_type: str = "URL"
     action_label: str = "Check Offer"
-    action_url: str = "https://u3.mnge.co/"
+    action_url: str = TATA_CTA_URL
     suggestions: list[dict[str, Any]] = field(default_factory=list)
     variables: list[str] = field(default_factory=list)
     sample_values: list[str] = field(default_factory=list)
@@ -134,7 +134,7 @@ def infer_sub_account_from_text(text: str, default: str = "tcl_promo") -> str:
     return default
 
 
-DEFAULT_CTA_URL = "https://u3.mnge.co/"
+DEFAULT_CTA_URL = TATA_CTA_URL
 
 
 def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
@@ -376,11 +376,11 @@ def extract_and_strip_cta(
     Identify and extract the Call-to-Action (CTA) line from a message body,
     removing it from the body text and placing it cleanly into button_text and button_url.
     T&Cs apply and disclaimers remain inside the message body — we never emit a FOOTER component.
-    If no destination URL is provided, defaults to https://u3.mnge.co/.
+    Tata CTAs use first-party destinations, defaulting to the Tata Capital homepage.
     """
     if not body:
         fallback_body = existing_footer.strip() if existing_footer and existing_footer.strip() else ""
-        return fallback_body, existing_btn_text or "Check Offer", existing_btn_url or DEFAULT_CTA_URL, None
+        return fallback_body, existing_btn_text or "Check Offer", resolve_cta_url(existing_btn_url or DEFAULT_CTA_URL, "tata"), None
 
     text = body.strip()
     extracted_btn_text = existing_btn_text
@@ -462,7 +462,7 @@ def extract_and_strip_cta(
             continue
 
         # 2b. Line containing 'T&Cs apply <url>' with leading directive or customer copy like:
-        # '👉 Apply below & double the joy. T&Cs apply https://u3.mnge.co/'
+        # '👉 Apply below & double the joy. T&Cs apply https://www.tatacapital.com/'
         # 'More orders are calling... Apply now: <url> T&Cs apply'
         m_tc_inline = re.search(
             r"(?:T\s*&\s*Cs?\s+apply\.?|Terms\s*(?:and|&)\s*Conditions\s+apply\.?)\s*(?:" + url_pat + r")?",
@@ -530,7 +530,7 @@ def extract_and_strip_cta(
         if m_cta_var:
             var_token = m_cta_var.group(1).strip()
             if not extracted_url or extracted_url == DEFAULT_CTA_URL:
-                extracted_url = f"https://u3.mnge.co/{var_token}"
+                extracted_url = f"{DEFAULT_CTA_URL}{var_token}"
             if not extracted_btn_text or extracted_btn_text == "Check Offer":
                 extracted_btn_text = "Apply Now"
             continue
@@ -586,7 +586,7 @@ def extract_and_strip_cta(
             if target_val.startswith("http"):
                 extracted_url = target_val
             elif target_val.startswith(("{", "<", "[")):
-                extracted_url = f"https://u3.mnge.co/{target_val}"
+                extracted_url = f"{DEFAULT_CTA_URL}{target_val}"
             continue
 
         # 4. Check for CTA label only (e.g. 'CTA: Apply Now', 'CTA Button: Check Eligibility', 'Button: Explore Offers')
@@ -701,15 +701,7 @@ def extract_and_strip_cta(
             clean_body = f"{clean_body}\n\n{ef}".strip()
 
     final_btn_text = extracted_btn_text or "Check Offer"
-    final_url = extracted_url or DEFAULT_CTA_URL
-    if final_url.rstrip("/") in (
-        "https://www.tatacapital.com",
-        "http://www.tatacapital.com",
-        "https://tatacapital.com",
-        "http://tatacapital.com",
-        "",
-    ):
-        final_url = DEFAULT_CTA_URL
+    final_url = resolve_cta_url(extracted_url or DEFAULT_CTA_URL, "tata")
 
     return clean_body, final_btn_text, final_url, None
 
@@ -2429,7 +2421,7 @@ def extract_templates_from_pptx_file(
                 "header": header,
                 "text": body_txt,
                 "button_text": btn_default,
-                "button_url": "https://u3.mnge.co/",
+                "button_url": DEFAULT_CTA_URL,
                 "variant": f"{theme} - Slide {s_idx}",
                 "source": f"pptx_{stem}",
             })
@@ -2478,7 +2470,7 @@ def extract_templates_from_excel_file(
                 if len(lines) > 1 and lines[0].strip().strip("*_#~ ").lower() == c_title.lower():
                     c_desc = "\n".join(lines[1:]).strip()
                 c_btn = card.get("button_text") or "Explore Now"
-                c_url = card.get("button_url") or "https://u3.mnge.co/"
+                c_url = resolve_cta_url(card.get("button_url") or DEFAULT_CTA_URL, "tata")
                 if sheet_imgs and (c_idx - 1) < len(sheet_imgs):
                     c_media = sheet_imgs[c_idx - 1]
                     c_media_fn = Path(c_media).name
@@ -3561,20 +3553,20 @@ def parse_jira_brief(
     # Apply the same URL policy to every extraction path, including SWCM and carousels.
     for draft in wa_drafts:
         if draft.button_type.upper() == "URL" and draft.button_url:
-            draft.button_url = ensure_dynamic_cta_url(draft.button_url)
+            draft.button_url = ensure_dynamic_cta_url(resolve_cta_url(draft.button_url, "tata"))
         for button in draft.buttons:
             if button.get("type", "URL").upper() == "URL" and button.get("url"):
-                button["url"] = ensure_dynamic_cta_url(button["url"])
+                button["url"] = ensure_dynamic_cta_url(resolve_cta_url(button["url"], "tata"))
     for draft in rcs_drafts:
         if draft.action_type.upper() == "URL":
-            draft.action_url = ensure_dynamic_cta_url(draft.action_url)
+            draft.action_url = ensure_dynamic_cta_url(resolve_cta_url(draft.action_url, "tata"))
         for target in [{"suggestions": draft.suggestions}, *draft.carousel_cards]:
             if target.get("button_url"):
-                target["button_url"] = ensure_dynamic_cta_url(target["button_url"])
+                target["button_url"] = ensure_dynamic_cta_url(resolve_cta_url(target["button_url"], "tata"))
             for suggestion in target.get("suggestions", []):
                 action_type = suggestion.get("suggestionType") or suggestion.get("type", "URL")
                 if action_type.upper() in ("URL", "URL_ACTION") and suggestion.get("url"):
-                    suggestion["url"] = ensure_dynamic_cta_url(suggestion["url"])
+                    suggestion["url"] = ensure_dynamic_cta_url(resolve_cta_url(suggestion["url"], "tata"))
 
 
     return ParsedJiraBrief(

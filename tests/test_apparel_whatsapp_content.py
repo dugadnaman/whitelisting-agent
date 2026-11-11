@@ -155,7 +155,7 @@ def test_reviewed_body_audiences_media_buttons_and_exact_schedule_are_preserved(
     assert payload["channel"] == "WHATSAPP"
     assert payload["campaign_delivery_type"] == "ONE_TIME"
     assert payload["created_by"] == USER["email"]
-    assert payload["basic_details"]["name"] == "VS Tili reviewed offer"
+    assert payload["basic_details"]["name"] == "att_VS Tili reviewed offer"
     assert payload["segmentation_details"] == {
         "included_filters": {"filter_operator": "and", "filters": [
             {"filter_type": "custom_segments", "name": "VS_ON_ATC_91D_No_Pr", "id": "seg-include"},
@@ -243,7 +243,7 @@ def test_all_four_no_goal_brands_remove_goals_even_if_inventory_has_a_reference(
 def test_existing_campaign_is_reference_only_and_a_new_draft_can_be_prepared():
     payload = ready(row_for(existing_campaign_id="444444444444444444444444"))
     assert "444444444444444444444444" not in json.dumps(payload)
-    assert payload["basic_details"]["name"] == "VS Tili reviewed offer"
+    assert payload["basic_details"]["name"] == "att_VS Tili reviewed offer"
 
 
 @pytest.mark.parametrize("change", [
@@ -483,9 +483,22 @@ def test_uploaded_source_preview_uses_real_parser_and_applies_only_reviewed_over
     reviewed = apparel.prepare_source("brief.csv", data, None, source_options(overrides={
         "WhatsApp!C": {"campaign_name": "Reviewed new campaign", "whatsapp_image_url": "https://cdn.example.com/reviewed.png"},
     }), USER)
-    assert reviewed["items"][0]["candidate_v5_payload"]["basic_details"]["name"] == "Reviewed new campaign"
+    assert reviewed["items"][0]["candidate_v5_payload"]["basic_details"]["name"] == "att_Reviewed new campaign"
     assert reviewed["items"][0]["candidate_v5_payload"]["campaign_content"]["content"]["whatsapp"]["header_placeholders"]["dynamic"]["url"] == "https://cdn.example.com/reviewed.png"
-    assert original["items"][0]["candidate_v5_payload"]["basic_details"]["name"] == "VS Tili reviewed offer"
+    assert original["items"][0]["candidate_v5_payload"]["basic_details"]["name"] == "att_VS Tili reviewed offer"
+
+
+@pytest.mark.parametrize("name", ["VS Tili reviewed offer", "att_VS Tili reviewed offer", "  ATT_VS Tili reviewed offer  "])
+def test_campaign_name_is_canonical_before_source_digest(routed_catalog, name):
+    data = brief_csv()
+    original = apparel.prepare_source("brief.csv", data, None, source_options(), USER)
+    reviewed = apparel.prepare_source("brief.csv", data, None, source_options(overrides={
+        "WhatsApp!C": {"campaign_name": name},
+    }), USER)
+    assert reviewed["source_digest"] == original["source_digest"]
+    item = reviewed["items"][0]
+    assert item["source_fields"]["campaign_name"] == "att_VS Tili reviewed offer"
+    assert item["candidate_v5_payload"]["basic_details"]["name"] == "att_VS Tili reviewed offer"
 
 
 @pytest.mark.parametrize("changed", [brief_csv(send_time="7:30PM"), brief_csv(notes="Changed source copy")])

@@ -1,3 +1,5 @@
+import { requireCampaignName } from './campaign-name';
+
 export type Account = string;
 export type Channel = "whatsapp" | "rcs" | "sms";
 
@@ -1727,6 +1729,7 @@ export function createMoEngageDraft(account: string, row: Record<string, unknown
   issue: string | null;
   validation_errors: Array<{ field?: string; issue?: string }>;
 }> {
+  requireCampaignName(row.campaign_name);
   return moEngageDraftRequest("/api/moengage/drafts/create", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

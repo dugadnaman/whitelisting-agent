@@ -62,8 +62,14 @@ def test_list_jira_issues_separates_email_and_messaging():
         assert messaging_issue["campaign_type"] == "messaging"
 
 
-def test_parse_jira_brief_separates_email_templates():
+def test_parse_jira_brief_separates_email_templates(tmp_path):
     """Verify parse_jira_brief isolates email templates from WhatsApp/RCS/SMS."""
+    from docx import Document
+
+    subject_file = tmp_path / "sept_subject_lines.docx"
+    document = Document()
+    document.add_paragraph("Subject: September newsletter")
+    document.save(subject_file)
     email_issue = {
         "key": "SWCM-101",
         "summary": "TCL Mailers Sept Newsletter",
@@ -78,6 +84,7 @@ def test_parse_jira_brief_separates_email_templates():
                 "id": "702",
                 "filename": "sept_subject_lines.docx",
                 "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "local_path": str(subject_file),
             },
         ],
     }

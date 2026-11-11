@@ -15,7 +15,7 @@ from pathlib import Path
 
 from config import get_waba_id
 from models import TemplateComponent, TemplateSubmission
-from cta import normalize_whatsapp_cta_buttons
+from cta import TATA_CTA_URL, normalize_whatsapp_cta_buttons
 
 logger = logging.getLogger(__name__)
 # Mirror of submission_client._TATA_GROUP — kept in sync manually.
@@ -86,7 +86,7 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
             "header": None,
             "body": "",
             "button_text": "Apply Now",
-            "button_url": "https://1kx.in/{{1}}",
+            "button_url": f"{TATA_CTA_URL}{{{{1}}}}" if client.lower() in _TATA_GROUP else "https://1kx.in/{{1}}",
             "button_example": "https://www.tatacapital.com",
         }
 
@@ -248,7 +248,7 @@ def _normalize_whatsapp_buttons(components: list, client: str) -> list:
         kind = component.get("type") if isinstance(component, dict) else component.type
         if str(kind or "").upper() == "BUTTONS":
             buttons = component.get("buttons", []) if isinstance(component, dict) else component.buttons
-            normalize_whatsapp_cta_buttons(buttons or [])
+            normalize_whatsapp_cta_buttons(buttons or [], client)
     return components
 
 
@@ -561,7 +561,7 @@ def _dynamic_row_to_submission(
         button = {
             "type": "URL",
             "text": (button_text or "Check Offer")[:25],
-            "url": button_url or "https://u3.mnge.co/",
+            "url": button_url or (TATA_CTA_URL if client.lower() in _TATA_GROUP else "https://u3.mnge.co/"),
         }
         if row.get("button_url_example"):
             button["example"] = [row["button_url_example"]]

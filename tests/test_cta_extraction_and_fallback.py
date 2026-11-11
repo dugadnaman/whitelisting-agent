@@ -1,18 +1,10 @@
-"""
-Unit tests for CTA extraction, removal from body, and default URL fallback (https://u3.mnge.co/).
-Verifies:
-1. CTA line is extracted to button (text and URL) and completely removed from the template body.
-2. T&C line is extracted to footer and removed from body.
-3. If no URL is provided or generic homepage is used, URL defaults to https://u3.mnge.co/.
-4. Specific custom/campaign URLs are preserved in the button.
-5. End-to-end integration with parse_jira_brief.
-"""
+"""CTA extraction preserves copy and sends Tata buttons to first-party destinations."""
 
 from briefing_parser import DEFAULT_CTA_URL, extract_and_strip_cta, parse_jira_brief
 
 
 def test_cta_line_removed_from_body_and_moved_to_button():
-    """Verify exact body from TCN-524 screenshot removes CTA line and sets button URL to https://u3.mnge.co/."""
+    """Extract the CTA without replacing the supplied Tata homepage with a tracker."""
     body = (
         "*Up to {{1}} Pre-Qualified* *offer could be available to you.*\n\n"
         "Thinking about getting more from your existing *Loan Against Property*?\n\n"
@@ -34,7 +26,7 @@ def test_cta_line_removed_from_body_and_moved_to_button():
 
     # 3. Button must receive the extracted CTA text and the default URL
     assert btn_text == "Check Your Offer"
-    assert btn_url == "https://u3.mnge.co/"
+    assert btn_url == "https://www.tatacapital.com"
 
     # 4. T&Cs apply MUST stay in body without underscores and footer MUST be None
     assert "T&Cs apply" in clean_body
@@ -61,8 +53,8 @@ def test_cta_line_removed_from_body_and_moved_to_button():
     assert len(samples_543) == 1
     assert foot_543 is None
 
-def test_cta_with_custom_campaign_url_preserved():
-    """Verify specific campaign tracking URLs are preserved in the button."""
+def test_cta_with_tracking_campaign_url_uses_tata_destination():
+    """A source tracking link must not escape into the customer CTA."""
     body = (
         "Special home loan interest rates starting 8.5%.\n"
         "Apply Online: https://u3.mnge.co/track/campaign_123\n"
@@ -72,17 +64,17 @@ def test_cta_with_custom_campaign_url_preserved():
     assert "Apply Online:" not in clean_body
     assert "https://u3.mnge.co/track/campaign_123" not in clean_body
     assert btn_text == "Apply Online"
-    assert btn_url == "https://u3.mnge.co/track/campaign_123"
+    assert btn_url == "https://www.tatacapital.com/"
 
 
-def test_cta_without_url_defaults_to_u3_mnge_co():
-    """Verify CTA line without URL defaults to https://u3.mnge.co/."""
+def test_cta_without_url_uses_tata_homepage():
+    """A missing destination uses the first-party Tata homepage."""
     body = "Too many EMIs? Consolidate them today.\nCheck your offer: <link>\nT&Cs apply."
     clean_body, btn_text, btn_url, _ = extract_and_strip_cta(body)
     assert "<link>" not in clean_body
     assert "Check your offer:" not in clean_body
     assert btn_text == "Check Your Offer"
-    assert btn_url == "https://u3.mnge.co/"
+    assert btn_url == "https://www.tatacapital.com/"
 
 
 def test_parse_jira_brief_end_to_end_removes_cta_from_wa_body():
@@ -133,7 +125,7 @@ def test_parse_jira_brief_end_to_end_removes_cta_from_wa_body():
     # Whitelisting drafts always expose a dynamic URL, even when the source is static.
     assert wa["button_type"] == "URL"
     assert wa["button_text"] == "Check Your Offer"
-    assert wa["button_url"] == "https://u3.mnge.co/{{1}}"
+    assert wa["button_url"] == "https://www.tatacapital.com/{{1}}"
 
 
 def test_cta_variable_extraction_and_stripping():
@@ -150,7 +142,7 @@ def test_cta_variable_extraction_and_stripping():
     clean_body, btn_text, btn_url, footer = extract_and_strip_cta(body)
     assert "CTA {{4}}" not in clean_body
     assert btn_text == "Apply Now"
-    assert btn_url == "https://u3.mnge.co/{{4}}"
+    assert btn_url == "https://www.tatacapital.com/{{4}}"
 
 
 def test_cta_label_with_arrow_syntax():
@@ -179,7 +171,7 @@ def test_cta_label_without_url():
     clean_body, btn_text, btn_url, footer = extract_and_strip_cta(body)
     assert "CTA: Apply Now" not in clean_body
     assert btn_text == "Apply Now"
-    assert btn_url == "https://u3.mnge.co/"
+    assert btn_url == "https://www.tatacapital.com/"
 
 
 def test_tap_to_proceed_cta_extraction_and_stripping():
@@ -194,7 +186,7 @@ def test_tap_to_proceed_cta_extraction_and_stripping():
     assert "Tap to proceed" not in clean_body
     assert "⬇" not in clean_body
     assert btn_text == "Proceed"
-    assert btn_url == "https://u3.mnge.co/"
+    assert btn_url == "https://www.tatacapital.com/"
 
 
 def test_card_title_and_body_deduplication(tmp_path):
@@ -246,7 +238,7 @@ def test_card_title_and_body_deduplication(tmp_path):
     # CTA {{4}} must be extracted into button and NOT in body
     assert "CTA {{4}}" not in rcs["body"]
     assert rcs["action_label"] == "Apply Now"
-    assert rcs["action_url"] == "https://u3.mnge.co/{{4}}"
+    assert rcs["action_url"] == "https://www.tatacapital.com/{{4}}"
 def test_customer_messages_with_embedded_urls_preserve_body():
     """Verify single-line messages with embedded URLs (e.g. SWCM-93, SWCM-91, SWCM-31) preserve their body text."""
     # 1. Message with embedded FAQ URL after colon
@@ -278,7 +270,7 @@ def test_customer_messages_with_embedded_urls_preserve_body():
     assert len(clean_31) > 50
     assert "Dear {{1}}" in clean_31
     assert "Successful referrals unlock exclusive" in clean_31
-    assert url_31 == "https://u3.mnge.co/"
+    assert url_31 == "https://www.tatacapital.com/"
 
 def test_smpl_carousel_and_standalone_cta_extraction_and_stripping():
     """Verify SMPL campaign CTA patterns (angle brackets, bracket buttons, tap below directives) are stripped from body."""
@@ -292,7 +284,7 @@ def test_smpl_carousel_and_standalone_cta_extraction_and_stripping():
     )
     c1, bt1, u1, _ = extract_and_strip_cta(card_1)
     assert bt1 == "Know More"
-    assert u1 == "https://u3.mnge.co/"
+    assert u1 == "https://www.tatacapital.com/"
     assert "[Know more]" not in c1
     assert "Tap to proceed" not in c1
     assert c1.endswith("T&Cs apply")
@@ -306,7 +298,7 @@ def test_smpl_carousel_and_standalone_cta_extraction_and_stripping():
     )
     c2, bt2, u2, _ = extract_and_strip_cta(card_2)
     assert bt2 == "Check Eligibility"
-    assert u2 == "https://u3.mnge.co/"
+    assert u2 == "https://www.tatacapital.com/"
     assert "CTA Button" not in c2
     assert "<Check Eligibility>" not in c2
     assert "Tap below" not in c2
@@ -321,7 +313,7 @@ def test_smpl_carousel_and_standalone_cta_extraction_and_stripping():
     )
     c3, bt3, u3, _ = extract_and_strip_cta(card_3)
     assert bt3 == "Apply Now"
-    assert u3 == "https://u3.mnge.co/"
+    assert u3 == "https://www.tatacapital.com/"
     assert "CTA button" not in c3
     assert "Click below" not in c3
     assert c3.endswith("T&Cs Apply.")
@@ -334,7 +326,7 @@ def test_smpl_carousel_and_standalone_cta_extraction_and_stripping():
     )
     c5, bt5, u5, _ = extract_and_strip_cta(row_5)
     assert bt5 == "Apply Now"
-    assert u5 == "https://u3.mnge.co/"
+    assert u5 == "https://www.tatacapital.com/"
     assert "👉 Apply below" not in c5
     assert c5.endswith("T&Cs apply")
 
@@ -428,9 +420,15 @@ def test_swcm_114_multi_cta_extraction_and_rcs_suggestions():
     ]
 
 
-def test_swcm_164_single_cta_and_direct_attachments_extraction():
+def test_swcm_164_single_cta_and_direct_attachments_extraction(tmp_path):
     """Verify SWCM-164 extracts exactly 1 CTA with cleaned label, maps direct image attachments, and derives card title."""
     from briefing_parser import _parse_swcm_cta, parse_jira_brief
+    from PIL import Image
+
+    rcs_image = tmp_path / "TCW_Asset finance_RCS SMs.jpg"
+    whatsapp_image = tmp_path / "TCW_Asset finance_whatsapp.jpg"
+    Image.new("RGB", (900, 600), "white").save(rcs_image)
+    Image.new("RGB", (600, 600), "white").save(whatsapp_image)
 
     # 1. Verify single CTA with markdown asterisks and trailing colons does NOT duplicate
     raw_cta = (
@@ -495,8 +493,8 @@ def test_swcm_164_single_cta_and_direct_attachments_extraction():
         "description_raw": desc_adf,
         "description_text": "Campaign Execution Format",
         "attachments": [
-            {"id": "38473", "filename": "TCW_Asset finance_RCS SMs.jpg", "mimeType": "image/jpeg", "local_path": "media_cache/jira_38473_TCW_Asset_finance_RCS_SMs.jpg"},
-            {"id": "38472", "filename": "TCW_Asset finance_whatsapp.jpg", "mimeType": "image/jpeg", "local_path": "media_cache/jira_38472_TCW_Asset_finance_whatsapp.jpg"},
+            {"id": "38473", "filename": rcs_image.name, "mimeType": "image/jpeg", "local_path": str(rcs_image)},
+            {"id": "38472", "filename": whatsapp_image.name, "mimeType": "image/jpeg", "local_path": str(whatsapp_image)},
         ],
     }
 
@@ -508,5 +506,5 @@ def test_swcm_164_single_cta_and_direct_attachments_extraction():
     assert len(rcs["suggestions"]) == 1
     assert rcs["suggestions"][0]["label"] == "Explore Loan Solutions"
     assert rcs["media_filename"] == "TCW_Asset finance_RCS SMs.jpg"
-    assert rcs["media_file"] == "media_cache/jira_38473_TCW_Asset_finance_RCS_SMs.jpg"
+    assert rcs["media_file"] == str(rcs_image)
     assert rcs["template_type"] == "richcard"

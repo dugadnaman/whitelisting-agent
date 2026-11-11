@@ -45,7 +45,7 @@ def test_sheet_preview_requires_authenticated_tenant_and_server_catalog(tmp_path
         assert [item["row_id"] for item in data["items"]] == ["2", "3"]
         assert data["items"][0]["candidate_v5_payload"]["channel"] == "EMAIL"
         assert data["items"][1]["status"] == "blocked"
-        assert data["items"][1]["source_fields"]["campaign_name"] == "Unlisted audience"
+        assert data["items"][1]["source_fields"]["campaign_name"] == "att_Unlisted audience"
         assert data["items"][1]["candidate_v5_payload"] is None
         assert client.post("/api/moengage/drafts/batches", headers=headers, data={"account": "bajaj"}, files=upload).status_code == 403
         for name in ("DATABASE_URL", "POSTGRES_URL", "POSTGRESQL_URL"):
@@ -132,6 +132,8 @@ def test_client_whatsapp_workbook_resolves_only_explicit_workspace_audiences(tmp
         ("15:00:00", "10:55:00"), strict=True,
     ):
         payload = item["candidate_v5_payload"]
+        assert payload["basic_details"]["name"].startswith("att_")
+        assert item["source_fields"]["campaign_name"] == payload["basic_details"]["name"]
         assert item["workspace_id"] == workspace
         assert payload["segmentation_details"]["included_filters"]["filters"][0]["id"] == audience
         whatsapp = payload["campaign_content"]["content"]["whatsapp"]

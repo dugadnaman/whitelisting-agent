@@ -333,8 +333,8 @@ def test_outgoing_url_buttons_are_dynamic_and_explicit_samples_survive(provider,
         {"type": "HEADER", "format": "TEXT", "text": "Hello {{1}}", "example": {"header_text": ["Asha"]}},
         {"type": "BODY", "text": "Dear {{1}}, your offer {{2}} is ready.", "example": {"body_text": [["Asha", "special"]]}},
         {"type": "BUTTONS", "buttons": [
-            {"type": "URL", "text": "View", "url": "https://example.test/offers", "example": ["https://unrelated.test/default"]},
-            {"type": "URL", "text": "Personal offer", "url": f"https://example.test/{variable}", "example": ["https://example.test/my-offer"]},
+            {"type": "URL", "text": "View", "url": "https://www.tatacapital.com/offers", "example": ["https://unrelated.test/default"]},
+            {"type": "URL", "text": "Personal offer", "url": f"https://www.tatacapital.com/{variable}", "example": ["https://www.tatacapital.com/my-offer"]},
             {"type": "PHONE_NUMBER", "text": "Call", "phone_number": "+911234567890"},
             {"type": "QUICK_REPLY", "text": "Not now"},
         ]},
@@ -349,11 +349,11 @@ def test_outgoing_url_buttons_are_dynamic_and_explicit_samples_survive(provider,
     assert body["components"][:2] == payload.components[:2]
     buttons = body["components"][2]["buttons"]
     assert buttons[:2] == [
-        {"type": "URL", "text": "View", "url": "https://example.test/offers{{1}}", "example": ["https://example.test/offerssample"]},
-        {"type": "URL", "text": "Personal offer", "url": "https://example.test/{{1}}", "example": ["https://example.test/my-offer"]},
+        {"type": "URL", "text": "View", "url": "https://www.tatacapital.com/offers{{1}}", "example": ["https://www.tatacapital.com/offerssample"]},
+        {"type": "URL", "text": "Personal offer", "url": "https://www.tatacapital.com/{{1}}", "example": ["https://www.tatacapital.com/my-offer"]},
     ]
     assert buttons[2:] == payload.components[2]["buttons"][2:]
-    assert payload.components[2]["buttons"][0]["url"] == "https://example.test/offers"
+    assert payload.components[2]["buttons"][0]["url"] == "https://www.tatacapital.com/offers"
 
 
 def test_selected_account_cannot_be_overridden_by_payload_waba(provider):

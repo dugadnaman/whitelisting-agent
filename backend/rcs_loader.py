@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from cta import ensure_dynamic_cta_url
+from rcs_client import _resolve_rcs_action_url
 from rcs_config import _account_prefix, get_rcs_bot_id, get_rcs_entity_id, get_rcs_esmeaddr
 from rcs_models import RcsTemplateSubmission
 
@@ -58,10 +59,10 @@ def _json_objects(value, label: str) -> list[dict]:
     return value
 
 
-def normalize_rcs_suggestions(suggestions: list[dict]) -> list[dict]:
-    """Make URL actions dynamic without changing reply or dialer actions."""
+def normalize_rcs_suggestions(suggestions: list[dict], client: str = "tata") -> list[dict]:
+    """Resolve account URL destinations and make them dynamic, preserving other actions."""
     return [
-        {**suggestion, "url": ensure_dynamic_cta_url(suggestion.get("url") or "")}
+        {**suggestion, "url": ensure_dynamic_cta_url(_resolve_rcs_action_url(suggestion.get("url"), client))}
         if suggestion.get("suggestionType") == "url_action"
         or (not suggestion.get("suggestionType") and suggestion.get("url"))
         else dict(suggestion)
@@ -69,12 +70,12 @@ def normalize_rcs_suggestions(suggestions: list[dict]) -> list[dict]:
     ]
 
 
-def _build_suggestions_from_row(row: dict) -> list[dict]:
+def _build_suggestions_from_row(row: dict, client: str = "tata") -> list[dict]:
     """Parse button columns into Karix RCS suggestion dictionaries."""
     suggestions = []
 
     if row.get("suggestions") not in (None, ""):
-        return normalize_rcs_suggestions(_json_objects(row["suggestions"], "suggestions"))
+        return normalize_rcs_suggestions(_json_objects(row["suggestions"], "suggestions"), client)
 
     btype = (row.get("button_type") or row.get("suggestion_type") or "").strip().upper()
     btext = (row.get("button_text") or row.get("suggestion_text") or "").strip()
@@ -112,7 +113,7 @@ def _build_suggestions_from_row(row: dict) -> list[dict]:
                     "suggestionType": "url_action",
                     "text": btext,
                     "postbackData": btext,
-                    "url": ensure_dynamic_cta_url(burl),
+                    "url": ensure_dynamic_cta_url(_resolve_rcs_action_url(burl, client)),
                 }
             )
         else:
@@ -174,7 +175,7 @@ def _parse_sender_ids(raw) -> list[str]:
     return [x.strip() for x in re.split(r"[|,]", str(raw)) if x.strip()]
 
 
-def _build_carousel_cards_from_row(row: dict) -> list[dict]:
+def _build_carousel_cards_from_row(row: dict, client: str = "tata") -> list[dict]:
     """Keep card column positions, including blanks, without borrowing another card's data."""
     if row.get("carousel_cards") not in (None, ""):
         cards = _json_objects(row["carousel_cards"], "carousel_cards")
@@ -182,12 +183,12 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
         for card in cards:
             card = dict(card)
             if "suggestions" in card or card.get("button_text"):
-                card["suggestions"] = _build_suggestions_from_row(card)
+                card["suggestions"] = _build_suggestions_from_row(card, client)
                 if card.get("button_url") and any(
                     suggestion.get("suggestionType") == "url_action"
                     for suggestion in card["suggestions"]
                 ):
-                    card["button_url"] = ensure_dynamic_cta_url(card["button_url"])
+                    card["button_url"] = ensure_dynamic_cta_url(_resolve_rcs_action_url(card["button_url"], client))
             normalized.append(card)
         return normalized
 
@@ -228,7 +229,7 @@ def _build_carousel_cards_from_row(row: dict) -> list[dict]:
         "cardTitle": card["card_title"],
         "cardDescription": card["body"],
         "mediaUrl": card["media_url"],
-        "suggestions": _build_suggestions_from_row(card),
+        "suggestions": _build_suggestions_from_row(card, client),
     } for card in card_rows]
 
 
@@ -294,7 +295,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
 
     if is_carousel:
         template_type = "carousel"
-        carousel_cards = _build_carousel_cards_from_row(row)
+        carousel_cards = _build_carousel_cards_from_row(row, c)
     elif (
         raw_type in ("text", "plain", "standard", "plain_text")
         and not media_url
@@ -313,7 +314,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
 
     # Pipe-delimited carousel actions belong to individual cards, not one global button.
     suggestions = _build_suggestions_from_row(
-        {"suggestions": row.get("suggestions")} if is_carousel else row
+        {"suggestions": row.get("suggestions")} if is_carousel else row, c
     )
     category = str(row.get("category") or row.get("template_category") or "TRANSACTIONAL").strip().upper()
 
@@ -616,7 +617,7 @@ def _brief_actions(value: str, count: int, label: str) -> dict[int, dict[int, st
     raise ValueError(f"Ambiguous {label}: use explicit Card N / Button M headings")
 
 
-def _brief_suggestions(row: dict, count: int) -> dict[int, list[dict]]:
+def _brief_suggestions(row: dict, count: int, client: str) -> dict[int, list[dict]]:
     texts = _brief_actions(row.get("button_text", ""), count, "button text")
     fields = {}
     for key in ("button_type", "button_url"):
@@ -644,12 +645,12 @@ def _brief_suggestions(row: dict, count: int) -> dict[int, list[dict]]:
                 "reply (rcs)": "REPLY", "suggested reply (rcs)": "REPLY",
                 "na": "", "n/a": "",
             }.get(kind, action["button_type"])
-            suggestions.extend(_build_suggestions_from_row(action))
+            suggestions.extend(_build_suggestions_from_row(action, client))
         output[card] = suggestions
     return output
 
 
-def _brief_rcs_row(row: dict) -> dict:
+def _brief_rcs_row(row: dict, client: str) -> dict:
     import hashlib
 
     result = dict(row)
@@ -668,7 +669,7 @@ def _brief_rcs_row(row: dict) -> dict:
         bodies = _brief_blocks(row.get("body", ""), "Card")
         if not titles or not bodies or titles.keys() != bodies.keys():
             raise ValueError("Carousel title/body card counts must match explicit Card N headings")
-        actions = _brief_suggestions(row, len(titles))
+        actions = _brief_suggestions(row, len(titles), client)
         media_text = row.get("image_url", "").strip()
         media = _brief_blocks(media_text, "Card") if media_text else {}
         if media_text and (media is None or media.keys() != titles.keys()):
@@ -679,7 +680,7 @@ def _brief_rcs_row(row: dict) -> dict:
             for number in titles
         ]
     else:
-        result["suggestions"] = _brief_suggestions(row, 1)[1]
+        result["suggestions"] = _brief_suggestions(row, 1, client)[1]
     return result
 
 
@@ -692,7 +693,7 @@ def _load_rcs_client_brief(path: str, records: list[dict], client: str, upload_m
         if row["channel"].strip().lower() != "rcs":
             continue
         try:
-            sub = _row_to_rcs_submission(_brief_rcs_row(row), client=client, fallback_idx=row["excel_row"])
+            sub = _row_to_rcs_submission(_brief_rcs_row(row, client), client=client, fallback_idx=row["excel_row"])
         except ValueError as exc:
             raise ValueError(f"{row['source_ref']}: {exc}") from exc
         sub._excel_row = row["excel_row"]
@@ -772,7 +773,9 @@ def load_rcs_from_excel(
             for _c_idx, block in enumerate(block_row_cards):
                 card_dict = parse_single_cell_card_block(block)
 
-                card_dict["suggestions"] = _build_suggestions_from_row(card_dict)
+                card_dict["suggestions"] = _build_suggestions_from_row(card_dict, client)
+                if any(suggestion.get("suggestionType") == "url_action" for suggestion in card_dict["suggestions"]):
+                    card_dict["button_url"] = card_dict["suggestions"][0]["url"]
                 c_cards.append(card_dict)
 
             base_name = Path(path).stem

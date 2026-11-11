@@ -1255,7 +1255,7 @@ def _inspect_rcs_compliance(item: dict) -> list[dict]:
             for button_index, suggestion in enumerate(suggestions):
                 check(
                     f"{component} button {button_index + 1}",
-                    lambda: _build_rcs_clean_suggestions([suggestion], 1, []),
+                    lambda: _build_rcs_clean_suggestions([suggestion], 1, [], client=item.get("client", "bajaj")),
                 )
     return warnings
 
@@ -3675,10 +3675,10 @@ def _jira_whatsapp_components(wa: dict, account: str) -> list[dict]:
         btn_type = (wa.get("button_type") or "NONE").upper().strip()
         btn_text = (wa.get("button_text") or "").strip()
         btn_url = (wa.get("button_url") or "").strip()
-        if not btn_url or btn_url.rstrip("/") in (
-            "https://www.tatacapital.com", "http://www.tatacapital.com", "https://tatacapital.com",
-        ):
-            btn_url = "https://u3.mnge.co/"
+        if not btn_url:
+            from cta import TATA_CTA_URL
+
+            btn_url = TATA_CTA_URL
         if btn_type == "URL" and (btn_url or btn_text):
             btn_list.append({"type": "URL", "text": btn_text or "Check Offer", "url": btn_url})
         elif btn_type in ("QUICK_REPLY", "QUICKREPLY") and btn_text:
@@ -3691,13 +3691,13 @@ def _jira_whatsapp_components(wa: dict, account: str) -> list[dict]:
     if btn_list:
         from cta import normalize_whatsapp_cta_buttons
 
-        normalize_whatsapp_cta_buttons(btn_list)
+        normalize_whatsapp_cta_buttons(btn_list, account)
         comps.append({"type": "BUTTONS", "buttons": btn_list})
     return comps
 
 
 def _jira_rcs_suggestions(draft: dict, carousel: bool = False) -> list[dict]:
-    from cta import ensure_dynamic_cta_url
+    from cta import TATA_CTA_URL, ensure_dynamic_cta_url, resolve_cta_url
 
     if "suggestions" in draft:
         suggestions = [dict(suggestion) for suggestion in draft["suggestions"]]
@@ -3707,12 +3707,12 @@ def _jira_rcs_suggestions(draft: dict, carousel: bool = False) -> list[dict]:
             return []
         suggestions = [{
             "suggestionType": "url_action", "text": label, "postbackData": label,
-            "url": draft.get("button_url") or draft.get("action_url") or "https://u3.mnge.co/",
+            "url": draft.get("button_url") or draft.get("action_url") or TATA_CTA_URL,
         }]
     for suggestion in suggestions:
         action_type = suggestion.get("suggestionType") or suggestion.get("type", "URL")
         if action_type.upper() in ("URL", "URL_ACTION") and suggestion.get("url"):
-            suggestion["url"] = ensure_dynamic_cta_url(suggestion["url"])
+            suggestion["url"] = ensure_dynamic_cta_url(resolve_cta_url(suggestion["url"], "tata"))
     return suggestions
 
 
@@ -4238,7 +4238,9 @@ async def submit_jira_brief_endpoint(
                 formatted_cards = []
                 for card in c_cards:
                     btn_label = card.get("button_text") or card.get("action_label") or "Explore Now"
-                    btn_link = card.get("button_url") or card.get("action_url") or "https://u3.mnge.co/"
+                    from cta import resolve_cta_url
+
+                    btn_link = resolve_cta_url(card.get("button_url") or card.get("action_url") or "", acc)
                     formatted_cards.append({
                         **card,
                         "card_title": card.get("card_title") or "Offer",
@@ -4468,7 +4470,6 @@ def get_moengage_rcs_workspaces_endpoint(
         return {"workspaces": list_moengage_rcs_workspaces(account)}
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 
 @app.post("/api/moengage/rcs/sync")

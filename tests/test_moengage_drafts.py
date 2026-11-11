@@ -1,7 +1,7 @@
 """Offline security behavior for the MoEngage V5 draft-only seam."""
 
 import os
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -80,14 +80,15 @@ def test_writer_never_falls_back_to_shared_or_other_account_key():
     assert transport.calls[0][2]["allow_redirects"] is False
 
 
-def test_draft_only_operations_and_status_guard():
+@pytest.mark.parametrize("channel", ["EMAIL", "PUSH"])
+def test_draft_only_operations_and_status_guard(channel):
     transport = FakeTransport("DRAFT", "DRAFT", "DRAFT", "DRAFT")
     with patch.dict(os.environ, draft_env(), clear=True):
         writer = DraftWriter("tata", USER, transport=transport)
         for payload in (
-            {"channel": "SMS", "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com"},
-            {"channel": "EMAIL", "campaign_delivery_type": "EVENT_TRIGGERED", "created_by": "user@example.com"},
-            {"channel": "EMAIL", "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com", "status": "ACTIVE"},
+            {"channel": "SMS", "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com", "basic_details": {"name": "att_Release"}},
+            {"channel": channel, "campaign_delivery_type": "EVENT_TRIGGERED", "created_by": "user@example.com", "basic_details": {"name": "att_Release"}},
+            {"channel": channel, "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com", "basic_details": {"name": "att_Release"}, "status": "ACTIVE"},
         ):
             with pytest.raises(ValueError):
                 writer.create(payload, idempotency_key=KEY)
@@ -96,7 +97,7 @@ def test_draft_only_operations_and_status_guard():
         assert transport.calls == []
 
         created = writer.create(
-            {"channel": "EMAIL", "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com"},
+            {"channel": channel, "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com", "basic_details": {"name": "att_Release V1"}},
             idempotency_key=KEY,
         )
         assert created["status"] == "DRAFT"
@@ -107,6 +108,51 @@ def test_draft_only_operations_and_status_guard():
     assert transport.calls[-1][1].endswith(f"/{ID}/validate")
     assert all("/v5/campaigns" in call[1] for call in transport.calls)
     assert transport.calls[0][2]["headers"]["Idempotency-Key"] == KEY
+    assert transport.calls[0][2]["json"]["basic_details"] == {"name": "att_Release V1"}
+
+
+@pytest.mark.parametrize("channel", ["EMAIL", "PUSH"])
+@pytest.mark.parametrize("name", [
+    "Release", "attRelease", "att-Release", "ATT_Release", "Att_Release", "aTt_Release",
+    "", " ", "att_", "ATT_", "att_ ", " att_Release", "att_Release ",
+    None, 123, False, {}, [],
+])
+def test_create_rejects_noncanonical_name_without_network(channel, name):
+    transport = FakeTransport()
+    payload = {
+        "channel": channel, "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com",
+        "basic_details": {"name": name},
+    }
+    with patch.dict(os.environ, draft_env(), clear=True):
+        writer = DraftWriter("tata", USER, transport=transport)
+        with pytest.raises(ValueError):
+            writer.create(payload, idempotency_key=KEY)
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize("details", [None, {}, [], "att_Release"])
+def test_create_rejects_missing_or_malformed_name_fields_without_network(details):
+    transport = FakeTransport()
+    payload = {
+        "channel": "EMAIL", "campaign_delivery_type": "ONE_TIME", "created_by": "user@example.com",
+        "basic_details": details,
+    }
+    with patch.dict(os.environ, draft_env(), clear=True):
+        writer = DraftWriter("tata", USER, transport=transport)
+        with pytest.raises(ValueError):
+            writer.create(payload, idempotency_key=KEY)
+    assert transport.calls == []
+
+
+def test_get_preserves_legacy_unprefixed_campaign_name():
+    saved = {"status": "DRAFT", "id": ID, "basic_details": {"name": "Legacy Release"}}
+    transport = Mock()
+    transport.request.return_value.status_code = 200
+    transport.request.return_value.json.return_value = {"data": saved}
+    with patch.dict(os.environ, draft_env(), clear=True):
+        writer = DraftWriter("tata", USER, transport=transport)
+        assert writer.get(ID) == saved
+    assert transport.request.call_args.args[0] == "GET"
 
 
 @pytest.mark.parametrize("status", ["ACTIVE", "SCHEDULED", None])

@@ -108,7 +108,7 @@ def test_authorized_catalog_preview_and_durable_stage(gateway, provision_user, s
     assert item["row_id"] == "WhatsApp!C"
     assert item["workspace_id"] == "offline-crocs"
     candidate = item["candidate_v5_payload"]
-    assert candidate["basic_details"]["name"] == "Reviewed campaign"
+    assert candidate["basic_details"]["name"] == "att_Reviewed campaign"
     assert candidate["scheduling_details"]["start_time"] == "2026-10-15T18:30:00"
     wa = candidate["campaign_content"]["content"]["whatsapp"]
     assert (wa["sender_id"], wa["template_id"]) == (SENDER, TEMPLATE)
@@ -209,7 +209,7 @@ def test_exactly_five_mib_upload_remains_previewable(gateway):
     assert len(content) == 5 * 1024 * 1024
     response = post(client, "/preview", headers, data=content)
     assert response.status_code == 200
-    assert response.json()["items"][0]["candidate_v5_payload"]["basic_details"]["name"] == "Reviewed campaign"
+    assert response.json()["items"][0]["candidate_v5_payload"]["basic_details"]["name"] == "att_Reviewed campaign"
     assert stored_rows() == []
 
 

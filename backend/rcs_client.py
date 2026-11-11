@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import requests
 
-from cta import CTA_VARIABLE_PATTERN, ensure_dynamic_cta_url
+from cta import CTA_VARIABLE_PATTERN, ensure_dynamic_cta_url, resolve_cta_url
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
     KARIX_RCS_FETCH_TEMPLATES_URL,
@@ -101,6 +101,14 @@ def _checked_url(value, label: str) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or any(c.isspace() for c in value):
         raise ValueError(f"RCS {label} must be an absolute HTTP(S) URL without credentials")
     return value
+
+
+def _resolve_rcs_action_url(value, client: str) -> str:
+    """Validate supplied URL input before the account policy can replace its host."""
+    value = _checked_text(value, "action URL", 2048).strip()
+    if value and _VARIABLE_PATTERN.sub("", value).strip():
+        _checked_url(value, "action URL")
+    return resolve_cta_url(value, client)
 
 
 def _media_fields(file_name, media_url, image_bytes=None, required: bool = False) -> dict:
@@ -268,10 +276,10 @@ def _build_single_suggestion(payload: RcsTemplateSubmission) -> list[dict]:
     return _build_suggestions_from_row({
         field: getattr(payload, field, "") or ""
         for field in ("button_type", "button_text", "button_url", "button_phone")
-    })
+    }, payload.client)
 
 
-def _build_rcs_clean_suggestions(raw_suggs: list, next_var_idx: int, param_names: list[str]) -> tuple[list[dict], int]:
+def _build_rcs_clean_suggestions(raw_suggs: list, next_var_idx: int, param_names: list[str], client: str = "tata") -> tuple[list[dict], int]:
     if not isinstance(raw_suggs, list):
         raise ValueError("RCS suggestions must be an array")
     clean_suggs = []
@@ -288,7 +296,7 @@ def _build_rcs_clean_suggestions(raw_suggs: list, next_var_idx: int, param_names
             "postbackData": _checked_text(s.get("postbackData") or stext, "postbackData", 2048),
         }
         if stype == "url_action":
-            raw_url = _checked_url(s.get("url"), "action URL")
+            raw_url = _checked_url(_resolve_rcs_action_url(s.get("url"), client), "action URL")
             b_url, url_params, following_idx = _extract_and_number_rcs_variables(raw_url, next_var_idx)
             if not url_params:
                 b_url = _ensure_url_variable(raw_url, next_var_idx)
@@ -328,12 +336,12 @@ def _build_rcs_carousel_vi_template(
             raw_suggs = card["suggestions"]
         elif card.get("button_text"):
             from rcs_loader import _build_suggestions_from_row
-            raw_suggs = _build_suggestions_from_row(card)
+            raw_suggs = _build_suggestions_from_row(card, payload.client)
         else:
             raw_suggs = []
         if not isinstance(raw_suggs, list) or len(raw_suggs) > 4:
             raise ValueError("RCS cards allow at most 4 suggestions in an array")
-        clean_suggs, next_var_idx = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
+        clean_suggs, next_var_idx = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params, payload.client)
 
         c_entry: dict = {"cardTitle": c_title_norm, "cardDescription": c_desc_norm, "suggestions": clean_suggs}
         c_entry.update(_media_fields(card.get("fileName") or card.get("file_name"), card.get("mediaUrl") or card.get("media_url"), card.get("image_bytes")))
@@ -364,7 +372,7 @@ def _build_rcs_richcard_vi_template(
         raw_suggs = _build_single_suggestion(payload)
     if not isinstance(raw_suggs, list) or len(raw_suggs) > 4:
         raise ValueError("RCS cards allow at most 4 suggestions in an array")
-    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params)
+    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, all_params, payload.client)
 
     card_entry: dict = {
         "cardTitle": c_title_norm,
@@ -394,7 +402,7 @@ def _build_rcs_text_vi_template(payload: RcsTemplateSubmission, safe_name: str, 
     )
     if not isinstance(raw_suggs, list) or len(raw_suggs) > 11:
         raise ValueError("RCS text allows at most 11 suggestions in an array")
-    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, param_names)
+    clean_suggs, _ = _build_rcs_clean_suggestions(raw_suggs, next_var_idx, param_names, payload.client)
 
     vi_template = {
         "name": safe_name,

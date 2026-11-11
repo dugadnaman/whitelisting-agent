@@ -8,7 +8,7 @@ from rcs_client import _build_rcs_carousel_vi_template
 
 
 def test_build_rcs_carousel_uses_custom_card_cta_and_urls():
-    """Verify that card-level button_text and button_url are preserved and converted to suggestions."""
+    """Card labels survive while Tata URL actions use the account's destination."""
     payload = RcsTemplateSubmission(
         client="tcl_promo",
         template_name="tcn_test_carousel",
@@ -41,12 +41,15 @@ def test_build_rcs_carousel_uses_custom_card_cta_and_urls():
     assert cards[0]["cardTitle"] == "Card 1: Festive Discount"
     assert cards[0]["suggestions"][0]["text"] == "Claim Deal"
     assert cards[0]["suggestions"][0]["postbackData"] == "Claim Deal"
-    assert "https://u3.mnge.co/deal-1" in cards[0]["suggestions"][0]["url"]
+    assert cards[0]["suggestions"][0]["url"] == "https://www.tatacapital.com/[1]"
 
     # Card 2 assertions
     assert cards[1]["cardTitle"] == "Card 2: Personal Loan"
     assert cards[1]["suggestions"][0]["text"] == "Check Eligibility"
     assert cards[1]["suggestions"][0]["postbackData"] == "Check Eligibility"
-    assert "https://u3.mnge.co/loan-2" in cards[1]["suggestions"][0]["url"]
+    assert cards[1]["suggestions"][0]["url"] == "https://www.tatacapital.com/[2]"
+    assert params == ["1", "2"]
+    assert cards[0]["fileName"] == "provider-card1"
+    assert cards[1]["fileName"] == "provider-card2"
 
 

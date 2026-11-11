@@ -16,6 +16,7 @@ import {
 import type { Stats, Template, ActivityLog, ActivityStats, RcsSyncWorkspace } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import { formatChannel, formatDate, formatError, relativeTime, truncate } from '@/lib/format';
+import { normalizeRcsSyncCtas } from '@/lib/cta';
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -163,6 +164,7 @@ export default function DashboardPage() {
     const generation = syncGenerationRef.current;
     const tName = t.template_name;
     const isCarousel = (t.template_type || '').toLowerCase().includes('carousel') || Boolean(t.carousel_cards?.length);
+    const syncTemplate = normalizeRcsSyncCtas(t, account);
     try {
       setSyncingSingleRcs((prev) => ({ ...prev, [tName]: true }));
       const res = await syncRcsTemplateToMoEngage({
@@ -174,10 +176,10 @@ export default function DashboardPage() {
         card_description: t.template_message || tName,
         media_url: t.media_url,
         cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
-        cta_url: t.cta_url,
+        cta_url: syncTemplate.cta_url,
         sender_id: syncBotId || t.sender_ids?.[0],
         template_type: isCarousel ? 'carousel' : 'card',
-        carousel_cards: t.carousel_cards || undefined,
+        carousel_cards: syncTemplate.carousel_cards || undefined,
         width: t.width,
         height: t.height,
       });
@@ -251,6 +253,7 @@ export default function DashboardPage() {
         if (generation !== syncGenerationRef.current) return;
         try {
           const isCarousel = (t.template_type || '').toLowerCase().includes('carousel') || Boolean(t.carousel_cards?.length);
+          const syncTemplate = normalizeRcsSyncCtas(t, account);
           await syncRcsTemplateToMoEngage({
             account,
             workspace_id: account === 'apparel' ? syncWorkspaceId : undefined,
@@ -260,10 +263,10 @@ export default function DashboardPage() {
             card_description: t.template_message || t.template_name,
             media_url: t.media_url,
             cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
-            cta_url: t.cta_url,
+            cta_url: syncTemplate.cta_url,
             sender_id: syncBotId || t.sender_ids?.[0],
             template_type: isCarousel ? 'carousel' : 'card',
-            carousel_cards: t.carousel_cards || undefined,
+            carousel_cards: syncTemplate.carousel_cards || undefined,
             width: t.width,
             height: t.height,
           });

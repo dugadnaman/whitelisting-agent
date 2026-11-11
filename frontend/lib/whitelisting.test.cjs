@@ -10,6 +10,7 @@ function apiFor(fetch) {
   vm.runInNewContext(ts.transpileModule(readFileSync(join(__dirname, 'api.ts'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, {
+    require: require('./test-typescript.cjs'),
     exports: exportsObject, module: { exports: exportsObject }, fetch,
     process: { env: {} }, Headers, FormData, URLSearchParams,
     AbortController, AbortSignal, setTimeout, clearTimeout,

@@ -21,6 +21,8 @@ import type {
   MoEngageDraftPreview,
   MoEngageDraftRow,
 } from '@/lib/api';
+import { TATA_CTA_URL, resolveCtaUrl } from '@/lib/cta';
+import { CAMPAIGN_NAME_HINT, CAMPAIGN_NAME_RULE, campaignRowName, normalizeCampaignName, requireCampaignName } from '@/lib/campaign-name';
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 function isCompletedDraft(row: MoEngageDraftRow): boolean {
@@ -82,7 +84,7 @@ function RowCard({
       <div className="flex flex-wrap justify-between items-start gap-2">
         <div>
           <h3 className="font-semibold text-gray-900 text-base mt-0.5">
-            {source.campaign_name || candidate?.basic_details?.name || 'Campaign name missing'}
+            {campaignRowName(row) || 'Campaign name missing'}
           </h3>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
@@ -195,7 +197,7 @@ function RowCard({
             <div>
               <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Click URL / Deeplink</dt>
               <dd className="text-gray-900 mt-0.5 break-all text-xs font-mono text-blue-700">
-                🔗 {source.click_url || push?.default_click_action_value || 'Not set'}
+                🔗 {push?.default_click_action_value || source.click_url || 'Not set'}
               </dd>
             </div>
             <div className="sm:col-span-2">
@@ -361,7 +363,7 @@ function GeneralCampaignsPage() {
   const [singlePushPlatform, setSinglePushPlatform] = useTabState<string>('moe_single_push_platform', 'ANDROID');
   const [singlePushTitle, setSinglePushTitle] = useTabState<string>('moe_single_push_title', '');
   const [singlePushMessage, setSinglePushMessage] = useTabState<string>('moe_single_push_message', '');
-  const [singleClickUrl, setSingleClickUrl] = useTabState<string>('moe_single_click_url', 'https://tatacapital.com');
+  const [singleClickUrl, setSingleClickUrl] = useTabState<string>('moe_single_click_url', TATA_CTA_URL);
   // WhatsApp fields
   const [singleWaSender, setSingleWaSender] = useTabState<string>('moe_single_wa_sender', '');
   const [singleWaTemplate, setSingleWaTemplate] = useTabState<string>('moe_single_wa_template', '');
@@ -614,7 +616,7 @@ function GeneralCampaignsPage() {
       Boolean(row.campaign_id && /^[a-f0-9]{24}$/i.test(row.campaign_id));
     if (!readBackOnly && (row.status !== 'preview_ready' || row.campaign_id || uncertainRows.includes(row.row_id))) return;
 
-    const name = row.source_fields?.campaign_name || row.candidate_v5_payload?.basic_details?.name || 'unnamed campaign';
+    const name = campaignRowName(row) || 'unnamed campaign';
     const prompt = readBackOnly
       ? `Recheck saved MoEngage draft ${row.campaign_id}?\n\nCampaign: ${name}\n\nThis only reads back the existing draft to verify its configuration and Drafts membership. It will not create another draft, publish or send.`
       : `Request a MoEngage ${row.channel} DRAFT for ${account.toUpperCase()}?\n\nCampaign: ${name}\nPhysical Row: ${row.row_id}\n\nThis requests draft-only creation and read-back. It does not publish or send. Review the returned state before human publishing in MoEngage.`;
@@ -746,8 +748,10 @@ function GeneralCampaignsPage() {
   };
 
   const handleCreateFromSingleForm = async () => {
-    if (busy || !singleName.trim() || !singleSegment) {
-      setError('Campaign Name and Target Audience are required.');
+    const campaignName = normalizeCampaignName(singleName);
+    setSingleName(campaignName);
+    if (busy || !campaignName.slice(4).trim() || !singleSegment) {
+      setError(`${CAMPAIGN_NAME_RULE} Target Audience is also required.`);
       return;
     }
     if (singleChannel === 'WHATSAPP' && (!waWorkspace || !waCatalog || waCatalog.workspace_id !== waWorkspace ||
@@ -769,6 +773,7 @@ function GeneralCampaignsPage() {
     setNotice('');
 
     try {
+      requireCampaignName(campaignName);
       const headers = [
         'channel',
         'campaign_name',
@@ -795,7 +800,7 @@ function GeneralCampaignsPage() {
 
       const values = [
         singleChannel,
-        singleName.trim(),
+        campaignName,
         singleSegment,
         isoSchedule,
         singleTimezone,
@@ -807,7 +812,7 @@ function GeneralCampaignsPage() {
         singleChannel === 'PUSH' ? singlePushPlatform : '',
         singleChannel === 'PUSH' ? singlePushTitle : '',
         singleChannel === 'PUSH' ? singlePushMessage : '',
-        singleChannel === 'PUSH' ? singleClickUrl : '',
+        singleChannel === 'PUSH' ? resolveCtaUrl(singleClickUrl, account) : '',
         singleChannel === 'WHATSAPP' ? singleWaSender : '',
         singleChannel === 'WHATSAPP' ? singleWaTemplate : '',
         singleChannel === 'WHATSAPP' ? waWorkspace : '',
@@ -822,6 +827,8 @@ function GeneralCampaignsPage() {
 
       const stagedBatch = await stageMoEngageDraftBatch(syntheticFile, account);
       showBatch(stagedBatch, storageKey);
+      const stagedName = stagedBatch.items[0] && campaignRowName(stagedBatch.items[0]);
+      if (stagedName) setSingleName(stagedName);
       setActiveTab('batch');
       setNotice('Campaign staged locally for review; no remote draft has been confirmed. Only preview_ready rows can be selected for draft creation.');
     } catch (err) {
@@ -859,7 +866,7 @@ function GeneralCampaignsPage() {
     if (type === 'all' || type === 'whatsapp') {
       rows.push([
         'WHATSAPP',
-        'TATA_TEST_DRAFT_WA_OCT01',
+        'att_TATA_TEST_DRAFT_WA_OCT01',
         'REPLACE_WITH_WORKSPACE_SEGMENT_ID',
         '2026-10-15T11:00:00+05:30',
         'Asia/Kolkata',
@@ -881,7 +888,7 @@ function GeneralCampaignsPage() {
     if (type === 'all' || type === 'push') {
       rows.push([
         'PUSH',
-        'TATA_TEST_DRAFT_PUSH_OCT01',
+        'att_TATA_TEST_DRAFT_PUSH_OCT01',
         segId,
         '2026-10-15T10:30:00+05:30',
         'Asia/Kolkata',
@@ -893,7 +900,9 @@ function GeneralCampaignsPage() {
         'ANDROID',
         'Tata Capital Test Draft',
         'Test verification draft. Do not publish.',
-        'https://tatacapital.com',
+        TATA_CTA_URL,
+        '',
+        '',
         '',
         '',
         '',
@@ -903,7 +912,7 @@ function GeneralCampaignsPage() {
     if (type === 'all' || type === 'email') {
       rows.push([
         'EMAIL',
-        'TATA_TEST_DRAFT_EMAIL_OCT01',
+        'att_TATA_TEST_DRAFT_EMAIL_OCT01',
         segId,
         '2026-10-15T10:00:00+05:30',
         'Asia/Kolkata',
@@ -1137,11 +1146,14 @@ function GeneralCampaignsPage() {
                 <label className="block text-xs font-semibold text-gray-700 mb-1">Campaign Name *</label>
                 <input
                   type="text"
-                  placeholder="e.g. TATA_FESTIVE_SPECIAL_OCT2026"
+                  placeholder="e.g. att_TATA_FESTIVE_SPECIAL_OCT2026"
                   value={singleName}
                   onChange={(e) => setSingleName(e.target.value)}
+                  onBlur={() => setSingleName(normalizeCampaignName(singleName))}
+                  aria-describedby="single-campaign-name-rule"
                   className="w-full rounded-lg border border-gray-300 px-3.5 py-2 text-sm focus:border-blue-500 focus:outline-none"
                 />
+                <p id="single-campaign-name-rule" className="mt-1 text-xs text-gray-500">{CAMPAIGN_NAME_HINT}</p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1684,7 +1696,7 @@ function GeneralCampaignsPage() {
                     <td className="p-2.5 font-mono font-bold text-blue-700">campaign_name</td>
                     <td className="p-2.5">All</td>
                     <td className="p-2.5 font-bold text-rose-700">Yes</td>
-                    <td className="p-2.5">Unique campaign name in MoEngage (min 5 chars)</td>
+                    <td className="p-2.5">Unique campaign name starting with lowercase <code>att_</code> and a nonempty suffix. Preview adds the prefix automatically; template names and IDs are unchanged.</td>
                   </tr>
                   <tr>
                     <td className="p-2.5 font-mono font-bold text-blue-700">segment_id</td>

@@ -40,7 +40,7 @@ def test_everything_in_one_cell_decomposition():
 
     # 3. Button populated
     assert res["button_text"] == "Apply Now"
-    assert res["button_url"] == "https://u3.mnge.co/offer"
+    assert res["button_url"] == "https://www.tatacapital.com/"
 
     # 4. Footer is strictly never used (always None)
     assert res["footer_text"] is None
@@ -103,9 +103,9 @@ def test_neighbor_cell_cta_attachment(tmp_path: Path):
 
     item1 = next(i for i in items if "Loan Against Property" in i["text"])
     assert item1["button_text"] == "Check Your Offer"
-    assert item1["button_url"] == "https://u3.mnge.co/lap_special"
+    assert item1["button_url"] == "https://www.tatacapital.com/"
     assert "https://u3.mnge.co" not in item1["text"]  # Stripped from body!
 
     item2 = next(i for i in items if "lower EMI" in i["text"])
     assert item2["button_text"] == "Apply Now"
-    assert item2["button_url"] == "https://u3.mnge.co/transfer"
+    assert item2["button_url"] == "https://www.tatacapital.com/"

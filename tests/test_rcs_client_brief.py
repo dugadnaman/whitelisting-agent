@@ -101,10 +101,15 @@ def test_merged_headers_non_active_sheet_richcard_and_provenance(tmp_path):
     assert sub.template_name == second[0].template_name and len(sub.template_name) <= 25
 
 
-def test_carousel_copy_shared_url_and_no_cross_row_or_sheet_media(tmp_path):
+@pytest.mark.parametrize('url,expected_url', [
+    ('https://example.test/offer', 'https://example.test/offer{{1}}'),
+    ('https://u3.mnge.co/offer/{{1}}', 'https://www.tatacapital.com/{{1}}'),
+])
+def test_carousel_copy_shared_url_and_no_cross_row_or_sheet_media(tmp_path, url, expected_url):
     wb, ws, path = workbook(tmp_path)
     row(ws, 11, 'Carousel')
     row(ws, 13, 'Carousel')
+    ws['M11'] = ws['M13'] = url
     row(ws, 16)
     add_image(ws, 'O13')  # Incomplete carousel set cannot identify a particular card.
     add_image(ws, 'O16', 'blue')
@@ -116,13 +121,14 @@ def test_carousel_copy_shared_url_and_no_cross_row_or_sheet_media(tmp_path):
         assert len(sub.carousel_cards) == 2
         assert sub.carousel_cards[0]['cardDescription'] == 'First body\ninner line\n\nparagraph'
         assert [card['suggestions'][0]['text'] for card in sub.carousel_cards] == ['First action', 'Second action']
-        assert all(card['suggestions'][0]['url'].startswith('https://example.test/offer') for card in sub.carousel_cards)
+        assert all(card['suggestions'][0]['url'] == expected_url for card in sub.carousel_cards)
         assert all(not card.get('mediaUrl') and not card.get('image_bytes') for card in sub.carousel_cards)
     assert subs[2].image_bytes
 
 
 @pytest.mark.parametrize('layout', ['nested', 'slash'])
-def test_multiple_buttons_per_card_and_parallel_mappings(tmp_path, layout):
+@pytest.mark.parametrize('tracking', [False, True])
+def test_multiple_buttons_per_card_and_parallel_mappings(tmp_path, layout, tracking):
     wb, ws, path = workbook(tmp_path)
     row(ws, 11, 'Carousel')
     if layout == 'nested':
@@ -131,10 +137,14 @@ def test_multiple_buttons_per_card_and_parallel_mappings(tmp_path, layout):
     else:
         ws['L11'] = 'Card 1 / Button 1 :- One\nCard 1 / Button 2 :- Two\nCard 2 / Button 1 :- Three\nCard 2 / Button 2 :- Four'
         ws['M11'] = 'https://shared.test/'
+    if tracking:
+        ws['M11'] = 'https://u3.mnge.co/offer/{{1}}'
     wb.save(path)
     cards = load(path)[0].carousel_cards
     assert [[button['text'] for button in card['suggestions']] for card in cards] == [['One', 'Two'], ['Three', 'Four']]
-    if layout == 'nested':
+    if tracking:
+        assert all(button['url'] == 'https://www.tatacapital.com/{{1}}' for card in cards for button in card['suggestions'])
+    elif layout == 'nested':
         assert cards[1]['suggestions'][1]['url'].startswith('https://four.test/')
     else:
         assert all(button['url'].startswith('https://shared.test/') for card in cards for button in card['suggestions'])

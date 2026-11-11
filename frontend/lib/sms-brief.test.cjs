@@ -9,7 +9,7 @@ function load(name, globals = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(join(__dirname, name), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText, { exports, module: { exports }, ...globals });
+  }).outputText, { exports, module: { exports }, require: require('./test-typescript.cjs'), ...globals });
   return exports;
 }
 const { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts } = load('sms-brief.ts');

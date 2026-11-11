@@ -112,7 +112,7 @@ def test_verified_draft_has_exact_selection_and_durable_idempotency(isolated_db)
     assert [name for name, _ in writer.calls] == ["create", "get"]
     payload = writer.payloads[result["campaign_id"]]
     assert payload["channel"] == "WHATSAPP"
-    assert payload["basic_details"]["name"] == ROW_WA["campaign_name"]
+    assert payload["basic_details"]["name"] == "att_Tata Diwali WA Offer"
     assert "seg-wa" in json.dumps(payload["segmentation_details"])
     wa = payload["campaign_content"]["content"]["whatsapp"]
     assert wa["sender_id"] == SENDER_ID
@@ -319,7 +319,6 @@ def test_malformed_nested_readback_requires_review_and_preserves_real_id(isolate
     assert result["campaign_id"] == "000000000000000000000001"
     assert service(writer).create(ROW_WA)["state"] == "NEEDS_REVIEW"
     assert [name for name, _ in writer.calls] == ["create", "get"]
-
 
 def test_parse_spreadsheet_csv_filtering(tmp_path):
     path = tmp_path / "campaigns.csv"

@@ -45,7 +45,7 @@ def test_mixed_batch_persists_blocked_row_and_confirmed_draft_without_reposting(
                                "segment_id": "not-in-catalog"}], "rows.json")
     assert (batch["ready"], batch["blocked"]) == (1, 1)
     assert [item["row_id"] for item in batch["items"]] == ["1", "2"]
-    assert batch["items"][1]["source_fields"]["campaign_name"] == "Missing audience"
+    assert batch["items"][1]["source_fields"]["campaign_name"] == "att_Missing audience"
     assert batch["items"][1]["candidate_v5_payload"] is None
     assert batch["items"][1]["updated_at"] == batch["created_at"]
 

@@ -256,13 +256,13 @@ def test_attached_spreadsheet_comprehensive_content_mapping(tmp_path: Path):
     assert wa_draft["footer_text"] is None
     assert "T&C apply" in wa_draft["body"]
     assert wa_draft["button_text"] == "Claim Loan"
-    assert wa_draft["button_url"] == "https://u3.mnge.co/diwali{{1}}"
+    assert wa_draft["button_url"] == "https://www.tatacapital.com/{{1}}"
 
     rcs_draft = brief.rcs_templates[0]
     assert rcs_draft["template_name"] == "diwali_home_loan_rcs"
     assert rcs_draft["card_title"] == "Durga Pooja Special"
     assert rcs_draft["action_label"] == "Check Rates"
-    assert rcs_draft["action_url"] == "https://u3.mnge.co/home{{1}}"
+    assert rcs_draft["action_url"] == "https://www.tatacapital.com/{{1}}"
 
 
 def test_jira_duplicate_workbook_bytes_keep_copy_and_embedded_creative(tmp_path, monkeypatch):

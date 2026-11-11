@@ -757,7 +757,7 @@ def _resolve_body_variables(components: list, client: str = "bajaj", fix_grammar
                 if "header_text" not in example or not example.get("header_text"):
                     example["header_text"] = [auto_samples[0]]
         elif ctype == "BUTTONS":
-            normalize_whatsapp_cta_buttons(comp.get("buttons", []))
+            normalize_whatsapp_cta_buttons(comp.get("buttons", []), client)
 
     return components
 
