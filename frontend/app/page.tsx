@@ -569,12 +569,12 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="workspace-eyebrow mb-2">Campaign operations</p>
-            <h1 className="text-3xl font-semibold tracking-tight text-gray-900">Overview</h1>
+            <h1 className="workspace-heading">Template approvals</h1>
             <p className="mt-2 text-sm text-gray-600">{accountLabel} <span className="mx-1 text-gray-300">/</span> {channelLabel}</p>
           </div>
           {jiraWhitelisting && (
-            <Link href="/briefs" className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-800">
-              Open Jira Briefs <span aria-hidden="true">→</span>
+            <Link href="/briefs" className="workspace-button-primary">
+              Review Jira briefs <span aria-hidden="true">→</span>
             </Link>
           )}
         </div>
@@ -637,7 +637,7 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-xl">
               <p className="workspace-eyebrow mb-2">Apparel · RCS only</p>
-              <h2 className="text-lg font-semibold tracking-tight text-gray-900">Sync to MoEngage</h2>
+              <h2 className="text-lg font-medium text-gray-900">Sync to MoEngage</h2>
               <p className="mt-2 text-sm leading-relaxed text-gray-600">
                 Pull approved Karix RCS templates into one selected destination. Duplicate detection and sender mapping stay scoped to that workspace.
               </p>
@@ -682,7 +682,7 @@ export default function DashboardPage() {
               <button
                 onClick={handleSyncRcsToMoEngage}
                 disabled={syncBusy || !syncDestinationReady}
-                className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-blue-700 text-white hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-60"
+                className="px-4 py-2.5 rounded-lg text-sm font-medium bg-blue-700 text-white hover:bg-blue-800 transition-colors flex items-center gap-2 disabled:opacity-60"
               >
                 {syncingRcs ? (
                   <>
@@ -723,7 +723,6 @@ export default function DashboardPage() {
             ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
             : 'bg-red-50 border-red-200 text-red-700'
         }`}>
-          <span className="text-base shrink-0 mt-0.5">{syncRcsFeedback.type === 'success' ? '✅' : '⚠️'}</span>
           <div className="flex-1">{syncRcsFeedback.message}</div>
           <button onClick={() => setSyncRcsFeedback(null)} className="text-gray-400 hover:text-gray-600" aria-label="Dismiss">&times;</button>
         </div>
@@ -731,12 +730,12 @@ export default function DashboardPage() {
 
       <section aria-labelledby="template-health-heading" className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="template-health-heading" className="text-base font-semibold tracking-tight text-gray-900">Template health</h2>
+          <h2 id="template-health-heading" className="text-base font-medium text-gray-900">Approval inventory</h2>
           <p className="text-sm text-gray-500">
             {statsError ? stats ? 'Last available counts · sync degraded' : 'Counts unavailable · sync degraded' : statsLoading ? 'Refreshing counts…' : stats ? `${total.toLocaleString()} templates in this account and channel` : 'Counts unavailable'}
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
           {kpiCards.map(card => {
             const active = Boolean(card.statusValue) && statusFilter === card.statusValue;
             return (
@@ -754,7 +753,7 @@ export default function DashboardPage() {
                   <span className={`h-2 w-2 shrink-0 rounded-full ${card.dot}`} />
                   {card.label}
                 </span>
-                <span className="workspace-number mt-3 block text-3xl font-semibold tracking-tight text-gray-900">
+                <span className="workspace-number mt-3 block text-3xl font-medium text-gray-900">
                   {statsLoading ? <span className="block h-9 w-14 rounded bg-gray-100" aria-label="Loading count" /> : stats ? card.value.toLocaleString() : '—'}
                 </span>
                 <span className={`mt-2 block text-xs ${active ? 'text-blue-700' : 'text-gray-500'}`}>
@@ -769,9 +768,8 @@ export default function DashboardPage() {
       {!statsLoading && stats?.sla_insights && stats.pending > 0 && Object.keys(stats.sla_insights.categories).length > 0 && (
         <div className="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="text-sm">⏱️</span>
-            <span className="text-xs font-bold text-amber-950">
-              Estimated Meta Review Turnaround ({stats.pending} pending):
+            <span className="text-sm font-medium text-amber-950">
+              Estimated Meta review time ({stats.pending} pending)
             </span>
             <div className="flex items-center gap-1.5 flex-wrap">
               {Object.entries(stats.sla_insights.categories).map(([cat, count]) => (
@@ -779,7 +777,7 @@ export default function DashboardPage() {
                   key={cat}
                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-white text-amber-900 border border-amber-200"
                 >
-                  <span className="font-bold text-amber-700">{count}</span> {cat}
+                  <span className="font-medium text-amber-800">{count}</span> {cat}
                 </span>
               ))}
             </div>
@@ -803,7 +801,7 @@ export default function DashboardPage() {
               seg.value > 0 ? (
                 <div
                   key={seg.key}
-                  className={`${seg.color} transition-all duration-500`}
+                  className={seg.color}
                   style={{ width: `${(seg.value / distTotal) * 100}%` }}
                   title={`${seg.label}: ${seg.value}`}
                 />
@@ -814,7 +812,7 @@ export default function DashboardPage() {
             {segs.map(seg => (
               <span key={seg.key} className="flex items-center gap-1.5 text-xs text-gray-600">
                 <span className={`w-2 h-2 rounded-full ${seg.color}`} />
-                {seg.label} <span className="font-bold text-gray-900">{seg.value}</span>
+                {seg.label} <span className="font-medium text-gray-900">{seg.value.toLocaleString()}</span>
               </span>
             ))}
           </div>
@@ -826,7 +824,7 @@ export default function DashboardPage() {
         {/* Left: Templates table */}
         <section aria-labelledby="inventory-heading" className="min-w-0 space-y-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 id="inventory-heading" className="text-base font-semibold tracking-tight text-gray-900">Template inventory</h2>
+            <h2 id="inventory-heading" className="text-base font-medium text-gray-900">Template inventory</h2>
             <span className="text-sm text-gray-500" aria-live="polite">
               {templatesLoading ? 'Refreshing inventory…' : templatesError ? 'Inventory unavailable' : `${visibleTemplates.length.toLocaleString()} shown${operatorFilter !== 'all' ? ` of ${templates.length.toLocaleString()} fetched` : ''}`}
             </span>
@@ -894,8 +892,7 @@ export default function DashboardPage() {
                 : 'bg-red-50 border-red-200 text-red-800'
             }`}>
               <div className="flex items-center gap-2">
-                <span>{deleteFeedback.type === 'success' ? '✅' : '⚠️'}</span>
-                <span className="font-semibold">{deleteFeedback.message}</span>
+                <span className="font-medium">{deleteFeedback.message}</span>
               </div>
               <button onClick={() => setDeleteFeedback(null)} className="text-gray-400 hover:text-gray-600" aria-label="Dismiss delete feedback">&times;</button>
             </div>
@@ -904,7 +901,7 @@ export default function DashboardPage() {
           {(channel === 'whatsapp' || channel === 'rcs') && (
             <div className="workspace-panel flex flex-wrap items-center justify-between gap-3 p-3">
               <div className="flex items-center gap-2 text-sm text-gray-600">
-                <span className="font-bold text-gray-900">{selectedTemplates.size}</span>
+                <span className="font-medium tabular-nums text-gray-900">{selectedTemplates.size}</span>
                 <span>of {visibleTemplates.length} selected</span>
                 {selectedTemplates.size > 0 && (
                   <button
@@ -923,7 +920,7 @@ export default function DashboardPage() {
                     type="button"
                     onClick={handleSyncSelectedRcsToMoEngage}
                     disabled={syncBusy || !syncDestinationReady}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 transition-colors cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white bg-blue-700 hover:bg-blue-800 transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {syncingRcs ? (
                       <>
@@ -935,7 +932,7 @@ export default function DashboardPage() {
                       </>
                     ) : (
                       <>
-                        <span>🔄 Sync Selected to {syncDestinationLabel} ({selectedTemplates.size})</span>
+                        <span>Sync selected to {syncDestinationLabel} ({selectedTemplates.size})</span>
                       </>
                     )}
                   </button>
@@ -946,7 +943,7 @@ export default function DashboardPage() {
                     type="button"
                     onClick={handleDeleteSelected}
                     disabled={deleting}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer disabled:opacity-50"
                   >
                     {deleting ? (
                       <>
@@ -1049,7 +1046,7 @@ export default function DashboardPage() {
                               <path d="M10 3v10M6 9l4 4 4-4M3 15h14" />
                             </svg>
                           </div>
-                          <div className="text-sm font-semibold text-gray-700">
+                          <div className="text-sm font-medium text-gray-700">
                             {templatesError
                               ? 'Template history is unavailable.'
                               : stats?.error
@@ -1067,7 +1064,7 @@ export default function DashboardPage() {
                           {!stats?.error && !templatesError && !hasFilters && account !== 'apparel' && (
                             <a
                               href={jiraWhitelisting ? '/briefs' : '/submit'}
-                              className="text-xs font-semibold text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center gap-1"
+                              className="text-xs font-medium text-blue-600 hover:text-blue-800 mt-1 inline-flex items-center gap-1"
                             >
                               {jiraWhitelisting ? 'Open Jira Briefs →' : 'Go to Submit Templates →'}
                             </a>
@@ -1200,8 +1197,8 @@ export default function DashboardPage() {
                                     {syncingSingleRcs[t.template_name]
                                       ? 'Syncing...'
                                       : syncedSingleRcs[t.template_name]
-                                      ? `✓ Synced to ${syncDestinationLabel}`
-                                      : `🔄 Sync to ${syncDestinationLabel}`}
+                                      ? `Synced to ${syncDestinationLabel}`
+                                      : `Sync to ${syncDestinationLabel}`}
                                   </button>
                                 )}
                                 <button
@@ -1223,43 +1220,43 @@ export default function DashboardPage() {
                                 <div className="space-y-3">
                                   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 text-sm break-words">
                                     <div>
-                                      <span className="font-semibold text-gray-500">Template ID: </span>
+                                      <span className="font-medium text-gray-500">Template ID: </span>
                                       <span className="font-mono text-gray-800">
                                         {channel === 'whatsapp' ? (t.provider_ref_id || '—') : (t.template_id || t.provider_ref_id || '—')}
                                       </span>
                                     </div>
                                     <div>
-                                      <span className="font-semibold text-gray-500">Operator: </span>
+                                      <span className="font-medium text-gray-500">Operator: </span>
                                       <span className="text-gray-800">{t.submitted_by || (channel === 'sms' ? 'VILPOWER Sync' : 'Karix Sync')}</span>
                                     </div>
                                     <div>
-                                      <span className="font-semibold text-gray-500">Source File: </span>
+                                      <span className="font-medium text-gray-500">Source File: </span>
                                       <span className="font-mono text-gray-800">{t.source_file || '—'}</span>
                                     </div>
                                     <div>
-                                      <span className="font-semibold text-gray-500">Record: </span>
+                                      <span className="font-medium text-gray-500">Record: </span>
                                       <LiveBadge live={t.live} existsOnWaba={t.exists_on_waba} channel={channel} />
                                     </div>
                                   </div>
 
                                   {pipelineError && (
                                     <div className="p-2.5 bg-red-50 border border-red-200 rounded text-red-700 text-xs">
-                                      <span className="font-semibold">Pipeline Error: </span>
+                                      <span className="font-medium">Pipeline Error: </span>
                                       {pipelineError}
                                     </div>
                                   )}
 
                                   {rejectionReason && (
                                     <div className="p-2.5 bg-amber-50 border border-amber-200 rounded text-amber-800 text-xs">
-                                      <span className="font-semibold">Meta Rejection Reason: </span>
+                                      <span className="font-medium">Meta Rejection Reason: </span>
                                       {rejectionReason}
                                     </div>
                                   )}
 
                                   {t.provider_response && Object.keys(t.provider_response).length > 0 && (
                                     <div>
-                                      <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
-                                        Raw Provider Response
+                                      <div className="text-xs font-medium text-gray-500 mb-1">
+                                        Raw provider response
                                       </div>
                                       <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-48">
                                         {JSON.stringify(t.provider_response, null, 2)}
@@ -1293,10 +1290,10 @@ export default function DashboardPage() {
                                             <span>Syncing to {syncDestinationLabel}...</span>
                                           </>
                                         ) : syncedSingleRcs[t.template_name] ? (
-                                          <span>✓ In {syncDestinationLabel}</span>
+                                          <span>In {syncDestinationLabel}</span>
                                         ) : (
                                           <>
-                                            <span>🔄 Sync to {syncDestinationLabel}</span>
+                                            <span>Sync to {syncDestinationLabel}</span>
                                           </>
                                         )}
                                       </button>
@@ -1321,7 +1318,7 @@ export default function DashboardPage() {
           {activityError && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{activityError}{activityStats ? ' · Showing last available activity.' : ''}</p>}
           <section className="workspace-panel p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-2 mb-1">
-              <h2 className="text-base font-semibold tracking-tight text-gray-900">Team activity</h2>
+              <h2 className="text-base font-medium text-gray-900">Team activity</h2>
               <span className="text-xs text-gray-500">{activityStats ? `${activityStats.total_users} operators` : '—'}</span>
             </div>
             <p className="mb-4 text-xs text-gray-500">Across workspace accounts and channels</p>
@@ -1329,7 +1326,7 @@ export default function DashboardPage() {
               <div className="space-y-3">
                 {activityStats.user_activity.slice(0, 4).map(u => (
                   <div key={u.user} className="flex items-center gap-2.5">
-                    <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-[11px] flex items-center justify-center shrink-0">
+                    <span className="w-6 h-6 rounded bg-gray-100 text-gray-600 font-medium text-xs flex items-center justify-center shrink-0">
                       {u.user.charAt(0).toUpperCase()}
                     </span>
                     <div className="flex-1 min-w-0">
@@ -1339,7 +1336,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="h-1 bg-gray-100 rounded-full mt-1">
                         <div
-                          className="h-1 bg-blue-500 rounded-full transition-all duration-500"
+                          className="h-1 bg-gray-400 rounded-full"
                           style={{ width: `${Math.min(100, (u.actions / Math.max(1, activityStats.total_actions)) * 100)}%` }}
                         />
                       </div>
@@ -1355,7 +1352,7 @@ export default function DashboardPage() {
           {/* Recent activity feed */}
           <section className="workspace-panel p-5">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-semibold tracking-tight text-gray-900">Recent activity</h2>
+              <h2 className="text-base font-medium text-gray-900">Recent activity</h2>
               <a href="/activity" className="text-sm font-medium text-blue-700 hover:underline">
                 View all →
               </a>
@@ -1367,7 +1364,7 @@ export default function DashboardPage() {
                     <ActivityIcon action={a.action} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm leading-relaxed text-gray-800">
-                        <span className="font-semibold">{a.user}</span>{' '}
+                        <span className="font-medium">{a.user}</span>{' '}
                         {a.action === 'TEMPLATE_SUBMISSION' && (a.details.count == null ? <>submitted templates</> : <>submitted {a.details.count} template{a.details.count === 1 ? '' : 's'}</>)}
                         {a.action === 'TEMPLATE_PREVIEW' && <>previewed {a.details.filename || 'a file'}</>}
                         {a.action === 'STATUS_POLL' && (a.details.checked_count == null ? <>polled pending templates</> : <>polled {a.details.checked_count} pending</>)}
@@ -1400,8 +1397,8 @@ export default function DashboardPage() {
                   </svg>
                 </div>
                 <div>
-                  <h3 id="file-delete-heading" className="text-base font-semibold tracking-tight text-gray-900">Delete Templates from Spreadsheet</h3>
-                  <p className="text-sm text-gray-500">Target Account: <span className="font-semibold text-gray-800">{accountLabel}</span> · {channelLabel}</p>
+                  <h3 id="file-delete-heading" className="text-base font-medium text-gray-900">Delete templates from spreadsheet</h3>
+                  <p className="text-sm text-gray-500">Target account: <span className="font-medium text-gray-800">{accountLabel}</span> · {channelLabel}</p>
                 </div>
               </div>
               <button
@@ -1440,12 +1437,12 @@ export default function DashboardPage() {
                   </div>
                   {deleteFile ? (
                     <div>
-                      <span className="font-semibold text-gray-900 font-mono text-sm break-all">{deleteFile.name}</span>
+                      <span className="font-medium text-gray-900 font-mono text-sm break-all">{deleteFile.name}</span>
                       <p className="text-xs text-gray-500 mt-1">{(deleteFile.size / 1024).toFixed(1)} KB — Click to change file</p>
                     </div>
                   ) : (
                     <div>
-                      <span className="font-semibold text-blue-600 hover:underline">Choose a file</span>
+                      <span className="font-medium text-blue-600 hover:underline">Choose a file</span>
                       <p className="text-xs text-gray-500 mt-1">CSV or Excel (.xlsx, .xls)</p>
                     </div>
                   )}
@@ -1453,7 +1450,7 @@ export default function DashboardPage() {
               </div>
 
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-sm leading-relaxed">
-                <strong>⚠️ Warning:</strong> This will permanently delete all templates defined in this file from your active WABA on Karix and Meta.
+                <strong>Warning:</strong> This will permanently delete all templates defined in this file from your active WABA on Karix and Meta.
               </div>
             </div>
 
@@ -1470,7 +1467,7 @@ export default function DashboardPage() {
                 type="button"
                 onClick={handleDeleteFromFile}
                 disabled={!deleteFile || fileDeleting}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-50"
               >
                 {fileDeleting ? (
                   <>

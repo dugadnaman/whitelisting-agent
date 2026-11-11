@@ -57,33 +57,33 @@ function DraftWarningList({ draft, showAspectWarnings = true }: { draft: DraftWa
   return (
     <div className="space-y-2 text-xs">
       {showAspectWarnings && isAspectBlocked(draft) && (
-        <p role="alert" className="font-semibold text-rose-800">
+        <p role="alert" className="font-medium text-rose-800">
           Whitelisting blocked: {draft.aspect_ratio_block_reason || 'Replace the creative with a compliant image.'}
         </p>
       )}
       {showAspectWarnings && draft.aspect_ratio_warnings?.map((warning, index) => (
-        <div key={`aspect-${index}`} className="p-2 rounded border border-rose-200 bg-rose-50 text-rose-900">
-          <p className="font-semibold">{warning.component}: {warning.error || warning.action || 'Image aspect ratio warning'}</p>
+        <div key={`aspect-${index}`} className="p-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-900">
+          <p className="font-medium">{warning.component}: {warning.error || warning.action || 'Image aspect ratio warning'}</p>
           <p>Original: {warning.original_size || 'Unknown'} · Current ratio: {warning.current_ratio || 'Unknown'} · Required: {warning.recommended_ratio || 'See recommendation'}</p>
           {warning.error && warning.action && <p>{warning.action}</p>}
         </div>
       ))}
       {draft.compliance_warnings?.filter((warning) => warning.severity === 'error').map((warning, index) => (
-        <div role="alert" key={`compliance-${index}`} className="p-2 rounded border border-rose-200 bg-rose-50 text-rose-900">
-          <p className="font-semibold">{warning.component ? `${warning.component}: ` : ''}{warning.severity === 'error' ? 'Compliance error' : 'Compliance warning'}: {warning.issue}</p>
+        <div role="alert" key={`compliance-${index}`} className="p-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-900">
+          <p className="font-medium">{warning.component ? `${warning.component}: ` : ''}{warning.severity === 'error' ? 'Compliance error' : 'Compliance warning'}: {warning.issue}</p>
           {warning.recommendation && <p>{warning.recommendation}</p>}
         </div>
       ))}
       {suggestionCount > 0 && <details className="rounded-lg border border-gray-200 p-2 text-gray-600">
         <summary className="cursor-pointer font-medium">Suggestions ({suggestionCount})</summary>
         <div className="mt-2 space-y-2">
-        {suggestions.map((warning, index) => <div key={`suggestion-${index}`} className="rounded border border-amber-200 bg-amber-50 p-2 text-amber-900">
+        {suggestions.map((warning, index) => <div key={`suggestion-${index}`} className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-900">
           <p>{warning.component ? `${warning.component}: ` : ''}{warning.issue}</p>
           {warning.recommendation && <p>{warning.recommendation}</p>}
         </div>)}
       {draft.grammar_warnings?.map((warning, index) => (
-        <div key={`grammar-${index}`} className="p-2 rounded border border-blue-200 bg-blue-50 text-blue-900">
-          <p className="font-semibold">{warning.component ? `${warning.component}: ` : ''}Grammar: {warning.issue}</p>
+        <div key={`grammar-${index}`} className="p-2 rounded-lg border border-gray-200 bg-gray-50 text-blue-900">
+          <p className="font-medium">{warning.component ? `${warning.component}: ` : ''}Grammar: {warning.issue}</p>
           {warning.suggestion && <p>{warning.suggestion}</p>}
           {warning.original && <p>Original: {warning.original}</p>}
           {warning.replacement && <p>Suggested: {warning.replacement}</p>}
@@ -92,7 +92,7 @@ function DraftWarningList({ draft, showAspectWarnings = true }: { draft: DraftWa
         </div>
       </details>}
       {draft.duplicate_warning && (
-        <p className="p-2 rounded border border-amber-200 bg-amber-50 text-amber-900">
+        <p className="p-2 rounded-lg border border-amber-200 bg-amber-50 text-amber-900">
           Duplicate: {draft.duplicate_warning.message}
         </p>
       )}
@@ -136,7 +136,7 @@ function BriefStatusBadge({ status }: { status?: string }) {
   }
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border shrink-0 ${colorClass}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium border shrink-0 ${colorClass}`}>
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
       <span>{label}</span>
     </span>
@@ -1564,7 +1564,7 @@ export default function JiraBriefsPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-2">
           <p className="workspace-eyebrow">Campaign operations</p>
-          <h1 className="text-2xl font-semibold tracking-tight text-gray-900 sm:text-3xl">Jira briefs</h1>
+          <h1 className="text-[28px] font-medium tracking-tight text-gray-900 sm:text-3xl">Jira briefs</h1>
           <p className="max-w-2xl text-sm leading-relaxed text-gray-500">From ticket to reviewed template. Keep the source in view and confirm only what you choose.</p>
         </div>
         <button type="button" onClick={() => loadIssues(searchQuery, briefStatusFilter)} disabled={loadingIssues}
@@ -1582,9 +1582,9 @@ export default function JiraBriefsPage() {
           ].map((step, index) => (
             <li key={step.label} aria-current={workflowStep === index + 1 ? 'step' : undefined} className="relative flex min-w-0 flex-1 gap-2 last:flex-none last:w-[30%] sm:gap-3">
               {index < 2 && <span aria-hidden="true" className={`absolute left-8 right-2 top-4 h-px ${workflowStep > index + 1 ? 'bg-blue-300' : 'bg-gray-200'}`} />}
-              <span aria-hidden="true" className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-semibold ${workflowStep >= index + 1 ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white text-gray-400'}`}>{index + 1}</span>
+              <span aria-hidden="true" className={`relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-sm font-medium ${workflowStep >= index + 1 ? 'border-gray-200 bg-gray-50 text-blue-800' : 'border-gray-200 bg-white text-gray-400'}`}>{index + 1}</span>
               <div className="relative min-w-0 bg-white pr-2 pt-1">
-                <p className={`text-sm font-semibold ${workflowStep === index + 1 ? 'text-blue-800' : workflowStep > index + 1 ? 'text-gray-800' : 'text-gray-500'}`}>{step.label}</p>
+                <p className={`text-sm font-medium ${workflowStep === index + 1 ? 'text-blue-800' : workflowStep > index + 1 ? 'text-gray-800' : 'text-gray-500'}`}>{step.label}</p>
                 <p className="mt-1 hidden text-xs leading-relaxed text-gray-500 sm:block">{step.detail}</p>
               </div>
             </li>
@@ -1612,10 +1612,10 @@ export default function JiraBriefsPage() {
           }`}
         >
           <div className="flex items-center gap-2">
-            <span>{feedback.type === 'success' ? '✅' : '⚠️'}</span>
+            
             <span>{feedback.message}</span>
           </div>
-          <button onClick={() => setFeedback(null)} className="text-gray-400 hover:text-gray-600">
+          <button aria-label="Dismiss feedback" onClick={() => setFeedback(null)} className="text-gray-400 hover:text-gray-600">
             ✕
           </button>
         </div>
@@ -1626,8 +1626,8 @@ export default function JiraBriefsPage() {
         {/* Left Column: Jira Issues List */}
         <section className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 space-y-4 lg:col-span-4 xl:col-span-3" aria-labelledby="ticket-picker-heading">
           <div className="flex items-center justify-between gap-2 border-b border-gray-100 pb-3">
-            <h2 id="ticket-picker-heading" className="text-sm font-semibold text-gray-900">Choose a ticket</h2>
-            <button type="button" aria-expanded={showTicketPicker || !selectedKey} aria-controls="jira-ticket-picker" onClick={() => setShowTicketPicker((open) => !open)} className="rounded-lg px-2 py-1 text-sm font-medium text-blue-700 hover:bg-blue-50 lg:hidden">{showTicketPicker ? 'Hide tickets' : 'Change ticket'}</button>
+            <h2 id="ticket-picker-heading" className="text-sm font-medium text-gray-900">Choose a ticket</h2>
+            <button type="button" aria-expanded={showTicketPicker || !selectedKey} aria-controls="jira-ticket-picker" onClick={() => setShowTicketPicker((open) => !open)} className="rounded-lg px-2 py-1 text-sm font-medium text-blue-700 hover:bg-gray-50 lg:hidden">{showTicketPicker ? 'Hide tickets' : 'Change ticket'}</button>
           </div>
           <div id="jira-ticket-picker" className={`${showTicketPicker || !selectedKey ? 'block' : 'hidden'} lg:block space-y-3`}>
 
@@ -1638,13 +1638,13 @@ export default function JiraBriefsPage() {
               setSelectedKey('');
               setBrief(null);
               if (typeof window !== 'undefined') localStorage.setItem('briefs_project', nextProject);
-            }} className="mt-1.5 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+            }} className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
               {projectsList.map((item) => <option key={item.key} value={item.key}>{item.key === 'ALL' ? 'All projects' : `${item.key} — ${item.name}`}</option>)}
             </select>
           </label>
           <label className="block text-sm font-medium text-gray-700">Search tickets
             <input type="search" placeholder="Key, title or assignee" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)}
-              className="mt-1.5 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              className="mt-2 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" />
           </label>
           <details className="text-sm text-gray-600" open={campaignTypeFilter !== 'all' || briefStatusFilter !== 'all' || undefined}>
             <summary className="cursor-pointer font-medium">Filter tickets{campaignTypeFilter !== 'all' || briefStatusFilter !== 'all' ? ' · active' : ''}</summary>
@@ -1676,7 +1676,7 @@ export default function JiraBriefsPage() {
               <div className="py-12 text-center text-xs text-gray-400">Loading Jira queue...</div>
             ) : filteredIssues.length === 0 ? (
               <div className="space-y-3 rounded-lg bg-gray-50 px-4 py-8 text-center text-sm text-gray-600">
-                <p className="font-semibold text-gray-900">No matching tickets</p>
+                <p className="font-medium text-gray-900">No matching tickets</p>
                 <p>Try a ticket key, a different project, or fewer filters.</p>
                 {ticketFiltersActive && <button type="button" onClick={resetTicketFilters} className="rounded-lg border border-gray-200 bg-white px-3 py-2 font-medium text-gray-700 hover:bg-gray-100">Clear search &amp; filters</button>}
               </div>
@@ -1689,31 +1689,31 @@ export default function JiraBriefsPage() {
                       onClick={() => handleSelectIssue(issue.key)}
                       className={`w-full text-left p-3 rounded-lg border transition-colors text-sm space-y-2 ${
                         isSelected
-                          ? 'bg-blue-50/80 border-blue-300 ring-1 ring-blue-400/40 shadow-xs'
+                          ? 'bg-gray-50/80 border-blue-300 ring-1 ring-blue-400/40 '
                           : 'bg-white border-gray-200 hover:bg-gray-50/80'
                       }`}
                     >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-bold font-mono text-blue-700">{issue.key}</span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium font-mono text-blue-700">{issue.key}</span>
                         {issue.is_email ? (
-                          <span className="rounded bg-purple-50 px-1.5 py-0.5 text-xs font-medium text-purple-700">
+                          <span className="rounded-lg bg-gray-50 px-1.5 py-0.5 text-xs font-medium text-purple-700">
                             Email
                           </span>
                         ) : (
-                          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
+                          <span className="rounded-lg bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
                             Messaging
                           </span>
                         )}
                       </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-lg bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
                           {issue.status}
                         </span>
                         <BriefStatusBadge status={issue.brief_status} />
                       </div>
                     </div>
-                    <p className="font-semibold text-gray-800 line-clamp-2 leading-snug">{issue.summary}</p>
+                    <p className="font-medium text-gray-800 line-clamp-2 leading-snug">{issue.summary}</p>
                     <div className="flex flex-wrap items-center justify-between gap-1 pt-1 text-xs text-gray-500">
                       <span>{issue.assignee || 'Unassigned'}</span>
                       <span>{issue.attachment_count} creatives</span>
@@ -1723,35 +1723,35 @@ export default function JiraBriefsPage() {
                       const counts = (isSelected && brief?.channel_counts) ? brief.channel_counts : issue.channel_counts;
                       if (!counts || counts.total === 0) return null;
                       return (
-                        <div className="flex flex-wrap items-center gap-1 pt-1.5 border-t border-gray-100">
+                        <div className="flex flex-wrap items-center gap-1 pt-2 border-t border-gray-100">
                           {counts.whatsapp > 0 && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200" title={`${counts.whatsapp} WhatsApp campaign(s)`}>
+                            <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-1 rounded-lg bg-gray-100 text-gray-600 border border-gray-200" title={`${counts.whatsapp} WhatsApp campaign(s)`}>
                               <span>WA:</span>
-                              <span className="font-extrabold">{counts.whatsapp}</span>
+                              <span className="font-medium">{counts.whatsapp}</span>
                             </span>
                           )}
                           {counts.rcs > 0 && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-50 text-blue-700 border border-blue-200" title={`${counts.rcs} RCS campaign(s)`}>
+                            <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-1 rounded-lg bg-gray-50 text-gray-600 border border-gray-200" title={`${counts.rcs} RCS campaign(s)`}>
                               <span>RCS:</span>
-                              <span className="font-extrabold">{counts.rcs}</span>
+                              <span className="font-medium">{counts.rcs}</span>
                             </span>
                           )}
                           {counts.sms > 0 && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 border border-purple-200" title={`${counts.sms} SMS campaign(s)`}>
+                            <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-1 rounded-lg bg-gray-50 text-gray-600 border border-gray-200" title={`${counts.sms} SMS campaign(s)`}>
                               <span>SMS:</span>
-                              <span className="font-extrabold">{counts.sms}</span>
+                              <span className="font-medium">{counts.sms}</span>
                             </span>
                           )}
                           {counts.email > 0 && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200" title={`${counts.email} Email campaign(s)`}>
+                            <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-1 rounded-lg bg-gray-100 text-gray-600 border border-gray-200" title={`${counts.email} Email campaign(s)`}>
                               <span>Email:</span>
-                              <span className="font-extrabold">{counts.email}</span>
+                              <span className="font-medium">{counts.email}</span>
                             </span>
                           )}
                           {counts.push > 0 && (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-700 border border-indigo-200" title="Push / MoEngage campaign">
+                            <span className="inline-flex items-center gap-0.5 text-xs font-medium px-1.5 py-1 rounded-lg bg-gray-50 text-gray-600 border border-gray-200" title="Push / MoEngage campaign">
                               <span>Push:</span>
-                              <span className="font-extrabold">{counts.push}</span>
+                              <span className="font-medium">{counts.push}</span>
                             </span>
                           )}
                         </div>
@@ -1768,12 +1768,12 @@ export default function JiraBriefsPage() {
         {/* Right Column: Interactive Brief Inspector */}
         <div className="min-w-0 space-y-4 lg:col-span-8 xl:col-span-9">
           {loadingBrief ? (
-            <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs p-16 text-center text-xs text-gray-400 space-y-2">
-              <div className="animate-spin text-xl">⏳</div>
+            <div className="bg-white rounded-xl border border-gray-200/80  p-16 text-center text-xs text-gray-400 space-y-2">
+              <p role="status" className="text-sm text-gray-500">Loading brief…</p>
               <p>Parsing Jira brief and downloading creative attachments...</p>
             </div>
           ) : !brief ? (
-            <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs p-16 text-center text-xs text-gray-400">
+            <div className="bg-white rounded-xl border border-gray-200/80  p-16 text-center text-xs text-gray-400">
               Select a Jira ticket from the left panel to inspect its campaign brief.
             </div>
           ) : (
@@ -1783,48 +1783,48 @@ export default function JiraBriefsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="space-y-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold font-mono text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                      <span className="text-sm font-medium font-mono text-blue-700 bg-gray-50 px-2 py-0.5 rounded-lg border border-gray-200">
                         {brief.issue_key}
                       </span>
-                      <h2 className="min-w-0 break-words text-base font-semibold text-gray-900">{brief.summary}</h2>
+                      <h2 className="min-w-0 break-words text-base font-medium text-gray-900">{brief.summary}</h2>
                       <BriefStatusBadge status={brief.brief_status} />
                     </div>
                     <details className="text-xs text-gray-500">
                       <summary className="cursor-pointer font-medium">Ticket details</summary>
                       <div className="mt-2 flex flex-wrap gap-3">
                       <span>Detected account (suggestion): <strong className="text-gray-800">{destinationAccountLabel(brief.account, getAccountLabel(brief.account))}</strong></span>
-                      <span>👤 Reporter: <strong>{brief.reporter}</strong></span>
-                      <span>🛠️ Assignee: <strong>{brief.assignee}</strong></span>
-                      {brief.duedate && <span>📅 Due Date: <strong>{formatDate(brief.duedate)}</strong></span>}
+                      <span>Reporter: <strong>{brief.reporter}</strong></span>
+                      <span>Assignee: <strong>{brief.assignee}</strong></span>
+                      {brief.duedate && <span>Due date: <strong>{formatDate(brief.duedate)}</strong></span>}
                       </div>
                     </details>
                   </div>
-                    <div className="flex flex-wrap items-center gap-2 pt-1.5">
+                    <div className="flex flex-wrap items-center gap-2 pt-2">
                       <span className="text-xs font-medium text-gray-700">Destination: {selectedDestinationLabel}</span>
                     </div>
 
                     {/* Dedicated RCS Destination Card when RCS templates are present */}
                     {channel === 'rcs' && rcsTemplates.length > 0 && (
-                      <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950 space-y-2">
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-blue-950 space-y-2">
                         <p className="font-medium">RCS bot: {currentRcs.botName}</p>
                         <details>
                           <summary className="cursor-pointer text-blue-800">Connection details</summary>
                           <p className="mt-2 break-words">Bot ID: {currentRcs.botId || 'Not configured'} · User: {currentRcs.rcsUser} · Entity: {currentRcs.entity}</p>
                         </details>
                         {!currentRcs.botId && (
-                          <p role="alert" className="font-semibold text-amber-800">
+                          <p role="alert" className="font-medium text-amber-800">
                             RCS submission is unavailable: this account has no verified Karix bot. Refresh account settings.
                           </p>
                         )}
                         {brief.account && brief.account !== targetAccount && (
-                          <div className="mt-1 pt-1.5 border-t border-blue-200/80 flex flex-wrap items-center justify-between gap-2 text-xs bg-amber-50/90 p-2 rounded-lg border border-amber-200 text-amber-900">
+                          <div className="mt-1 pt-2 border-t border-gray-200/80 flex flex-wrap items-center justify-between gap-2 text-xs bg-amber-50/90 p-2 rounded-lg border border-amber-200 text-amber-900">
                             <span>
                               <strong>Suggested account:</strong> {destinationAccountLabel(brief.account, getAccountLabel(brief.account))}. Your reviewed destination remains <strong>{selectedDestinationLabel}</strong>.
                             </span>
                             <button
                               type="button"
                               onClick={() => { if (!setDestination(brief.account, channel)) return; }}
-                              className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-2xs"
+                              className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs transition-colors "
                             >
                               Use {destinationLabel(brief.account, channel, getAccountLabel(brief.account))}
                             </button>
@@ -1837,7 +1837,7 @@ export default function JiraBriefsPage() {
                     <div role={validationError ? 'alert' : 'status'} className={`p-3 rounded-lg border text-xs ${validationError ? 'bg-rose-50 border-rose-200 text-rose-900' : 'bg-amber-50 border-amber-200 text-amber-900'}`}>
                       <p>{validationError ? `Creative and copy validation failed: ${validationError}` : 'Checking current creative and copy. Whitelisting is paused until validation completes.'}</p>
                       {validationError && (
-                        <button type="button" className="mt-1 font-semibold underline" onClick={() => {
+                        <button type="button" className="mt-1 font-medium underline" onClick={() => {
                           setValidation({ signature: previewSignature, status: 'pending' });
                           setPreviewAttempt((value) => value + 1);
                         }}>
@@ -1851,7 +1851,7 @@ export default function JiraBriefsPage() {
                       type="button"
                       onClick={prepareValidationComment}
                       disabled={!validationReady || submitting || commentBusy}
-                      className="px-3 py-2 rounded-lg border border-rose-300 bg-rose-50 text-rose-800 text-xs font-semibold hover:bg-rose-100 disabled:opacity-50"
+                      className="px-3 py-2 rounded-lg border border-rose-300 bg-rose-50 text-rose-800 text-xs font-medium hover:bg-rose-100 disabled:opacity-50"
                     >
                       {commentBusy ? 'Preparing Jira report…' : 'Report validation errors to Jira…'}
                     </button>
@@ -1865,7 +1865,7 @@ export default function JiraBriefsPage() {
                   <details className="pt-3 border-t border-gray-100 text-xs">
                     <summary className="cursor-pointer font-medium text-gray-600">Source attachments ({brief.attachments_mapped.length})</summary>
 
-                    <div className="flex items-center gap-3 overflow-x-auto pb-1.5 scrollbar-thin">
+                    <div className="flex items-center gap-3 overflow-x-auto pb-2 scrollbar-thin">
                       {brief.attachments_mapped.map((att) => {
                         const fn = att.filename || '';
                         const isImg = Boolean(
@@ -1878,26 +1878,26 @@ export default function JiraBriefsPage() {
                           return (
                             <div
                               key={att.id || att.filename}
-                              className="group relative flex flex-col w-36 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden shadow-2xs hover:shadow-md hover:border-blue-400 transition"
+                              className="group relative flex flex-col w-36 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden   hover:border-blue-400 transition-colors"
                             >
                               <div className="relative min-h-24 w-full bg-gray-50 flex items-center justify-center">
                                 <JiraCreativeImage
                                   source={source}
-                                  className="max-h-24 w-full object-contain transition duration-200"
+                                  className="max-h-24 w-full object-contain transition-colors duration-200"
                                   onPreview={() => setPreviewCreativeModal({ ...source, filename: fn, channel: att.target_channel })}
                                 />
-                                <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-white/90 text-gray-800 shadow-2xs">
+                                <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-lg text-xs font-medium bg-white/90 text-gray-800 ">
                                   {att.target_channel === 'WHATSAPP'
-                                    ? '🟢 WA'
+                                    ? 'WhatsApp'
                                     : att.target_channel === 'RCS'
-                                    ? '🔵 RCS'
-                                    : '📎 Mapped'}
+                                    ? 'RCS'
+                                    : 'Mapped'}
                                 </span>
                               </div>
 
-                              <div className="p-2 flex flex-col justify-between gap-1 text-[10px]">
+                              <div className="p-2 flex flex-col justify-between gap-1 text-xs">
                                 <span
-                                  className="font-mono text-gray-900 truncate font-semibold"
+                                  className="font-mono text-gray-900 truncate font-medium"
                                   title={fn}
                                 >
                                   {fn}
@@ -1906,13 +1906,13 @@ export default function JiraBriefsPage() {
                                   <button
                                     type="button"
                                     onClick={() => setPreviewCreativeModal({ ...source, filename: fn, channel: att.target_channel })}
-                                    className="text-blue-600 hover:text-blue-800 font-bold"
+                                    className="text-gray-600 hover:text-gray-600 font-medium"
                                   >
                                     View
                                   </button>
                                   <JiraCreativeDownload
                                     source={source}
-                                    className="text-gray-500 hover:text-gray-900 font-semibold"
+                                    className="text-gray-500 hover:text-gray-900 font-medium"
                                   />
                                 </div>
                               </div>
@@ -1927,20 +1927,20 @@ export default function JiraBriefsPage() {
                         return (
                           <div
                             key={att.id || att.filename}
-                            className="flex flex-col justify-between w-40 shrink-0 p-2.5 rounded-xl border border-gray-200 bg-gray-50/70 text-[11px] shadow-2xs hover:bg-gray-100/70 transition space-y-1.5"
+                            className="flex flex-col justify-between w-40 shrink-0 p-3 rounded-xl border border-gray-200 bg-gray-50/70 text-xs  hover:bg-gray-100/70 transition-colors space-y-1.5"
                           >
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-2">
                               <span className="text-base">
-                                {isSpreadsheet ? '📊' : isDocx ? '📄' : isZip ? '📦' : '📎'}
+                                {isSpreadsheet ? 'XLS' : isDocx ? 'DOC' : isZip ? 'ZIP' : 'File'}
                               </span>
                               <span
-                                className="font-mono font-semibold text-gray-800 truncate"
+                                className="font-mono font-medium text-gray-800 truncate"
                                 title={fn}
                               >
                                 {fn}
                               </span>
                             </div>
-                            <span className="text-[10px] text-gray-500 font-sans">
+                            <span className="text-xs text-gray-500 font-sans">
                               {isSpreadsheet
                                 ? 'Spreadsheet Brief'
                                 : isDocx
@@ -1950,12 +1950,12 @@ export default function JiraBriefsPage() {
                                 : att.target_channel || 'Attachment'}
                             </span>
                             <div className="pt-1 border-t border-gray-200/80 flex items-center justify-between">
-                              <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-white text-gray-600 border">
+                              <span className="text-xs px-1.5 py-1 rounded-lg font-medium bg-white text-gray-600 border">
                                 {att.target_channel || 'BRIEF'}
                               </span>
                               <JiraCreativeDownload
                                 source={source}
-                                className="px-2 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-[10px] border border-blue-200"
+                                className="px-2 py-0.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 font-medium text-xs border border-gray-200"
                               />
                             </div>
                           </div>
@@ -1968,30 +1968,30 @@ export default function JiraBriefsPage() {
 
               {/* Email Campaign Banner if applicable */}
               {brief.is_email_campaign && (
-                <div className="p-4 bg-purple-50/80 border border-purple-200 rounded-xl space-y-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-base">📧</span>
-                    <h3 className="text-xs font-bold text-purple-900 uppercase tracking-wider">
-                      Email Mailer Campaign Detected
+                <div className="p-4 bg-gray-50/80 border border-gray-200 rounded-xl space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    
+                    <h3 className="text-xs font-medium text-gray-900 normal-case tracking-normal">
+                      Email campaign
                     </h3>
-                    <span className="text-[10px] bg-purple-100 text-purple-800 font-semibold px-2 py-0.5 rounded">
-                      No Karix Whitelisting Required
+                    <span className="text-xs bg-gray-100 text-gray-600 font-medium px-2 py-0.5 rounded-lg">
+                      No Karix whitelisting required
                     </span>
                   </div>
-                  <p className="text-xs text-purple-800 leading-relaxed">
+                  <p className="text-xs text-gray-600 leading-relaxed">
                     <strong>{brief.summary}</strong> is an email newsletter brief containing HTML mailer zip packages and preheaders/subject lines. Email mailers are deployed directly through MoEngage Email or your ESP, and do not require Meta / Karix WhatsApp or RCS approval.
                   </p>
                   {brief.attachments_mapped.some((a) => a.filename.endsWith('.zip') || a.filename.endsWith('.docx')) && (
                     <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <span className="text-[11px] text-purple-700 font-medium">Mailer Files:</span>
+                      <span className="text-xs text-gray-600 font-medium">Mailer Files:</span>
                       {brief.attachments_mapped
                         .filter((a) => a.filename.endsWith('.zip') || a.filename.endsWith('.docx'))
                         .map((a) => (
                           <span
                             key={a.filename}
-                            className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-white border border-purple-200 text-[11px] font-mono font-semibold text-purple-800 shadow-2xs"
+                            className="inline-flex items-center gap-2 px-2 py-1 rounded-lg bg-white border border-gray-200 text-sm font-mono font-medium text-gray-600 "
                           >
-                            <span>📦</span>
+                            
                             <span>{a.filename}</span>
                           </span>
                         ))}
@@ -2001,35 +2001,35 @@ export default function JiraBriefsPage() {
               )}
 
               {/* Multi-Channel Content Tabs */}
-              <div className="bg-white rounded-xl border border-gray-200/80 shadow-2xs overflow-hidden">
+              <div className="bg-white rounded-xl border border-gray-200/80  overflow-hidden">
                 <div className="flex flex-wrap items-center border-b border-gray-200 bg-gray-50/70">
-                  <p className="w-full px-4 pt-4 pb-1 text-sm font-semibold text-gray-900">2. Review templates</p>
+                  <p className="w-full px-4 pt-4 pb-1 text-sm font-medium text-gray-900">2. Review templates</p>
                   {brief.is_email_campaign ? (
                     <>
                       <button
                         onClick={() => setActiveTab('email')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'email'
                             ? 'border-purple-600 text-purple-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>📧 Email Packages & Assets</span>
-                        <span className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span>Email packages & assets</span>
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           {brief.email_templates?.length || 0}
                         </span>
                       </button>
 
                       <button
                         onClick={() => setActiveTab('comments')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'comments'
                             ? 'border-indigo-600 text-indigo-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
                         <span>Comments</span>
-                        <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           {brief.comments?.length || 0}
                         </span>
                       </button>
@@ -2038,14 +2038,14 @@ export default function JiraBriefsPage() {
                         <summary className="cursor-pointer py-3 text-gray-500">More tools</summary>
                       <button
                         onClick={() => setActiveTab('moengage')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'moengage'
                             ? 'border-amber-600 text-amber-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>🎯 MoEngage Email Staging</span>
-                        <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span>MoEngage email staging</span>
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           Draft
                         </span>
                       </button>
@@ -2055,56 +2055,56 @@ export default function JiraBriefsPage() {
                     <>
                       <button
                         onClick={() => setActiveTab('whatsapp')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'whatsapp'
                             ? 'border-emerald-600 text-emerald-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
                         <span>WhatsApp</span>
-                        <span className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           {selectedWaCount}/{waTemplates.length}
                         </span>
                       </button>
 
                       <button
                         onClick={() => setActiveTab('rcs')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'rcs'
                             ? 'border-blue-600 text-blue-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
                         <span>RCS</span>
-                        <span className="bg-blue-100 text-blue-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           {selectedRcsCount}/{rcsTemplates.length}
                         </span>
                       </button>
 
                       <button
                         onClick={() => setActiveTab('sms')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'sms'
                             ? 'border-purple-600 text-purple-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
                         <span>SMS</span>
-                        <span className="bg-purple-100 text-purple-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           {smsTemplates.length}
                         </span>
                       </button>
 
                       <button
                         onClick={() => setActiveTab('comments')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'comments'
                             ? 'border-indigo-600 text-indigo-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
                         <span>Comments</span>
-                        <span className="bg-indigo-100 text-indigo-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           {brief.comments?.length || 0}
                         </span>
                       </button>
@@ -2113,14 +2113,14 @@ export default function JiraBriefsPage() {
                         <summary className="cursor-pointer py-3 text-gray-500">More tools</summary>
                       <button
                         onClick={() => setActiveTab('moengage')}
-                        className={`flex-1 py-3 px-4 text-xs font-bold border-b-2 transition flex items-center justify-center gap-2 ${
+                        className={`flex-1 py-3 px-4 text-xs font-medium border-b-2 transition-colors flex items-center justify-center gap-2 ${
                           activeTab === 'moengage'
                             ? 'border-amber-600 text-amber-700 bg-white'
                             : 'border-transparent text-gray-500 hover:text-gray-700'
                         }`}
                       >
-                        <span>🎯 MoEngage Staging</span>
-                        <span className="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
+                        <span>MoEngage staging</span>
+                        <span className="bg-gray-100 text-gray-600 text-xs px-1.5 py-1 rounded-md font-mono">
                           Draft
                         </span>
                       </button>
@@ -2137,7 +2137,7 @@ export default function JiraBriefsPage() {
                         type="button"
                         onClick={() => addTemplate(activeTab)}
                         disabled={submitting}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                       >
                         Add template
                       </button>
@@ -2147,9 +2147,9 @@ export default function JiraBriefsPage() {
                   {activeTab === 'whatsapp' && (
                     <div className="space-y-4">
                       {waTemplates.length > 0 && (
-                        <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
+                        <div className="flex flex-wrap items-start justify-between gap-3 pb-2 border-b border-gray-100 text-xs">
                           <div className="flex items-center gap-3">
-                            <span className="font-semibold text-gray-700">
+                            <span className="font-medium text-gray-700">
                               Selected: {selectedWaCount} of {waTemplates.length}
                             </span>
                             <button
@@ -2157,11 +2157,11 @@ export default function JiraBriefsPage() {
                               disabled={!validationReady || eligibleWaCount === 0}
                               className="text-blue-600 hover:underline font-medium"
                             >
-                              {selectedWaCount < eligibleWaCount ? 'Select All Eligible' : 'Deselect All'}
+                              {selectedWaCount < eligibleWaCount ? 'Select all eligible' : 'Deselect all'}
                             </button>
                           </div>
-                          <span className="text-gray-400 text-[11px]">
-                            💡 Click <strong>✏️ Edit</strong> to tweak copy, variables, or CTA buttons before whitelisting.
+                          <span className="text-gray-400 text-xs">
+                            Edit copy, variables and CTA buttons before whitelisting.
                           </span>
                         </div>
                       )}
@@ -2183,35 +2183,35 @@ export default function JiraBriefsPage() {
                           return (
                             <div
                               key={`wa-card-${idx}`}
-                              className={`p-4 rounded-xl border transition space-y-3 ${
-                                isSelected ? 'bg-white border-emerald-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
+                              className={`p-4 rounded-xl border transition-colors space-y-3 ${
+                                isSelected ? 'bg-white border-blue-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
                               }`}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2.5">
+                                <div className="flex min-w-0 flex-wrap items-center gap-3">
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
                                     onChange={() => toggleSelectWa(idx)}
                                     disabled={!validationReady}
                                     aria-label={`Select ${wa.template_name} for whitelisting`}
-                                    className="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer"
+                                    className="w-4 h-4 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer"
                                   />
                                   {isEditing ? (
                                     <div className="flex flex-wrap items-center gap-2">
-                                      <div className="flex items-center gap-1.5">
-                                        <label className="text-[10px] uppercase font-bold text-gray-400">Name:</label>
+                                      <div className="flex items-center gap-2">
+                                        <label className="text-xs normal-case font-medium text-gray-400">Name:</label>
                                         <input
                                           type="text"
                                           value={wa.template_name}
                                           onChange={(e) => updateWaField(idx, 'template_name', e.target.value)}
-                                          className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
+                                          className="break-all max-w-full font-mono text-sm font-medium border border-gray-300 rounded-lg px-2 py-1 bg-white"
                                         />
                                       </div>
                                       <select
                                         value={wa.category || 'MARKETING'}
                                         onChange={(e) => updateWaField(idx, 'category', e.target.value)}
-                                        className="text-[10px] font-bold border border-gray-300 rounded px-1.5 py-1 bg-white cursor-pointer"
+                                        className="text-sm font-medium border border-gray-300 rounded-lg px-1.5 py-1 bg-white cursor-pointer"
                                       >
                                         <option value="MARKETING">MARKETING</option>
                                         <option value="UTILITY">UTILITY</option>
@@ -2220,7 +2220,7 @@ export default function JiraBriefsPage() {
                                       <select
                                         value={wa.language || 'en'}
                                         onChange={(e) => updateWaField(idx, 'language', e.target.value)}
-                                        className="text-[10px] font-bold border border-gray-300 rounded px-1.5 py-1 bg-white font-mono cursor-pointer"
+                                        className="text-sm font-medium border border-gray-300 rounded-lg px-1.5 py-1 bg-white font-mono cursor-pointer"
                                       >
                                         <option value="en">en (English)</option>
                                         <option value="hi">hi (Hindi)</option>
@@ -2235,19 +2235,19 @@ export default function JiraBriefsPage() {
                                       </select>
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-mono font-bold text-xs text-gray-900">{wa.template_name}</span>
-                                      <span className={`text-[10px] px-2 py-0.2 rounded-full font-semibold uppercase ${
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                      <span className="break-all max-w-full font-mono font-medium text-xs text-gray-900">{wa.template_name}</span>
+                                      <span className={`text-sm px-2 py-1 rounded-md font-medium normal-case ${
                                         wa.category === 'UTILITY'
-                                          ? 'bg-blue-100 text-blue-800'
+                                          ? 'bg-gray-100 text-gray-600'
                                           : wa.category === 'AUTHENTICATION'
-                                          ? 'bg-purple-100 text-purple-800'
-                                          : 'bg-emerald-100 text-emerald-800'
+                                          ? 'bg-gray-100 text-gray-600'
+                                          : 'bg-gray-100 text-gray-600'
                                       }`}>
                                         {wa.category}
                                       </span>
-                                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-gray-100 text-gray-700 font-mono font-semibold uppercase">
-                                        🌐 {(wa.language || 'en').toUpperCase()}
+                                      <span className="text-xs px-1.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-mono font-medium normal-case">
+                                        {(wa.language || 'en').toUpperCase()}
                                       </span>
                                     </div>
                                   )}
@@ -2255,18 +2255,18 @@ export default function JiraBriefsPage() {
 
                                 <div className="flex items-center gap-2">
                                   {wa.exists_on_waba ? (
-                                    <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                      ✓ Live on WABA ({wa.live_status})
+                                    <span className="text-xs px-2 py-0.5 rounded-lg font-medium normal-case bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      Live on WABA ({wa.live_status})
                                     </span>
                                   ) : (
-                                    <span className="text-[10px] px-2 py-0.5 rounded font-bold uppercase bg-amber-50 text-amber-700 border border-amber-200">
+                                    <span className="text-xs px-2 py-0.5 rounded-lg font-medium normal-case bg-amber-50 text-amber-700 border border-amber-200">
                                       {warnings.compliance_warnings?.some((warning) => warning.severity === 'error') ? 'Needs attention' : validationReady ? 'Ready for review' : 'Checking…'}
                                     </span>
                                   )}
 
                                   <button
                                     onClick={() => toggleEditCard(`wa-${idx}`)}
-                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
+                                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
                                       isEditing
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
                                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
@@ -2283,33 +2283,33 @@ export default function JiraBriefsPage() {
                                         e.target.value = '';
                                       }
                                     }}
-                                    className="text-[11px] font-semibold bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition shadow-2xs"
+                                    className="text-sm font-medium bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition-colors "
                                     title="Move this template to another channel"
                                   >
-                                    <option value="" disabled>⇄ Move Channel...</option>
-                                    <option value="rcs">🔵 Move to RCS (DLT)</option>
-                                    <option value="sms">🟣 Move to SMS (DLT)</option>
+                                    <option value="" disabled>Move channel</option>
+                                    <option value="rcs">Move to RCS (DLT)</option>
+                                    <option value="sms">Move to SMS (DLT)</option>
                                   </select>}
                                 </div>
                               </div>
                               <DraftWarningList draft={warnings} showAspectWarnings={false} />
 
                               {/* Header Creative — Download, Replace or Remove */}
-                              <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
+                              <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-700 space-y-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="flex items-center gap-1.5 font-medium">
-                                    <span>🖼️ Header Creative:</span>
+                                  <span className="flex items-center gap-2 font-medium">
+                                    <span>Header creative:</span>
                                     {wa.media_filename ? (
                                       <strong className="text-gray-900 font-mono">{wa.media_filename}</strong>
                                     ) : (
-                                      <span className="text-gray-400 italic">{wa.header_type === 'NONE' ? 'Header: None' : 'None attached'}</span>
+                                      <span className="text-gray-400">{wa.header_type === 'NONE' ? 'Header: None' : 'None attached'}</span>
                                     )}
                                   </span>
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-2">
                                     {(wa.media_file || wa.media_attachment_id) && (
                                       <JiraCreativeDownload
                                         source={source}
-                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] shadow-2xs transition"
+                                        className="px-2 py-1 rounded-lg bg-white hover:bg-gray-100 text-blue-700 border border-gray-200 font-medium text-sm  transition-colors"
                                       />
                                     )}
                                     {(wa.header_type && wa.header_type !== 'NONE' || wa.header_text || wa.media_file || wa.media_filename || wa.media_attachment_id) && (
@@ -2318,13 +2318,13 @@ export default function JiraBriefsPage() {
                                         onClick={() => removeWaCreative(idx)}
                                         disabled={submitting || uploadingCreative[`wa_${idx}`]}
                                         aria-label={`Remove creative from ${wa.template_name}`}
-                                        className="px-2 py-1 rounded bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 font-semibold text-[10px] disabled:opacity-50"
+                                        className="px-2 py-1 rounded-lg bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 font-medium text-sm disabled:opacity-50"
                                       >
                                         Remove creative
                                       </button>
                                     )}
-                                    <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
-                                      <span>{uploadingCreative[`wa_${idx}`] ? '⏳ Uploading...' : wa.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
+                                    <label className="px-2 py-1 rounded-lg bg-gray-50 hover:bg-gray-100 text-indigo-700 border border-gray-200 font-medium text-sm flex items-center gap-1 cursor-pointer  transition-colors">
+                                      <span>{uploadingCreative[`wa_${idx}`] ? 'Uploading…' : wa.media_filename ? 'Replace creative' : 'Upload creative'}</span>
                                       <input
                                         type="file"
                                         accept="image/png,image/jpeg,image/webp,video/mp4,application/pdf"
@@ -2347,7 +2347,7 @@ export default function JiraBriefsPage() {
                                   <div className="pt-1">
                                     <JiraCreativeImage
                                       source={source}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white hover:opacity-90 transition shadow-2xs"
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white hover:opacity-90 transition-opacity "
                                       onPreview={() => setPreviewCreativeModal({ ...source, filename: wa.media_filename || 'whatsapp_creative.jpg', channel: 'WhatsApp' })}
                                     />
                                   </div>
@@ -2356,82 +2356,82 @@ export default function JiraBriefsPage() {
 
                               {/* Text Header */}
                               {wa.header_text && (
-                                <div className="text-xs font-bold text-gray-900 bg-gray-50 px-3 py-1.5 rounded border border-gray-200/80 flex items-center gap-1.5">
-                                  <span className="text-gray-400 text-[10px] font-semibold uppercase">Header:</span>
+                                <div className="text-sm font-medium text-gray-900 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200/80 flex items-center gap-2">
+                                  <span className="text-gray-400 text-xs font-medium normal-case">Header:</span>
                                   <span>{wa.header_text}</span>
                                 </div>
                               )}
 
                               {isEditing ? (
-                                <div className="space-y-2.5">
+                                <div className="space-y-3">
                                   {/* Header text edit */}
                                   <div>
-                                    <label className="block text-[11px] text-gray-500 mb-1">Header Text (optional):</label>
+                                    <label className="block text-xs text-gray-500 mb-1">Header text (optional)</label>
                                     <input
                                       type="text"
                                       value={wa.header_text || ''}
                                       onChange={(e) => updateWaField(idx, 'header_text', e.target.value)}
                                       placeholder="e.g. Special Festive Offer"
-                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white"
+                                      className="w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg bg-white"
                                     />
                                   </div>
 
-                                  <div className="flex items-center justify-between text-[11px] text-gray-500">
-                                    <span>Template Body (use {'{{1}}'}, {'{{2}}'} for variables):</span>
+                                  <div className="flex items-center justify-between text-xs text-gray-500">
+                                    <span>Template body (use {'{{1}}'}, {'{{2}}'} for variables):</span>
                                     <span>{wa.body.length} chars</span>
                                   </div>
                                   <textarea
                                     value={wa.body}
                                     onChange={(e) => updateWaField(idx, 'body', e.target.value)}
                                     rows={5}
-                                    className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500"
+                                    className="w-full p-3 text-sm border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500"
                                   />
 
                                   {/* Button controls */}
                                   <div className="space-y-2 pt-2 border-t border-gray-100">
                                     <div className="flex items-center justify-between">
-                                      <label className="text-[11px] font-bold text-gray-700">CTA Buttons ({waButtons.length}/3):</label>
+                                      <label className="text-xs font-medium text-gray-700">CTA buttons ({waButtons.length}/3):</label>
                                       {waButtons.length < 3 && (
                                         <button
                                           type="button"
                                           onClick={() => addWaButton(idx)}
-                                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                                          className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
                                         >
-                                          + Add CTA Button
+                                          + Add CTA button
                                         </button>
                                       )}
                                     </div>
                                     {waButtons.length === 0 ? (
-                                      <div className="p-2.5 bg-gray-50 rounded-lg border border-dashed border-gray-300 flex items-center justify-between text-xs text-gray-500">
+                                      <div className="p-3 bg-gray-50 rounded-lg border border-dashed border-gray-300 flex items-center justify-between text-xs text-gray-500">
                                         <span>No buttons configured.</span>
                                         <button
                                           type="button"
                                           onClick={() => addWaButton(idx)}
-                                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px] font-semibold text-blue-600 hover:bg-gray-50 cursor-pointer"
+                                          className="px-2 py-1 bg-white border border-gray-300 rounded-lg text-sm font-medium text-blue-600 hover:bg-gray-50 cursor-pointer"
                                         >
-                                          + Add CTA Button
+                                          + Add CTA button
                                         </button>
                                       </div>
                                     ) : (
                                       waButtons.map((btn, bIdx) => (
-                                        <div key={bIdx} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                                        <div key={bIdx} className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
                                           <div className="flex items-center justify-between">
-                                            <span className="text-[11px] font-bold text-gray-700">Button {bIdx + 1}</span>
+                                            <span className="text-xs font-medium text-gray-700">Button {bIdx + 1}</span>
                                             <button
                                               type="button"
                                               onClick={() => removeWaButton(idx, bIdx)}
-                                              className="text-[11px] font-semibold text-red-600 hover:text-red-800 cursor-pointer"
+                                              className="text-sm font-medium text-red-600 hover:text-red-800 cursor-pointer"
                                             >
-                                              ✕ Remove CTA
+                                              Remove CTA
                                             </button>
                                           </div>
                                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                             <div>
-                                              <label className="block text-[10px] text-gray-500 mb-0.5">Type:</label>
+                                              <label className="block text-xs text-gray-500 mb-0.5">Type:</label>
                                               <select
                                                 value={btn.type || 'URL'}
                                                 onChange={(e) => updateWaButton(idx, bIdx, { type: e.target.value })}
-                                                className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white font-medium cursor-pointer"
+                                                className="w-full text-sm px-2 py-1.5 border border-gray-300 rounded-lg bg-white font-medium cursor-pointer"
                                               >
                                                 <option value="URL">CTA URL</option>
                                                 <option value="QUICK_REPLY">Quick Reply</option>
@@ -2439,37 +2439,37 @@ export default function JiraBriefsPage() {
                                               </select>
                                             </div>
                                             <div>
-                                              <label className="block text-[10px] text-gray-500 mb-0.5">Button Text:</label>
+                                              <label className="block text-xs text-gray-500 mb-0.5">Button text</label>
                                               <input
                                                 type="text"
                                                 value={btn.text || ('label' in btn && typeof btn.label === 'string' ? btn.label : '')}
                                                 onChange={(e) => updateWaButton(idx, bIdx, { text: e.target.value, label: e.target.value })}
                                                 placeholder="e.g. Explore Now"
-                                                className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white"
+                                                className="w-full text-sm px-2 py-1.5 border border-gray-300 rounded-lg bg-white"
                                               />
                                             </div>
                                             <div>
                                               {btn.type === 'PHONE_NUMBER' ? (
                                                 <>
-                                                  <label className="block text-[10px] text-gray-500 mb-0.5">Phone (+91...):</label>
+                                                  <label className="block text-xs text-gray-500 mb-0.5">Phone (+91...):</label>
                                                   <input
                                                     type="text"
                                                     value={btn.phone_number || ''}
                                                     onChange={(e) => updateWaButton(idx, bIdx, { phone_number: e.target.value })}
                                                     placeholder="+919876543210"
-                                                    className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white font-mono"
+                                                    className="w-full text-sm px-2 py-1.5 border border-gray-300 rounded-lg bg-white font-mono"
                                                   />
                                                 </>
                                               ) : (
                                                 <>
-                                                  <label className="block text-[10px] text-gray-500 mb-0.5">Destination URL:</label>
+                                                  <label className="block text-xs text-gray-500 mb-0.5">Destination URL</label>
                                                   <input
                                                     type="text"
                                                     value={btn.url || ''}
                                                     onChange={(e) => updateWaButton(idx, bIdx, { url: e.target.value })}
                                                     placeholder={TATA_CTA_URL}
                                                     disabled={btn.type === 'QUICK_REPLY'}
-                                                    className="w-full text-xs px-2 py-1.5 border border-gray-300 rounded bg-white disabled:bg-gray-100 font-mono text-[11px]"
+                                                    className="w-full text-sm px-2 py-1.5 border border-gray-300 rounded-lg bg-white disabled:bg-gray-100 font-mono text-sm"
                                                   />
                                                 </>
                                               )}
@@ -2482,15 +2482,15 @@ export default function JiraBriefsPage() {
                                 </div>
                               ) : (
                                 <>
-                                  <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                  <div className="bg-white p-4 rounded-lg border border-gray-200/80 font-sans text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
                                     {wa.body}
                                   </div>
 
                                   {((wa.buttons && wa.buttons.length > 0) ? wa.buttons : (wa.button_type === 'URL' ? [{ type: 'URL', label: wa.button_text, text: wa.button_text, url: wa.button_url }] : [])).map((btn, bIdx) => (
                                     <div key={bIdx} className="flex flex-wrap items-center gap-2 text-xs">
                                       <span className="text-gray-400 font-medium">{(wa.buttons && wa.buttons.length > 1) ? `CTA ${bIdx + 1}:` : 'CTA Button:'}</span>
-                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60 break-all">
-                                        {('label' in btn && btn.label) || btn.text || 'Check Offer'} {isUrlCta(btn.type) ? `(🔗 ${resolveCtaUrl(btn.url, targetAccount)})` : btn.type === 'PHONE_NUMBER' && 'phone_number' in btn ? `(${btn.phone_number || ''})` : ''}
+                                      <span className="px-3 py-1 rounded-lg bg-gray-50 text-blue-700 font-medium border border-gray-200/60 break-all">
+                                        {('label' in btn && btn.label) || btn.text || 'Check Offer'} {isUrlCta(btn.type) ? `(${resolveCtaUrl(btn.url, targetAccount)})` : btn.type === 'PHONE_NUMBER' && 'phone_number' in btn ? `(${btn.phone_number || ''})` : ''}
                                       </span>
                                     </div>
                                   ))}
@@ -2498,8 +2498,8 @@ export default function JiraBriefsPage() {
                                   {wa.button_type === 'QUICK_REPLY' && (
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className="text-gray-400">Quick Reply:</span>
-                                      <span className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200/60">
-                                        ⚡ {wa.button_text || 'Interested'}
+                                      <span className="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-medium border border-emerald-200/60">
+                                        {wa.button_text || 'Interested'}
                                       </span>
                                     </div>
                                   )}
@@ -2507,8 +2507,8 @@ export default function JiraBriefsPage() {
                                   {wa.button_type === 'PHONE_NUMBER' && (
                                     <div className="flex items-center gap-2 text-xs">
                                       <span className="text-gray-400">Call Button:</span>
-                                      <span className="px-2.5 py-1 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200/60 font-mono">
-                                        📞 {wa.button_text || 'Call Us'} ({wa.button_phone || '+919876543210'})
+                                      <span className="px-3 py-1 rounded-lg bg-gray-50 text-purple-700 font-medium border border-gray-200/60 font-mono">
+                                        {wa.button_text || 'Call Us'} ({wa.button_phone || '+919876543210'})
                                       </span>
                                     </div>
                                   )}
@@ -2525,9 +2525,9 @@ export default function JiraBriefsPage() {
                   {activeTab === 'rcs' && (
                     <div className="space-y-4">
                       {rcsTemplates.length > 0 && (
-                        <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
+                        <div className="flex flex-wrap items-start justify-between gap-3 pb-2 border-b border-gray-100 text-xs">
                           <div className="flex items-center gap-3">
-                            <span className="font-semibold text-gray-700">
+                            <span className="font-medium text-gray-700">
                               Selected: {selectedRcsCount} of {rcsTemplates.length}
                             </span>
                             <button
@@ -2535,11 +2535,11 @@ export default function JiraBriefsPage() {
                               disabled={!validationReady || eligibleRcsCount === 0}
                               className="text-blue-600 hover:underline font-medium"
                             >
-                              {selectedRcsCount < eligibleRcsCount ? 'Select All Eligible' : 'Deselect All'}
+                              {selectedRcsCount < eligibleRcsCount ? 'Select all eligible' : 'Deselect all'}
                             </button>
                           </div>
-                          <span className="text-gray-400 text-[11px]">
-                            💡 Click <strong>✏️ Edit</strong> to tweak card title, body copy, or CTA action.
+                          <span className="text-gray-400 text-xs">
+                            Edit the card title, copy and CTA before whitelisting.
                           </span>
                         </div>
                       )}
@@ -2563,40 +2563,40 @@ export default function JiraBriefsPage() {
                           return (
                             <div
                               key={`rcs-card-${idx}`}
-                              className={`p-4 rounded-xl border transition space-y-3 ${
+                              className={`p-4 rounded-xl border transition-colors space-y-3 ${
                                 isSelected ? 'bg-white border-blue-300 shadow-xs' : `bg-gray-50/70 border-gray-200${isEditing ? '' : ' opacity-60'}`
                               }`}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2.5">
+                                <div className="flex min-w-0 flex-wrap items-center gap-3">
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
                                     onChange={() => toggleSelectRcs(idx)}
                                     disabled={!validationReady || submitting || (!selectedRcs.has(idx) && (blocked || Boolean(selectionError)))}
                                     aria-label={`Select ${rcs.template_name} for whitelisting`}
-                                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                                    className="w-4 h-4 text-blue-600 rounded-lg border-gray-300 focus:ring-blue-500 cursor-pointer"
                                   />
                                   {isEditing ? (
-                                    <div className="flex items-center gap-1.5">
-                                      <label className="text-[10px] uppercase font-bold text-gray-400">Name:</label>
+                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                      <label className="text-xs normal-case font-medium text-gray-400">Name:</label>
                                       <input
                                         type="text"
                                         value={rcs.template_name}
                                         onChange={(e) => updateRcsField(idx, 'template_name', e.target.value)}
-                                        className="font-mono text-xs font-bold border border-gray-300 rounded px-2 py-1 bg-white"
+                                        className="break-all max-w-full font-mono text-sm font-medium border border-gray-300 rounded-lg px-2 py-1 bg-white"
                                       />
                                     </div>
                                   ) : (
-                                    <span className="font-mono font-bold text-xs text-gray-900">{rcs.template_name}</span>
+                                    <span className="break-all max-w-full font-mono font-medium text-xs text-gray-900">{rcs.template_name}</span>
                                   )}
                                   {rcs.template_type === 'carousel' || (rcs.carousel_cards && rcs.carousel_cards.length > 0) ? (
-                                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 font-bold uppercase flex items-center gap-1">
-                                      <span>🎠</span> Carousel Template ({rcs.carousel_cards?.length || 0} Cards)
+                                    <span className="text-xs px-3 py-0.5 rounded-md bg-gray-100 text-gray-600 font-medium normal-case flex items-center gap-1">
+                                      Carousel template ({rcs.carousel_cards?.length || 0} cards)
                                     </span>
                                   ) : (
-                                    <span className="text-[10px] px-2 py-0.2 rounded-full bg-blue-100 text-blue-800 font-semibold uppercase">
-                                      Standalone Card
+                                    <span className="text-sm px-2 py-1 rounded-md bg-gray-100 text-gray-600 font-medium normal-case">
+                                      Standalone card
                                     </span>
                                   )}
                                 </div>
@@ -2605,25 +2605,25 @@ export default function JiraBriefsPage() {
                                   {isEditing && <button
                                     onClick={() => handleSyncRcsToMoEngage(rcs)}
                                     disabled={syncingRcs[rcs.template_name]}
-                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition flex items-center gap-1.5 ${
+                                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
                                       syncedRcs[rcs.template_name]
                                         ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                                        : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                                        : 'bg-gray-50 text-purple-700 border-gray-200 hover:bg-purple-100'
                                     }`}
                                     title="Register this RCS template directly into MoEngage Settings -> RCS template management"
                                   >
                                     {syncingRcs[rcs.template_name]
                                       ? 'Syncing...'
                                       : syncedRcs[rcs.template_name]
-                                      ? '✓ In MoEngage'
-                                      : '🔄 Sync to MoEngage'}
+                                      ? 'In MoEngage'
+                                      : 'Sync to MoEngage'}
                                   </button>}
 
                                   <button
                                     onClick={() => toggleEditCard(`rcs-${idx}`)}
-                                    className={`px-2.5 py-1 rounded text-xs font-semibold border transition ${
+                                    className={`px-3 py-1 rounded-lg text-xs font-medium border transition-colors ${
                                       isEditing
-                                        ? 'bg-blue-50 text-blue-700 border-blue-300'
+                                        ? 'bg-gray-50 text-blue-700 border-blue-300'
                                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                     }`}
                                   >
@@ -2638,37 +2638,37 @@ export default function JiraBriefsPage() {
                                         e.target.value = '';
                                       }
                                     }}
-                                    className="text-[11px] font-semibold bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition shadow-2xs"
+                                    className="text-sm font-medium bg-gray-50 hover:bg-gray-100 border border-gray-300 rounded-lg px-2 py-1 text-gray-700 outline-none cursor-pointer transition-colors "
                                     title="Move this template to another channel"
                                   >
-                                    <option value="" disabled>⇄ Move Channel...</option>
-                                    <option value="whatsapp">🟢 Move to WhatsApp</option>
-                                    <option value="sms">🟣 Move to SMS (DLT)</option>
+                                    <option value="" disabled>Move channel</option>
+                                    <option value="whatsapp">Move to WhatsApp</option>
+                                    <option value="sms">Move to SMS (DLT)</option>
                                   </select>}
                                 </div>
                               </div>
                               <DraftWarningList draft={warnings} />
-                              {selectionError && <p role="alert" className="text-xs font-semibold text-rose-800">{selectionError}</p>}
+                              {selectionError && <p role="alert" className="text-xs font-medium text-rose-800">{selectionError}</p>}
 
-                              <div className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 text-[11px] text-gray-700 space-y-2">
+                              <div className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs text-gray-700 space-y-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <span className="flex items-center gap-1.5 font-medium">
-                                    <span>🖼️ Card Creative:</span>
+                                  <span className="flex items-center gap-2 font-medium">
+                                    <span>Card creative:</span>
                                     {rcs.media_filename ? (
                                       <strong className="text-gray-900 font-mono">{rcs.media_filename}</strong>
                                     ) : (
-                                      <span className="text-gray-400 italic">None attached</span>
+                                      <span className="text-gray-400">None attached</span>
                                     )}
                                   </span>
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-2">
                                     {(rcs.media_file || rcs.media_attachment_id) && (
                                       <JiraCreativeDownload
                                         source={source}
-                                        className="px-2 py-1 rounded bg-white hover:bg-gray-100 text-blue-700 border border-blue-200 font-semibold text-[10px] shadow-2xs transition"
+                                        className="px-2 py-1 rounded-lg bg-white hover:bg-gray-100 text-blue-700 border border-gray-200 font-medium text-sm  transition-colors"
                                       />
                                     )}
-                                    <label className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer shadow-2xs transition">
-                                      <span>{uploadingCreative[`rcs_${idx}`] ? '⏳ Uploading...' : rcs.media_filename ? '🔄 Replace Creative' : '📤 Upload Creative'}</span>
+                                    <label className="px-2 py-1 rounded-lg bg-gray-50 hover:bg-gray-100 text-indigo-700 border border-gray-200 font-medium text-sm flex items-center gap-1 cursor-pointer  transition-colors">
+                                      <span>{uploadingCreative[`rcs_${idx}`] ? 'Uploading…' : rcs.media_filename ? 'Replace creative' : 'Upload creative'}</span>
                                       <input
                                         type="file"
                                         accept="image/png,image/jpeg,image/webp,video/mp4"
@@ -2687,7 +2687,7 @@ export default function JiraBriefsPage() {
                                   <div className="pt-1">
                                     <JiraCreativeImage
                                       source={source}
-                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white hover:opacity-90 transition shadow-2xs"
+                                      className="max-h-36 rounded-lg border border-gray-200 object-contain bg-white hover:opacity-90 transition-opacity "
                                       onPreview={() => setPreviewCreativeModal({ ...source, filename: rcs.media_filename || 'rcs_creative.jpg', channel: 'RCS (2:1 / 1440x720)' })}
                                     />
                                   </div>
@@ -2695,82 +2695,82 @@ export default function JiraBriefsPage() {
                               </div>
 
                               {isEditing ? (
-                                <div className="space-y-2.5">
+                                <div className="space-y-3">
                                   <div>
-                                    <label className="block text-[11px] text-gray-500 mb-1">Card Title:</label>
+                                    <label className="block text-xs text-gray-500 mb-1">Card title</label>
                                     <input
                                       type="text"
                                       value={rcs.card_title}
                                       onChange={(e) => updateRcsField(idx, 'card_title', e.target.value)}
-                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold"
+                                      className="w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg bg-white font-medium"
                                     />
                                   </div>
                                   <div>
-                                    <label className="block text-[11px] text-gray-500 mb-1">Card Body Copy:</label>
+                                    <label className="block text-xs text-gray-500 mb-1">Card copy</label>
                                     <textarea
                                       value={rcs.body}
                                       onChange={(e) => updateRcsField(idx, 'body', e.target.value)}
                                       rows={4}
-                                      className="w-full p-2.5 font-mono text-xs border border-gray-300 rounded bg-white"
+                                      className="w-full p-3 text-sm border border-gray-300 rounded-lg bg-white"
                                     />
                                   </div>
                                   {/* RCS Suggestions / Button controls */}
                                   <div className="space-y-2 pt-2 border-t border-gray-100">
                                     <div className="flex items-center justify-between">
-                                      <label className="text-[11px] font-bold text-gray-700">CTA Buttons (Suggestions) ({rcsSuggestions.length}/4):</label>
+                                      <label className="text-xs font-medium text-gray-700">CTA suggestions ({rcsSuggestions.length}/4):</label>
                                       {rcsSuggestions.length < 4 && (
                                         <button
                                           type="button"
                                           onClick={() => addRcsSuggestion(idx)}
-                                          className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                                          className="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
                                         >
-                                          + Add CTA Button
+                                          + Add CTA button
                                         </button>
                                       )}
                                     </div>
                                     {rcsSuggestions.length === 0 ? (
-                                      <div className="p-2.5 bg-gray-50 rounded-lg border border-dashed border-gray-300 flex items-center justify-between text-xs text-gray-500">
+                                      <div className="p-3 bg-gray-50 rounded-lg border border-dashed border-gray-300 flex items-center justify-between text-xs text-gray-500">
                                         <span>No CTA buttons configured.</span>
                                         <button
                                           type="button"
                                           onClick={() => addRcsSuggestion(idx)}
-                                          className="px-2 py-1 bg-white border border-gray-300 rounded text-[11px] font-semibold text-blue-600 hover:bg-gray-50 cursor-pointer"
+                                          className="px-2 py-1 bg-white border border-gray-300 rounded-lg text-sm font-medium text-blue-600 hover:bg-gray-50 cursor-pointer"
                                         >
-                                          + Add CTA Button
+                                          + Add CTA button
                                         </button>
                                       </div>
                                     ) : (
                                       rcsSuggestions.map((sugg, sIdx) => (
-                                        <div key={sIdx} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                                        <div key={sIdx} className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
                                           <div className="flex items-center justify-between">
-                                            <span className="text-[11px] font-bold text-gray-700">CTA {sIdx + 1}</span>
+                                            <span className="text-xs font-medium text-gray-700">CTA {sIdx + 1}</span>
                                             <button
                                               type="button"
                                               onClick={() => removeRcsSuggestion(idx, sIdx)}
-                                              className="text-[11px] font-semibold text-red-600 hover:text-red-800 cursor-pointer"
+                                              className="text-sm font-medium text-red-600 hover:text-red-800 cursor-pointer"
                                             >
-                                              ✕ Remove CTA
+                                              Remove CTA
                                             </button>
                                           </div>
                                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                             <div>
-                                              <label className="block text-[10px] text-gray-500 mb-0.5">Button Label:</label>
+                                              <label className="block text-xs text-gray-500 mb-0.5">Button label</label>
                                               <input
                                                 type="text"
                                                 value={sugg.label || sugg.text || ''}
                                                 onChange={(e) => updateRcsSuggestion(idx, sIdx, { label: e.target.value, text: e.target.value })}
                                                 placeholder="e.g. Apply Now"
-                                                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-medium"
+                                                className="w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg bg-white font-medium"
                                               />
                                             </div>
                                             <div>
-                                              <label className="block text-[10px] text-gray-500 mb-0.5">Button Destination URL:</label>
+                                              <label className="block text-xs text-gray-500 mb-0.5">Button Destination URL</label>
                                               <input
                                                 type="text"
                                                 value={sugg.url || ''}
                                                 onChange={(e) => updateRcsSuggestion(idx, sIdx, { url: e.target.value })}
                                                 placeholder={TATA_CTA_URL}
-                                                className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-mono text-[11px]"
+                                                className="w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg bg-white font-mono text-sm"
                                               />
                                             </div>
                                           </div>
@@ -2780,9 +2780,9 @@ export default function JiraBriefsPage() {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="bg-white p-3.5 rounded-lg border border-gray-200/80 space-y-2.5">
-                                  <h4 className="font-bold text-xs text-gray-900">{rcs.card_title}</h4>
-                                  <p className="font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                                <div className="bg-white p-4 rounded-lg border border-gray-200/80 space-y-3">
+                                  <h4 className="font-medium text-sm text-gray-900">{rcs.card_title}</h4>
+                                  <p className="font-sans text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
                                     {rcs.body}
                                   </p>
                                   {((rcs.suggestions && rcs.suggestions.length > 0) ? rcs.suggestions : ((rcs.action_label || rcs.action_url) ? [{ type: rcs.action_type, label: rcs.action_label, text: rcs.action_label, url: rcs.action_url }] : [])).map((sugg, sIdx) => (
@@ -2790,8 +2790,8 @@ export default function JiraBriefsPage() {
                                       <span className="text-gray-400 font-medium">
                                         {(rcs.suggestions && rcs.suggestions.length > 1) ? `CTA ${sIdx + 1}:` : 'CTA Button:'}
                                       </span>
-                                      <span className="px-2.5 py-1 rounded bg-blue-50 text-blue-700 font-semibold border border-blue-200/60 break-all">
-                                        {sugg.label || sugg.text || 'Explore Now'} {isUrlCta(sugg.type) ? `(🔗 ${resolveCtaUrl(sugg.url, targetAccount)})` : 'phone_number' in sugg ? `(${sugg.phone_number || ''})` : ''}
+                                      <span className="px-3 py-1 rounded-lg bg-gray-50 text-blue-700 font-medium border border-gray-200/60 break-all">
+                                        {sugg.label || sugg.text || 'Explore Now'} {isUrlCta(sugg.type) ? `(${resolveCtaUrl(sugg.url, targetAccount)})` : 'phone_number' in sugg ? `(${sugg.phone_number || ''})` : ''}
                                       </span>
                                     </div>
                                   ))}
@@ -2799,44 +2799,44 @@ export default function JiraBriefsPage() {
                               )}
                                   {rcs.carousel_cards && rcs.carousel_cards.length > 0 && (
                                     <div className="pt-3 border-t border-gray-100 space-y-2">
-                                      <div className="flex items-center justify-between text-[11px] font-bold text-gray-700">
-                                        <span>🎠 Carousel Cards ({effectiveRcsTemplates[idx].carousel_cards?.length || 0}/{rcs.carousel_cards.length} selected):</span>
+                                      <div className="flex items-center justify-between text-xs font-medium text-gray-700">
+                                        <span>Carousel cards ({effectiveRcsTemplates[idx].carousel_cards?.length || 0}/{rcs.carousel_cards.length} selected):</span>
                                       </div>
-                                      <p className="text-[11px] text-gray-500">Only checked cards are whitelisted, in their original order. Keep 2–10 cards selected.</p>
+                                      <p className="text-xs text-gray-500">Only checked cards are whitelisted, in their original order. Keep 2–10 cards selected.</p>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                         {rcs.carousel_cards.map((card, cIdx) => {
                                           const isCardEditing = isEditing || editingCard[`rcs_${idx}_card_${cIdx}`] || false;
                                           const cardSource = creativeSource(card.media_url, card.media_filename, card.media_attachment_id);
                                           const cardIncluded = !rcs.excluded_card_indices?.includes(cIdx);
                                           return (
-                                            <div key={`card-${cIdx}`} className={`p-3 rounded-xl border text-xs space-y-2.5 shadow-2xs transition ${cardIncluded ? 'bg-white' : 'bg-gray-50'} ${isCardEditing ? 'border-indigo-400 ring-2 ring-indigo-50' : cardIncluded ? 'border-indigo-200' : 'border-gray-200'}`}>
+                                            <div key={`card-${cIdx}`} className={`p-3 rounded-xl border text-xs space-y-3  transition-colors ${cardIncluded ? 'bg-white' : 'bg-gray-50'} ${isCardEditing ? 'border-indigo-400 ring-2 ring-indigo-50' : cardIncluded ? 'border-indigo-200' : 'border-gray-200'}`}>
                                               <div className="flex items-center justify-between gap-2">
-                                                <label className="flex items-center gap-2 text-[10px] font-bold text-indigo-700 cursor-pointer">
+                                                <label className="flex items-center gap-2 text-sm font-medium text-indigo-700 cursor-pointer">
                                                   <input
                                                     type="checkbox"
                                                     checked={cardIncluded}
                                                     onChange={() => toggleCarouselCard(idx, cIdx)}
                                                     disabled={submitting}
                                                     aria-label={`Include Card ${cIdx + 1} of ${rcs.template_name} for whitelisting`}
-                                                    className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500"
+                                                    className="w-4 h-4 text-indigo-600 rounded-lg border-gray-300 focus:ring-indigo-500"
                                                   />
                                                   Card {cIdx + 1}
                                                 </label>
                                                 <button
                                                   type="button"
                                                   onClick={() => toggleEditCard(`rcs_${idx}_card_${cIdx}`)}
-                                                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition ${
+                                                  className={`px-2 py-0.5 rounded-lg text-xs font-medium border transition-colors ${
                                                     isCardEditing
-                                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                                                      ? 'bg-gray-50 text-indigo-700 border-indigo-300'
                                                       : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                                   }`}
                                                 >
-                                                  {isCardEditing ? '✓ Done' : '✏️ Edit Card'}
+                                                  {isCardEditing ? 'Done' : 'Edit card'}
                                                 </button>
                                               </div>
                                               {cardIncluded
                                                 ? <DraftWarningList draft={carouselCardWarnings(rcs, warnings, cIdx)} />
-                                                : <p className="text-[11px] font-semibold text-gray-500">Excluded from whitelisting</p>}
+                                                : <p className="text-xs font-medium text-gray-500">Excluded from whitelisting</p>}
 
                                               {/* Card Creative Image Preview & Individual Upload */}
                                               <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex flex-col">
@@ -2844,7 +2844,7 @@ export default function JiraBriefsPage() {
                                                   <div className="relative min-h-28 w-full bg-white flex items-center justify-center">
                                                     <JiraCreativeImage
                                                       source={cardSource}
-                                                      className="w-full max-h-28 object-contain transition"
+                                                      className="w-full max-h-28 object-contain transition-colors"
                                                       onPreview={() => setPreviewCreativeModal({
                                                         ...cardSource,
                                                         filename: card.media_filename || `rcs_card_${cIdx + 1}.jpg`,
@@ -2853,24 +2853,24 @@ export default function JiraBriefsPage() {
                                                     />
                                                   </div>
                                                 ) : (
-                                                  <div className="h-16 flex items-center justify-center text-[10px] text-gray-400 italic bg-gray-50">
+                                                  <div className="h-16 flex items-center justify-center text-xs text-gray-400 bg-gray-50">
                                                     No creative attached
                                                   </div>
                                                 )}
 
-                                                <div className="p-1.5 bg-gray-100/70 border-t border-gray-200 flex items-center justify-between text-[10px]">
+                                                <div className="p-1.5 bg-gray-100/70 border-t border-gray-200 flex items-center justify-between text-xs">
                                                   <span className="font-mono text-gray-600 truncate max-w-[120px]" title={card.media_filename || ''}>
                                                     {card.media_filename || 'None'}
                                                   </span>
-                                                  <div className="flex items-center gap-1.5">
+                                                  <div className="flex items-center gap-2">
                                                     {(card.media_url || card.media_attachment_id) && (
                                                       <JiraCreativeDownload
                                                         source={cardSource}
-                                                        className="px-1.5 py-0.5 rounded bg-white hover:bg-gray-50 text-blue-700 border border-blue-200 font-semibold text-[9px]"
+                                                        className="px-1.5 py-0.5 rounded-lg bg-white hover:bg-gray-50 text-blue-700 border border-gray-200 font-medium text-xs"
                                                       />
                                                     )}
-                                                    <label className="px-1.5 py-0.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-[9px] cursor-pointer transition flex items-center gap-0.5">
-                                                      <span>{uploadingCreative[`rcs_${idx}_card_${cIdx}`] ? '⏳...' : card.media_url ? '🔄 Replace' : '📤 Upload'}</span>
+                                                    <label className="px-1.5 py-0.5 rounded-lg bg-gray-50 hover:bg-gray-100 text-indigo-700 border border-gray-200 font-medium text-sm cursor-pointer transition-colors flex items-center gap-0.5">
+                                                      <span>{uploadingCreative[`rcs_${idx}_card_${cIdx}`] ? 'Uploading…' : card.media_url ? 'Replace' : 'Upload'}</span>
                                                       <input
                                                         type="file"
                                                         accept="image/png,image/jpeg,image/webp"
@@ -2890,55 +2890,55 @@ export default function JiraBriefsPage() {
                                               {isCardEditing ? (
                                                 <div className="space-y-2 pt-1">
                                                   <div>
-                                                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">Card Title:</label>
+                                                    <label className="block text-xs normal-case font-medium text-gray-500 mb-0.5">Card title</label>
                                                     <input
                                                       type="text"
                                                       value={card.card_title}
                                                       onChange={(e) => updateCarouselCardField(idx, cIdx, 'card_title', e.target.value)}
-                                                      className="w-full text-xs px-2.5 py-1.5 border border-gray-300 rounded bg-white font-semibold outline-none focus:ring-1 focus:ring-indigo-500"
+                                                      className="w-full text-sm px-3 py-1.5 border border-gray-300 rounded-lg bg-white font-medium outline-none focus:ring-1 focus:ring-indigo-500"
                                                       placeholder="Card Title"
                                                     />
                                                   </div>
                                                   <div>
-                                                    <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">Card Description:</label>
+                                                    <label className="block text-xs normal-case font-medium text-gray-500 mb-0.5">Card description</label>
                                                     <textarea
                                                       rows={3}
                                                       value={card.card_description}
                                                       onChange={(e) => updateCarouselCardField(idx, cIdx, 'card_description', e.target.value)}
-                                                      className="w-full p-2 font-mono text-xs border border-gray-300 rounded bg-white outline-none focus:ring-1 focus:ring-indigo-500"
+                                                      className="w-full p-2 text-sm border border-gray-300 rounded-lg bg-white outline-none focus:ring-1 focus:ring-indigo-500"
                                                       placeholder="Card Description / Body copy"
                                                     />
                                                   </div>
                                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                     <div>
-                                                      <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">CTA Button Label:</label>
+                                                      <label className="block text-xs normal-case font-medium text-gray-500 mb-0.5">CTA Button label</label>
                                                       <input
                                                         type="text"
                                                         value={card.button_text || ''}
                                                         onChange={(e) => updateCarouselCardField(idx, cIdx, 'button_text', e.target.value)}
                                                         placeholder="e.g. Apply Now"
-                                                        className="w-full text-xs px-2 py-1 border border-gray-300 rounded bg-white font-medium outline-none focus:ring-1 focus:ring-indigo-500"
+                                                        className="w-full text-sm px-2 py-1 border border-gray-300 rounded-lg bg-white font-medium outline-none focus:ring-1 focus:ring-indigo-500"
                                                       />
                                                     </div>
                                                     <div>
-                                                      <label className="block text-[10px] uppercase font-bold text-gray-500 mb-0.5">CTA URL:</label>
+                                                      <label className="block text-xs normal-case font-medium text-gray-500 mb-0.5">CTA URL:</label>
                                                       <input
                                                         type="text"
                                                         value={card.button_url || ''}
                                                         onChange={(e) => updateCarouselCardField(idx, cIdx, 'button_url', e.target.value)}
                                                         placeholder={TATA_CTA_URL}
-                                                        className="w-full text-xs px-2 py-1 border border-gray-300 rounded bg-white font-mono outline-none focus:ring-1 focus:ring-indigo-500"
+                                                        className="w-full text-sm px-2 py-1 border border-gray-300 rounded-lg bg-white font-mono outline-none focus:ring-1 focus:ring-indigo-500"
                                                       />
                                                     </div>
                                                   </div>
                                                 </div>
                                               ) : (
                                                 <div className="space-y-1.5 pt-0.5">
-                                                  <h5 className="font-bold text-xs text-gray-900">{card.card_title}</h5>
-                                                  <p className="text-[11px] text-gray-700 line-clamp-3 whitespace-pre-wrap leading-relaxed">{card.card_description}</p>
-                                                  <div className="text-[10px] text-blue-700 font-semibold bg-blue-50/50 p-1.5 rounded border border-blue-100 flex items-center gap-1">
-                                                    <span>🔗 {card.button_text || 'Explore'}</span>
-                                                    <span className="text-gray-400 font-mono truncate font-normal">({resolveCtaUrl(card.button_url, targetAccount)})</span>
+                                                  <h5 className="font-medium text-sm text-gray-900">{card.card_title}</h5>
+                                                  <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{card.card_description}</p>
+                                                  <div className="text-xs text-blue-700 font-medium bg-gray-50/50 p-1.5 rounded-lg border border-gray-100 flex flex-wrap items-center gap-1">
+                                                    <span>{card.button_text || 'Explore'}</span>
+                                                    <span className="text-gray-400 font-mono break-all font-normal">({resolveCtaUrl(card.button_url, targetAccount)})</span>
                                                   </div>
                                                 </div>
                                               )}
@@ -2966,11 +2966,11 @@ export default function JiraBriefsPage() {
                       <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                           <div className="space-y-1">
-                            <h3 className="font-semibold text-gray-900">Prepare an SMS review</h3>
+                            <h3 className="font-medium text-gray-900">Prepare an SMS review</h3>
                             <p className="max-w-xl leading-relaxed text-gray-600">Select source messages here. Next, apply shared DLT settings once and review exact copy before confirming registration. No SMS is sent.</p>
                             <p className="font-medium text-gray-800">{selectedSmsCount.toLocaleString()} selected across all pages · maximum {BRIEF_SMS_REVIEW_LIMIT} per review</p>
                           </div>
-                          <button type="button" className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-800 disabled:bg-gray-200 disabled:text-gray-500" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT} onClick={() => {
+                          <button type="button" className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:bg-gray-200 disabled:text-gray-500" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT} onClick={() => {
                             if (account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT) return;
                             setSmsReview({ issueKey: brief.issue_key, drafts: selectedSmsDrafts.map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text })), revision: Date.now() });
                           }}>Review selected SMS ({selectedSmsCount})</button>
@@ -2989,11 +2989,11 @@ export default function JiraBriefsPage() {
                         <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-t border-gray-100 pt-3 text-sm">
                           <label className="flex items-center gap-2 font-medium text-gray-700">
                             <input type="checkbox" checked={smsPageSelected} disabled={smsPage.indices.length === 0 || (!smsPageSelected && selectedSmsCount + smsPageAdditionCount > BRIEF_SMS_REVIEW_LIMIT)}
-                              onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => selectBriefSmsIndices(previous, smsPage.indices, select)); }} className="h-4 w-4 rounded border-gray-300 text-blue-700" />
+                              onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => selectBriefSmsIndices(previous, smsPage.indices, select)); }} className="h-4 w-4 rounded-lg border-gray-300 text-blue-700" />
                             Select this page ({smsPage.indices.length})
                           </label>
                           {smsTemplates.length <= BRIEF_SMS_REVIEW_LIMIT && <label className="flex items-center gap-2 text-gray-700">
-                            <input type="checkbox" checked={selectedSmsCount === smsTemplates.length} onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => select ? selectBriefSmsIndices(previous, smsTemplates.map((_, index) => index), true) : new Set()); }} className="h-4 w-4 rounded border-gray-300 text-blue-700" />
+                            <input type="checkbox" checked={selectedSmsCount === smsTemplates.length} onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => select ? selectBriefSmsIndices(previous, smsTemplates.map((_, index) => index), true) : new Set()); }} className="h-4 w-4 rounded-lg border-gray-300 text-blue-700" />
                             Select entire brief ({smsTemplates.length})
                           </label>}
                           {selectedSmsCount > 0 && <button type="button" onClick={() => setSelectedSms(new Set())} className="font-medium text-gray-600 hover:text-gray-900 hover:underline">Clear all selections ({selectedSmsCount})</button>}
@@ -3015,7 +3015,7 @@ export default function JiraBriefsPage() {
                         <p className="py-8 text-center text-sm text-gray-500">No SMS variants detected in this brief.</p>
                       ) : matchingSmsIndices.length === 0 ? (
                         <div className="space-y-3 rounded-xl border border-dashed border-gray-200 px-4 py-10 text-center text-sm text-gray-600">
-                          <p className="font-semibold text-gray-900">No SMS messages match this search</p>
+                          <p className="font-medium text-gray-900">No SMS messages match this search</p>
                           <p>Try another name or phrase. All source drafts and selections are unchanged.</p>
                           <button type="button" onClick={() => { setSmsSearch(''); setSmsPageNumber(1); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 font-medium text-gray-700 hover:bg-gray-50">Show all SMS drafts</button>
                         </div>
@@ -3024,11 +3024,11 @@ export default function JiraBriefsPage() {
                           const sms = smsTemplates[idx];
                           const isEditing = editingCard[`sms-${idx}`] || false;
                           return (
-                            <div key={`sms-card-${idx}`} className="p-4 rounded-xl border border-gray-200 bg-white space-y-2.5 shadow-2xs">
+                            <div key={`sms-card-${idx}`} className="p-4 rounded-xl border border-gray-200 bg-white space-y-3 ">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                                   <input type="checkbox" aria-label={`Select source message ${idx + 1}: ${sms.template_name} for SMS DLT whitelisting`} checked={selectedSms.has(idx)} disabled={!selectedSms.has(idx) && selectedSmsCount >= BRIEF_SMS_REVIEW_LIMIT}
-                                    onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => selectBriefSmsIndices(previous, [idx], select)); }} className="h-4 w-4 rounded border-gray-300 text-blue-700" />
+                                    onChange={(event) => { const select = event.target.checked; setSelectedSms((previous) => selectBriefSmsIndices(previous, [idx], select)); }} className="h-4 w-4 rounded-lg border-gray-300 text-blue-700" />
                                   <span className="text-xs tabular-nums text-gray-500">#{idx + 1}</span>
                                   {isEditing ? (
                                     <input
@@ -3038,15 +3038,15 @@ export default function JiraBriefsPage() {
                                       aria-label={`Template name for source message ${idx + 1}`} className="min-w-0 max-w-full rounded-lg border border-gray-300 bg-white px-2 py-1 font-mono text-sm"
                                     />
                                   ) : (
-                                    <span className="break-all font-mono text-sm font-semibold text-gray-900">{sms.template_name}</span>
+                                    <span className="break-all font-mono text-sm font-medium text-gray-900">{sms.template_name}</span>
                                   )}
-                                  <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                                  <span className="rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
                                     {sms.variant}
                                   </span>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span
-                                    className={`rounded px-2 py-0.5 font-mono text-xs font-medium ${
+                                    className={`rounded-lg px-2 py-0.5 font-mono text-xs font-medium ${
                                       sms.char_count <= 160
                                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                                         : 'bg-amber-50 text-amber-700 border border-amber-200'
@@ -3058,7 +3058,7 @@ export default function JiraBriefsPage() {
                                     onClick={() => toggleEditCard(`sms-${idx}`)}
                                     className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
                                       isEditing
-                                        ? 'bg-purple-50 text-purple-700 border-purple-300'
+                                        ? 'bg-gray-50 text-purple-700 border-purple-300'
                                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                                     }`}
                                   >
@@ -3076,9 +3076,9 @@ export default function JiraBriefsPage() {
                                     className="rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm font-medium text-gray-700"
                                     title="Move this template to another channel"
                                   >
-                                    <option value="" disabled>⇄ Move Channel...</option>
-                                    <option value="whatsapp">🟢 Move to WhatsApp</option>
-                                    <option value="rcs">🔵 Move to RCS (DLT)</option>
+                                    <option value="" disabled>Move channel</option>
+                                    <option value="whatsapp">Move to WhatsApp</option>
+                                    <option value="rcs">Move to RCS (DLT)</option>
                                   </select>}
                                 </div>
                               </div>
@@ -3091,7 +3091,7 @@ export default function JiraBriefsPage() {
                                   aria-label={`Message body for source message ${idx + 1}`} className="w-full rounded-lg border border-gray-300 bg-white p-3 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                               ) : (
-                                <div className="whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-50 p-3.5 font-mono text-sm leading-relaxed text-gray-800">
+                                <div className="whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm leading-relaxed text-gray-800">
                                   {sms.text}
                                 </div>
                               )}
@@ -3105,12 +3105,12 @@ export default function JiraBriefsPage() {
                   {/* Email Packages & Templates Panel */}
                   {activeTab === 'email' && (
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
-                        <span className="font-semibold text-gray-700">
-                          Email Campaign Packages & Documents ({brief.email_templates?.length || 0} assets)
+                      <div className="flex flex-wrap items-start justify-between gap-3 pb-2 border-b border-gray-100 text-xs">
+                        <span className="font-medium text-gray-700">
+                          Email packages & documents ({brief.email_templates?.length || 0} assets)
                         </span>
-                        <span className="text-gray-400 text-[11px]">
-                          📦 HTML emailer ZIP packages, preheader documents, and email copy templates.
+                        <span className="text-gray-400 text-xs">
+                          HTML email packages, preheader documents and exact email copy
                         </span>
                       </div>
 
@@ -3118,30 +3118,30 @@ export default function JiraBriefsPage() {
                         <p className="py-8 text-center text-xs text-gray-400">No email packages detected in this brief.</p>
                       ) : (
                         brief.email_templates.map((em, idx) => (
-                          <div key={`email-asset-${idx}`} className="p-4 rounded-xl border border-purple-200 bg-purple-50/30 space-y-3">
+                          <div key={`email-asset-${idx}`} className="p-4 rounded-xl border border-gray-200 bg-gray-50/30 space-y-3">
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2.5">
-                                <span className="text-xl">{em.file_type?.includes('ZIP') ? '📦' : em.file_type?.includes('Subject') ? '📝' : '📄'}</span>
+                              <div className="flex items-center gap-3">
+                                
                                 <div>
-                                  <h4 className="font-bold text-xs text-gray-900">{em.filename || em.template_name}</h4>
-                                  <span className="text-[10px] text-purple-700 font-semibold">{em.file_type || 'Email Asset'}</span>
+                                  <h4 className="font-medium text-xs text-gray-900">{em.filename || em.template_name}</h4>
+                                  <span className="text-xs text-gray-600 font-medium">{em.file_type || 'Email Asset'}</span>
                                 </div>
                               </div>
                               {em.local_path && (
-                                <span className="text-[10px] font-mono bg-white text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-semibold">
-                                  ✓ Cached Locally
+                                <span className="text-xs font-mono bg-white text-emerald-700 px-2 py-0.5 rounded-lg border border-emerald-200 font-medium">
+                                  Cached locally
                                 </span>
                               )}
                             </div>
                             {em.body && (
-                              <div className="bg-white p-3 rounded-lg border border-purple-100 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                              <div className="bg-white p-3 rounded-lg border border-gray-100 font-sans text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
                                 {em.body}
                               </div>
                             )}
                             {(em.local_path || em.attachment_id) && (
                               <JiraCreativeDownload
                                 source={creativeSource(em.local_path, em.filename, em.attachment_id)}
-                                className="px-2 py-1 rounded bg-white hover:bg-purple-50 text-purple-700 border border-purple-200 font-semibold text-xs"
+                                className="px-2 py-1 rounded-lg bg-white hover:bg-gray-50 text-purple-700 border border-gray-200 font-medium text-sm"
                               >
                                 Download email asset
                               </JiraCreativeDownload>
@@ -3154,12 +3154,12 @@ export default function JiraBriefsPage() {
                   {/* Comments Panel */}
                   {activeTab === 'comments' && (
                     <div className="space-y-4">
-                      <div className="flex items-center justify-between pb-2 border-b border-gray-100 text-xs">
-                        <span className="font-semibold text-gray-700">
-                          Jira Discussion Thread ({brief.comments?.length || 0} comments)
+                      <div className="flex flex-wrap items-start justify-between gap-3 pb-2 border-b border-gray-100 text-xs">
+                        <span className="font-medium text-gray-700">
+                          Jira comments ({brief.comments?.length || 0} comments)
                         </span>
-                        <span className="text-gray-400 text-[11px]">
-                          💡 Revisions and copy changes posted by operators/managers in Jira comments.
+                        <span className="text-gray-400 text-xs">
+                          Revisions and copy changes from Jira
                         </span>
                       </div>
 
@@ -3167,19 +3167,19 @@ export default function JiraBriefsPage() {
                         <p className="py-8 text-center text-xs text-gray-400">No comments posted on this Jira ticket yet.</p>
                       ) : (
                         brief.comments.map((comment) => (
-                          <div key={comment.id} className="p-4 rounded-xl border border-gray-200 bg-white shadow-2xs space-y-2.5">
+                          <div key={comment.id} className="p-4 rounded-xl border border-gray-200 bg-white  space-y-3">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
+                                <span className="w-6 h-6 rounded-full bg-gray-100 text-indigo-700 flex items-center justify-center text-xs font-medium">
                                   {comment.author.charAt(0).toUpperCase()}
                                 </span>
-                                <strong className="text-xs font-semibold text-gray-900">{comment.author}</strong>
+                                <strong className="text-xs font-medium text-gray-900">{comment.author}</strong>
                               </div>
-                              <span className="text-[10px] text-gray-400 font-mono">
+                              <span className="text-xs text-gray-400 font-mono">
                                 {comment.created ? formatDate(comment.created) : ''}
                               </span>
                             </div>
-                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 font-sans text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+                            <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 font-sans text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
                               {comment.body_text}
                             </div>
                           </div>
@@ -3193,21 +3193,21 @@ export default function JiraBriefsPage() {
                     <div className="space-y-4">
                       {/* Success Banner if created */}
                       {moeResultCampaignId && (
-                        <div className="p-4 rounded-xl border border-emerald-300 bg-emerald-50/90 text-emerald-900 space-y-2 shadow-2xs">
+                        <div className="p-4 rounded-xl border border-emerald-300 bg-emerald-50/90 text-emerald-900 space-y-2 ">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <span className="text-base">{moeStagingStatus === 'CREATED' ? '✓' : '⚠'}</span>
-                              <span className="text-xs font-bold uppercase tracking-wider">
+                              
+                              <span className="text-xs font-medium normal-case tracking-normal">
                                 {moeStagingStatus === 'CREATED' ? 'Draft confirmed in MoEngage' : 'Draft attempt requires reconciliation'}
                               </span>
                             </div>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-200 text-emerald-800">
+                            <span className="px-2 py-0.5 rounded-lg text-xs font-mono font-medium bg-emerald-200 text-emerald-800">
                               {moeRemoteState || 'UNKNOWN'}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 text-xs">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
                             <span className="text-gray-600">Campaign ID:</span>
-                            <code className="px-2 py-0.5 rounded bg-white border border-emerald-200 font-mono font-bold text-gray-900 select-all">
+                            <code className="px-2 py-0.5 rounded-lg bg-white border border-emerald-200 font-mono font-medium text-gray-900 select-all">
                               {moeResultCampaignId}
                             </code>
                             <button
@@ -3216,13 +3216,13 @@ export default function JiraBriefsPage() {
                                 navigator.clipboard.writeText(moeResultCampaignId);
                                 setFeedback({ message: `Copied Campaign ID: ${moeResultCampaignId}`, type: 'success' });
                               }}
-                              className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                              className="px-2 py-0.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white"
                             >
                               Copy ID
                             </button>
                             <a
                               href="/moengage-campaigns"
-                              className="text-[11px] font-bold text-emerald-700 hover:underline ml-2"
+                              className="text-xs font-medium text-emerald-700 hover:underline ml-2"
                             >
                               View in MoEngage Campaigns Builder ➔
                             </a>
@@ -3233,11 +3233,11 @@ export default function JiraBriefsPage() {
                       {/* Error Banner */}
                       {moeError && (
                         <div className="p-3 rounded-xl border border-rose-300 bg-rose-50 text-rose-900 text-xs flex items-center justify-between">
-                          <span>⚠️ {moeError}</span>
+                          <span>{moeError}</span>
                           <button
                             type="button"
                             onClick={() => setMoeError(null)}
-                            className="text-rose-600 font-bold hover:text-rose-800"
+                            className="text-rose-600 font-medium hover:text-rose-800"
                           >
                             Dismiss
                           </button>
@@ -3245,31 +3245,31 @@ export default function JiraBriefsPage() {
                       )}
 
                       {/* Main Interactive Form Card */}
-                      <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/40 space-y-4 shadow-2xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-amber-200/60">
+                      <div className="p-4 rounded-xl border border-gray-200 bg-gray-50/40 space-y-4 ">
+                        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-gray-200/60">
                           <div>
                             <div className="flex items-center gap-2">
-                              <span className="text-base">🚀</span>
-                              <h3 className="text-xs font-bold text-amber-950 uppercase tracking-wider">
-                                MoEngage Campaign Staging & Deployment
+                              
+                              <h3 className="text-xs font-medium text-gray-900 normal-case tracking-normal">
+                                MoEngage campaign drafts
                               </h3>
                             </div>
-                            <p className="text-[11px] text-gray-500 mt-0.5">
+                            <p className="text-xs text-gray-500 mt-0.5">
                               Configure required campaign parameters and stage or create real V5 drafts in MoEngage.
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
                             {loadingCatalog && (
-                              <span className="text-[10px] text-gray-400 animate-pulse">Loading catalog...</span>
+                              <span className="text-xs text-gray-400">Loading catalog...</span>
                             )}
                             <span
-                              className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              className={`px-3 py-0.5 rounded-lg text-xs font-medium normal-case ${
                                 moeStagingStatus === 'CREATED'
                                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                   : moeStagingStatus === 'STAGED'
-                                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                                  ? 'bg-gray-100 text-blue-800 border border-blue-200'
                                   : moeStagingStatus === 'CREATING'
-                                  ? 'bg-indigo-100 text-indigo-800 border border-indigo-200 animate-pulse'
+                                  ? 'bg-gray-100 text-indigo-800 border border-indigo-200'
                                   : moeStagingStatus === 'ERROR'
                                   ? 'bg-rose-100 text-rose-800 border border-rose-200'
                                   : 'bg-amber-100 text-amber-800 border border-amber-200'
@@ -3285,7 +3285,7 @@ export default function JiraBriefsPage() {
                           {/* Campaign Name */}
                           <div>
                             <label className="block text-gray-600 font-medium mb-1">
-                              Campaign Name <span className="text-rose-500">*</span>:
+                              Campaign name <span className="text-rose-500">*</span>:
                             </label>
                             <input
                               type="text"
@@ -3294,30 +3294,30 @@ export default function JiraBriefsPage() {
                               onBlur={() => setMoeCampaignName(normalizeCampaignName(moeCampaignName))}
                               aria-describedby="jira-campaign-name-rule"
                               placeholder="e.g. att_TCN-546 - Personal Loan Blast"
-                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
-                            <p id="jira-campaign-name-rule" className="mt-1 text-[11px] text-gray-500">{CAMPAIGN_NAME_HINT}</p>
+                            <p id="jira-campaign-name-rule" className="mt-1 text-xs text-gray-500">{CAMPAIGN_NAME_HINT}</p>
                           </div>
 
                           {/* Channel Selector */}
                           <div>
                             <label className="block text-gray-600 font-medium mb-1">
-                              Campaign Channel <span className="text-rose-500">*</span>:
+                              Campaign channel <span className="text-rose-500">*</span>:
                             </label>
                             <select
                               value={moeChannel}
                               onChange={(e) => setMoeChannel(e.target.value as 'WHATSAPP' | 'EMAIL' | 'PUSH')}
-                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
                             >
-                              <option value="WHATSAPP">🟢 WhatsApp</option>
-                              <option value="EMAIL">📧 Email</option>
-                              <option value="PUSH">📱 Push Notification</option>
+                              <option value="WHATSAPP">WhatsApp</option>
+                              <option value="EMAIL">Email</option>
+                              <option value="PUSH">Push notification</option>
                             </select>
                           </div>
                           {moeChannel === 'WHATSAPP' && (
                             <div>
                               <label className="block text-gray-600 font-medium mb-1">WhatsApp destination workspace (required):</label>
-                              <select value={moeWorkspace} onChange={(e) => setMoeWorkspace(e.target.value)} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs">
+                              <select value={moeWorkspace} onChange={(e) => setMoeWorkspace(e.target.value)} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm">
                                 <option value="">Select and review destination — no default</option>
                                 {moeWorkspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} ({workspace.id})</option>)}
                               </select>
@@ -3328,13 +3328,13 @@ export default function JiraBriefsPage() {
                           {/* Target Audience / Segment */}
                           <div>
                             <label className="block text-gray-600 font-medium mb-1">
-                              Target Segment / Audience <span className="text-rose-500">*</span>:
+                              Target audience <span className="text-rose-500">*</span>:
                             </label>
                             {moeCatalog?.segments && moeCatalog.segments.length > 0 ? (
                               <select
                                 value={moeSegmentId}
                                 onChange={(e) => setMoeSegmentId(e.target.value)}
-                                className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+                                className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
                               >
                                 <option value="">Select workspace audience</option>
                                 {moeCatalog.segments.map((seg) => (
@@ -3349,7 +3349,7 @@ export default function JiraBriefsPage() {
                                 value={moeSegmentId}
                                 onChange={(e) => setMoeSegmentId(e.target.value)}
                                 placeholder="Segment ID, e.g. Test_FSTP_Pranav_1602"
-                                className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                               />
                             )}
                           </div>
@@ -3357,13 +3357,13 @@ export default function JiraBriefsPage() {
                           {/* Scheduled Date */}
                           <div>
                             <label className="block text-gray-600 font-medium mb-1">
-                              Scheduled Send Time:
+                              Scheduled send time
                             </label>
                             <input
                               type="datetime-local"
                               value={moeScheduledAt ? moeScheduledAt.slice(0, 16) : ''}
                               onChange={(e) => setMoeScheduledAt(e.target.value)}
-                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                              className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
                           </div>
 
@@ -3372,18 +3372,18 @@ export default function JiraBriefsPage() {
                             <>
                               <div>
                                 <label className="block text-gray-600 font-medium mb-1">
-                                  WhatsApp Template ID:
+                                  WhatsApp template ID
                                 </label>
-                                <select value={moeWaTemplateId} onChange={(e) => setMoeWaTemplateId(e.target.value)} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs">
+                                <select value={moeWaTemplateId} onChange={(e) => setMoeWaTemplateId(e.target.value)} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm">
                                   <option value="">Select approved sender template</option>
                                   {moeCatalog?.whatsapp_templates?.filter((template) => template.sender_ids.includes(moeWaSender)).map((template) => <option key={template.id} value={template.id}>{template.name} ({template.id})</option>)}
                                 </select>
                               </div>
                               <div>
                                 <label className="block text-gray-600 font-medium mb-1">
-                                  WhatsApp Sender:
+                                  WhatsApp sender
                                 </label>
-                                <select value={moeWaSender} onChange={(e) => { setMoeWaSender(e.target.value); setMoeWaTemplateId(''); }} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs">
+                                <select value={moeWaSender} onChange={(e) => { setMoeWaSender(e.target.value); setMoeWaTemplateId(''); }} className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm">
                                   <option value="">Select workspace sender</option>
                                   {moeCatalog?.whatsapp_senders?.map((sender) => <option key={sender.sender_id} value={sender.sender_id}>{sender.name} ({sender.number}) · {sender.provider}</option>)}
                                 </select>
@@ -3395,26 +3395,26 @@ export default function JiraBriefsPage() {
                             <>
                               <div>
                                 <label className="block text-gray-600 font-medium mb-1">
-                                  From Address:
+                                  From address
                                 </label>
                                 <input
                                   type="email"
                                   value={moeEmailFrom}
                                   onChange={(e) => setMoeEmailFrom(e.target.value)}
                                   placeholder="e.g. contact@tatacapital.com"
-                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                                 />
                               </div>
                               <div>
                                 <label className="block text-gray-600 font-medium mb-1">
-                                  Email Subject:
+                                  Email subject
                                 </label>
                                 <input
                                   type="text"
                                   value={moeEmailSubject}
                                   onChange={(e) => setMoeEmailSubject(e.target.value)}
                                   placeholder="e.g. Festive Loan Offer"
-                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                                 />
                               </div>
                             </>
@@ -3424,27 +3424,27 @@ export default function JiraBriefsPage() {
                             <>
                               <div>
                                 <label className="block text-gray-600 font-medium mb-1">
-                                  Push Title:
+                                  Push title
                                 </label>
                                 <input
                                   type="text"
                                   value={moePushTitle}
                                   onChange={(e) => setMoePushTitle(e.target.value)}
                                   placeholder="e.g. Tata Capital Offer"
-                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                                 />
                               </div>
                               <div>
                                 <label className="block text-gray-600 font-medium mb-1">
-                                  Push Platform:
+                                  Push platform
                                 </label>
                                 <select
                                   value={moePushPlatform}
                                   onChange={(e) => setMoePushPlatform(e.target.value as 'ANDROID' | 'IOS')}
-                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
+                                  className="w-full px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none cursor-pointer"
                                 >
-                                  <option value="ANDROID">🤖 Android</option>
-                                  <option value="IOS">🍎 iOS</option>
+                                  <option value="ANDROID">Android</option>
+                                  <option value="IOS">iOS</option>
                                 </select>
                               </div>
                             </>
@@ -3455,14 +3455,14 @@ export default function JiraBriefsPage() {
                         {moeChannel === 'PUSH' && (
                           <div>
                             <label className="block text-gray-600 font-medium mb-1 text-xs">
-                              Push Message Body:
+                              Push message body
                             </label>
                             <textarea
                               rows={2}
                               value={moePushBody}
                               onChange={(e) => setMoePushBody(e.target.value)}
                               placeholder="Message body copy..."
-                              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-xs text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                              className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
                           </div>
                         )}
@@ -3470,29 +3470,29 @@ export default function JiraBriefsPage() {
                         {moeChannel === 'EMAIL' && (
                           <div>
                             <label className="block text-gray-600 font-medium mb-1 text-xs">
-                              Email HTML Content:
+                              Email HTML content
                             </label>
                             <textarea
                               rows={3}
                               value={moeEmailContent}
                               onChange={(e) => setMoeEmailContent(e.target.value)}
                               placeholder="<p>HTML content...</p>"
-                              className="w-full px-3 py-2 rounded-lg border border-gray-300 font-mono text-xs text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
+                              className="w-full px-3 py-2 rounded-lg border border-gray-300 font-mono text-sm text-gray-900 bg-white focus:ring-2 focus:ring-amber-500 outline-none"
                             />
                           </div>
                         )}
 
                         {/* Action Buttons Row */}
-                        <div className="pt-3 border-t border-amber-200/80 flex flex-wrap items-center justify-between gap-3">
+                        <div className="pt-3 border-t border-gray-200/80 flex flex-wrap items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={handleMoeCreateDraft}
                               disabled={moeBusy || moeCreateAttempted || !normalizeCampaignName(moeCampaignName).slice(4).trim()}
-                              className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 shadow-2xs transition flex items-center gap-2"
+                              className="px-4 py-2 rounded-lg text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300  transition-colors flex items-center gap-2"
                               title="Create real audited V5 draft in MoEngage Live workspace"
                             >
-                              <span>✨</span>
+                              
                               <span>{moeBusy && moeStagingStatus === 'CREATING' ? 'Creating Draft...' : 'Create Draft in MoEngage'}</span>
                             </button>
 
@@ -3500,10 +3500,10 @@ export default function JiraBriefsPage() {
                               type="button"
                               onClick={handleMoeStageBatch}
                               disabled={moeBusy || !normalizeCampaignName(moeCampaignName).slice(4).trim()}
-                              className="px-3.5 py-2 rounded-lg text-xs font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50 shadow-2xs transition flex items-center gap-1.5"
+                              className="px-4 py-2 rounded-lg text-xs font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50  transition-colors flex items-center gap-2"
                               title="Stage campaign in local workspace batch queue"
                             >
-                              <span>📁</span>
+                              
                               <span>{moeBusy && moeStagingStatus === 'STAGING' ? 'Staging...' : 'Stage in Queue'}</span>
                             </button>
                           </div>
@@ -3520,9 +3520,9 @@ export default function JiraBriefsPage() {
                               }
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 transition"
+                              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 transition-colors"
                             >
-                              <span>🔗</span>
+                              
                               <span>Open in MoEngage {moeChannel === 'WHATSAPP' ? 'WhatsApp' : moeChannel === 'EMAIL' ? 'Email' : 'Push'} Studio ↗</span>
                             </a>
                           </div>
@@ -3538,12 +3538,12 @@ export default function JiraBriefsPage() {
                     type="button"
                     onClick={() => requestWhitelist(channel === 'rcs' ? 'rcs' : 'whatsapp')}
                     disabled={activeTab !== channel || !destinationAvailable || submitting || !validationReady || totalSelectedCount === 0 || (channel === 'rcs' && !currentRcs.botId)}
-                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:bg-gray-300 disabled:text-gray-600"
+                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800 disabled:bg-gray-300 disabled:text-gray-600"
                   >
                     {submitting ? 'Submitting…' : `Review & whitelist (${totalSelectedCount})`}
                   </button>
                   <div className="min-w-0 text-xs text-gray-600">
-                    <p className="font-semibold text-gray-900">3. Confirm · {selectedDestinationLabel}</p>
+                    <p className="font-medium text-gray-900">3. Confirm · {selectedDestinationLabel}</p>
                     <p>{activeTab !== channel ? 'This tab is read-only. Change the whitelisting destination to submit this channel.' : !validationReady ? 'Waiting for current validation.' : totalSelectedCount === 0 ? 'Select at least one template.' : hasValidationErrors ? 'Review the highlighted issues before continuing.' : 'Only checked templates are included. Nothing is sent before confirmation.'}</p>
                   </div>
                 </div>
@@ -3555,14 +3555,14 @@ export default function JiraBriefsPage() {
     </div>
     {commentReview && commentReview.signature === previewSignature && validationReady && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4" role="dialog" aria-modal="true" aria-labelledby="jira-report-confirmation-title">
-        <div className="w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-4">
-          <h2 id="jira-report-confirmation-title" className="text-base font-bold text-gray-900">Report validation errors on {commentReview.issueKey}?</h2>
+        <div className="max-h-[90vh] overflow-y-auto w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-4">
+          <h2 id="jira-report-confirmation-title" className="text-base font-medium text-gray-900">Report validation errors on {commentReview.issueKey}?</h2>
           <p className="text-xs text-gray-600">Review the exact comment below. Nothing is posted until you choose “Yes, post comment”.</p>
-          <pre className="max-h-[55vh] overflow-auto whitespace-pre-wrap break-words p-3 rounded-lg border border-gray-200 bg-gray-50 text-xs text-gray-800 font-sans">{commentReview.text}</pre>
+          <pre className="max-h-[55vh] overflow-auto whitespace-pre-wrap break-words p-3 rounded-lg border border-gray-200 bg-gray-50 text-sm text-gray-800 font-sans">{commentReview.text}</pre>
           {commentError && <p role="alert" className="text-xs text-rose-800">{commentError}</p>}
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={() => setCommentReview(null)} disabled={commentBusy} className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-semibold text-gray-700 disabled:opacity-50">Cancel</button>
-            <button type="button" onClick={confirmValidationComment} disabled={commentBusy || submitting || !validationReady} className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-semibold disabled:opacity-50">{commentBusy ? 'Posting comment…' : 'Yes, post comment'}</button>
+            <button type="button" onClick={() => setCommentReview(null)} disabled={commentBusy} className="px-4 py-2 rounded-lg border border-gray-300 text-xs font-medium text-gray-700 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={confirmValidationComment} disabled={commentBusy || submitting || !validationReady} className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-medium disabled:opacity-50">{commentBusy ? 'Posting comment…' : 'Yes, post comment'}</button>
           </div>
         </div>
       </div>
@@ -3574,13 +3574,13 @@ export default function JiraBriefsPage() {
         aria-modal="true"
         aria-labelledby="whitelist-confirmation-title"
       >
-        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-5">
+        <div className="max-h-[90vh] overflow-y-auto w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl space-y-5">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg shrink-0">
-              ⚠️
+            <div className="text-sm font-medium text-amber-800 shrink-0">
+
             </div>
             <div>
-              <h2 id="whitelist-confirmation-title" className="text-base font-bold text-gray-900">
+              <h2 id="whitelist-confirmation-title" className="text-base font-medium text-gray-900">
                 Confirm whitelisting
               </h2>
               <p className="text-xs text-gray-500 mt-1">
@@ -3610,48 +3610,48 @@ export default function JiraBriefsPage() {
               ))}
             </ul>
             {(confirmationMode === 'all' || confirmationMode === 'whatsapp') && selectedWaCount > 0 && (
-              <p className="font-semibold text-gray-800">
+              <p className="font-medium text-gray-800">
                 WhatsApp destination: <strong>{selectedDestinationLabel}</strong> — WABA
               </p>
             )}
 
-            {/* Dedicated RCS Whitelisting Destination breakdown inside modal */}
+            {/* Dedicated RCS whitelisting destination breakdown inside modal */}
             {(confirmationMode === 'all' || confirmationMode === 'rcs') && selectedRcsCount > 0 && (
-              <div className="rounded-xl border border-blue-200 bg-blue-50/90 p-3.5 space-y-2.5 text-blue-950">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-xs uppercase tracking-wide text-blue-900 flex items-center gap-1.5">
-                    <span>🔵</span>
-                    <span>RCS Whitelisting Destination</span>
+              <div className="rounded-xl border border-gray-200 bg-gray-50/90 p-4 space-y-3 text-blue-950">
+                <div className="flex min-w-0 flex-wrap items-center justify-between">
+                  <span className="font-medium text-xs normal-case tracking-normal text-blue-900 flex items-center gap-2">
+                    
+                    <span>RCS whitelisting destination</span>
                   </span>
-                  <span className="font-mono text-[10px] bg-blue-200/90 px-2 py-0.5 rounded text-blue-900 font-bold border border-blue-300">
+                  <span className="font-mono text-xs bg-gray-200/90 px-2 py-0.5 rounded-lg text-blue-900 font-medium border border-blue-300">
                     Bot ID: {currentRcs.botId}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 bg-white/95 p-2.5 rounded-lg border border-blue-200/80 text-xs">
+                <div className="grid grid-cols-2 gap-2 bg-white/95 p-3 rounded-lg border border-gray-200/80 text-xs">
                   <div>
-                    <span className="text-[10px] text-gray-500 uppercase block font-medium">Target Karix Account</span>
-                    <span className="font-bold text-gray-900">{currentRcs.name} ({targetAccount.toUpperCase()})</span>
+                    <span className="text-xs text-gray-500 normal-case block font-medium">Target Karix account</span>
+                    <span className="font-medium text-gray-900">{currentRcs.name} ({targetAccount.toUpperCase()})</span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-gray-500 uppercase block font-medium">RCS Bot Name</span>
-                    <span className="font-bold text-blue-700">{currentRcs.botName}</span>
+                    <span className="text-xs text-gray-500 normal-case block font-medium">RCS bot name</span>
+                    <span className="font-medium text-blue-700">{currentRcs.botName}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-gray-500 uppercase block font-medium">Karix Portal User</span>
-                    <span className="font-mono font-bold text-gray-800">{currentRcs.rcsUser}</span>
+                    <span className="text-xs text-gray-500 normal-case block font-medium">Karix portal user</span>
+                    <span className="font-mono font-medium text-gray-800">{currentRcs.rcsUser}</span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-gray-500 uppercase block font-medium">DLT Entity</span>
-                    <span className="font-bold text-gray-800">{currentRcs.entity}</span>
+                    <span className="text-xs text-gray-500 normal-case block font-medium">DLT entity</span>
+                    <span className="font-medium text-gray-800">{currentRcs.entity}</span>
                   </div>
                 </div>
 
-                <p className="pt-2 border-t border-blue-200/80 text-gray-600 text-[11px]">To change destination, close this review and use “Whitelisting for”. Switching clears drafts after confirmation and requires a new preview.</p>
+                <p className="pt-2 border-t border-gray-200/80 text-gray-600 text-xs">To change destination, close this review and use “Whitelisting for”. Switching clears drafts after confirmation and requires a new preview.</p>
               </div>
             )}
 
-            <p className="pt-2 border-t border-amber-200/80 font-semibold">
+            <p className="pt-2 border-t border-amber-200/80 font-medium">
               After you confirm, the application will submit them to Karix for whitelisting.
             </p>
           </div>
@@ -3661,7 +3661,7 @@ export default function JiraBriefsPage() {
               type="button"
               onClick={() => setConfirmationMode(null)}
               disabled={submitting}
-              className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50"
+              className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-medium hover:bg-gray-50 disabled:opacity-50"
             >
               Cancel
             </button>
@@ -3669,7 +3669,7 @@ export default function JiraBriefsPage() {
               type="button"
               onClick={confirmWhitelist}
               disabled={!destinationAvailable || confirmationMode !== channel || submitting || !validationReady || totalSelectedCount === 0 || (channel === 'rcs' && !currentRcs.botId)}
-              className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
+              className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50"
             >
               {submitting ? 'Whitelisting...' : `Confirm & Whitelist to ${selectedDestinationLabel}`}
             </button>
@@ -3680,7 +3680,7 @@ export default function JiraBriefsPage() {
     {/* Full-Resolution Creative Lightbox Modal */}
     {previewCreativeModal && (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
         onClick={() => setPreviewCreativeModal(null)}
         role="dialog"
         aria-modal="true"
@@ -3690,14 +3690,14 @@ export default function JiraBriefsPage() {
           className="relative max-w-4xl max-h-[92vh] w-full bg-gray-900 border border-gray-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="p-3.5 bg-gray-950/90 border-b border-gray-800 flex items-center justify-between text-white text-xs">
-            <div className="flex items-center gap-2 font-mono">
-              <span className="text-base">🖼️</span>
-              <span id="creative-lightbox-title" className="font-bold truncate max-w-md">
+          <div className="p-4 bg-gray-950/90 border-b border-gray-800 flex items-center justify-between text-white text-xs">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 font-mono">
+              
+              <span id="creative-lightbox-title" className="font-medium truncate max-w-full sm:max-w-md">
                 {previewCreativeModal.filename}
               </span>
               {previewCreativeModal.channel && (
-                <span className="px-2 py-0.5 rounded text-[10px] bg-white/10 font-sans font-semibold text-gray-200">
+                <span className="px-2 py-0.5 rounded-lg text-xs bg-white/10 font-sans font-medium text-gray-200">
                   {previewCreativeModal.channel}
                 </span>
               )}
@@ -3705,13 +3705,13 @@ export default function JiraBriefsPage() {
             <div className="flex items-center gap-2">
               <JiraCreativeDownload
                 source={previewCreativeModal}
-                className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-sans text-xs font-semibold shadow-2xs transition"
+                className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-sans text-sm font-medium  transition-colors"
               >
                 Download Creative
               </JiraCreativeDownload>
               <button
                 onClick={() => setPreviewCreativeModal(null)}
-                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 text-base font-bold px-2.5 transition"
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 text-base font-medium px-3 transition-colors"
                 title="Close preview"
               >
                 ✕

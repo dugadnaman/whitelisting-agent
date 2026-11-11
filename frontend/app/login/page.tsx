@@ -89,7 +89,7 @@ export default function LoginPage() {
             <img src="/logo.svg" alt="" className="w-10 h-10 rounded-lg" />
             <span className="workspace-eyebrow">Attributics · Campaign operations</span>
           </div>
-          <h1 className="workspace-heading">Welcome back</h1>
+          <h1 className="workspace-heading">Sign in to campaign operations</h1>
           <p className="workspace-description">Sign in to your organization workspace. Access is limited to the accounts assigned to you.</p>
         </div>
 
@@ -97,7 +97,7 @@ export default function LoginPage() {
         {error && (
           <div role="alert" id="login-error" className="p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
             <div className="flex-1 leading-relaxed">
-              <span className="font-semibold">Sign in failed: </span>
+              <span className="font-medium">Sign in failed: </span>
               <span>{error}</span>
             </div>
           </div>
@@ -106,7 +106,7 @@ export default function LoginPage() {
         {/* Sign In Form */}
         <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading} aria-describedby={error ? 'login-error' : undefined}>
           <div>
-            <label htmlFor="login-organization" className="block text-sm font-semibold text-gray-700  mb-1.5">
+            <label htmlFor="login-organization" className="block text-sm font-medium text-gray-700  mb-2">
               Organization
             </label>
             <select
@@ -114,7 +114,7 @@ export default function LoginPage() {
               value={organization}
               onChange={(e) => setOrganization(e.target.value)}
               disabled={loading}
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition bg-white disabled:bg-gray-100"
+              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors bg-white disabled:bg-gray-100"
             >
               <option value="">Use my account&apos;s organization</option>
               <option value="bajaj">Bajaj Finserv</option>
@@ -123,7 +123,7 @@ export default function LoginPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="login-email" className="block text-sm font-semibold text-gray-700 mb-1.5">
+            <label htmlFor="login-email" className="block text-sm font-medium text-gray-700 mb-2">
               <span>Work email</span>
             </label>
             <input
@@ -135,12 +135,12 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
-              className="w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition font-sans"
+              className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-colors font-sans"
             />
           </div>
 
           <div>
-            <label htmlFor="login-password" className="block text-sm font-semibold text-gray-700  mb-1.5">
+            <label htmlFor="login-password" className="block text-sm font-medium text-gray-700  mb-2">
               Password
             </label>
             <div className="relative">
@@ -171,11 +171,10 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-semibold shadow-sm transition flex items-center justify-center gap-2 mt-2"
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-medium shadow-sm transition-colors flex items-center justify-center gap-2 mt-2"
           >
             {loading ? (
               <>
-                <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
                 <span>Signing in...</span>
               </>
             ) : (
@@ -194,7 +193,7 @@ export default function LoginPage() {
         {/* Sign up link */}
         <div className="text-center text-sm text-gray-500 pt-1 border-t border-gray-100">
           <span>Don&apos;t have an account? </span>
-          <Link href="/signup" className="text-indigo-600 hover:underline font-semibold">
+          <Link href="/signup" className="text-indigo-600 hover:underline font-medium">
             Request company access
           </Link>
         </div>

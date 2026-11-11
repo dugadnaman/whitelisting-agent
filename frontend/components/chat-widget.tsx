@@ -57,13 +57,13 @@ function formatMessageContent(content: string) {
 
     if (line.startsWith('### ')) {
       elements.push(
-        <h4 key={idx} className="font-bold text-gray-900 text-sm mt-2 mb-1 flex items-center gap-1.5">
+        <h4 key={idx} className="font-medium text-gray-900 text-sm mt-2 mb-1 flex items-center gap-1.5">
           {line.replace('### ', '')}
         </h4>
       );
     } else if (line.startsWith('#### ')) {
       elements.push(
-        <h5 key={idx} className="font-semibold text-gray-800 text-xs mt-2 mb-0.5">
+        <h5 key={idx} className="font-medium text-gray-800 text-xs mt-2 mb-0.5">
           {line.replace('#### ', '')}
         </h5>
       );
@@ -102,13 +102,13 @@ function renderInlineStyles(text: string): React.ReactNode {
     const token = match[0];
     if (token.startsWith('`') && token.endsWith('`')) {
       parts.push(
-        <code key={match.index} className="px-1.5 py-0.5 bg-gray-100 text-gray-900 font-mono text-[11px] rounded border border-gray-200">
+        <code key={match.index} className="px-1.5 py-0.5 bg-gray-100 text-gray-900 font-mono text-xs rounded border border-gray-200">
           {token.slice(1, -1)}
         </code>
       );
     } else if (token.startsWith('**') && token.endsWith('**')) {
       parts.push(
-        <strong key={match.index} className="font-semibold text-gray-900">
+        <strong key={match.index} className="font-medium text-gray-900">
           {token.slice(2, -2)}
         </strong>
       );
@@ -131,14 +131,14 @@ export default function ChatWidget() {
   const [loading, setLoading] = useState(false);
 
   const welcomeMessage =
-    `### 👋 Karix AI Whitelisting Copilot\n\n` +
-    `I am your autonomous template assistant for **${getAccountLabel(account)} (${formatChannel(channel)})**.\n\n` +
-    `**What I can do for you:**\n` +
-    `• 🚀 **Submit Templates**: Type *"Create a template named X with body Y"* or ask *"How do I submit templates?"*\n` +
-    `• 🔧 **Fix Rejections**: Type *"Check why template X was rejected, fix it, and resubmit"*\n` +
-    `• 📋 **Inspect Catalogs**: Ask *"List rejected templates"* or *"Show pending approvals"*\n` +
-    `• 🔄 **Sync Statuses**: Ask *"Poll live approval status from Meta"*\n` +
-    `• ✍️ **Lint Copy**: Paste any copy with variables/URLs to fix typos and compliance.`;
+    `### Template review assistant\n\n` +
+    `Current destination: **${getAccountLabel(account)} (${formatChannel(channel)})**\n\n` +
+    `**Available tasks**\n` +
+    `• **Submit templates**: ask how to submit, or provide a template name and body\n` +
+    `• **Review rejections**: inspect a template's rejection and request a correction\n` +
+    `• **Inspect catalogs**: list rejected templates or pending approvals\n` +
+    `• **Check statuses**: request current approval status from Meta\n` +
+    `• **Review copy**: inspect variables, links and compliance before making changes`;
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: 'init-1',
@@ -245,7 +245,7 @@ export default function ChatWidget() {
           msg.id === pendingAssistantMsg.id
             ? {
                 ...msg,
-                content: `❌ **Error communicating with agent engine:** ${err instanceof Error ? err.message : String(err)}`,
+                content: `**Agent connection error:** ${err instanceof Error ? err.message : String(err)}`,
                 isLoading: false,
               }
             : msg
@@ -261,7 +261,7 @@ export default function ChatWidget() {
       {
         id: `init-${Date.now()}`,
         role: 'assistant',
-        content: `### 🔄 Session Cleared\n\nReady for new instructions on **${getAccountLabel(account)} (${formatChannel(channel)})**.`,
+        content: `### Chat cleared\n\nCurrent destination: **${getAccountLabel(account)} (${formatChannel(channel)})**`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         suggested_actions: DEFAULT_SUGGESTED_PROMPTS,
       },
@@ -294,11 +294,11 @@ export default function ChatWidget() {
           {/* Header */}
           <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/70">
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-gray-900 text-white flex items-center justify-center font-bold text-xs shadow-sm">
+              <div className="w-7 h-7 rounded-lg bg-gray-900 text-white flex items-center justify-center font-medium text-xs shadow-sm">
                 AI
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">AI Copilot</h3>
+                <h3 className="text-sm font-medium text-gray-900">AI Copilot</h3>
                 <p className="text-xs text-gray-500 truncate max-w-[240px]">
                   {getAccountLabel(account)} • {channel.toUpperCase()}
                 </p>
@@ -336,23 +336,23 @@ export default function ChatWidget() {
                 className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
               >
                 <div className="flex items-center gap-1.5 mb-1 px-1">
-                  <span className="text-[10px] font-semibold text-gray-400">
+                  <span className="text-xs font-medium text-gray-600">
                     {msg.role === 'user' ? (user || 'Operator') : 'Agent'}
                   </span>
-                  <span className="text-[10px] text-gray-300">• {msg.timestamp}</span>
+                  <span className="text-xs text-gray-500">· {msg.timestamp}</span>
                 </div>
 
                 <div
-                  className={`max-w-[92%] rounded-xl px-4 py-3 text-xs leading-relaxed shadow-sm ${
+                  className={`max-w-[92%] rounded-lg px-4 py-3 text-sm leading-relaxed ${
                     msg.role === 'user'
-                      ? 'bg-blue-600 text-white rounded-br-none'
-                      : 'bg-gray-50 border border-gray-200 text-gray-800 rounded-bl-none'
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-gray-50 border border-gray-200 text-gray-800'
                   }`}
                 >
                   {msg.isLoading ? (
                     <div className="flex items-center gap-2 py-1 text-gray-500">
-                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                      <span className="italic font-medium">Executing agent tools & reasoning...</span>
+                      <span className="w-2 h-2 rounded-full bg-gray-400" aria-hidden="true" />
+                      <span>Working on your request…</span>
                     </div>
                   ) : msg.role === 'user' ? (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -364,9 +364,8 @@ export default function ChatWidget() {
                           {msg.actions_taken.map((act, idx) => (
                             <span
                               key={idx}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[10px] font-mono font-medium"
+                              className="inline-flex items-center gap-2 px-2 py-1 bg-gray-50 text-gray-600 border border-gray-200 rounded text-xs font-mono"
                             >
-                              <span>🛠️</span>
                               <span>{act.tool}</span>
                               {act.target && <span className="text-blue-500">({act.target})</span>}
                             </span>
@@ -380,17 +379,17 @@ export default function ChatWidget() {
                       {/* Interactive Suggested Action Chips */}
                       {msg.suggested_actions && msg.suggested_actions.length > 0 && (
                         <div className="mt-3 pt-2.5 border-t border-gray-200/80 flex flex-wrap gap-1.5">
-                          <span className="w-full text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-0.5">
-                            Suggested Next Steps:
+                          <span className="w-full text-xs font-medium text-gray-600 mb-1">
+                            Suggested next steps
                           </span>
                           {msg.suggested_actions.map((sug, idx) => (
                             <button
                               key={idx}
                               onClick={() => handleSend(sug)}
                               disabled={loading}
-                              className="px-2.5 py-1 bg-white hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300 text-gray-700 border border-gray-200 rounded-full text-[11px] font-medium transition text-left shadow-2xs"
+                              className="workspace-button text-left"
                             >
-                              ⚡ {sug}
+                              {sug}
                             </button>
                           ))}
                         </div>
@@ -408,37 +407,37 @@ export default function ChatWidget() {
             <button
               onClick={() => handleSend('Check if template exists: Dear customer, your EMI is due.')}
               disabled={loading}
-              className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded text-[11px] border border-emerald-200 font-medium transition shrink-0"
+              className="workspace-button shrink-0"
             >
-              🔍 Find Template by Body
+              Find a template
             </button>
             <button
               onClick={() => handleSend('How do I submit templates?')}
               disabled={loading}
-              className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[11px] border border-blue-200 font-medium transition shrink-0"
+              className="workspace-button shrink-0"
             >
-              🚀 How to Submit
+              Submission help
             </button>
             <button
               onClick={() => handleSend('List rejected templates')}
               disabled={loading}
-              className="px-2 py-1 bg-white hover:bg-gray-100 text-gray-600 rounded text-[11px] border border-gray-200 font-medium transition shrink-0"
+              className="workspace-button shrink-0"
             >
-              📋 Rejected Templates
+              Rejected templates
             </button>
             <button
               onClick={() => handleSend('Poll approval status')}
               disabled={loading}
-              className="px-2 py-1 bg-white hover:bg-gray-100 text-gray-600 rounded text-[11px] border border-gray-200 font-medium transition shrink-0"
+              className="workspace-button shrink-0"
             >
-              🔄 Poll Status
+              Check status
             </button>
             <button
               onClick={() => handleSend('Check why template emic_check_wa_07aug was rejected and fix it')}
               disabled={loading}
-              className="px-2 py-1 bg-white hover:bg-gray-100 text-gray-600 rounded text-[11px] border border-gray-200 font-medium transition shrink-0"
+              className="workspace-button shrink-0"
             >
-              🔧 Fix Last Rejection
+              Review a rejection
             </button>
           </div>
 
@@ -462,13 +461,13 @@ export default function ChatWidget() {
                       handleSend();
                     }
                   }}
-                  placeholder="e.g. Check why loan_oct_01 was rejected, fix it, and resubmit..."
+                  placeholder="Ask about a template or approval"
                   rows={2}
                   disabled={loading}
                   aria-label="Message AI Copilot"
                   className="workspace-input resize-none font-sans"
                 />
-                <span className="absolute bottom-1.5 right-2 text-[10px] text-gray-400 select-none">
+                <span className="absolute bottom-1 right-2 text-xs text-gray-500 select-none">
                   ↵ Send
                 </span>
               </div>
@@ -476,7 +475,7 @@ export default function ChatWidget() {
                 type="submit"
                 aria-label="Send message"
                 disabled={!input.trim() || loading}
-                className="h-10 px-3.5 bg-gray-900 hover:bg-black disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-lg text-xs font-semibold flex items-center justify-center transition shadow-sm"
+                className="h-10 px-3.5 bg-gray-900 hover:bg-black disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-lg text-xs font-medium flex items-center justify-center transition shadow-sm"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M5 12h14M12 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />

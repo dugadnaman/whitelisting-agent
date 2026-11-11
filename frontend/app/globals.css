@@ -5,8 +5,8 @@
 @layer base {
   :root {
     color-scheme: light;
-    --workspace-accent: #5948b2;
-    --workspace-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --workspace-accent: #8e3d20;
+    --workspace-ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
   html {
     scroll-padding-top: 7rem;
@@ -17,14 +17,14 @@
     font-size: 0.875rem;
     line-height: 1.6;
     font-optical-sizing: auto;
+    font-variant-numeric: tabular-nums;
   }
   h1, h2, h3 {
     text-wrap: balance;
-    letter-spacing: -0.025em;
+    letter-spacing: 0;
     line-height: 1.25;
   }
-  h1 { font-weight: 650; }
-  h2, h3 { font-weight: 600; }
+  h1, h2, h3 { font-weight: 500; }
   button, input, select, textarea { font: inherit; }
   button, a, summary {
     -webkit-tap-highlight-color: transparent;
@@ -55,17 +55,14 @@
 
 @layer components {
   .workspace-shell { min-height: 100dvh; }
-  .workspace-chrome {
-    background: rgb(255 255 255 / 94%);
-    backdrop-filter: blur(14px);
-  }
+  .workspace-chrome { @apply bg-white; }
   .workspace-content {
     @apply mx-auto w-full;
     max-width: 100rem;
   }
   .workspace-page { animation: workspace-fade 220ms var(--workspace-ease); }
   .workspace-panel { @apply rounded-xl border border-gray-200 bg-white; }
-  .workspace-heading { @apply text-2xl font-semibold tracking-tight text-gray-900 sm:text-3xl; }
+  .workspace-heading { @apply text-[28px] font-medium text-gray-900 sm:text-[32px]; }
   .workspace-description { @apply mt-2 max-w-3xl text-sm leading-relaxed text-gray-600; }
   .workspace-input, .workspace-select {
     @apply w-full min-w-0 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500;
@@ -75,30 +72,31 @@
     @apply inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .workspace-button-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-transparent bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-transparent bg-blue-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .workspace-toolbar { @apply flex flex-wrap items-center gap-3; }
   .workspace-empty { @apply rounded-xl border border-dashed border-gray-300 bg-white px-5 py-10 text-center text-sm leading-relaxed text-gray-600; }
   .workspace-guide { @apply rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-600; }
   .workspace-eyebrow {
-    @apply text-xs font-semibold uppercase text-gray-500;
-    letter-spacing: 0.08em;
+    @apply text-xs font-medium text-gray-500;
+    letter-spacing: 0;
   }
   .workspace-number {
     font-variant-numeric: tabular-nums;
-    letter-spacing: -0.035em;
+    letter-spacing: 0;
   }
   .workspace-search {
     @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900;
   }
   .workspace-search:focus { @apply border-blue-500 ring-2 ring-blue-100; }
   .workspace-filter-chip {
-    @apply inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800;
+    @apply inline-flex items-center gap-2 rounded border border-gray-200 bg-gray-100 px-2 py-1 text-xs text-gray-700;
   }
   button.workspace-filter-chip:hover { @apply border-blue-300 bg-blue-100; }
   .workspace-nav-link {
     position: relative;
     min-height: 2.75rem;
+    @screen md { min-height: 2.25rem; }
   }
   .workspace-nav-link[aria-current='page']::before {
     position: absolute;

@@ -83,24 +83,16 @@ function RowCard({
     <article className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
       <div className="flex flex-wrap justify-between items-start gap-3">
         <div className="min-w-0">
-          <h3 className="break-words font-semibold text-gray-900 text-base mt-0.5 [overflow-wrap:anywhere]">
+          <h3 className="break-words text-base font-medium text-gray-900 [overflow-wrap:anywhere]">
             {campaignRowName(row) || 'Campaign name missing'}
           </h3>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-          <span
-            className={`rounded-full px-2.5 py-1 ${
-              isWhatsApp
-                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                : isEmail
-                ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                : 'bg-purple-50 text-purple-800 border border-purple-200'
-            }`}
-          >
+        <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
+          <span className="font-mono text-xs font-normal text-gray-600">
             {row.channel || 'UNKNOWN'}
           </span>
           <span
-            className={`rounded-full px-2.5 py-1 ${
+            className={`rounded-md px-2.5 py-1 ${
               verified
                 ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                 : ready
@@ -123,8 +115,8 @@ function RowCard({
       </div>
       {verified && <p className="text-sm font-medium text-emerald-800">Draft saved and verified. Not published or sent.</p>}
       <details className="text-sm">
-        <summary className="cursor-pointer font-semibold text-gray-600">Details — source, IDs and configuration</summary>
-        <p className="mt-3 break-words text-sm text-gray-600">{row.source_ref} · Row {row.row_id} · Workspace {row.workspace_id}</p>
+        <summary className="cursor-pointer font-medium text-gray-600">Details — source, IDs and configuration</summary>
+        <p className="mt-3 break-all font-mono text-xs leading-relaxed text-gray-600">{row.source_ref} · Row {row.row_id} · Workspace {row.workspace_id}</p>
 
       {batch && row.updated_at && (
         <p className="mt-2 text-sm text-gray-600">
@@ -132,13 +124,13 @@ function RowCard({
         </p>
       )}
 
-      <dl className="grid gap-3 text-sm sm:grid-cols-2">
+      <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
         <div>
-          <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Target Audience</dt>
+          <dt className="text-xs font-medium text-gray-500">Target audience</dt>
           <dd className="text-gray-900 mt-0.5 break-all">
             {segment ? (
               <span className="inline-flex items-center gap-1 font-medium">
-                🎯 {segment.name || 'Custom segment'}
+                {segment.name || 'Custom segment'}
                 <span className="text-xs text-gray-500 font-mono">({segment.id})</span>
               </span>
             ) : (
@@ -148,9 +140,9 @@ function RowCard({
         </div>
 
         <div>
-          <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">{isWhatsApp ? 'Planning Time & Timezone — Confirm in MoEngage' : 'Schedule & Timezone'}</dt>
+          <dt className="text-xs font-medium text-gray-500">{isWhatsApp ? 'Planned time and timezone — confirm in MoEngage' : 'Schedule and timezone'}</dt>
           <dd className="text-gray-900 mt-0.5">
-            📅 {schedule?.start_time || [source.scheduled_at, source.timezone].filter(Boolean).join(' · ') || 'Not supplied'}
+            {schedule?.start_time || [source.scheduled_at, source.timezone].filter(Boolean).join(' · ') || 'Not supplied'}
             {schedule?.timezone ? ` (${schedule.timezone})` : ''}
           </dd>
         </div>
@@ -158,15 +150,15 @@ function RowCard({
         {isEmail && (
           <>
             <div>
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Email Sender & Subject</dt>
+              <dt className="text-xs font-medium text-gray-500">Email sender and subject</dt>
               <dd className="text-gray-900 mt-0.5 break-words">
-                ✉️ {source.from_address || email?.from_address || 'Not set'}
+                {source.from_address || email?.from_address || 'Not set'}
                 <span className="text-gray-500"> · </span>
                 <span className="font-medium">{source.subject || email?.subject || 'No subject'}</span>
               </dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Content Type & Connector</dt>
+              <dt className="text-xs font-medium text-gray-500">Content type and connector</dt>
               <dd className="text-gray-900 mt-0.5">
                 {source.content_type || candidate?.basic_details?.content_type || 'PROMOTIONAL'}
                 {candidate?.connector?.connector_type ? ` · ${candidate.connector.connector_type} (${candidate.connector.connector_name || 'default'})` : ''}
@@ -174,7 +166,7 @@ function RowCard({
             </div>
             {(source.html_content || email?.html_content) && (
               <div className="sm:col-span-2">
-                <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Email HTML Content</dt>
+                <dt className="text-xs font-medium text-gray-500 mb-1">Email HTML content</dt>
                 <dd className="rounded-lg bg-gray-50 border border-gray-200 p-3 font-mono text-xs max-h-36 overflow-auto text-gray-800 whitespace-pre-wrap">
                   {source.html_content || email?.html_content}
                 </dd>
@@ -186,22 +178,22 @@ function RowCard({
         {isPush && (
           <>
             <div>
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Push Title & Platform</dt>
+              <dt className="text-xs font-medium text-gray-500">Push title and platform</dt>
               <dd className="text-gray-900 mt-0.5 font-medium">
-                🔔 {source.push_title || push?.title || 'Not set'}
+                {source.push_title || push?.title || 'Not set'}
                 <span className="text-xs font-normal text-gray-500 ml-1">
                   ({source.push_platform || candidate?.basic_details?.platforms?.join(', ') || 'ANDROID'})
                 </span>
               </dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Click URL / Deeplink</dt>
-              <dd className="text-gray-900 mt-0.5 break-all text-xs font-mono text-blue-700">
-                🔗 {push?.default_click_action_value || source.click_url || 'Not set'}
+              <dt className="text-xs font-medium text-gray-500">Click URL / deeplink</dt>
+              <dd className="text-gray-900 mt-0.5 break-all text-xs font-mono text-gray-700">
+                {push?.default_click_action_value || source.click_url || 'Not set'}
               </dd>
             </div>
             <div className="sm:col-span-2">
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Push Notification Body</dt>
+              <dt className="text-xs font-medium text-gray-500">Push notification body</dt>
               <dd className="mt-1 whitespace-pre-wrap rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-900 [overflow-wrap:anywhere]">
                 {source.push_message || push?.message || 'Not set'}
               </dd>
@@ -212,33 +204,33 @@ function RowCard({
         {isWhatsApp && (
           <>
             <div>
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Sender</dt>
+              <dt className="text-xs font-medium text-gray-500">WhatsApp sender</dt>
               <dd className="text-gray-900 mt-0.5 font-medium">
-                💬 {whatsapp?.sender_name || source.whatsapp_sender || source.whatsapp_sender_id || 'Not supplied'}
+                {whatsapp?.sender_name || source.whatsapp_sender || source.whatsapp_sender_id || 'Not supplied'}
                 {whatsapp?.sender_id && <span className="block text-xs font-mono font-normal">{whatsapp.sender_id}{whatsapp.provider ? ` · ${whatsapp.provider}` : ''}</span>}
               </dd>
             </div>
             <div>
-              <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">WhatsApp Template</dt>
+              <dt className="text-xs font-medium text-gray-500">WhatsApp template</dt>
               <dd className="text-gray-900 mt-0.5 font-medium flex flex-wrap items-center gap-1.5">
-                <span>📋 {whatsapp?.template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'Not supplied'}</span>
+                <span>{whatsapp?.template_name || source.whatsapp_template_name || source.whatsapp_template_id || 'Not supplied'}</span>
                 {(whatsapp?.template_id || source.matched_template_id) && (
                   <span className="text-xs font-mono text-gray-500">({whatsapp?.template_id || source.matched_template_id})</span>
                 )}
                 {source.matched_template_confidence && (
-                  <span className="text-xs font-medium bg-emerald-50 text-emerald-800 px-2 py-1 rounded">
-                    🎯 {source.matched_template_confidence} Match
+                  <span className="text-xs font-medium font-mono text-gray-600">
+                    {source.matched_template_confidence} Match
                   </span>
                 )}
               </dd>
             </div>
             {whatsapp?.body_placeholders && Object.keys(whatsapp.body_placeholders).length > 0 && (
               <div className="sm:col-span-2">
-                <dt className="text-xs font-medium text-gray-500 uppercase tracking-wider">Template Variables</dt>
+                <dt className="text-xs font-medium text-gray-500">Template variables</dt>
                 <dd className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm space-y-2">
                   {Object.entries(whatsapp.body_placeholders).map(([slot, value]) => (
                     <div key={slot} className="whitespace-pre-wrap break-words">
-                      <code className="text-xs font-bold">{slot}</code>: {value}
+                      <code className="text-xs font-medium">{slot}</code>: {value}
                     </div>
                   ))}
                 </dd>
@@ -249,22 +241,18 @@ function RowCard({
       </dl>
       {row.campaign_id && (
         <div
-          className={`rounded-xl border p-4 text-sm flex flex-wrap items-center justify-between gap-3 shadow-xs ${
-            verified
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : 'bg-amber-50 border-amber-200 text-amber-900'
-          }`}
+          className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 pt-4 text-sm"
         >
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-bold">
-                Reported MoEngage Campaign ID:
+              <span className="font-medium">
+                Reported MoEngage campaign ID
               </span>
-              <code className="bg-emerald-100 text-emerald-950 px-2 py-0.5 rounded font-mono font-bold text-xs">
+              <code className="break-all font-mono text-xs font-normal text-gray-900">
                 {row.campaign_id}
               </code>
             </div>
-            <p className="text-xs text-emerald-800 mt-1 max-w-xl">
+            <p className="mt-2 max-w-xl text-sm leading-relaxed text-gray-600">
               {verified
                 ? 'Draft read-back completed. Review in MoEngage before any human publish action.'
                 : `State: ${status}. This ID alone does not confirm a verified draft. Review the issues and reconcile in MoEngage before taking further action.`}
@@ -276,7 +264,7 @@ function RowCard({
 
       {issues.length > 0 && (
         <div className="rounded-lg bg-rose-50 border border-rose-200 p-3 text-sm text-rose-900">
-          <strong className="block font-semibold">Validation Issues:</strong>
+          <strong className="block font-medium">Validation issues</strong>
           <ul className="list-disc pl-5 mt-2 space-y-1 text-sm">
             {issues.map((issue, index) => (
               <li key={`${index}-${issue}`}>{issue}</li>
@@ -287,9 +275,9 @@ function RowCard({
 
 
       {(uncertain || status === 'UNCERTAIN' || status === 'UNKNOWN') && (
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-semibold text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm font-medium text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-200">
           <div>
-            <span>⚠️ Previous attempt was unconfirmed.</span>
+            <span>Previous attempt was unconfirmed</span>
             <p className="text-sm text-amber-800 font-normal mt-1">
               Refresh stored state and manually reconcile the campaign in MoEngage with an operator. Do not create it again: the previous request may already have saved a draft.
             </p>
@@ -959,8 +947,8 @@ function GeneralCampaignsPage() {
   if (authLoading) return <p role="status" className="workspace-page p-6 text-sm text-gray-600">Checking credentials…</p>;
   if (!allowed) {
     return (
-      <div className="max-w-3xl mx-auto rounded-xl bg-rose-50 border border-rose-200 p-8 text-rose-900 shadow-sm mt-8 text-center">
-        <h2 className="text-xl font-bold mb-2">Access Denied</h2>
+      <div className="max-w-3xl mx-auto rounded-xl bg-rose-50 border border-rose-200 p-8 text-rose-900 mt-8 text-center">
+        <h2 className="text-xl font-medium mb-2">Access denied</h2>
         <p className="text-sm">MoEngage campaign authoring requires a signed-in operator for {account || 'this account'}.</p>
       </div>
     );
@@ -1009,7 +997,7 @@ function GeneralCampaignsPage() {
         {/* Safety Banner */}
         <div className="workspace-guide flex items-start gap-3 text-sm leading-relaxed text-gray-700">
           <div>
-            <strong className="font-semibold text-gray-900">Draft only, never a launch.</strong> Creation requests target
+            <strong className="font-medium text-gray-900">Draft only · No sending</strong> Creation requests target
             <code className="mx-1 rounded border border-gray-200 bg-white px-1.5 py-0.5 font-mono text-xs text-gray-900">DRAFT</code>
             status. The builder never sends messages to customers, never publishes, and never schedules automated sends. Publishing requires manual review and sign-off in the MoEngage dashboard.
           </div>
@@ -1023,12 +1011,12 @@ function GeneralCampaignsPage() {
             aria-pressed={activeTab === 'batch'}
             className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'batch'
-                ? 'border-indigo-600 text-indigo-700'
+                ? 'border-indigo-600 text-gray-700'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
             Bulk upload
-            {batch && <span className="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-blue-100 text-blue-800">{batch.items.length}</span>}
+            {batch && <span className="ml-1 font-mono text-xs text-gray-600">{batch.items.length}</span>}
           </button>
           <button
             type="button"
@@ -1036,7 +1024,7 @@ function GeneralCampaignsPage() {
             aria-pressed={activeTab === 'single'}
             className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'single'
-                ? 'border-indigo-600 text-indigo-700'
+                ? 'border-indigo-600 text-gray-700'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
@@ -1048,7 +1036,7 @@ function GeneralCampaignsPage() {
             aria-pressed={activeTab === 'templates'}
             className={`flex items-center gap-2 border-b-2 pb-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
               activeTab === 'templates'
-                ? 'border-indigo-600 text-indigo-700'
+                ? 'border-indigo-600 text-gray-700'
                 : 'border-transparent text-gray-500 hover:text-gray-900'
             }`}
           >
@@ -1059,15 +1047,13 @@ function GeneralCampaignsPage() {
 
       {/* Global Alerts */}
       {error && (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 flex items-start gap-2.5 shadow-xs">
-          <span>⚠️</span>
+        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 flex items-start gap-3">
           <div className="flex-1">{error}</div>
           <button type="button" aria-label="Dismiss error" onClick={() => setError('')} className="shrink-0 rounded p-1 text-rose-700 hover:bg-rose-100">✕</button>
         </div>
       )}
       {notice && (
-        <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 flex items-start gap-2.5 shadow-xs">
-          <span>✅</span>
+        <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 flex items-start gap-3">
           <div className="flex-1 font-medium">{notice}</div>
           <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')} className="shrink-0 rounded p-1 text-emerald-700 hover:bg-emerald-100">✕</button>
         </div>
@@ -1081,55 +1067,55 @@ function GeneralCampaignsPage() {
           <div className="min-w-0 space-y-6 lg:col-span-7">
             {/* Step 1: Channel selection */}
             <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
-              <h2 className="text-base font-semibold text-gray-900">1. Select a channel</h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <h2 className="text-base font-medium text-gray-900">1. Select a channel</h2>
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => setSingleChannel('WHATSAPP')}
                   aria-pressed={singleChannel === 'WHATSAPP'}
-                  className={`rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                  className={`rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                     singleChannel === 'WHATSAPP'
-                      ? 'border-indigo-300 bg-indigo-50'
+                      ? 'border-gray-200 bg-gray-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   }`}
                 >
-                  <div className="font-bold text-sm text-gray-900">WhatsApp</div>
-                  <div className="mt-1 text-sm text-gray-600">Workspace-approved templates</div>
+                  <div className="font-medium text-sm text-gray-900">WhatsApp</div>
+                  <div className="mt-2 text-xs leading-relaxed text-gray-600">Workspace-approved templates</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSingleChannel('PUSH')}
                   aria-pressed={singleChannel === 'PUSH'}
-                  className={`rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                  className={`rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                     singleChannel === 'PUSH'
-                      ? 'border-indigo-300 bg-indigo-50'
+                      ? 'border-gray-200 bg-gray-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   }`}
                 >
-                  <div className="font-bold text-sm text-gray-900">Push App</div>
-                  <div className="mt-1 text-sm text-gray-600">Android &amp; iOS push</div>
+                  <div className="font-medium text-sm text-gray-900">Push app</div>
+                  <div className="mt-2 text-xs leading-relaxed text-gray-600">Android &amp; iOS push</div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setSingleChannel('EMAIL')}
                   aria-pressed={singleChannel === 'EMAIL'}
-                  className={`rounded-xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                  className={`rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                     singleChannel === 'EMAIL'
-                      ? 'border-indigo-300 bg-indigo-50'
+                      ? 'border-gray-200 bg-gray-50'
                       : 'border-gray-200 hover:border-gray-300 bg-white'
                   }`}
                 >
-                  <div className="font-bold text-sm text-gray-900">Email</div>
-                  <div className="mt-1 text-sm text-gray-600">SendGrid / HTML</div>
+                  <div className="font-medium text-sm text-gray-900">Email</div>
+                  <div className="mt-2 text-xs leading-relaxed text-gray-600">SendGrid / HTML</div>
                 </button>
               </div>
             </section>
 
             {/* Step 2: Campaign basics */}
             <section className="workspace-panel min-w-0 space-y-5 p-5 sm:p-6">
-              <h2 className="text-base font-semibold text-gray-900">2. Campaign details &amp; audience</h2>
+              <h2 className="text-base font-medium text-gray-900">2. Campaign details &amp; audience</h2>
 
               {singleChannel === 'WHATSAPP' && (
                 <div>
@@ -1186,7 +1172,7 @@ function GeneralCampaignsPage() {
 
             {/* Step 3: Channel-specific content */}
             <section className="workspace-panel min-w-0 space-y-5 p-5 sm:p-6">
-              <h2 className="text-base font-semibold text-gray-900">3. {singleChannel} content</h2>
+              <h2 className="text-base font-medium text-gray-900">3. {singleChannel} content</h2>
 
               {singleChannel === 'WHATSAPP' && (
                 <div className="space-y-4">
@@ -1354,13 +1340,13 @@ function GeneralCampaignsPage() {
 
           {/* Right Live Preview: 5 cols */}
           <aside aria-labelledby="message-preview-heading" className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:col-span-5">
-            <h2 id="message-preview-heading" className="text-base font-semibold text-gray-900">Message preview</h2>
+            <h2 id="message-preview-heading" className="text-base font-medium text-gray-900">Message preview</h2>
             <p className="text-sm leading-relaxed text-gray-600">Preview only. Staging saves a review queue in this app; a separate confirmation is required to save a MoEngage draft.</p>
 
             {singleChannel === 'WHATSAPP' && (
               <div className="workspace-panel min-w-0 overflow-hidden p-5">
                 <div className="mb-4 flex items-center gap-3 border-b border-gray-200 pb-4 text-gray-900">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold text-gray-700">WA</div>
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-medium text-gray-700">WA</div>
                   <div className="flex-1 min-w-0">
                     <div className="break-words text-sm font-medium">{selectedWaSender?.name || 'Select a WhatsApp sender'}</div>
                     <div className="text-sm text-gray-600">{selectedWaSender?.provider || 'Workspace-scoped preview'}</div>
@@ -1370,7 +1356,7 @@ function GeneralCampaignsPage() {
                 <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-800 [overflow-wrap:anywhere]">
                   {selectedWaTemplate ? (
                     <>
-                      <div className="font-semibold text-gray-900">{selectedWaTemplate.display_name || selectedWaTemplate.name}</div>
+                      <div className="font-medium text-gray-900">{selectedWaTemplate.display_name || selectedWaTemplate.name}</div>
                       <p className="text-gray-700">Template: <code className="rounded bg-white px-1 py-0.5 font-mono text-xs">{selectedWaTemplate.id}</code></p>
                       <p className="whitespace-pre-wrap text-sm text-gray-800">{selectedWaTemplate.body?.replace(/\{\{\d+\}\}/g, (slot) => singleWaPlaceholders[slot] || slot) || 'The live template has no body text available for preview.'}</p>
                       <p className="text-xs text-gray-600">Live template copy · Preview only, not sent</p>
@@ -1385,8 +1371,8 @@ function GeneralCampaignsPage() {
             {singleChannel === 'PUSH' && (
               <div className="workspace-panel min-w-0 space-y-3 p-5">
                 <div className="text-sm font-medium text-gray-600">Notification preview</div>
-                <div className="bg-white rounded-xl p-3.5 shadow-sm border border-gray-200 flex items-start gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-semibold text-gray-700">
+                <div className="bg-white rounded-xl p-4 border border-gray-200 flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-xs font-medium text-gray-700">
                     {account === 'tata' ? 'TC' : 'BF'}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1394,7 +1380,7 @@ function GeneralCampaignsPage() {
                       <span className="font-medium text-gray-700">{account === 'tata' ? 'Tata Capital' : 'Bajaj Finserv'}</span>
                       <span>now</span>
                     </div>
-                    <div className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold text-gray-900">
+                    <div className="mt-1 whitespace-pre-wrap break-words text-sm font-medium text-gray-900">
                       {singlePushTitle || 'Exclusive Offer Available'}
                     </div>
                     <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-600">
@@ -1414,7 +1400,7 @@ function GeneralCampaignsPage() {
                   </div>
                   <div>
                     <span className="text-gray-500">Subject:</span>{' '}
-                    <span className="font-semibold text-gray-900">{singleSubject || 'No subject entered'}</span>
+                    <span className="font-medium text-gray-900">{singleSubject || 'No subject entered'}</span>
                   </div>
                 </div>
                 <div
@@ -1433,7 +1419,7 @@ function GeneralCampaignsPage() {
           <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-gray-900">1. Upload and preview your brief</h2>
+                <h2 className="text-base font-medium text-gray-900">1. Upload and preview your brief</h2>
                 <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-600">
                   Upload a <code>.csv</code> or <code>.xlsx</code> file. Every WhatsApp row requires its own exact <code>workspace</code> name or portal <code>workspace_id</code>; review each destination before creating.
                 </p>
@@ -1485,7 +1471,7 @@ function GeneralCampaignsPage() {
             <section className="space-y-4">
               <div className="workspace-panel flex min-w-0 flex-wrap items-center justify-between gap-4 p-5">
                 <div>
-                  <h2 className="break-words text-base font-semibold text-gray-900">
+                  <h2 className="break-words text-base font-medium text-gray-900">
                     2. Review spreadsheet · <span className="font-mono text-sm text-gray-600">{file?.name}</span>
                   </h2>
                   <p className="mt-2 text-sm text-gray-600">
@@ -1514,11 +1500,11 @@ function GeneralCampaignsPage() {
                     aria-pressed={filterChannel === ch}
                     className={`workspace-filter-chip ${
                       filterChannel === ch
-                        ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
+                        ? 'border-gray-200 bg-gray-50 text-gray-900'
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    {ch}
+                    {ch === 'ALL' ? 'All' : ch === 'WHATSAPP' ? 'WhatsApp' : ch === 'EMAIL' ? 'Email' : 'Push'}
                   </button>
                 ))}
                 {filterChannel !== 'ALL' && <button type="button" className="workspace-button" onClick={() => setFilterChannel('ALL')}>Reset filter</button>}
@@ -1541,7 +1527,7 @@ function GeneralCampaignsPage() {
             <section className="space-y-4">
               <div className="workspace-panel flex min-w-0 flex-wrap items-center justify-between gap-4 p-5">
                 <div>
-                  <h2 className="text-base font-semibold text-gray-900">
+                  <h2 className="text-base font-medium text-gray-900">
                     3. Save and verify drafts
                   </h2>
                   <p className="mt-2 break-words text-sm text-gray-600">
@@ -1598,11 +1584,11 @@ function GeneralCampaignsPage() {
                     aria-pressed={filterChannel === ch}
                     className={`workspace-filter-chip ${
                       filterChannel === ch
-                        ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
+                        ? 'border-gray-200 bg-gray-50 text-gray-900'
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    {ch}
+                    {ch === 'ALL' ? 'All' : ch === 'WHATSAPP' ? 'WhatsApp' : ch === 'EMAIL' ? 'Email' : 'Push'}
                   </button>
                 ))}
                 {filterChannel !== 'ALL' && <button type="button" className="workspace-button" onClick={() => setFilterChannel('ALL')}>Reset filter</button>}
@@ -1632,7 +1618,7 @@ function GeneralCampaignsPage() {
       {activeTab === 'templates' && (
         <div className="space-y-6">
           <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
-            <h2 className="text-base font-semibold text-gray-900">Sample CSV templates</h2>
+            <h2 className="text-base font-medium text-gray-900">Sample CSV templates</h2>
             <p className="text-sm text-gray-600">
               Replace all sample placeholders before upload. Every WhatsApp row requires an explicit workspace and that workspace&apos;s audience, sender and approved template IDs; there is no default destination.
             </p>
@@ -1643,7 +1629,7 @@ function GeneralCampaignsPage() {
                 onClick={() => downloadSampleCsv('all')}
                 className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-sm font-semibold text-gray-900">Combined 3-channel</div>
+                <div className="text-sm font-medium text-gray-900">Combined 3-channel</div>
                 <div className="mt-2 text-sm font-normal text-gray-600">WhatsApp + Push + Email</div>
               </button>
 
@@ -1652,7 +1638,7 @@ function GeneralCampaignsPage() {
                 onClick={() => downloadSampleCsv('whatsapp')}
                 className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-sm font-semibold text-gray-900">WhatsApp only</div>
+                <div className="text-sm font-medium text-gray-900">WhatsApp only</div>
                 <div className="mt-2 text-sm font-normal text-gray-600">Workspace-approved senders</div>
               </button>
 
@@ -1661,7 +1647,7 @@ function GeneralCampaignsPage() {
                 onClick={() => downloadSampleCsv('push')}
                 className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-sm font-semibold text-gray-900">Push only</div>
+                <div className="text-sm font-medium text-gray-900">Push only</div>
                 <div className="mt-2 text-sm font-normal text-gray-600">Android app push</div>
               </button>
 
@@ -1670,102 +1656,102 @@ function GeneralCampaignsPage() {
                 onClick={() => downloadSampleCsv('email')}
                 className="workspace-button flex-col items-start whitespace-normal p-4 text-left"
               >
-                <div className="text-sm font-semibold text-gray-900">Email only</div>
+                <div className="text-sm font-medium text-gray-900">Email only</div>
                 <div className="mt-2 text-sm font-normal text-gray-600">SendGrid HTML</div>
               </button>
             </div>
           </section>
 
           <section className="workspace-panel min-w-0 space-y-4 p-5 sm:p-6">
-            <h2 className="text-base font-semibold text-gray-900">Spreadsheet column specifications</h2>
+            <h2 className="text-base font-medium text-gray-900">Spreadsheet column specifications</h2>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] border-collapse text-left text-sm">
                 <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50 font-bold text-gray-700">
-                    <th className="p-2.5">Column Header</th>
-                    <th className="p-2.5">Channel</th>
-                    <th className="p-2.5">Required?</th>
-                    <th className="p-2.5">Description / Example</th>
+                  <tr className="border-b border-gray-200 bg-gray-50 font-medium text-gray-700">
+                    <th className="font-medium p-3">Column header</th>
+                    <th className="font-medium p-3">Channel</th>
+                    <th className="font-medium p-3">Required?</th>
+                    <th className="font-medium p-3">Description / example</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-gray-800">
                   <tr>
-                    <td className="p-2.5 font-mono font-bold text-blue-700">channel</td>
-                    <td className="p-2.5">All</td>
-                    <td className="p-2.5 font-bold text-rose-700">Yes</td>
-                    <td className="p-2.5"><code>WHATSAPP</code>, <code>PUSH</code>, or <code>EMAIL</code></td>
+                    <td className="p-3 font-mono font-medium text-gray-700">channel</td>
+                    <td className="p-3">All</td>
+                    <td className="p-3 font-medium text-rose-700">Yes</td>
+                    <td className="p-3"><code>WHATSAPP</code>, <code>PUSH</code>, or <code>EMAIL</code></td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono font-bold text-blue-700">campaign_name</td>
-                    <td className="p-2.5">All</td>
-                    <td className="p-2.5 font-bold text-rose-700">Yes</td>
-                    <td className="p-2.5">Unique campaign name starting with lowercase <code>att_</code> and a nonempty suffix. Preview adds the prefix automatically; template names and IDs are unchanged.</td>
+                    <td className="p-3 font-mono font-medium text-gray-700">campaign_name</td>
+                    <td className="p-3">All</td>
+                    <td className="p-3 font-medium text-rose-700">Yes</td>
+                    <td className="p-3">Unique campaign name starting with lowercase <code>att_</code> and a nonempty suffix. Preview adds the prefix automatically; template names and IDs are unchanged.</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono font-bold text-blue-700">segment_id</td>
-                    <td className="p-2.5">All</td>
-                    <td className="p-2.5 font-bold text-rose-700">Yes</td>
-                    <td className="p-2.5">Saved audience ID (e.g. <code>65cf4af4d4c88174e5ad186e</code>)</td>
+                    <td className="p-3 font-mono font-medium text-gray-700">segment_id</td>
+                    <td className="p-3">All</td>
+                    <td className="p-3 font-medium text-rose-700">Yes</td>
+                    <td className="p-3">Saved audience ID (e.g. <code>65cf4af4d4c88174e5ad186e</code>)</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono font-bold text-blue-700">scheduled_at</td>
-                    <td className="p-2.5">All</td>
-                    <td className="p-2.5 font-bold text-rose-700">Yes</td>
-                    <td className="p-2.5">ISO datetime (e.g. <code>2026-10-15T10:30:00+05:30</code>)</td>
+                    <td className="p-3 font-mono font-medium text-gray-700">scheduled_at</td>
+                    <td className="p-3">All</td>
+                    <td className="p-3 font-medium text-rose-700">Yes</td>
+                    <td className="p-3">ISO datetime (e.g. <code>2026-10-15T10:30:00+05:30</code>)</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono font-bold text-blue-700">timezone</td>
-                    <td className="p-2.5">All</td>
-                    <td className="p-2.5 font-bold text-rose-700">Yes</td>
-                    <td className="p-2.5">IANA timezone (e.g. <code>Asia/Kolkata</code>)</td>
+                    <td className="p-3 font-mono font-medium text-gray-700">timezone</td>
+                    <td className="p-3">All</td>
+                    <td className="p-3 font-medium text-rose-700">Yes</td>
+                    <td className="p-3">IANA timezone (e.g. <code>Asia/Kolkata</code>)</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">whatsapp_sender</td>
-                    <td className="p-2.5">WhatsApp</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">e.g. <code>Tata Capital Financial Services Limited</code></td>
+                    <td className="p-3 font-mono">whatsapp_sender</td>
+                    <td className="p-3">WhatsApp</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">e.g. <code>Tata Capital Financial Services Limited</code></td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">whatsapp_template_id</td>
-                    <td className="p-2.5">WhatsApp</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">Exact approved template ID from the selected workspace</td>
+                    <td className="p-3 font-mono">whatsapp_template_id</td>
+                    <td className="p-3">WhatsApp</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">Exact approved template ID from the selected workspace</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">from_address</td>
-                    <td className="p-2.5">Email</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">e.g. <code>hello@info.tatacapital.co.in</code></td>
+                    <td className="p-3 font-mono">from_address</td>
+                    <td className="p-3">Email</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">e.g. <code>hello@info.tatacapital.co.in</code></td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">subject</td>
-                    <td className="p-2.5">Email</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">Subject line for HTML emails</td>
+                    <td className="p-3 font-mono">subject</td>
+                    <td className="p-3">Email</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">Subject line for HTML emails</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">html_content</td>
-                    <td className="p-2.5">Email</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">Raw HTML message body</td>
+                    <td className="p-3 font-mono">html_content</td>
+                    <td className="p-3">Email</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">Raw HTML message body</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">push_title</td>
-                    <td className="p-2.5">Push</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">Push notification title text</td>
+                    <td className="p-3 font-mono">push_title</td>
+                    <td className="p-3">Push</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">Push notification title text</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">push_message</td>
-                    <td className="p-2.5">Push</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">Notification body text</td>
+                    <td className="p-3 font-mono">push_message</td>
+                    <td className="p-3">Push</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">Notification body text</td>
                   </tr>
                   <tr>
-                    <td className="p-2.5 font-mono">click_url</td>
-                    <td className="p-2.5">Push</td>
-                    <td className="p-2.5">Yes</td>
-                    <td className="p-2.5">Target HTTPS click URL or deeplink</td>
+                    <td className="p-3 font-mono">click_url</td>
+                    <td className="p-3">Push</td>
+                    <td className="p-3">Yes</td>
+                    <td className="p-3">Target HTTPS click URL or deeplink</td>
                   </tr>
                 </tbody>
               </table>

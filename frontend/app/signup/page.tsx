@@ -81,8 +81,8 @@ export default function SignupPage() {
     }
   }
 
-  const inputClass = 'w-full border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100';
-  const labelClass = 'block text-sm font-semibold text-gray-700  mb-1.5';
+  const inputClass = 'w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none disabled:bg-gray-100';
+  const labelClass = 'block text-sm font-medium text-gray-700  mb-2';
   const errorDescription = error ? 'signup-error' : undefined;
 
   if (authLoading || (currentUser && !isPendingUser(currentUser))) {
@@ -105,12 +105,12 @@ export default function SignupPage() {
         </div>
 
         {error && <div id="signup-error" role="alert" className="p-3 rounded-xl border border-red-200 bg-red-50 text-sm text-red-700">{error}</div>}
-        {status && <p role="status" className="text-sm text-blue-700">{status}</p>}
+        {status && <p role="status" className="text-sm text-gray-700">{status}</p>}
 
         {currentUser?.requested_tenant_id ? (
           <div className="workspace-guide space-y-2" role="status">
-            <h2 className="text-sm font-semibold text-blue-900">Access request pending</h2>
-            <p className="text-sm text-blue-800">You requested access to <strong>{getAccountLabel(currentUser.requested_tenant_id)}</strong>. Its administrator must approve your account before you can open the workspace.</p>
+            <h2 className="text-sm font-medium text-gray-900">Access request pending</h2>
+            <p className="text-sm text-gray-800">You requested access to <strong className="font-medium">{getAccountLabel(currentUser.requested_tenant_id)}</strong>. Its administrator must approve your account before you can open the workspace.</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4" aria-busy={Boolean(loading)}>
@@ -133,7 +133,7 @@ export default function SignupPage() {
                   <label htmlFor="signup-confirmation" className={labelClass}>Confirm password</label>
                   <input id="signup-confirmation" type={showPassword ? 'text' : 'password'} autoComplete="new-password" required disabled={Boolean(loading)} value={confirmation} onChange={(e) => setConfirmation(e.target.value)} aria-describedby={errorDescription} className={inputClass} />
                 </div>
-                <button type="button" onClick={() => setShowPassword(!showPassword)} disabled={Boolean(loading)} aria-pressed={showPassword} className="text-sm font-semibold text-indigo-600 hover:underline">{showPassword ? 'Hide passwords' : 'Show passwords'}</button>
+                <button type="button" onClick={() => setShowPassword(!showPassword)} disabled={Boolean(loading)} aria-pressed={showPassword} className="text-sm font-medium text-indigo-600 hover:underline">{showPassword ? 'Hide passwords' : 'Show passwords'}</button>
               </>
             )}
             {currentUser && <p className="text-sm text-gray-600">Your account has no organization access yet. Choose your company to send an approval request.</p>}
@@ -146,7 +146,7 @@ export default function SignupPage() {
                 <option value="apparel">Apparel</option>
               </select>
             </div>
-            <button type="submit" disabled={Boolean(loading)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-semibold">
+            <button type="submit" disabled={Boolean(loading)} className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-medium">
               {loading === 'signup' ? 'Creating account...' : loading === 'request' ? 'Sending request...' : currentUser ? 'Request company access' : 'Create account and request access'}
             </button>
           </form>
@@ -154,11 +154,11 @@ export default function SignupPage() {
 
         {currentUser ? (
           <div className="flex flex-wrap gap-3 border-t border-gray-100 pt-4">
-            <button type="button" onClick={handleRefresh} disabled={Boolean(loading)} className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 px-4 py-2.5 text-sm font-semibold text-white">{loading === 'refresh' ? 'Checking approval...' : 'Refresh approval status'}</button>
-            <button type="button" onClick={logout} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50">Sign out</button>
+            <button type="button" onClick={handleRefresh} disabled={Boolean(loading)} className="flex-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 px-4 py-2.5 text-sm font-medium text-white">{loading === 'refresh' ? 'Checking approval...' : 'Refresh approval status'}</button>
+            <button type="button" onClick={logout} className="rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">Sign out</button>
           </div>
         ) : (
-          <p className="border-t border-gray-100 pt-4 text-center text-sm text-gray-500">Already have an account? <Link href="/login" className="font-semibold text-indigo-600 hover:underline">Sign in</Link></p>
+          <p className="border-t border-gray-100 pt-4 text-center text-sm text-gray-500">Already have an account? <Link href="/login" className="font-medium text-indigo-600 hover:underline">Sign in</Link></p>
         )}
       </main>
     </div>

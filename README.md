@@ -16,8 +16,9 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 - The overview groups real template health, inventory and team activity. Missing
   or unavailable counts are not presented as successful zeroes.
 - Restrained transitions respect reduced motion; navigation supports keyboard
-  focus, a mobile drawer and a skip-to-content link. Typography, warm-neutral
-  surfaces and a single indigo action accent are shared across the workspace.
+  focus, a mobile drawer and a skip-to-content link. Typography, graphite-neutral
+  surfaces and a restrained ember accent from the Attributics mark are shared
+  across the workspace. Desktop navigation uses 36px rows; touch rows remain 44px.
 - The same layout and control system covers sign-in/access requests, Settings,
   uploads, campaign builders, activity/work management, MoEngage operations,
   attribution/click reporting and gateway pairing—not only Jira and the overview.
@@ -26,6 +27,17 @@ Before enterprise messages can be sent via WhatsApp, RCS, or SMS, templates must
 - Upload dropzones support keyboard activation. Catalog and SMS source filters
   expose reset actions without clearing source selections; the copilot uses a
   quiet launcher rather than an animated, implied-live status indicator.
+
+The whole-site refinement follows [Unslop](https://github.com/heydamir/unslop)
+by **Damir Sokolovsky ([@heydamir](https://x.com/heydamir))**, licensed
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+The direction is an approval desk: precise, composed and accountable. Source IDs
+and explicit destinations provide the signature; actual message previews,
+creatives and approval data carry the visual interest. The passes standardize
+spacing and color, remove decorative icons and shouty copy, simplify typography,
+retain workflow order, quiet badges and borders, prioritize real content, and
+limit motion to feedback. Imported copy, user-generated emoji, provider statuses
+and identifiers remain unchanged. No generated artwork or story video is used.
 
 ## Tata Capital SMS DLT — VILPOWER portal
 

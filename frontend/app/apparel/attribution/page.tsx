@@ -18,7 +18,7 @@ import type {
 } from '@/lib/apparel-attribution';
 
 const panel = 'workspace-panel min-w-0 p-5 sm:p-6';
-const input = 'workspace-input w-full disabled:bg-gray-50 disabled:text-gray-500';
+const input = 'workspace-input w-full tabular-nums disabled:bg-gray-50 disabled:text-gray-500';
 const button = 'workspace-button';
 const primary = 'workspace-button-primary';
 type Resource = 'health' | 'google' | 'session' | 'jobs' | 'setup';
@@ -26,7 +26,7 @@ type Resource = 'health' | 'google' | 'session' | 'jobs' | 'setup';
 function StatusBadge({ value }: { value: string }) {
   const good = ['ok', 'connected', 'completed', 'success', 'configured'].includes(value);
   const bad = ['failed', 'disconnected', 'not_configured', 'unavailable'].includes(value);
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${good ? 'bg-emerald-50 text-emerald-700' : bad ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'}`}>{value.replaceAll('_', ' ')}</span>;
+  return <span className={`inline-flex rounded-md px-2 py-1 text-sm font-normal ${good ? 'bg-emerald-50 text-emerald-700' : bad ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-800'}`}>{value.replaceAll('_', ' ')}</span>;
 }
 
 export default function ApparelAttributionPage() {
@@ -36,9 +36,9 @@ export default function ApparelAttributionPage() {
     return (
       <div className="mx-auto max-w-3xl p-8">
         <div className={`${panel} border-red-200`}>
-          <h1 className="text-xl font-bold text-gray-900">Apparel Attribution access denied</h1>
+          <h1 className="text-xl font-medium text-gray-900">Apparel Attribution access denied</h1>
           <p className="mt-2 text-sm text-gray-600">This workspace is restricted to authorised Apparel operators and admins. A platform superadmin must select Apparel in the account selector before opening it.</p>
-          <Link href="/" className="mt-4 inline-block text-sm font-semibold text-blue-600">Return to your dashboard</Link>
+          <Link href="/" className="mt-4 inline-block text-sm font-medium text-blue-600">Return to your dashboard</Link>
         </div>
       </div>
     );
@@ -394,33 +394,33 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
           <h1 className="workspace-heading mt-1">Campaign attribution</h1>
           <p className="workspace-description mt-2 max-w-3xl">Read real MoEngage reports and update the approved Google sheet. Attribution channels are independent of the template channel in the sidebar.</p>
         </div>
-        <button className={button} disabled={Boolean(pending)} onClick={() => void perform('refresh', async () => { await refreshDashboard(); }, false)}>{pending === 'refresh' ? 'Refreshing…' : 'Refresh status & history'}</button>
+        <button className={button} disabled={Boolean(pending)} onClick={() => void perform('refresh', async () => { await refreshDashboard(); }, false)}>{pending === 'refresh' ? 'Refreshing…' : 'Refresh status and history'}</button>
       </header>
       <aside className="workspace-guide" aria-label="Attribution workflow">
-        <h2 className="text-sm font-semibold text-gray-900">Connect, preview, then run</h2>
+        <h2 className="text-sm font-medium text-gray-900">Connect, preview, then run</h2>
         <p className="mt-1 text-sm leading-6 text-gray-600">Confirm the Apparel Google sheet and MoEngage session separately below. Choose your source campaigns and review a fresh preview before running. Completed sheet rows are preserved unless you explicitly enable overwrite.</p>
       </aside>
 
       {loading && <p role="status" className="text-sm text-gray-500">Checking the attribution worker, sheet configuration and MoEngage session…</p>}
-      {Object.entries(resourceErrors).map(([resource, message]) => <div key={resource} role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong>{resource === 'health' ? 'Attribution worker' : resource === 'google' ? 'Google configuration' : resource === 'session' ? 'MoEngage session' : resource === 'jobs' ? 'Job history' : 'Admin setup'}:</strong> {message}</div>)}
+      {Object.entries(resourceErrors).map(([resource, message]) => <div key={resource} role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"><strong className="font-medium">{resource === 'health' ? 'Attribution worker' : resource === 'google' ? 'Google configuration' : resource === 'session' ? 'MoEngage session' : resource === 'jobs' ? 'Job history' : 'Admin setup'}:</strong> {message}</div>)}
       {actionError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{actionError}</div>}
       {notice && <div role="status" className="workspace-guide text-sm text-gray-700">{notice}</div>}
       {requiresRefresh && <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Actions are paused until a successful status refresh confirms the worker state. Do not repeat an unconfirmed write.</div>}
 
       <section aria-label="Integration status" className="grid gap-4 md:grid-cols-3">
         <div className={panel}>
-          <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-semibold text-gray-900">Attribution worker</h2><StatusBadge value={health ? health.worker_configured === false ? 'not_configured' : health.status : resourceErrors.health ? 'unavailable' : 'checking'} /></div>
-          {health ? <><p className="text-sm text-gray-600">Report mode: <strong>Direct MoEngage HTTP</strong></p><p className="mt-1 text-xs text-gray-500">Configured brands: {supportedBrands.length ? supportedBrands.join(', ') : 'None'}</p>{!supportedBrands.length && <p className="mt-2 text-sm text-amber-800">Ask an Apparel admin to configure the workspace mappings.</p>}</> : <p className="text-sm text-gray-500">{resourceErrors.health ? 'Attribution is unavailable in the main application. Refresh status or contact an administrator.' : 'Waiting for a live response.'}</p>}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="font-medium text-gray-900">Attribution worker</h2><StatusBadge value={health ? health.worker_configured === false ? 'not_configured' : health.status : resourceErrors.health ? 'unavailable' : 'checking'} /></div>
+          {health ? <><p className="text-sm text-gray-600">Report mode: <strong className="font-medium">Direct MoEngage HTTP</strong></p><p className="mt-1 text-sm text-gray-500">Configured brands: {supportedBrands.length ? supportedBrands.join(', ') : 'None'}</p>{!supportedBrands.length && <p className="mt-2 text-sm text-amber-800">Ask an Apparel admin to configure the workspace mappings.</p>}</> : <p className="text-sm text-gray-500">{resourceErrors.health ? 'Attribution is unavailable in the main application. Refresh status or contact an administrator.' : 'Waiting for a live response.'}</p>}
         </div>
         <div className={panel}>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="font-semibold text-gray-900">Google Sheet</h2>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-medium text-gray-900">Google sheet</h2>
             <StatusBadge value={connection ? 'connected' : resourceErrors.google ? 'unavailable' : loading ? 'checking' : google?.configured ? 'not_connected' : 'not_configured'} />
           </div>
           {connection ? (
             <>
-              <p className="break-words text-sm font-semibold text-gray-900">{connection.spreadsheet_title}</p>
-              <p className="mt-1 text-sm text-gray-600">Tab: <strong>{connection.worksheet_title}</strong> · {connection.row_count.toLocaleString()} campaigns loaded</p>
+              <p className="break-words text-sm font-medium text-gray-900">{connection.spreadsheet_title}</p>
+              <p className="mt-1 text-sm text-gray-600">Tab: <strong className="font-medium">{connection.worksheet_title}</strong> · {connection.row_count.toLocaleString()} campaigns loaded</p>
               <p className="mt-2 text-sm text-gray-500">Setup is saved server-side. Reconnect after an application restart.</p>
             </>
           ) : (
@@ -428,18 +428,18 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
               <p className="text-sm text-gray-600">{loading ? 'Checking the approved sheet connection…' : google?.configured ? 'Google credentials are configured. The approved sheet connection is not confirmed.' : 'Google credentials and an approved sheet must be configured by an Apparel admin.'}</p>
               {google?.worksheet_name && <p className="mt-1 break-words text-sm text-gray-500">Worksheet: {google.worksheet_name}</p>}
               <button className={`${button} mt-3`} disabled={locked || !google?.configured || !approvedUrl || !google.worksheet_name} onClick={() => void connectSheet()}>
-                {pending === 'connect' ? 'Connecting…' : 'Reconnect Sheet'}
+                {pending === 'connect' ? 'Connecting…' : 'Reconnect sheet'}
               </button>
             </>
           )}
           {approvedUrl && (
             <a href={approvedUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block break-all text-sm font-medium text-indigo-700 underline">
-              Open approved sheet ↗
+              Open approved sheet
             </a>
           )}
         </div>
         <div className={panel}>
-          <div className="mb-3 flex items-center justify-between gap-2"><h2 className="font-semibold text-gray-900">MoEngage</h2><StatusBadge value={session?.status || (resourceErrors.session ? 'unavailable' : 'checking')} /></div>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2"><h2 className="font-medium text-gray-900">MoEngage</h2><StatusBadge value={session?.status || (resourceErrors.session ? 'unavailable' : 'checking')} /></div>
           <p className="text-sm text-gray-600">{session?.message || 'Checking the Apparel MoEngage HTTP session.'}</p>
           {session && session.status !== 'connected' && <p className="mt-2 text-sm text-amber-800">{isAdmin ? 'Connect Apparel Auth Sync or refresh the Apparel session in Settings → MoEngage, then refresh status.' : 'Ask an Apparel admin to reconnect Apparel Auth Sync, then refresh status.'}</p>}
         </div>
@@ -449,7 +449,7 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="workspace-eyebrow">Campaign selection</p>
-            <h2 id="selection-heading" className="mt-1 text-lg font-semibold text-gray-900">Choose source rows</h2>
+            <h2 id="selection-heading" className="mt-1 text-lg font-medium text-gray-900">Choose source rows</h2>
           </div>
           {(brands.length > 0 || channels.length > 0 || dateFrom || dateTo || rowLimit || agiplTarget) && <button className={button} disabled={locked} onClick={() => { setBrands([]); setChannels([]); setDateFrom(''); setDateTo(''); setRowLimit(''); setAgiplTarget(''); setOverwrite(false); }}>Reset selection</button>}
         </div>
@@ -460,24 +460,24 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
         </details>
         <fieldset disabled={locked} className="mt-5 space-y-5">
           <fieldset className="rounded-lg border border-gray-200 p-4">
-            <legend className="px-1 text-sm font-semibold text-gray-700">Attribution channels · {channels.length} selected</legend>
+            <legend className="px-1 text-sm font-medium text-gray-700">Attribution channels · {channels.length} selected</legend>
             <div className="flex flex-wrap gap-4">{ATTRIBUTION_CHANNELS.map((value) => <label key={value} className="flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={channels.includes(value)} onChange={(event) => setChannels((old) => event.target.checked ? [...old, value] : old.filter((item) => item !== value))} className="h-4 w-4 accent-indigo-600" />{value}</label>)}</div>
           </fieldset>
           <fieldset className="rounded-lg border border-gray-200 p-4">
-            <legend className="px-1 text-sm font-semibold text-gray-700">Brands from the approved sheet · {brands.length} selected</legend>
-            {connection ? <div className="flex flex-wrap gap-x-5 gap-y-3">{connection.brands.map((value) => {
+            <legend className="px-1 text-sm font-medium text-gray-700">Brands from the approved sheet · {brands.length} selected</legend>
+            {connection ? <div className="flex flex-wrap gap-x-6 gap-y-4">{connection.brands.map((value) => {
               const supported = supportedBrands.some((brand) => brand.toLowerCase() === value.toLowerCase());
-              return <label key={value} className={`flex items-center gap-2 text-sm ${supported ? 'text-gray-700' : 'text-gray-400'}`}><input type="checkbox" checked={brands.includes(value)} disabled={!supported} onChange={(event) => setBrands((old) => event.target.checked ? [...old, value] : old.filter((item) => item !== value))} className="h-4 w-4 accent-blue-600" />{value}{!supported && <span className="text-xs">(report not configured)</span>}</label>;
+              return <label key={value} className={`flex items-center gap-2 text-sm ${supported ? 'text-gray-700' : 'text-gray-400'}`}><input type="checkbox" checked={brands.includes(value)} disabled={!supported} onChange={(event) => setBrands((old) => event.target.checked ? [...old, value] : old.filter((item) => item !== value))} className="h-4 w-4 accent-blue-600" />{value}{!supported && <span className="text-sm">(report not configured)</span>}</label>;
             })}</div> : <p className="text-sm text-gray-500">Connect the approved sheet to load its actual brands.</p>}
           </fieldset>
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="text-sm font-medium text-gray-700">Sent date from<input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className={`${input} mt-1`} /></label>
             <label className="text-sm font-medium text-gray-700">Sent date to<input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} className={`${input} mt-1`} /></label>
-            <label className="text-sm font-medium text-gray-700">Optional row limit<input type="number" min="1" max="10000" step="1" value={rowLimit} onChange={(event) => setRowLimit(event.target.value)} className={`${input} mt-1`} /><span className="mt-1 block text-xs font-normal text-gray-500">Blank processes all matching rows.</span></label>
+            <label className="text-sm font-medium text-gray-700">Optional row limit<input type="number" min="1" max="10000" step="1" value={rowLimit} onChange={(event) => setRowLimit(event.target.value)} className={`${input} mt-1`} /><span className="mt-1 block text-sm font-normal text-gray-500">Blank processes all matching rows.</span></label>
           </div>
-          {connection?.sent_dates.length ? <p className="text-xs text-gray-500">Parsed sent dates in this sheet: {[...connection.sent_dates].sort()[0]} to {[...connection.sent_dates].sort().at(-1)}.</p> : null}
-          {hasAgipl && <label className="block max-w-md text-sm font-medium text-gray-700">AGIPL attribution target<select value={agiplTarget} onChange={(event) => setAgiplTarget(event.target.value)} className={`${input} mt-1`}><option value="">Choose a supported brand</option>{targetBrands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select><span className="mt-1 block text-xs font-normal text-gray-500">AGIPL cannot attribute to itself. Choices are the worker’s genuinely configured brands.</span></label>}
-          <label className="flex items-start gap-2 text-sm text-gray-700"><input type="checkbox" checked={overwrite} onChange={(event) => setOverwrite(event.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" /><span>Overwrite existing attribution metrics<span className="mt-1 block text-xs text-gray-500">Unchecked by default: preserve complete existing results. Checked: intentional replacements require confirmation before the run.</span></span></label>
+          {connection?.sent_dates.length ? <p className="text-sm text-gray-500">Parsed sent dates in this sheet: {[...connection.sent_dates].sort()[0]} to {[...connection.sent_dates].sort().at(-1)}.</p> : null}
+          {hasAgipl && <label className="block max-w-md text-sm font-medium text-gray-700">AGIPL attribution target<select value={agiplTarget} onChange={(event) => setAgiplTarget(event.target.value)} className={`${input} mt-1`}><option value="">Choose a supported brand</option>{targetBrands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}</select><span className="mt-1 block text-sm font-normal text-gray-500">AGIPL cannot attribute to itself. Choices are the worker’s genuinely configured brands.</span></label>}
+          <label className="flex items-start gap-2 text-sm text-gray-700"><input type="checkbox" checked={overwrite} onChange={(event) => setOverwrite(event.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" /><span>Overwrite existing attribution metrics<span className="mt-1 block text-sm text-gray-500">Unchecked by default: preserve complete existing results. Checked: intentional replacements require confirmation before the run.</span></span></label>
         </fieldset>
         {selectionErrors.length > 0 && <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-gray-600">{selectionErrors.map((message) => <li key={message}>{message}</li>)}</ul>}
         <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -489,35 +489,35 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       </section>
 
       {currentPreview && <section className={panel} aria-labelledby="preview-heading">
-        <h2 id="preview-heading" className="text-lg font-semibold text-gray-900">Selected campaign preview</h2>
+        <h2 id="preview-heading" className="text-lg font-medium text-gray-900">Selected campaign preview</h2>
         <p className="mt-1 text-sm text-gray-600">{currentPreview.row_count.toLocaleString()} matching campaigns; {rowLimit ? `at most ${Math.min(Number(rowLimit), currentPreview.row_count).toLocaleString()} rows will be processed` : 'all matching rows will be processed'}. Showing the first {currentPreview.preview.length} rows.</p>
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <strong>Input warnings for sent dates {currentPreview.warning_sent_date_from} to {currentPreview.warning_sent_date_to}</strong>
+          <strong className="font-medium">Input warnings for sent dates {currentPreview.warning_sent_date_from} to {currentPreview.warning_sent_date_to}</strong>
           {currentPreview.warnings?.length ? <ul className="mt-2 list-disc space-y-1 pl-5">{currentPreview.warnings.map((warning, index) => <li key={`${index}:${warning}`}>{warning}</li>)}</ul> : <p className="mt-1">No parsing warnings were reported for the selected dates.</p>}
-          <p className="mt-2 text-xs">Malformed source rows may be excluded from the parsed campaign count. Correct source inputs before running if these warnings affect your selection.</p>
+          <p className="mt-2 text-sm">Malformed source rows may be excluded from the parsed campaign count. Correct source inputs before running if these warnings affect your selection.</p>
         </div>
         {!currentPreview.row_count && <p className="workspace-empty mt-3 text-sm">No campaigns match this selection. Change the dates, brands or channels and preview again.</p>}
-        <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Selected campaign preview table" tabIndex={0}><table className="w-full text-left text-sm"><caption className="sr-only">Source campaigns matching the current selection</caption><thead className="border-b border-gray-200 bg-gray-50 text-gray-500"><tr>{['Sheet row', 'Campaign', 'Campaign ID', 'Brand', 'Channel', 'Type', 'Sent date', 'Goal range'].map((title) => <th key={title} scope="col" className="whitespace-nowrap px-3 py-3 font-semibold">{title}</th>)}</tr></thead><tbody>{currentPreview.preview.map((row) => <tr key={row.excel_row} className="border-b border-gray-100"><td className="px-3 py-3">{row.excel_row}</td><td className="min-w-48 px-3 py-3">{row.campaign_name}</td><td className="px-3 py-3 font-mono">{row.campaign_id}</td><td className="px-3 py-3">{row.brand}</td><td className="px-3 py-3">{row.channel}</td><td className="px-3 py-3">{row.campaign_type}</td><td className="whitespace-nowrap px-3 py-3">{row.sent_date}</td><td className="whitespace-nowrap px-3 py-3">{row.date_range}</td></tr>)}</tbody></table></div>
+        <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Selected campaign preview table" tabIndex={0}><table className="w-full text-left text-sm tabular-nums"><caption className="sr-only">Source campaigns matching the current selection</caption><thead className="border-b border-gray-200 bg-gray-50 text-gray-500"><tr>{['Sheet row', 'Campaign', 'Campaign ID', 'Brand', 'Channel', 'Type', 'Sent date', 'Goal range'].map((title) => <th key={title} scope="col" className={`whitespace-nowrap px-3 py-3 font-medium ${['Sheet row'].includes(title) ? 'text-right' : ''}`}>{title}</th>)}</tr></thead><tbody>{currentPreview.preview.map((row) => <tr key={row.excel_row} className="border-b border-gray-100"><td className="px-3 py-3 text-right">{row.excel_row}</td><td className="min-w-48 px-3 py-3">{row.campaign_name}</td><td className="px-3 py-3 font-mono">{row.campaign_id}</td><td className="px-3 py-3">{row.brand}</td><td className="px-3 py-3">{row.channel}</td><td className="px-3 py-3">{row.campaign_type}</td><td className="whitespace-nowrap px-3 py-3">{row.sent_date}</td><td className="whitespace-nowrap px-3 py-3">{row.date_range}</td></tr>)}</tbody></table></div>
       </section>}
       {preview && !currentPreview && <p className="text-sm text-amber-800">Selection changed. Load a fresh preview before starting a run.</p>}
 
       <section className={panel} aria-labelledby="job-heading">
-        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="job-heading" className="text-lg font-semibold text-gray-900">Job progress & results</h2>{selectedJob && <StatusBadge value={selectedJob.status} />}</div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 id="job-heading" className="text-lg font-medium text-gray-900">Job progress and results</h2>{selectedJob && <StatusBadge value={selectedJob.status} />}</div>
         {pollError && <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{pollError}</p>}
         {selectedId && !selectedJob && <p role="status" className="mt-3 text-sm text-gray-500">Loading actual job details for {selectedId}…</p>}
-        {!selectedId && <div className="workspace-empty mt-4"><h3 className="text-sm font-semibold text-gray-800">No run selected</h3><p className="mt-1 text-sm text-gray-600">Start a valid previewed run, or open a job from history below. Progress and recorded results will appear here.</p></div>}
+        {!selectedId && <div className="workspace-empty mt-4"><h3 className="text-sm font-medium text-gray-800">No run selected</h3><p className="mt-1 text-sm text-gray-600">Start a valid previewed run, or open a job from history below. Progress and recorded results will appear here.</p></div>}
         {selectedJob && <>
-          <p className="mt-2 break-all text-xs text-gray-500">{selectedJob.filename} · Job {selectedJob.job_id} · Created {new Date(selectedJob.created_at).toLocaleString()}</p>
-          <div className="mt-4 flex items-center gap-3"><progress aria-label="Attribution job progress" value={selectedJob.progress} max="100" className="h-3 w-full accent-indigo-600" /><span className="workspace-number text-sm font-semibold text-gray-700">{selectedJob.progress}%</span></div>
-          <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">{[['Total', selectedJob.total_rows], ['Processed', selectedJob.processed_rows], ['Successful', selectedJob.successful_rows], ['Failed', selectedJob.failed_rows], ['Skipped', selectedJob.skipped_rows]].map(([label, value]) => <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-3"><dt className="text-sm text-gray-600">{label}</dt><dd className="workspace-number mt-1 text-2xl font-semibold text-gray-900">{Number(value).toLocaleString()}</dd></div>)}</dl>
+          <p className="mt-2 break-all font-mono text-sm text-gray-500">{selectedJob.filename} · Job {selectedJob.job_id} · Created {new Date(selectedJob.created_at).toLocaleString()}</p>
+          <div className="mt-4 flex items-center gap-3"><progress aria-label="Attribution job progress" value={selectedJob.progress} max="100" className="h-3 w-full accent-indigo-600" /><span className="workspace-number text-sm font-medium text-gray-700">{selectedJob.progress}%</span></div>
+          <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">{[['Total', selectedJob.total_rows], ['Processed', selectedJob.processed_rows], ['Successful', selectedJob.successful_rows], ['Failed', selectedJob.failed_rows], ['Skipped', selectedJob.skipped_rows]].map(([label, value]) => <div key={label} className="rounded-lg border border-gray-200 bg-gray-50 p-3"><dt className="text-sm text-gray-600">{label}</dt><dd className="workspace-number mt-1 text-2xl font-medium text-gray-900">{Number(value).toLocaleString()}</dd></div>)}</dl>
           {selectedJob.current_row !== null && <p role="status" className="mt-3 text-sm text-gray-600">Processing sheet row {selectedJob.current_row}{selectedJob.current_brand ? ` · ${selectedJob.current_brand}` : ''}</p>}
           {selectedJob.error && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{selectedJob.error}</p>}
           <div className="mt-4 flex flex-wrap gap-3">
             <button className={button} disabled={Boolean(pending) || !selectedJob.results.length || isAttributionJobActive(selectedJob.status)} onClick={() => void perform('download', async () => { await downloadAttributionCsv(selectedJob.job_id); }, false)}>{pending === 'download' ? 'Downloading…' : 'Download results CSV'}</button>
             <button className={button} disabled={locked || !ready || !selectedJob.failed_rows || !['completed', 'failed', 'cancelled'].includes(selectedJob.status)} onClick={() => void retryFailed()}>{pending === 'retry' ? 'Retrying…' : 'Retry failed rows'}</button>
           </div>
-          <p className="mt-3 text-xs text-gray-500">The worker returns the latest 250 row results below. The CSV contains all recorded results for this job, including skipped and failed rows; blank metrics are not converted to zero.</p>
-          <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Attribution row results table" tabIndex={0}><table className="w-full text-left text-sm"><caption className="sr-only">Latest recorded attribution row results, including failed and skipped rows</caption><thead className="border-b border-gray-200 bg-gray-50 text-gray-500"><tr>{['Row', 'Campaign / ID', 'Brand / channel / type', 'Goal range', 'Status', 'Users total / online / offline', 'Revenue total / online / offline', 'Message'].map((title) => <th key={title} scope="col" className="whitespace-nowrap px-3 py-3 font-semibold">{title}</th>)}</tr></thead><tbody>{selectedJob.results.map((row) => <tr key={`${row.excel_row}:${row.campaign_id}`} className="border-b border-gray-100"><td className="px-3 py-3">{row.excel_row}</td><td className="min-w-48 px-3 py-3">{row.campaign_name}<div className="mt-1 font-mono text-gray-500">{row.campaign_id}</div></td><td className="px-3 py-3">{row.brand}<div className="mt-1 whitespace-nowrap text-gray-500">{row.channel} / {row.campaign_type}</div></td><td className="whitespace-nowrap px-3 py-3">{row.date_range}</td><td className="px-3 py-3"><StatusBadge value={row.status} /></td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{[row.unique_users, row.online_unique_users, row.offline_unique_users].map((value) => value === null ? '—' : value.toLocaleString()).join(' / ')}</td><td className="whitespace-nowrap px-3 py-3 tabular-nums">{[row.total_revenue, row.online_revenue, row.offline_revenue].map((value) => value === null ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: 2 })).join(' / ')}</td><td className="min-w-56 px-3 py-3 text-gray-600">{row.message || '—'}</td></tr>)}</tbody></table></div>
+          <p className="mt-3 text-sm text-gray-500">The worker returns the latest 250 row results below. The CSV contains all recorded results for this job, including skipped and failed rows; blank metrics are not converted to zero.</p>
+          <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Attribution row results table" tabIndex={0}><table className="w-full text-left text-sm tabular-nums"><caption className="sr-only">Latest recorded attribution row results, including failed and skipped rows</caption><thead className="border-b border-gray-200 bg-gray-50 text-gray-500"><tr>{['Row', 'Campaign / ID', 'Brand / channel / type', 'Goal range', 'Status', 'Users total / online / offline', 'Revenue total / online / offline', 'Message'].map((title) => <th key={title} scope="col" className={`whitespace-nowrap px-3 py-3 font-medium ${['Row', 'Users total / online / offline', 'Revenue total / online / offline'].includes(title) ? 'text-right' : ''}`}>{title}</th>)}</tr></thead><tbody>{selectedJob.results.map((row) => <tr key={`${row.excel_row}:${row.campaign_id}`} className="border-b border-gray-100"><td className="px-3 py-3 text-right">{row.excel_row}</td><td className="min-w-48 px-3 py-3">{row.campaign_name}<div className="mt-1 font-mono text-gray-500">{row.campaign_id}</div></td><td className="px-3 py-3">{row.brand}<div className="mt-1 whitespace-nowrap text-gray-500">{row.channel} / {row.campaign_type}</div></td><td className="whitespace-nowrap px-3 py-3">{row.date_range}</td><td className="px-3 py-3"><StatusBadge value={row.status} /></td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{[row.unique_users, row.online_unique_users, row.offline_unique_users].map((value) => value === null ? '—' : value.toLocaleString()).join(' / ')}</td><td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">{[row.total_revenue, row.online_revenue, row.offline_revenue].map((value) => value === null ? '—' : value.toLocaleString(undefined, { maximumFractionDigits: 2 })).join(' / ')}</td><td className="min-w-56 px-3 py-3 text-gray-600">{row.message || '—'}</td></tr>)}</tbody></table></div>
           {!selectedJob.results.length && <p className="workspace-empty mt-3 text-sm">No row results have been recorded for this job yet.</p>}
         </>}
         {pollingId && <button className={`${button} mt-4 border-red-200 text-red-700`} disabled={Boolean(pending) || requiresRefresh} onClick={() => {
@@ -527,26 +527,26 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
       </section>
 
       <section className={panel} aria-labelledby="history-heading">
-        <h2 id="history-heading" className="text-lg font-semibold text-gray-900">Run history</h2>
-        <p className="mt-1 text-xs text-gray-500">History is kept in the worker’s memory (latest 30 jobs), not a durable audit store. Worker restarts clear jobs and downloadable CSVs, but do not erase results already written to the sheet.</p>
+        <h2 id="history-heading" className="text-lg font-medium text-gray-900">Run history</h2>
+        <p className="mt-1 text-sm text-gray-500">History is kept in the worker’s memory (latest 30 jobs), not a durable audit store. Worker restarts clear jobs and downloadable CSVs, but do not erase results already written to the sheet.</p>
         {!jobs.length && !loading && !resourceErrors.jobs && <p className="workspace-empty mt-4 text-sm">The worker reports no job history. Preview your campaigns above to prepare a new run.</p>}
-        <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Attribution run history table" tabIndex={0}><table className="w-full text-left text-sm"><caption className="sr-only">Latest attribution jobs held in worker memory</caption><thead className="border-b border-gray-200 bg-gray-50 text-gray-500"><tr>{['Created', 'Source / job', 'Status', 'Processed', 'Success / failed / skipped', 'Results'].map((title) => <th key={title} scope="col" className="whitespace-nowrap px-3 py-3 font-semibold">{title}</th>)}</tr></thead><tbody>{jobs.map((job) => <tr key={job.job_id} className={`border-b border-gray-100 ${selectedId === job.job_id ? 'bg-indigo-50/50' : ''}`}><td className="whitespace-nowrap px-3 py-3">{new Date(job.created_at).toLocaleString()}</td><td className="px-3 py-3">{job.filename}<div className="mt-1 font-mono text-gray-500">{job.job_id.slice(0, 8)}</div></td><td className="px-3 py-3"><StatusBadge value={job.status} /></td><td className="px-3 py-3 tabular-nums">{job.processed_rows} / {job.total_rows}</td><td className="px-3 py-3 tabular-nums">{job.successful_rows} / {job.failed_rows} / {job.skipped_rows}</td><td className="px-3 py-3"><button className={button} aria-pressed={selectedId === job.job_id} disabled={Boolean(pending) || Boolean(pollingId && pollingId !== job.job_id)} onClick={() => { selectJob(job.job_id); setJobRefresh((old) => old + 1); }}>View results</button></td></tr>)}</tbody></table></div>
+        <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Attribution run history table" tabIndex={0}><table className="w-full text-left text-sm tabular-nums"><caption className="sr-only">Latest attribution jobs held in worker memory</caption><thead className="border-b border-gray-200 bg-gray-50 text-gray-500"><tr>{['Created', 'Source / job', 'Status', 'Processed', 'Success / failed / skipped', 'Results'].map((title) => <th key={title} scope="col" className={`whitespace-nowrap px-3 py-3 font-medium ${['Processed', 'Success / failed / skipped'].includes(title) ? 'text-right' : ''}`}>{title}</th>)}</tr></thead><tbody>{jobs.map((job) => <tr key={job.job_id} className={`border-b border-gray-100 ${selectedId === job.job_id ? 'bg-gray-50' : ''}`}><td className="whitespace-nowrap px-3 py-3">{new Date(job.created_at).toLocaleString()}</td><td className="px-3 py-3">{job.filename}<div className="mt-1 font-mono text-gray-500">{job.job_id.slice(0, 8)}</div></td><td className="px-3 py-3"><StatusBadge value={job.status} /></td><td className="px-3 py-3 text-right tabular-nums">{job.processed_rows} / {job.total_rows}</td><td className="px-3 py-3 text-right tabular-nums">{job.successful_rows} / {job.failed_rows} / {job.skipped_rows}</td><td className="px-3 py-3"><button className={button} aria-pressed={selectedId === job.job_id} disabled={Boolean(pending) || Boolean(pollingId && pollingId !== job.job_id)} onClick={() => { selectJob(job.job_id); setJobRefresh((old) => old + 1); }}>View results</button></td></tr>)}</tbody></table></div>
       </section>
 
       {isAdmin && (
         <section className={panel} aria-labelledby="setup-heading">
-          <h2 id="setup-heading" className="text-lg font-semibold text-gray-900">Admin setup</h2>
-          <p className="mt-1 text-sm text-gray-500">Attribution runs in the main application using Apparel-only credentials. Server files and the credential database need durable storage across deployments.</p>
+          <h2 id="setup-heading" className="text-lg font-medium text-gray-900">Admin setup</h2>
+          <p className="mt-1 text-sm text-gray-500">Attribution uses Apparel-only credentials in the main application. Server files and the credential database need durable storage across deployments.</p>
           <div className="mt-5 grid gap-6 md:grid-cols-2">
             <div className="min-w-0 space-y-4 rounded-lg border border-gray-200 p-4">
-              <label className="block text-sm font-medium text-gray-700">Approved Google Sheet URL<input value={setupUrl} onChange={(event) => setSetupUrl(event.target.value)} disabled={locked} className={`${input} mt-1`} /></label>
+              <label className="block text-sm font-medium text-gray-700">Approved Google sheet URL<input value={setupUrl} onChange={(event) => setSetupUrl(event.target.value)} disabled={locked} className={`${input} mt-1`} /></label>
               <label className="block text-sm font-medium text-gray-700">Worksheet title<input value={setupWorksheet} onChange={(event) => setSetupWorksheet(event.target.value)} disabled={locked} className={`${input} mt-1`} /></label>
               <label className="block text-sm font-medium text-gray-700">Apparel workspace mappings<textarea value={reportJson} onChange={(event) => setReportJson(event.target.value)} disabled={locked} rows={10} spellCheck={false} className={`${input} mt-1 font-mono`} /></label>
               <button className={primary} disabled={locked || !setup} onClick={() => void saveSetup()}>{pending === 'setup' ? 'Saving…' : 'Save approved setup'}</button>
             </div>
             <div className="space-y-5">
               <div className="space-y-3 rounded-lg border border-gray-200 p-4">
-                <h3 className="font-semibold text-gray-900">Google service account</h3>
+                <h3 className="font-medium text-gray-900">Google service account</h3>
                 <p className="break-all text-sm text-gray-600">{google?.service_account_email || 'No service account configured'}. Share the approved sheet with this account as Editor.</p>
                 <label className="block text-sm font-medium text-gray-700">Google service-account JSON<input type="file" accept=".json,application/json" disabled={locked} onChange={(event) => setCredential(event.target.files?.[0] || null)} className={`${input} mt-2 block file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-1 file:text-sm file:text-gray-700`} /></label>
                 <button className={button} disabled={locked || !credential} onClick={() => void perform('credentials', async () => {
@@ -557,11 +557,11 @@ function AttributionWorkspace({ isAdmin }: { isAdmin: boolean }) {
                 })}>{pending === 'credentials' ? 'Installing…' : 'Install Google key'}</button>
               </div>
               <div className="space-y-3 rounded-lg border border-gray-200 p-4">
-                <h3 className="font-semibold text-gray-900">Apparel MoEngage session</h3>
+                <h3 className="font-medium text-gray-900">Apparel MoEngage session</h3>
                 <p className="text-sm text-gray-500">Use the existing Apparel Auth Sync connection, or update its bearer token, refresh token and cookie in Settings → MoEngage. Sessions can expire; no browser server or CDP configuration is required.</p>
-                <Link href="/settings" className="inline-block text-sm font-semibold text-indigo-700">Open Apparel settings →</Link>
+                <Link href="/settings" className="inline-block text-sm font-medium text-indigo-700">Open Apparel settings →</Link>
               </div>
-              <p className="text-xs text-amber-800">Crocs is offline-only: Offline rows use all purchases; Overall rows have zero Online metrics and all purchases Offline. Correct Crocs rows marked Online before running.</p>
+              <p className="text-sm text-amber-800">Crocs is offline-only: Offline rows use all purchases; Overall rows have zero Online metrics and all purchases Offline. Correct Crocs rows marked Online before running.</p>
             </div>
           </div>
         </section>

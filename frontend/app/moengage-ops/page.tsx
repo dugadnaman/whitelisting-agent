@@ -160,21 +160,21 @@ export default function MoEngageOpsPage() {
   };
 
   const channelColors: Record<string, { bg: string; text: string; bar: string }> = {
-    Push: { bg: 'bg-indigo-50 text-indigo-700 border-indigo-200', text: 'text-indigo-600', bar: 'bg-indigo-500' },
-    WhatsApp: { bg: 'bg-emerald-50 text-emerald-700 border-emerald-200', text: 'text-emerald-600', bar: 'bg-emerald-500' },
-    SMS: { bg: 'bg-amber-50 text-amber-700 border-amber-200', text: 'text-amber-600', bar: 'bg-amber-500' },
-    Email: { bg: 'bg-blue-50 text-blue-700 border-blue-200', text: 'text-blue-600', bar: 'bg-blue-500' },
-    RCS: { bg: 'bg-purple-50 text-purple-700 border-purple-200', text: 'text-purple-600', bar: 'bg-purple-500' },
+    Push: { bg: 'bg-gray-50 text-gray-700 border-gray-200', text: 'text-gray-600', bar: 'bg-gray-500' },
+    WhatsApp: { bg: 'bg-gray-50 text-gray-700 border-gray-200', text: 'text-gray-600', bar: 'bg-gray-500' },
+    SMS: { bg: 'bg-gray-50 text-gray-700 border-gray-200', text: 'text-gray-600', bar: 'bg-gray-500' },
+    Email: { bg: 'bg-gray-50 text-gray-700 border-gray-200', text: 'text-gray-600', bar: 'bg-gray-500' },
+    RCS: { bg: 'bg-gray-50 text-gray-700 border-gray-200', text: 'text-gray-600', bar: 'bg-gray-500' },
   };
 
   return (
-    <div className="workspace-page min-w-0 space-y-6 max-w-7xl mx-auto pb-16">
+    <div className="workspace-page min-w-0 tabular-nums space-y-6 pb-16">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 pb-6">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="workspace-heading">MoEngage Operations Dashboard</h1>
-            <span className="inline-flex flex-wrap items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            <h1 className="workspace-heading">MoEngage operations</h1>
+            <span className="inline-flex flex-wrap items-center gap-2 px-2.5 py-0.5 rounded-md text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
               <span className="w-2 h-2 rounded-full bg-blue-500 " />
               Tata Capital
             </span>
@@ -184,17 +184,17 @@ export default function MoEngageOpsPage() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={openWorkspaces}
             className="workspace-button"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
               <line x1="8" y1="21" x2="16" y2="21" />
               <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
-            Manage Workspaces
+            Manage workspaces
           </button>
 
           <a
@@ -203,12 +203,12 @@ export default function MoEngageOpsPage() {
             rel="noopener noreferrer"
             className="workspace-button"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            Export to Excel
+            Export Excel
           </a>
           <input
             type="file"
@@ -222,7 +222,7 @@ export default function MoEngageOpsPage() {
             disabled={uploading}
             className="workspace-button"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
@@ -238,11 +238,11 @@ export default function MoEngageOpsPage() {
             }`}
           >
             <svg
-              className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`}
+              className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.5"
+              strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
@@ -256,26 +256,26 @@ export default function MoEngageOpsPage() {
       </div>
 
       {error && (
-        <div role="alert" className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex flex-wrap items-center gap-3">
+        <div role="alert" className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex flex-wrap items-center gap-3">
           <svg className="w-5 h-5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <div className="flex-1">{error}</div>
         </div>
       )}
 
       {/* Date Filter Bar */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white border border-gray-200 rounded-xl p-4  flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="workspace-toolbar min-w-0">
-          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider mr-2">Date Range:</span>
+          <span className="text-sm font-medium text-gray-500   mr-2">Date range:</span>
           {(['last_week', 'last_month', 'custom'] as const).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
               aria-pressed={mode === m}
-              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold capitalize transition-colors ${
+              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${
                 mode === m
-                  ? 'bg-blue-600 text-white shadow-sm'
+                  ? 'bg-blue-600 text-white '
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >
@@ -283,14 +283,14 @@ export default function MoEngageOpsPage() {
             </button>
           ))}
           <div className="flex flex-wrap items-center gap-2 border-l border-gray-200 pl-3 ml-1">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Workspace:</span>
+            <span className="text-sm font-medium text-gray-500  ">Workspace:</span>
             <select
               value={workspaceFilter}
               aria-label="MoEngage workspace scope"
               onChange={(e) => setWorkspaceFilter(e.target.value)}
               className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 workspace-select max-w-full"
             >
-              <option value="all">All Combined</option>
+              <option value="all">All combined</option>
               <option value="TCL">Tata Capital (TCL)</option>
               <option value="Services">Services</option>
               <option value="Wealth">Wealth</option>
@@ -302,7 +302,7 @@ export default function MoEngageOpsPage() {
         </div>
 
         {mode === 'custom' && (
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <input
               type="date"
               aria-label="MoEngage start date"
@@ -322,13 +322,13 @@ export default function MoEngageOpsPage() {
         )}
 
         {data?.date_filter && (
-          <div className="text-xs text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
+          <div className="text-sm text-gray-500 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-200">
             Showing:{' '}
-            <span className="font-semibold text-gray-800">
+            <span className="font-medium text-gray-800">
               {data.date_filter.start_date}
             </span>{' '}
             to{' '}
-            <span className="font-semibold text-gray-800">
+            <span className="font-medium text-gray-800">
               {data.date_filter.end_date}
             </span>{' '}
             <span className="text-gray-500 ml-1">({mode})</span>
@@ -345,36 +345,31 @@ export default function MoEngageOpsPage() {
       {loading && data && <p className="text-sm text-gray-600" role="status">Updating the selected operations view…</p>}
       {loading && !data ? (
         <div className="py-24 text-center">
-          <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-xs text-gray-500">Loading MoEngage operations metrics...</p>
+          <div className="w-8 h-8 border-2 border-gray-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-sm text-gray-500">Loading MoEngage operations metrics...</p>
         </div>
       ) : data ? (
         <>
           {data.in_scope_active_count === 0 && (
             <div className="workspace-empty space-y-2">
-              <h2 className="text-base font-semibold text-gray-900">No records in this view</h2>
+              <h2 className="text-base font-medium text-gray-900">No records in this view</h2>
               <p>Try another period or workspace. Import an existing export or sync configured workspaces to load operations data.</p>
               <button type="button" className="workspace-button" onClick={() => { setMode('last_week'); setCustomStart(''); setCustomEnd(''); setWorkspaceFilter('all'); }}>Reset filters</button>
             </div>
           )}
           {/* Executive Overview Cards */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
-              Account Overview ({data.account_overview.title})
+            <div className="text-sm font-medium   text-gray-500 mb-3">
+              Account overview ({data.account_overview.title})
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Card 1: Total Campaigns */}
-              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div className="bg-white border border-gray-200 rounded-xl p-4  flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Standalone Campaigns</span>
-                    <span className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
-                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-                      </svg>
-                    </span>
+                    <span className="text-sm font-medium text-gray-500  ">Standalone campaigns</span>
                   </div>
-                  <div className="text-3xl font-semibold text-gray-900 mt-2">
+                  <div className="text-3xl font-medium text-gray-900 mt-2">
                     {data.account_overview.total_campaigns}
                   </div>
                 </div>
@@ -382,7 +377,7 @@ export default function MoEngageOpsPage() {
                   {Object.entries(data.account_overview.campaigns_channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
-                      className={`text-xs font-semibold px-1.5 py-0.5 rounded border ${
+                      className={`text-sm font-medium px-1.5 py-0.5 rounded border ${
                         channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                       }`}
                     >
@@ -393,37 +388,27 @@ export default function MoEngageOpsPage() {
               </div>
 
               {/* Card 2: Total Flows */}
-              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div className="bg-white border border-gray-200 rounded-xl p-4  flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Active Flows</span>
-                    <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
-                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                      </svg>
-                    </span>
+                    <span className="text-sm font-medium text-gray-500  ">Active flows</span>
                   </div>
-                  <div className="text-3xl font-semibold text-gray-900 mt-2">
+                  <div className="text-3xl font-medium text-gray-900 mt-2">
                     {data.account_overview.total_flows}
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100">
+                <p className="text-sm text-gray-500 mt-3 pt-3 border-t border-gray-100">
                   Multi-step customer journeys & automations
                 </p>
               </div>
 
               {/* Card 3: Total Flow Nodes (WhatsApp & RCS) */}
-              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div className="bg-white border border-gray-200 rounded-xl p-4  flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Flow Action Nodes</span>
-                    <span className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
-                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                      </svg>
-                    </span>
+                    <span className="text-sm font-medium text-gray-500  ">Flow action nodes</span>
                   </div>
-                  <div className="text-3xl font-semibold text-gray-900 mt-2">
+                  <div className="text-3xl font-medium text-gray-900 mt-2">
                     {data.account_overview.total_flow_nodes}
                   </div>
                 </div>
@@ -431,7 +416,7 @@ export default function MoEngageOpsPage() {
                   {Object.entries(data.account_overview.nodes_channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
-                      className={`text-xs font-semibold px-1.5 py-0.5 rounded border ${
+                      className={`text-sm font-medium px-1.5 py-0.5 rounded border ${
                         channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                       }`}
                     >
@@ -442,25 +427,20 @@ export default function MoEngageOpsPage() {
               </div>
 
               {/* Card 4: Total Omnichannel Delivery */}
-              <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex flex-col justify-between">
+              <div className="bg-white border border-gray-200 rounded-xl p-4  flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Total Touchpoints</span>
-                    <span className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
-                      <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </span>
+                    <span className="text-sm font-medium text-gray-700  ">Total touchpoints</span>
                   </div>
-                  <div className="text-3xl font-semibold text-blue-900 mt-2">
+                  <div className="text-3xl font-medium text-gray-900 mt-2">
                     {data.account_overview.total_touchpoints || (data.account_overview.total_campaigns + data.account_overview.total_flow_nodes)}
                   </div>
                 </div>
-                <div className="mt-3 pt-3 border-t border-blue-100 flex flex-wrap gap-1">
+                <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-1">
                   {Object.entries(data.account_overview.channel_breakdown || {}).filter(([_, count]) => count > 0).map(([ch, count]) => (
                     <span
                       key={ch}
-                      className={`text-xs font-semibold px-1.5 py-0.5 rounded border ${
+                      className={`text-sm font-medium px-1.5 py-0.5 rounded border ${
                         channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                       }`}
                     >
@@ -474,52 +454,52 @@ export default function MoEngageOpsPage() {
 
           {/* Vertical Breakdown Grid */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">
-              Vertical Breakdown (Tata Capital Business Units)
+            <div className="text-sm font-medium   text-gray-500 mb-3">
+              Vertical breakdown · Tata Capital business units
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {Object.entries(data.vertical_breakdown).map(([verticalName, vdata]) => (
                 <div
                   key={verticalName}
-                  className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm flex flex-col justify-between"
+                  className="bg-white border border-gray-200 rounded-xl p-5  flex flex-col justify-between"
                 >
                   <div>
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-base font-semibold text-gray-900">{verticalName}</h3>
+                      <h3 className="text-base font-medium text-gray-900">{verticalName}</h3>
                       <span
-                        className={`text-xs font-semibold uppercase px-2 py-0.5 rounded-full ${
+                        className={`text-sm font-medium  px-2 py-0.5 rounded-md ${
                           vdata.in_account_total
-                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            ? 'bg-gray-50 text-gray-700 border border-gray-200'
                             : 'bg-amber-50 text-amber-700 border border-amber-200'
                         }`}
                       >
-                        {vdata.in_account_total ? 'In Overview Total' : 'Reported Separately'}
+                        {vdata.in_account_total ? 'In overview total' : 'Reported separately'}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 py-3 bg-gray-50 rounded-lg text-center mb-3">
                       <div>
-                        <div className="text-lg font-semibold text-gray-900">{vdata.campaigns_total}</div>
-                        <div className="text-xs text-gray-500 uppercase font-semibold">Campaigns</div>
+                        <div className="text-lg font-medium text-gray-900">{vdata.campaigns_total}</div>
+                        <div className="text-sm text-gray-500  font-medium">Campaigns</div>
                       </div>
                       <div>
-                        <div className="text-lg font-semibold text-gray-900">{vdata.flows_total}</div>
-                        <div className="text-xs text-gray-500 uppercase font-semibold">Flows</div>
+                        <div className="text-lg font-medium text-gray-900">{vdata.flows_total}</div>
+                        <div className="text-sm text-gray-500  font-medium">Flows</div>
                       </div>
                       <div>
-                        <div className="text-lg font-semibold text-gray-900">{vdata.flow_nodes_total}</div>
-                        <div className="text-xs text-gray-500 uppercase font-semibold">Nodes</div>
+                        <div className="text-lg font-medium text-gray-900">{vdata.flow_nodes_total}</div>
+                        <div className="text-sm text-gray-500  font-medium">Nodes</div>
                       </div>
                     </div>
                   </div>
 
                   <div>
-                    <div className="text-xs font-semibold text-gray-500 mb-1.5 uppercase">Channel Breakdown:</div>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="text-sm font-medium text-gray-500 mb-1.5 ">Channel breakdown:</div>
+                    <div className="flex flex-wrap gap-2">
                       {Object.entries(vdata.channels).filter(([_, count]) => count > 0).map(([ch, count]) => (
                         <span
                           key={ch}
-                          className={`text-xs font-semibold px-2 py-0.5 rounded border ${
+                          className={`text-sm font-medium px-2 py-0.5 rounded border ${
                             channelColors[ch]?.bg || 'bg-gray-50 text-gray-700 border-gray-200'
                           }`}
                         >
@@ -541,15 +521,15 @@ export default function MoEngageOpsPage() {
           <div role="dialog" aria-modal="true" aria-label="MoEngage workspaces" className="bg-white rounded-xl shadow-xl max-w-2xl min-w-0 w-full p-6 border border-gray-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">MoEngage Workspaces</h3>
-                <p className="text-xs text-gray-500">Configure Workspace IDs and API Keys for each Tata Capital vertical.</p>
+                <h3 className="text-lg font-medium text-gray-900">MoEngage workspaces</h3>
+                <p className="text-sm text-gray-500">Configure Workspace IDs and API Keys for each Tata Capital vertical.</p>
               </div>
               <button
                 onClick={() => setShowWorkspacesModal(false)}
                 aria-label="Close workspaces"
                 className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-1 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-600"
               >
-                ✕
+                <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
 
@@ -558,13 +538,13 @@ export default function MoEngageOpsPage() {
                 <button
                   key={ws.vertical}
                   onClick={() => setSelectedWs(ws)}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold whitespace-nowrap transition-colors ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                     selectedWs?.vertical === ws.vertical
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
-                  {ws.workspace_name} {ws.is_active && '✓'}
+                  {ws.workspace_name} {ws.is_active && '· Active'}
                 </button>
               ))}
             </div>
@@ -573,7 +553,7 @@ export default function MoEngageOpsPage() {
             {selectedWs && (
               <form onSubmit={handleSaveWorkspace} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Workspace Name</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Workspace name</label>
                   <input
                     type="text"
                     value={selectedWs.workspace_name}
@@ -585,7 +565,7 @@ export default function MoEngageOpsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">Workspace ID (App ID)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Workspace ID (App ID)</label>
                   <input
                     type="text"
                     value={selectedWs.workspace_id}
@@ -598,7 +578,7 @@ export default function MoEngageOpsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">API Key</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
                   <input
                     type="text"
                     value={selectedWs.api_key}
@@ -612,7 +592,7 @@ export default function MoEngageOpsPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Data Center</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Data center</label>
                     <select
                       value={selectedWs.data_center}
                     aria-label="Workspace data center"
@@ -626,7 +606,7 @@ export default function MoEngageOpsPage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">Status</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                     <select
                       value={selectedWs.is_active ? 'active' : 'inactive'}
                     aria-label="Workspace sync status"
@@ -643,7 +623,7 @@ export default function MoEngageOpsPage() {
                   <button
                     type="button"
                     onClick={() => setShowWorkspacesModal(false)}
-                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
                     Close
                   </button>

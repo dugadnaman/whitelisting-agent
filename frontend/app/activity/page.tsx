@@ -37,17 +37,17 @@ function formatTimestamp(iso: string): { relative: string; exact: string } {
 
 function ActionBadge({ action }: { action: string }) {
   const map: Record<string, { label: string; color: string }> = {
-    TEMPLATE_SUBMISSION: { label: 'Template Submit', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-    TEMPLATE_PREVIEW: { label: 'File Preview', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-    STATUS_POLL: { label: 'Status Poll', color: 'bg-blue-100 text-blue-800 border-blue-200' },
-    CREDENTIALS_UPDATE: { label: 'Credentials Update', color: 'bg-amber-100 text-amber-800 border-amber-200' },
-    CREDENTIALS_TEST: { label: 'Credentials Test', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+    TEMPLATE_SUBMISSION: { label: 'Template submission', color: 'bg-gray-100 text-gray-700 border-gray-200' },
+    TEMPLATE_PREVIEW: { label: 'File preview', color: 'bg-gray-100 text-gray-800 border-gray-200' },
+    STATUS_POLL: { label: 'Status poll', color: 'bg-gray-100 text-gray-800 border-gray-200' },
+    CREDENTIALS_UPDATE: { label: 'Credentials update', color: 'bg-gray-100 text-gray-700 border-gray-200' },
+    CREDENTIALS_TEST: { label: 'Credentials test', color: 'bg-gray-100 text-gray-800 border-gray-200' },
   };
 
   const item = map[action] || { label: action.replace(/_/g, ' '), color: 'bg-gray-100 text-gray-800 border-gray-200' };
 
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border ${item.color}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-sm font-medium border ${item.color}`}>
       {item.label}
     </span>
   );
@@ -55,24 +55,17 @@ function ActionBadge({ action }: { action: string }) {
 
 function UserAvatar({ name, isCurrentUser }: { name: string; isCurrentUser?: boolean }) {
   const initial = (name || 'U').charAt(0).toUpperCase();
-  const colors = [
-    'bg-blue-600', 'bg-sky-600', 'bg-emerald-600', 'bg-teal-600',
-    'bg-pink-600', 'bg-amber-600', 'bg-teal-600', 'bg-cyan-600',
-  ];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  const color = colors[Math.abs(hash) % colors.length];
 
   return (
     <div className="flex items-center gap-2">
-      <div className={`w-7 h-7 rounded-full ${color} text-white font-semibold text-xs flex items-center justify-center shrink-0 shadow-xs`}>
+      <div className={`w-7 h-7 rounded-full bg-gray-100 border border-gray-200 text-gray-700 font-medium text-sm flex items-center justify-center shrink-0 `}>
         {initial}
       </div>
       <div className="min-w-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs font-semibold text-gray-900 truncate">{name}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-gray-900 truncate">{name}</span>
           {isCurrentUser && (
-            <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-1.5 py-0.2 rounded border border-blue-200/60">
+            <span className="text-sm bg-gray-50 text-gray-700 font-medium px-1.5 py-0.5 rounded border border-gray-200/60">
               You
             </span>
           )}
@@ -222,13 +215,13 @@ export default function ActivityLogsPage() {
   };
 
   return (
-    <div className="workspace-page min-w-0 space-y-6">
+    <div className="workspace-page min-w-0 tabular-nums space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-200">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="workspace-heading">Activity Logs & Team Audit Trail</h1>
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+            <h1 className="workspace-heading">Activity audit trail</h1>
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md text-sm font-medium bg-gray-100 text-gray-800 border border-gray-200">
               Team audit trail
             </span>
           </div>
@@ -255,11 +248,11 @@ export default function ActivityLogsPage() {
             className="workspace-button-primary"
           >
             <svg
-              className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
+              className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
               viewBox="0 0 20 20"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.5"
             >
               <path d="M4 10a6 6 0 106-6M4 4v6h6" />
             </svg>
@@ -271,74 +264,51 @@ export default function ActivityLogsPage() {
       {/* KPI Stats Cards */}
       <p className="workspace-eyebrow">Team overview · all recorded activity</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
+        <div className="bg-white p-5 rounded-xl border border-gray-200/80 ">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Actions</span>
-            <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
-              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="10" cy="10" r="7" />
-                <polyline points="10 6 10 10 13 13" />
-              </svg>
-            </span>
+            <span className="text-sm font-medium text-gray-500  ">Total actions</span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-semibold text-gray-900">{stats?.total_actions || 0}</span>
-            <span className="text-xs text-gray-500">logged events</span>
+            <span className="text-2xl font-medium text-gray-900">{stats?.total_actions || 0}</span>
+            <span className="text-sm text-gray-500">logged events</span>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
+        <div className="bg-white p-5 rounded-xl border border-gray-200/80 ">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Active Operators</span>
-            <span className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M13 16h-6a4 4 0 01-4-4V7a4 4 0 014-4h6a4 4 0 014 4v5a4 4 0 01-4 4z" />
-                <circle cx="10" cy="8" r="2" />
-              </svg>
-            </span>
+            <span className="text-sm font-medium text-gray-500  ">Active operators</span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-semibold text-gray-900">{stats?.total_users || 0}</span>
-            <span className="text-xs text-emerald-600 font-semibold truncate">
+            <span className="text-2xl font-medium text-gray-900">{stats?.total_users || 0}</span>
+            <span className="text-sm text-emerald-600 font-medium truncate">
               Top: {stats?.top_user || 'None'}
             </span>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
+        <div className="bg-white p-5 rounded-xl border border-gray-200/80 ">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Templates Submitted</span>
-            <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
-              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="3" y="3" width="14" height="14" rx="2" />
-                <path d="M7 8h6M7 12h4" />
-              </svg>
-            </span>
+            <span className="text-sm font-medium text-gray-500  ">Templates submitted</span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-semibold text-gray-900">{stats?.total_templates_submitted || 0}</span>
-            <span className="text-xs text-gray-500">across team</span>
+            <span className="text-2xl font-medium text-gray-900">{stats?.total_templates_submitted || 0}</span>
+            <span className="text-sm text-gray-500">across team</span>
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200/80 shadow-xs">
+        <div className="bg-white p-5 rounded-xl border border-gray-200/80 ">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Current Operator</span>
-            <span className="p-2 rounded-lg bg-blue-50 text-blue-600">
-              <svg className="w-5 h-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M10 2a5 5 0 00-5 5v1a5 5 0 0010 0V7a5 5 0 00-5-5zM3 18a7 7 0 0114 0" />
-              </svg>
-            </span>
+            <span className="text-sm font-medium text-gray-500  ">Current operator</span>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-base font-semibold text-gray-900 truncate">{currentAppUser || 'Namann'}</span>
-            <span className="text-xs text-gray-500 uppercase font-semibold">Active Profile</span>
+            <span className="text-base font-medium text-gray-900 truncate">{currentAppUser || 'Not available'}</span>
+            <span className="text-sm text-gray-500  font-medium">Active profile</span>
           </div>
         </div>
       </div>
 
       {/* Filter & Search Toolbar */}
-      <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs p-4 space-y-3">
+      <div className="bg-white rounded-xl border border-gray-200/80  p-4 space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Search Input */}
           <div className="relative flex-1 max-w-md">
@@ -357,34 +327,34 @@ export default function ActivityLogsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search user, action, template name, details..."
-              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-gray-500 outline-none"
             />
           </div>
 
           {/* Filter Selects */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-3">
             {/* Date Range Filter (Default: Today to save memory/load) */}
             <select
               value={filterDateRange}
               aria-label="Activity date range"
               onChange={(e) => setFilterDateRange(e.target.value)}
-              className={`min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm border rounded-lg px-3 py-2 outline-none font-semibold transition-colors ${
+              className={`min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm border rounded-lg px-3 py-2 outline-none font-medium transition-colors ${
                 filterDateRange === 'today'
-                  ? 'bg-blue-50 border-blue-300 text-blue-800'
+                  ? 'bg-gray-50 border-gray-300 text-gray-800'
                   : 'bg-white border-gray-300 text-gray-700'
               }`}
             >
-              <option value="today">Today (Default)</option>
+              <option value="today">Today</option>
               <option value="yesterday">Yesterday</option>
-              <option value="7d">Past 7 Days</option>
-              <option value="30d">Past 30 Days</option>
-              <option value="all">All Past Activity</option>
-              <option value="custom">Custom Date Range...</option>
+              <option value="7d">Past 7 days</option>
+              <option value="30d">Past 30 days</option>
+              <option value="all">All past activity</option>
+              <option value="custom">Custom date range</option>
             </select>
 
             {filterDateRange === 'custom' && (
-              <div className="flex flex-wrap items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1">
-                <span className="text-xs text-gray-500 uppercase font-semibold">From:</span>
+              <div className="flex flex-wrap items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1">
+                <span className="text-sm text-gray-500  font-medium">From:</span>
                 <input
                   type="date"
               aria-label="Activity start date"
@@ -392,7 +362,7 @@ export default function ActivityLogsPage() {
                   onChange={(e) => setCustomStartDate(e.target.value)}
                   className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded px-1.5 py-0.5 text-gray-700"
                 />
-                <span className="text-sm text-gray-500 uppercase font-semibold">To:</span>
+                <span className="text-sm text-gray-500  font-medium">To:</span>
                 <input
                   type="date"
               aria-label="Activity end date"
@@ -410,7 +380,7 @@ export default function ActivityLogsPage() {
               onChange={(e) => setFilterUser(e.target.value)}
               className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
-              <option value="all">All Team Members</option>
+              <option value="all">All team members</option>
               {users.map((u) => (
                 <option key={u.id || u.name} value={u.name}>
                   {u.name}
@@ -425,15 +395,15 @@ export default function ActivityLogsPage() {
               onChange={(e) => setFilterAction(e.target.value)}
               className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
-              <option value="all">All Action Types</option>
-              <option value="TEMPLATE_SUBMISSION">Template Submission</option>
-              <option value="TEMPLATE_PREVIEW">File Preview</option>
-              <option value="STATUS_POLL">Status Poll</option>
-              <option value="CREDENTIALS_UPDATE">Credentials Update</option>
-              <option value="CREDENTIALS_TEST">Credentials Test</option>
-              <option value="ACCOUNT_CREATE">Account Created</option>
-              <option value="ACCOUNT_DELETE">Account Deleted</option>
-              <option value="USER_LOGIN">User Active</option>
+              <option value="all">All action types</option>
+              <option value="TEMPLATE_SUBMISSION">Template submission</option>
+              <option value="TEMPLATE_PREVIEW">File preview</option>
+              <option value="STATUS_POLL">Status poll</option>
+              <option value="CREDENTIALS_UPDATE">Credentials update</option>
+              <option value="CREDENTIALS_TEST">Credentials test</option>
+              <option value="ACCOUNT_CREATE">Account created</option>
+              <option value="ACCOUNT_DELETE">Account deleted</option>
+              <option value="USER_LOGIN">User active</option>
             </select>
 
             {/* Account Filter */}
@@ -443,7 +413,7 @@ export default function ActivityLogsPage() {
               onChange={(e) => setFilterAccount(e.target.value)}
               className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
-              <option value="all">All Accounts</option>
+              <option value="all">All accounts</option>
               {accounts.map((acc) => (
                 <option key={acc.id} value={acc.id}>
                   {acc.name}
@@ -457,19 +427,19 @@ export default function ActivityLogsPage() {
               onChange={(e) => setFilterChannel(e.target.value)}
               className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm bg-white border border-gray-300 rounded-lg px-3 py-2 text-gray-700 focus:ring-2 focus:ring-blue-500 outline-none font-medium"
             >
-              <option value="all">All Channels</option>
+              <option value="all">All channels</option>
               <option value="whatsapp">WhatsApp</option>
               <option value="rcs">RCS (DLT)</option>
               <option value="sms">SMS (Karix)</option>
             </select>
 
             {/* Auto-refresh toggle */}
-            <label className="flex flex-wrap items-center gap-1.5 text-xs text-gray-600 cursor-pointer pl-1">
+            <label className="flex flex-wrap items-center gap-2 text-sm text-gray-600 cursor-pointer pl-1">
               <input
                 type="checkbox"
                 checked={autoRefresh}
                 onChange={(e) => setAutoRefresh(e.target.checked)}
-                className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-gray-600 focus:ring-blue-500"
               />
               <span>Auto-refresh · 15 seconds</span>
             </label>
@@ -488,27 +458,27 @@ export default function ActivityLogsPage() {
 
       {/* Error Banner */}
       {error && (
-        <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-4 text-xs text-red-700">
-          <span className="font-semibold">Error: </span>
+        <div role="alert" className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+          <span className="font-medium">Error: </span>
           {error}
         </div>
       )}
 
       {/* Activity Table */}
-      <div className="bg-white rounded-xl border border-gray-200/80 shadow-xs overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-200/80  overflow-hidden">
         <div className="p-4 bg-gray-50/80 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="w-2 h-2 rounded-full bg-blue-600" />
-            <h3 className="text-base font-semibold text-gray-900 uppercase tracking-wider">
-              Audit Trail ({logs.length} events)
+            <h3 className="text-base font-medium text-gray-900  ">
+              Audit trail ({logs.length} events)
             </h3>
             {filterDateRange === 'today' ? (
-              <span className="inline-flex flex-wrap items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+              <span className="inline-flex flex-wrap items-center gap-1 px-2 py-0.5 rounded text-sm font-medium bg-gray-100 text-gray-800 border border-gray-200">
                 
-                <span>Today&apos;s Activity</span>
+                <span>Today&apos;s activity</span>
               </span>
             ) : (
-              <span className="inline-flex flex-wrap items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+              <span className="inline-flex flex-wrap items-center gap-1 px-2 py-0.5 rounded text-sm font-medium bg-amber-50 text-amber-800 border border-amber-200">
                 
                 <span>
                   {filterDateRange === 'yesterday'
@@ -524,7 +494,7 @@ export default function ActivityLogsPage() {
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
             {filterDateRange === 'today' ? (
               <span className="text-gray-600 font-medium">Scope: today only · up to 250 events</span>
             ) : (
@@ -536,14 +506,14 @@ export default function ActivityLogsPage() {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead>
-              <tr className="bg-gray-50/40 text-gray-500 font-semibold border-b border-gray-200 uppercase tracking-wider text-xs">
-                <th className="px-5 py-3">Timestamp</th>
-                <th className="px-5 py-3">Team Member</th>
-                <th className="px-5 py-3">Action</th>
-                <th className="px-5 py-3">Target</th>
-                <th className="px-5 py-3">Details / Summary</th>
-                <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3 text-right">Inspect</th>
+              <tr className="bg-gray-50/40 text-gray-500 font-medium border-b border-gray-200   text-sm">
+                <th className="font-medium px-5 py-3">Timestamp</th>
+                <th className="font-medium px-5 py-3">Team member</th>
+                <th className="font-medium px-5 py-3">Action</th>
+                <th className="font-medium px-5 py-3">Target</th>
+                <th className="font-medium px-5 py-3">Details / summary</th>
+                <th className="font-medium px-5 py-3">Status</th>
+                <th className="font-medium px-5 py-3 text-right">Inspect</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -551,7 +521,7 @@ export default function ActivityLogsPage() {
                 <tr>
                   <td colSpan={7} className="px-5 py-12 text-center text-gray-500">
                     <div className="flex flex-col items-center gap-2">
-                      <svg className="animate-spin h-5 w-5 text-blue-600" viewBox="0 0 24 24" fill="none">
+                      <svg className="animate-spin h-5 w-5 text-gray-600" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
                       </svg>
@@ -565,24 +535,24 @@ export default function ActivityLogsPage() {
                     {filterDateRange === 'today' && !hasActiveFilters ? (
                       <div className="flex flex-col items-center gap-2 max-w-sm mx-auto">
                         <span className="workspace-eyebrow">Audit trail</span>
-                        <p className="text-xs font-semibold text-gray-700">No activity recorded today yet</p>
-                        <p className="text-xs text-gray-500 leading-relaxed">
+                        <p className="text-sm font-medium text-gray-700">No activity recorded today yet</p>
+                        <p className="text-sm text-gray-500 leading-relaxed">
                           Start with today’s activity, or choose a wider period to inspect earlier events.
                         </p>
                         <div className="flex flex-wrap items-center gap-2 mt-2">
                           <button
                             type="button"
                             onClick={() => setFilterDateRange('7d')}
-                            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 text-sm font-semibold bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-300 shadow-2xs transition"
+                            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 rounded-lg border border-gray-300  transition-colors"
                           >
-                            View Past 7 Days
+                            View past 7 days
                           </button>
                           <button
                             type="button"
                             onClick={() => setFilterDateRange('all')}
-                            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 text-sm font-semibold bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 shadow-2xs transition"
+                            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 text-sm font-medium bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-lg border border-gray-200  transition-colors"
                           >
-                            View All Past Activity
+                            View all past activity
                           </button>
                         </div>
                       </div>
@@ -608,8 +578,8 @@ export default function ActivityLogsPage() {
                       }
                     >
                       <td className="px-5 py-3 font-mono text-gray-500 whitespace-nowrap">
-                        <div className="font-semibold text-gray-800">{relative}</div>
-                        <div className="text-xs text-gray-500">{exact}</div>
+                        <div className="font-medium text-gray-800">{relative}</div>
+                        <div className="text-sm text-gray-500">{exact}</div>
                       </td>
 
                       <td className="px-5 py-3 whitespace-nowrap">
@@ -622,17 +592,17 @@ export default function ActivityLogsPage() {
 
                       <td className="px-5 py-3 whitespace-nowrap">
                         <span
-                          className={`inline-flex flex-wrap items-center gap-1.5 px-2 py-0.5 rounded text-xs font-semibold ${
+                          className={`inline-flex flex-wrap items-center gap-2 px-2 py-0.5 rounded text-sm font-medium ${
                             log.channel === 'whatsapp'
                               ? 'bg-emerald-50 text-emerald-800 border border-emerald-200/60'
                               : log.channel === 'sms'
-                              ? 'bg-purple-50 text-purple-800 border-purple-200/60'
-                              : 'bg-blue-50 text-blue-800 border-blue-200/60'
+                              ? 'bg-gray-50 text-gray-700 border-gray-200/60'
+                              : 'bg-gray-50 text-gray-700 border-gray-200/60'
                           }`}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              log.channel === 'whatsapp' ? 'bg-emerald-500' : log.channel === 'sms' ? 'bg-purple-500' : 'bg-blue-500'
+                              log.channel === 'whatsapp' ? 'bg-gray-400' : log.channel === 'sms' ? 'bg-gray-400' : 'bg-gray-400'
                             }`}
                           />
                           {targetAccount} &bull; {targetChannel}
@@ -642,10 +612,10 @@ export default function ActivityLogsPage() {
                       <td className="px-5 py-3 text-gray-600 max-w-xs truncate">
                         {log.action === 'TEMPLATE_SUBMISSION' && (
                           <div className="space-y-0.5">
-                            <div className="font-semibold text-gray-900 text-xs">
+                            <div className="font-medium text-gray-900 text-sm">
                               Submitted {log.details.count || 0} template{log.details.count === 1 ? '' : 's'}
                             </div>
-                            <div className="text-xs text-gray-500 truncate">
+                            <div className="text-sm text-gray-500 truncate">
                               File: {log.details.filename || 'upload.csv'}
                               {Array.isArray(log.details.templates) && log.details.templates.length > 0 && (
                                 <> &bull; {log.details.templates.join(', ')}</>
@@ -655,25 +625,25 @@ export default function ActivityLogsPage() {
                         )}
 
                         {log.action === 'STATUS_POLL' && (
-                          <span className="text-xs text-gray-700 font-medium">
+                          <span className="text-sm text-gray-700 font-medium">
                             Polled {log.details.checked_count || 0} pending template(s)
                           </span>
                         )}
 
                         {log.action === 'CREDENTIALS_UPDATE' && (
-                          <span className="text-xs text-gray-700 font-medium">
+                          <span className="text-sm text-gray-700 font-medium">
                             Updated keys: {Array.isArray(log.details.keys_updated) ? log.details.keys_updated.join(', ') : 'API credentials'}
                           </span>
                         )}
 
                         {log.action === 'CREDENTIALS_TEST' && (
-                          <span className="text-xs text-gray-700 font-medium truncate block max-w-xs">
+                          <span className="text-sm text-gray-700 font-medium truncate block max-w-xs">
                             {log.details.message || (log.details.valid ? 'Credentials Valid' : 'Test Failed')}
                           </span>
                         )}
 
                         {log.action === 'TEMPLATE_PREVIEW' && (
-                          <span className="text-xs text-gray-700 font-medium truncate">
+                          <span className="text-sm text-gray-700 font-medium truncate">
                             Previewed {log.details.filename || 'file'}
                           </span>
                         )}
@@ -681,7 +651,7 @@ export default function ActivityLogsPage() {
 
                       <td className="px-5 py-3 whitespace-nowrap">
                         <span
-                          className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
+                          className={`inline-flex px-2 py-0.5 rounded-md text-sm font-medium   ${
                             log.status === 'success'
                               ? 'bg-emerald-100 text-emerald-800'
                               : 'bg-red-100 text-red-800'
@@ -694,7 +664,7 @@ export default function ActivityLogsPage() {
                       <td className="px-5 py-3 text-right whitespace-nowrap">
                         <button
                           onClick={() => setSelectedLog(log)}
-                          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 bg-gray-100 hover:bg-blue-50 text-gray-700 hover:text-blue-700 rounded font-semibold text-sm transition-colors"
+                          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 bg-gray-100 hover:bg-gray-50 text-gray-700 hover:text-gray-700 rounded font-medium text-sm transition-colors"
                         >
                           Inspect
                         </button>
@@ -713,53 +683,53 @@ export default function ActivityLogsPage() {
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
           <div role="dialog" aria-modal="true" aria-label="Event details" className="bg-white rounded-xl border border-gray-200 shadow-xl max-w-lg min-w-0 w-full max-h-[85vh] overflow-y-auto p-6 space-y-5">
             <div className="flex items-center justify-between pb-3 border-b border-gray-200">
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-3">
                 <ActionBadge action={selectedLog.action} />
-                <h3 className="text-sm font-semibold text-gray-900">Event Details (ID: {selectedLog.id})</h3>
+                <h3 className="text-sm font-medium text-gray-900">Event details · ID: {selectedLog.id}</h3>
               </div>
               <button
                 onClick={() => setSelectedLog(null)}
                 aria-label="Close event details"
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-gray-500 hover:text-gray-600 text-lg font-semibold p-1"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-gray-500 hover:text-gray-600 text-lg font-medium p-1"
               >
-                ✕
+                <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm break-words">
               <div>
-                <span className="font-semibold text-gray-500">Operator: </span>
-                <span className="font-semibold text-gray-900">{selectedLog.user}</span>
+                <span className="font-medium text-gray-500">Operator: </span>
+                <span className="font-medium text-gray-900">{selectedLog.user}</span>
               </div>
               <div>
-                <span className="font-semibold text-gray-500">Timestamp: </span>
+                <span className="font-medium text-gray-500">Timestamp: </span>
                 <span className="font-mono text-gray-800">{formatTimestamp(selectedLog.timestamp).exact}</span>
               </div>
               <div>
-                <span className="font-semibold text-gray-500">Account: </span>
-                <span className="font-semibold text-gray-900 uppercase">{selectedLog.account}</span>
+                <span className="font-medium text-gray-500">Account: </span>
+                <span className="font-medium text-gray-900 ">{selectedLog.account}</span>
               </div>
               <div>
-                <span className="font-semibold text-gray-500">Channel: </span>
-                <span className="font-semibold text-gray-900 uppercase">{selectedLog.channel}</span>
+                <span className="font-medium text-gray-500">Channel: </span>
+                <span className="font-medium text-gray-900 ">{selectedLog.channel}</span>
               </div>
               <div>
-                <span className="font-semibold text-gray-500">Outcome: </span>
-                <span className={`font-semibold ${selectedLog.status === 'success' ? 'text-emerald-700' : 'text-red-700'}`}>
+                <span className="font-medium text-gray-500">Outcome: </span>
+                <span className={`font-medium ${selectedLog.status === 'success' ? 'text-emerald-700' : 'text-red-700'}`}>
                   {selectedLog.status.toUpperCase()}
                 </span>
               </div>
               <div>
-                <span className="font-semibold text-gray-500">IP: </span>
+                <span className="font-medium text-gray-500">IP: </span>
                 <span className="font-mono text-gray-600">{selectedLog.ip_address || '127.0.0.1'}</span>
               </div>
             </div>
 
             <div>
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                Event Payload & Details
+              <div className="text-sm font-medium text-gray-500   mb-2">
+                Event payload & details
               </div>
-              <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs font-mono overflow-x-auto max-h-60">
+              <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-sm font-mono overflow-x-auto max-h-60">
                 {JSON.stringify(selectedLog.details, null, 2)}
               </pre>
             </div>
@@ -767,7 +737,7 @@ export default function ActivityLogsPage() {
             <div className="pt-2 flex justify-end">
               <button
                 onClick={() => setSelectedLog(null)}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition-colors"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium text-sm transition-colors"
               >
                 Close
               </button>

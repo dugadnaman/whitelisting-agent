@@ -61,26 +61,26 @@ export default function WhatsAppQrPage() {
             <p role="status" className="py-12 text-center text-sm text-gray-600">Checking the WhatsApp gateway…</p>
           ) : status?.connected ? (
             <div className="space-y-4">
-              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800" role="status">WhatsApp linked</span>
-              <h2 className="text-lg font-semibold text-gray-900">Your gateway is connected</h2>
-              <p className="text-sm text-gray-600 break-words">Connected as <strong className="text-gray-900">{status.user?.name || status.user?.id || 'a WhatsApp user'}</strong>.</p>
+              <span className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800" role="status">WhatsApp linked</span>
+              <h2 className="text-lg font-medium text-gray-900">Your gateway is connected</h2>
+              <p className="text-sm text-gray-600 break-words">Connected as <strong className="font-medium text-gray-900">{status.user?.name || status.user?.id || 'a WhatsApp user'}</strong>.</p>
               <p className="text-sm text-gray-600">Return to Work Management to manage SLA work and alert settings.</p>
-              <a href="/work-management" className="workspace-button-primary inline-flex">Go to Work Management</a>
+              <a href="/work-management" className="workspace-button-primary inline-flex">Go to work management</a>
             </div>
           ) : (
             <div className="space-y-6">
               <div className="workspace-guide space-y-3">
-                <h2 className="text-sm font-semibold text-gray-900">Link your phone</h2>
+                <h2 className="text-sm font-medium text-gray-900">Link your phone</h2>
                 <ol className="list-decimal pl-5 space-y-2 text-sm leading-relaxed text-gray-600">
                   <li>Open WhatsApp on the phone you want to link.</li>
-                  <li>Open <strong>Settings / Menu (⋮)</strong>, then <strong>Linked Devices</strong>.</li>
-                  <li>Tap <strong>Link a Device</strong> and scan the QR code below.</li>
+                  <li>Open <strong className="font-medium">Settings / Menu (⋮)</strong>, then <strong className="font-medium">Linked Devices</strong>.</li>
+                  <li>Tap <strong className="font-medium">Link a Device</strong> and scan the QR code below.</li>
                 </ol>
               </div>
 
               {(status?.error || qr?.error || !status?.ok || qr?.ok === false) && (
                 <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 break-words">
-                  <p className="font-semibold">Gateway connection unavailable</p>
+                  <p className="font-medium">Gateway connection unavailable</p>
                   <p className="mt-1">{status?.error || qr?.error || 'The gateway could not provide a connection. Check that the gateway is running, then refresh its status.'}</p>
                 </div>
               )}

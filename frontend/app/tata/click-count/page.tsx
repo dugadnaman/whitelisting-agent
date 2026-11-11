@@ -16,7 +16,7 @@ import type {
 } from '@/lib/moengage-click-count';
 
 const panel = 'workspace-panel min-w-0 p-5 sm:p-6';
-const input = 'workspace-input w-full disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500';
+const input = 'workspace-input w-full tabular-nums disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500';
 const primary = 'workspace-button-primary';
 const secondary = 'workspace-button';
 
@@ -41,9 +41,9 @@ export default function TataClickCountPage() {
     return (
       <div className="mx-auto max-w-3xl p-8">
         <div className={`${panel} border-red-200`}>
-          <h1 className="text-xl font-bold text-gray-900">Tata Click Counts access denied</h1>
+          <h1 className="text-xl font-medium text-gray-900">Tata Click Counts access denied</h1>
           <p className="mt-2 text-sm text-gray-600">This page is restricted to Tata users and platform superadmins.</p>
-          <Link href="/" className="mt-4 inline-block text-sm font-semibold text-blue-600">Return to your dashboard</Link>
+          <Link href="/" className="mt-4 inline-block text-sm font-medium text-blue-600">Return to your dashboard</Link>
         </div>
       </div>
     );
@@ -88,18 +88,18 @@ function ClickCountWorkspacePicker({ account, accountLabel }: { account: string;
           <p className="workspace-eyebrow">Tata Capital · Audience analytics</p>
           <h1 className="workspace-heading mt-1">Click counts</h1>
           <p className="workspace-description mt-2 max-w-2xl">See how many unique users clicked across your channels. Select imported bases and count them in one run.</p>
-          <p className="mt-2 text-sm text-gray-600">Account: <strong>{accountLabel}</strong>. Uses this account&apos;s saved MoEngage session; manage its connection in <Link href="/settings" className="font-medium text-indigo-700 underline">Settings → MoEngage</Link>.</p>
+          <p className="mt-2 text-sm text-gray-600">Account: <strong className="font-medium">{accountLabel}</strong>. Uses this account&apos;s saved MoEngage session; manage its connection in <Link href="/settings" className="font-medium text-indigo-700 underline">Settings → MoEngage</Link>.</p>
         </div>
         <span className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600">Reporting only · No campaigns sent</span>
       </header>
       <aside className="workspace-guide" aria-label="How clicks are counted">
-        <h2 className="text-sm font-semibold text-gray-900">Choose a workspace, select bases, then set dates</h2>
+        <h2 className="text-sm font-medium text-gray-900">Choose a workspace, select bases, then set dates</h2>
         <p className="mt-1 text-sm leading-6 text-gray-600">Only users in each selected base are counted, once per base. Results stay separate—overlapping bases are never summed.</p>
         <details className="mt-3 text-sm text-gray-600">
           <summary className="cursor-pointer font-medium text-gray-700">Included click channels</summary>
           <div className="mt-2 flex flex-wrap gap-2">
             {['WhatsApp', 'Email', 'SMS', 'Android push', 'iOS push'].map((channel) => (
-              <span key={channel} className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-sm text-gray-700">{channel}</span>
+              <span key={channel} className="rounded-md border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700">{channel}</span>
             ))}
           </div>
         </details>
@@ -107,19 +107,19 @@ function ClickCountWorkspacePicker({ account, accountLabel }: { account: string;
       <section className={panel} aria-label="Click count selection" aria-busy={loading || busy}>
         <div className="grid items-center gap-4 md:grid-cols-2">
           <div className="flex items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-sm font-semibold text-gray-600" aria-hidden="true">1</span>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center font-mono text-sm text-gray-500" aria-hidden="true">1</span>
             <div>
-              <h2 className="text-base font-semibold text-gray-900">Choose your workspace</h2>
+              <h2 className="text-base font-medium text-gray-900">Choose a workspace</h2>
               <p className="mt-1 text-sm leading-6 text-gray-600">Bases and results stay within this MoEngage workspace.</p>
             </div>
           </div>
           <div>
-            <label htmlFor="click-workspace" className="mb-1.5 block text-sm font-medium text-gray-700">MoEngage workspace</label>
+            <label htmlFor="click-workspace" className="mb-2 block text-sm font-medium text-gray-700">MoEngage workspace</label>
             <select id="click-workspace" className={input} value={workspaceId} disabled={loading || busy || Boolean(error)} onChange={(event) => setWorkspaceId(event.target.value)}>
               <option value="">Select a workspace</option>
               {workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
-            {workspace && <p className="mt-1.5 text-sm text-gray-600">Reporting timezone: {workspace.timezone}</p>}
+            {workspace && <p className="mt-2 text-sm text-gray-600">Reporting timezone: {workspace.timezone}</p>}
           </div>
         </div>
         {loading && <p role="status" className="mt-4 text-sm text-gray-500">Loading Tata workspaces…</p>}
@@ -133,7 +133,7 @@ function ClickCountWorkspacePicker({ account, accountLabel }: { account: string;
       </section>
       {workspace ? <ImportedBasePicker key={`${workspace.id}:${workspace.timezone}`} account={account} workspace={workspace} busy={busy} onBusyChange={setBusy} /> : (
         <div className="workspace-empty px-6 py-12 text-center">
-          <h2 className="text-sm font-semibold text-gray-700">Start with a workspace</h2>
+          <h2 className="text-sm font-medium text-gray-700">Start with a workspace</h2>
           <p className="mt-2 text-sm text-gray-500">Your imported bases and counting options will appear here.</p>
         </div>
       )}
@@ -191,13 +191,13 @@ function ImportedBasePicker({ account, workspace, busy, onBusyChange }: { accoun
       <section className={`${panel} xl:col-span-7`} aria-label="Imported base selection" aria-busy={loading}>
         <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-sm font-semibold text-gray-600" aria-hidden="true">2</span>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center font-mono text-sm text-gray-500" aria-hidden="true">2</span>
             <div>
-              <h2 className="text-base font-semibold text-gray-900">Select imported bases</h2>
+              <h2 className="text-base font-medium text-gray-900">Select imported bases</h2>
               <p className="mt-1 text-sm leading-6 text-gray-600">Choose one or more audiences to compare.</p>
             </div>
           </div>
-          <span className="shrink-0 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-sm font-medium text-indigo-700">{selectedIds.length} selected</span>
+          <span className="shrink-0 font-mono text-sm tabular-nums text-gray-600">{selectedIds.length} selected</span>
         </div>
         {loading && <p role="status" className="py-8 text-center text-sm text-gray-500">Loading imported bases…</p>}
         {error && <ErrorNotice message={error} onRetry={() => setReload((value) => value + 1)} />}
@@ -211,8 +211,8 @@ function ImportedBasePicker({ account, workspace, busy, onBusyChange }: { accoun
           <fieldset>
             <legend className="sr-only">Imported bases · {selectedIds.length} selected</legend>
             <div className="mb-3">
-              <label htmlFor="click-base-search" className="mb-1.5 block text-sm font-medium text-gray-700">Search imported bases</label>
-              <input id="click-base-search" type="search" className={`workspace-search ${input}`} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="Search by base name…" />
+              <label htmlFor="click-base-search" className="mb-2 block text-sm font-medium text-gray-700">Search imported bases</label>
+              <input id="click-base-search" type="search" className={`workspace-search ${input}`} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="Base name" />
             </div>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm text-gray-600">{filteredBases.length} of {bases.length} bases shown</p>
@@ -229,10 +229,10 @@ function ImportedBasePicker({ account, workspace, busy, onBusyChange }: { accoun
               {filteredBases.map((base) => {
                 const checked = selected.has(base.id);
                 return (
-                  <label key={base.id} className={`flex items-center gap-3 rounded-lg border p-3 text-sm transition-colors ${busy ? 'cursor-not-allowed' : 'cursor-pointer'} ${checked ? 'border-indigo-200 bg-indigo-50/60' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
+                  <label key={base.id} className={`flex items-center gap-3 rounded-lg border p-3 text-sm transition-colors ${busy ? 'cursor-not-allowed' : 'cursor-pointer'} ${checked ? 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
                     <input type="checkbox" className="h-4 w-4 shrink-0 accent-indigo-600 focus-visible:ring-2 focus-visible:ring-indigo-500" checked={checked} disabled={busy} onChange={() => toggleBase(base.id)} />
-                    <span className={`min-w-0 flex-1 break-words ${checked ? 'font-medium text-indigo-900' : 'text-gray-700'}`}>{base.name}</span>
-                    {checked && <span className="shrink-0 text-xs font-medium text-indigo-700">Selected</span>}
+                    <span className={`min-w-0 flex-1 break-words ${checked ? 'font-medium text-gray-900' : 'text-gray-700'}`}>{base.name}</span>
+                    {checked && <span className="shrink-0 text-sm text-gray-600">Selected</span>}
                   </label>
                 );
               })}
@@ -245,9 +245,9 @@ function ImportedBasePicker({ account, workspace, busy, onBusyChange }: { accoun
       {selectedBases.length > 0 ? <MultiBaseCountForm account={account} workspace={workspace} bases={selectedBases} onBusyChange={onBusyChange} /> : (
         <aside className={`${panel} xl:col-span-5`}>
           <div className="flex items-start gap-3">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-sm font-bold text-gray-500" aria-hidden="true">3</span>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center font-mono text-sm text-gray-500" aria-hidden="true">3</span>
             <div>
-              <h2 className="text-base font-semibold text-gray-900">Set your date range</h2>
+              <h2 className="text-base font-medium text-gray-900">Set the date range</h2>
               <p className="mt-1 text-sm leading-6 text-gray-600">Select a base to load its start date and choose an end date.</p>
             </div>
           </div>
@@ -513,28 +513,28 @@ function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { accou
     <>
       <form onSubmit={submit} className={`${panel} space-y-4 xl:col-span-5`}>
         <div className="flex items-start gap-3">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-sm font-semibold text-gray-600" aria-hidden="true">3</span>
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center font-mono text-sm text-gray-500" aria-hidden="true">3</span>
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Set your date range</h2>
+            <h2 className="text-base font-medium text-gray-900">Set the date range</h2>
             <p className="mt-1 text-sm leading-6 text-gray-600">Start dates are fetched from each base&apos;s creation time. Edit them for your report, or reset to automatic.</p>
           </div>
         </div>
         <div className="max-h-72 overflow-auto rounded-lg border border-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Selected base date settings" tabIndex={0}>
-          <table className="min-w-full divide-y divide-gray-200 text-left text-sm">
+          <table className="min-w-full divide-y divide-gray-200 text-left text-sm tabular-nums">
             <caption className="sr-only">Selected bases and editable report start dates</caption>
             <thead className="sticky top-0 bg-gray-50 text-gray-500">
-              <tr><th scope="col" className="px-3 py-2.5 font-medium">Selected base</th><th scope="col" className="whitespace-nowrap px-3 py-2.5 font-medium">Start date</th></tr>
+              <tr><th scope="col" className="px-3 py-3 font-medium">Selected base</th><th scope="col" className="whitespace-nowrap px-3 py-3 font-medium">Start date</th></tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {bases.map((base) => (
                 <tr key={base.id}>
-                  <td className="break-words px-3 py-3 text-gray-700">{base.name}</td>
-                  <td className="whitespace-nowrap px-3 py-3 tabular-nums text-gray-600">
+                  <td className="min-w-40 break-words px-3 py-3 text-gray-700">{base.name}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums text-gray-600">
                     {metadata[base.id] ? (
                       <div className="min-w-40 space-y-2">
                         <label htmlFor={`click-start-${base.id}`} className="sr-only">Report start date for {base.name}</label>
                         <input id={`click-start-${base.id}`} type="date" className={input} value={startOverrides[base.id] ?? metadata[base.id].start_date} min="0001-01-01" max={endDate && endDate < today ? endDate : today} required disabled={busy || !today} onChange={(event) => changeStartDate(base.id, event.target.value)} aria-describedby={`click-start-help-${base.id}`} />
-                        <p id={`click-start-help-${base.id}`} className="text-xs text-gray-600">{startOverrides[base.id] === undefined ? 'Automatic' : 'Manual'} · Base created {metadata[base.id].start_date}</p>
+                        <p id={`click-start-help-${base.id}`} className="text-sm text-gray-600">{startOverrides[base.id] === undefined ? 'Automatic' : 'Manual'} · Base created {metadata[base.id].start_date}</p>
                         <button type="button" className={secondary} disabled={busy || startOverrides[base.id] === undefined} onClick={() => changeStartDate(base.id)}>Reset to automatic</button>
                       </div>
                     ) : loading.has(base.id) ? 'Loading…' : 'Unavailable'}
@@ -551,9 +551,9 @@ function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { accou
           <button type="button" className={secondary} onClick={() => setMetadataReload((value) => value + 1)}>Retry base dates</button>
         )}
         <div>
-          <label htmlFor="click-end" className="mb-1.5 block text-sm font-medium text-gray-700">Report end date (inclusive)</label>
+          <label htmlFor="click-end" className="mb-2 block text-sm font-medium text-gray-700">Report end date (inclusive)</label>
           <input id="click-end" type="date" className={input} value={endDate} min={maxStartDate} max={today} required aria-describedby="click-date-help" disabled={busy || !metadataReady || !today || maxStartDate > today} onChange={(event) => changeEndDate(event.target.value)} />
-          <p id="click-date-help" className="mt-2 text-xs leading-5 text-gray-500">Includes the whole end date in {workspace.timezone}. One end date applies to every selected base.</p>
+          <p id="click-date-help" className="mt-2 text-sm leading-5 text-gray-500">Includes the whole end date in {workspace.timezone}. One end date applies to every selected base.</p>
         </div>
         {today && maxStartDate > today && <p role="alert" className="text-sm text-red-700">At least one report start date is after today in this workspace. Choose an earlier start date.</p>}
         {endDate && !validDates && metadataReady && <p role="alert" className="text-sm text-red-700">Choose valid start dates on or before the end date, and an end date no later than {today}.</p>}
@@ -561,27 +561,27 @@ function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { accou
           <button type="submit" className={`${primary} w-full`} disabled={!validDates || busy} onClick={(event) => { if (event.detail > 1) event.preventDefault(); }}>
             {busy ? `Counting ${bases.length} ${bases.length === 1 ? 'base' : 'bases'}…` : Object.keys(jobs).length ? `Count ${bases.length} ${bases.length === 1 ? 'base' : 'bases'} again` : `Count ${bases.length} selected ${bases.length === 1 ? 'base' : 'bases'}`}
           </button>
-          <p className="mt-2 text-center text-xs leading-5 text-gray-500">Runs all selected bases together. No messages are sent.</p>
+          <p className="mt-2 text-center text-sm leading-5 text-gray-500">Runs all selected bases together. No messages are sent.</p>
         </div>
       </form>
       <section className="min-w-0 xl:col-span-12" aria-label="Query results" aria-live="polite">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Results by base</h2>
-            <p className="mt-1 text-xs text-gray-500">Unique clickers across channels, deduplicated within each base.</p>
+            <h2 className="text-lg font-medium text-gray-900">Results by base</h2>
+            <p className="mt-1 text-sm text-gray-500">Unique clickers across channels, deduplicated within each base.</p>
           </div>
-          {Object.keys(jobs).length > 0 && <span className="text-xs font-medium text-gray-500">{bases.filter((base) => jobs[base.id]?.status?.status === 'success').length} of {bases.length} complete</span>}
+          {Object.keys(jobs).length > 0 && <span className="text-sm font-medium text-gray-500">{bases.filter((base) => jobs[base.id]?.status?.status === 'success').length} of {bases.length} complete</span>}
         </div>
         {Object.keys(jobs).length === 0 ? (
           <div className="workspace-empty px-6 py-10 text-center">
-            <p className="text-sm font-medium text-gray-700">Ready when you are</p>
+            <p className="text-sm font-medium text-gray-700">No count results</p>
             <p className="mt-2 text-sm text-gray-600">Choose an end date and start counting. Each base will appear here separately.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Click count results table" tabIndex={0}>
-            <table className="w-full min-w-[960px] text-left text-sm">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" role="region" aria-label="Click count results table" tabIndex={0}>
+            <table className="w-full min-w-[960px] text-left text-sm tabular-nums">
               <caption className="sr-only">Click count results for each selected base. Counts are separate and are not summed.</caption>
-              <thead className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
+              <thead className="border-b border-gray-200 bg-gray-50 text-sm text-gray-500">
                 <tr>
                   <th scope="col" className="px-4 py-3 font-medium">Imported base</th>
                   <th scope="col" className="whitespace-nowrap px-4 py-3 font-medium">Start date</th>
@@ -599,11 +599,11 @@ function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { accou
                   const status = job.status;
                   const failed = status?.status === 'failed' || (!job.submitting && !status && Boolean(job.error) && !job.unknownSubmission);
                   const badge = job.submitting ? 'Starting' : job.unknownSubmission ? 'Outcome unknown' : job.pollingPaused ? 'Checking paused' : status?.status === 'success' ? 'Complete' : failed ? 'Failed' : status?.status === 'running' ? 'Running' : 'Queued';
-                  const badgeStyle = status?.status === 'success' ? 'bg-emerald-50 text-emerald-700' : failed ? 'bg-red-50 text-red-700' : job.unknownSubmission || job.pollingPaused ? 'bg-amber-50 text-amber-800' : 'bg-blue-50 text-blue-700';
+                  const badgeStyle = status?.status === 'success' ? 'bg-emerald-50 text-emerald-700' : failed ? 'bg-red-50 text-red-700' : job.unknownSubmission || job.pollingPaused ? 'bg-amber-50 text-amber-800' : 'bg-gray-100 text-gray-700';
                   return (
                     <tr key={base.id} className="align-top hover:bg-gray-50/50" aria-label={`${base.name} result`}>
-                      <th scope="row" className="min-w-[180px] break-words px-4 py-4 font-semibold text-gray-900">{base.name}</th>
-                      <td className="whitespace-nowrap px-4 py-4 text-xs leading-5 text-gray-600">
+                      <th scope="row" className="min-w-[180px] break-words px-4 py-4 font-medium text-gray-900">{base.name}</th>
+                      <td className="whitespace-nowrap px-4 py-4 text-sm leading-5 text-gray-600">
                         {job.query ? (
                           <>
                             <p className="tabular-nums">{job.query.start_date}</p>
@@ -611,20 +611,20 @@ function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { accou
                           </>
                         ) : <span className="text-gray-400">Awaiting query</span>}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-4 text-xs leading-5 tabular-nums text-gray-600">
+                      <td className="whitespace-nowrap px-4 py-4 text-sm leading-5 tabular-nums text-gray-600">
                         {job.query ? job.query.end_date : <span className="text-gray-400">Awaiting query</span>}
                       </td>
                       <td className="px-4 py-4">
-                        <span className={`inline-block whitespace-nowrap rounded-md px-2 py-1 text-xs font-semibold ${badgeStyle}`}>{badge}</span>
+                        <span className={`inline-block whitespace-nowrap rounded-md px-2 py-1 text-sm font-medium ${badgeStyle}`}>{badge}</span>
                       </td>
-                      <td className="px-4 py-4 text-right font-semibold tabular-nums text-gray-900">
+                      <td className="px-4 py-4 text-right font-medium tabular-nums text-gray-900">
                         {status?.status === 'success' ? status.user_count === null ? 'Unavailable' : status.user_count.toLocaleString() : <span aria-label="Not available yet" className="font-normal text-gray-400">—</span>}
                       </td>
                       <td className="px-4 py-4 text-right tabular-nums text-gray-700">
                         {status?.status === 'success' && status.reachable_users !== null ? status.reachable_users.toLocaleString() : <span aria-label="Not available yet" className="text-gray-400">—</span>}
                       </td>
                       <td className="min-w-[240px] px-4 py-4">
-                        {job.submitting && <p role="status" className="text-xs font-medium text-blue-700">Starting query…</p>}
+                        {job.submitting && <p role="status" className="text-sm font-medium text-gray-600">Starting query…</p>}
                         {job.error && <ErrorNotice message={job.error} />}
                         {job.unknownSubmission && (
                           <button type="button" className={`${secondary} mt-3`} onClick={() => updateJob(base.id, { unknownSubmission: false })}>
@@ -634,7 +634,7 @@ function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { accou
                         {status?.status === 'failed' && !job.error && <ErrorNotice message={status.error || 'The click count query failed.'} />}
                         {status && (status.status === 'queued' || status.status === 'running') && (
                           <div className="space-y-3">
-                            <p role="status" className="text-xs font-medium text-blue-700">
+                            <p role="status" className="text-sm font-medium text-gray-600">
                               {job.pollingPaused ? 'Status checking paused; the final outcome is unknown.' : status.status === 'queued' ? 'Query queued…' : 'Query running…'}
                             </p>
                             <button type="button" className={secondary} onClick={() => job.pollingPaused ? resumePolling(base.id) : pausePolling(base.id)}>
@@ -642,7 +642,7 @@ function MultiBaseCountForm({ account, workspace, bases, onBusyChange }: { accou
                             </button>
                           </div>
                         )}
-                        {status?.status === 'success' && !job.error && <span className="text-xs text-gray-500">No action needed</span>}
+                        {status?.status === 'success' && !job.error && <span className="text-sm text-gray-500">No action needed</span>}
                       </td>
                     </tr>
                   );

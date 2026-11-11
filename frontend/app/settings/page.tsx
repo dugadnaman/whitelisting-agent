@@ -554,9 +554,9 @@ export default function SettingsPage() {
   if (!hasAccountAccess) {
     return (
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold text-gray-900">Account settings</h1>
+        <h1 className="text-2xl font-medium text-gray-900">Account settings</h1>
         <div className="rounded-2xl border border-gray-200 bg-white p-6 space-y-2">
-          <p className="text-sm font-semibold text-gray-900">{currentUser?.name}</p>
+          <p className="text-sm font-medium text-gray-900">{currentUser?.name}</p>
           <p className="text-sm text-gray-600">{currentUser?.email}</p>
           <p className="text-sm text-gray-600">Organization: {getAccountLabel(currentUser?.tenant_id)}</p>
           <p className="text-sm text-gray-500">Your account is pending administrator approval before you can access organization workspaces and credentials.</p>
@@ -589,11 +589,11 @@ export default function SettingsPage() {
         <div className="workspace-guide flex flex-wrap items-start justify-between gap-3 text-sm text-gray-600">
           <div className="min-w-0 flex-1 break-words">
             <div>
-              <span className="font-semibold text-gray-900">Organization access: </span>
-              <span>Logged in as <strong>{currentUser?.name}</strong> ({currentUser?.email}). Scoped exclusively to <strong>{getAccountLabel(currentUser?.tenant_id)}</strong>.</span>
+              <span className="font-medium text-gray-900">Organization access: </span>
+              <span>Logged in as <strong className="font-medium">{currentUser?.name}</strong> ({currentUser?.email}). Scoped exclusively to <strong className="font-medium">{getAccountLabel(currentUser?.tenant_id)}</strong>.</span>
             </div>
           </div>
-          <span className="px-2 py-0.5 rounded text-sm font-mono font-semibold bg-blue-100 text-blue-900 uppercase">
+          <span className="px-2 py-0.5 rounded text-sm font-mono font-medium bg-gray-100 text-gray-900">
             {currentUser?.role || 'Operator'}
           </span>
         </div>
@@ -601,20 +601,20 @@ export default function SettingsPage() {
 
 
       <section aria-labelledby="connections-heading" className="space-y-3">
-        <h2 id="connections-heading" className="text-lg font-semibold text-gray-900">Connections</h2>
+        <h2 id="connections-heading" className="text-lg font-medium text-gray-900">Connections</h2>
         <p className="text-sm text-gray-500">
           Connection management follows Whitelisting for. Opening an integration does not change your delivery destination or the extension’s active target.
         </p>
         {!isAssigned ? (
-          <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-sm text-blue-900">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-5 text-sm text-gray-900">
             Choose a specific account and channel in Whitelisting for above to manage its Karix connection or MoEngage integration. All accounts is an overview, not a connection destination.
           </div>
         ) : (
           <div className="flex flex-wrap gap-2 rounded-xl border border-gray-200 bg-white p-2">
-            <button type="button" aria-pressed={!showMoEngage} onClick={() => showConnection(false)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${!showMoEngage ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button type="button" aria-pressed={!showMoEngage} onClick={() => showConnection(false)} className={`rounded-lg px-4 py-2 text-sm font-medium ${!showMoEngage ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
               {isSms ? 'VILPOWER · SMS DLT' : `Karix · ${channelTitle}`}
             </button>
-            <button type="button" aria-pressed={showMoEngage} onClick={() => showConnection(true)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${showMoEngage ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button type="button" aria-pressed={showMoEngage} onClick={() => showConnection(true)} className={`rounded-lg px-4 py-2 text-sm font-medium ${showMoEngage ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>
               MoEngage integration
             </button>
           </div>
@@ -624,20 +624,17 @@ export default function SettingsPage() {
       {isAssigned && <>
 
       {/* Target Info Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gray-50/50 border border-gray-100 rounded-xl">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-semibold text-sm uppercase">
-            {showMoEngage ? 'MO' : accountTitle.slice(0, 2)}
-          </div>
           <div>
-            <div className="text-sm font-semibold text-gray-900">
+            <div className="text-sm font-medium text-gray-900">
               {showMoEngage ? `MoEngage integration · ${accountTitle}` : `${isSms ? 'VILPOWER DLT' : 'Karix'} connection · ${accountTitle} · ${channelTitle}`}
             </div>
             <div className="text-sm text-gray-500">
               {showMoEngage
                 ? 'MoEngage dashboard session used to sync approved Karix RCS templates into MoEngage Settings'
                 : isWhatsApp
-                ? 'Karix Portal Session for Media Uploads & Official WABA Template API'
+                ? 'Karix portal session for media uploads and the official WABA template API'
                 : isSms
                 ? 'DLT SMS template whitelisting via the Tata Capital VILPOWER portal; no SMS sending'
                 : 'RCS bot template registration using Karix bearer authentication'}
@@ -650,13 +647,13 @@ export default function SettingsPage() {
       {/* Credential Form Card */}
       <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-6 space-y-6">
         <div className="workspace-guide space-y-2">
-          <h3 className="text-sm font-semibold text-gray-900">Set up this connection</h3>
+          <h3 className="text-sm font-medium text-gray-900">Set up this connection</h3>
           <p className="text-sm leading-relaxed text-gray-600">
             {showMoEngage
-              ? 'Save the workspace identifiers first, then use Auth Sync to connect that workspace. Use Test Connection to verify access; saving metadata alone does not confirm a live connection.'
+              ? 'Save the workspace identifiers first, then use Auth Sync to connect that workspace. Use Test connection to verify access; saving metadata alone does not confirm a live connection.'
               : isSms
                 ? 'Use the VILPOWER session setup below for this Tata Capital SMS destination. This connection is for DLT whitelisting, not message sending.'
-                : 'Confirm and save the account routing identifiers first, then pair Auth Sync. Manual session replacement is optional. Test Connection checks access without saving your edits.'}
+                : 'Confirm and save the account routing identifiers first, then pair Auth Sync. Manual session replacement is optional. Test connection checks access without saving your edits.'}
           </p>
           {hasUnsavedSettings && <p role="status" className="text-sm font-medium text-amber-800">You have unsaved connection edits.</p>}
         </div>
@@ -670,8 +667,8 @@ export default function SettingsPage() {
           <>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="moe_base_url" className="block text-sm font-semibold text-gray-700  mb-1">
-                  MoEngage Dashboard URL
+                <label htmlFor="moe_base_url" className="block text-sm font-medium text-gray-700  mb-1">
+                  MoEngage dashboard URL
                 </label>
                 <input
                   id="moe_base_url"
@@ -686,15 +683,15 @@ export default function SettingsPage() {
                 </p>
               </div>
               <div>
-                <label htmlFor="moe_sender_id" className="block text-sm font-semibold text-gray-700  mb-1">
-                  MoEngage Sender Profile ID
+                <label htmlFor="moe_sender_id" className="block text-sm font-medium text-gray-700  mb-1">
+                  MoEngage sender profile ID
                 </label>
                 <input
                   id="moe_sender_id"
                   type="text"
                   value={moeSenderId}
                   onChange={(e) => setMoeSenderId(e.target.value)}
-                  placeholder="MoEngage Sender Profile ID or Karix Bot ID (e.g. P7hzkqCcW3x96I6T)"
+                  placeholder="MoEngage sender profile ID or Karix Bot ID (e.g. P7hzkqCcW3x96I6T)"
                   className="workspace-input w-full font-mono"
                 />
                 <p className="text-sm text-gray-500 mt-1">
@@ -702,7 +699,7 @@ export default function SettingsPage() {
                 </p>
               </div>
               <div className="sm:col-span-2">
-                <label htmlFor="moe_workspace_id" className="block text-sm font-semibold text-gray-700  mb-1">MoEngage Internal Workspace ID</label>
+                <label htmlFor="moe_workspace_id" className="block text-sm font-medium text-gray-700  mb-1">MoEngage internal workspace ID</label>
                 <input id="moe_workspace_id" type="text" value={moeWorkspaceId} onChange={(event) => setMoeWorkspaceId(event.target.value)} placeholder="24-character alphanumeric ID from listApps / changeApp" className="workspace-input w-full font-mono" />
                 <p className="text-sm text-gray-500 mt-1">The portal’s 24-character alphanumeric workspace ID from listApps or changeApp. Preserve its exact case and confirm it belongs to this account; unknown workspaces are never adopted from browsing.</p>
               </div>
@@ -711,7 +708,7 @@ export default function SettingsPage() {
               <summary className="cursor-pointer font-medium text-gray-900">First-time MoEngage setup</summary>
               <p className="pt-3 leading-relaxed">Save Dashboard URL, Internal Workspace ID, and Sender Profile ID with manual override off. Then refresh Auth Sync and connect, or explicitly enter a complete session for that configured workspace. Editing metadata never resubmits saved tokens or cookies.</p>
             </details>
-            <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
               <input type="checkbox" checked={manualMoeSession} onChange={(event) => {
                 setManualMoeSession(event.target.checked);
                 setMoeBearerToken('');
@@ -723,8 +720,8 @@ export default function SettingsPage() {
             {manualMoeSession && <>
 
             <div>
-              <label htmlFor="moe_bearer_token" className="block text-sm font-semibold text-gray-700  mb-1">
-                MoEngage Bearer Token
+              <label htmlFor="moe_bearer_token" className="block text-sm font-medium text-gray-700  mb-1">
+                MoEngage bearer token
               </label>
               <input
                 id="moe_bearer_token"
@@ -741,8 +738,8 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label htmlFor="moe_refresh_token" className="block text-sm font-semibold text-gray-700  mb-1">
-                MoEngage Refresh Token
+              <label htmlFor="moe_refresh_token" className="block text-sm font-medium text-gray-700  mb-1">
+                MoEngage refresh token
               </label>
               <input
                 id="moe_refresh_token"
@@ -759,8 +756,8 @@ export default function SettingsPage() {
             </div>
 
             <div>
-              <label htmlFor="moe_cookie" className="block text-sm font-semibold text-gray-700  mb-1">
-                MoEngage Session Cookie
+              <label htmlFor="moe_cookie" className="block text-sm font-medium text-gray-700  mb-1">
+                MoEngage session cookie
               </label>
               <input
                 id="moe_cookie"
@@ -776,8 +773,8 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
-              <div className="text-sm font-semibold text-amber-900 flex items-center gap-1.5">
+            <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
+              <div className="text-sm font-medium text-amber-900 flex items-center gap-2">
                 Manual snapshot instructions
               </div>
               <ol className="space-y-1 text-sm text-amber-800 list-decimal list-inside">
@@ -792,24 +789,24 @@ export default function SettingsPage() {
 
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-gray-100">
               <div className="text-sm text-gray-500">
-                Enables the <span className="font-semibold text-gray-600">🔄 Sync to MoEngage</span> button on RCS template cards in Jira Briefs.
+                Enables the <span className="font-medium text-gray-600">Sync to MoEngage</span> button on RCS template cards in Jira Briefs.
               </div>
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={handleTestMoEngage}
                   disabled={testing || saving || !isAssigned || moeLoadedScope !== settingsScope}
-                  className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {testing ? 'Testing...' : 'Test Connection'}
+                  {testing ? 'Testing...' : 'Test connection'}
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveMoEngage}
                   disabled={saving || testing || !isAssigned || moeLoadedScope !== settingsScope}
-                  className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  {saving ? 'Saving...' : 'Save MoEngage Credentials'}
+                  {saving ? 'Saving...' : 'Save MoEngage credentials'}
                 </button>
               </div>
             </div>
@@ -822,9 +819,9 @@ export default function SettingsPage() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900 flex flex-wrap items-center gap-2">
-                    <span>Manual Karix Portal Session Override</span>
-                    <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                  <h4 className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-2">
+                    <span>Manual Karix portal session override</span>
+                    <span className="px-2 py-0.5 rounded-lg text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200">
                       Optional — replaces this scope’s session
                     </span>
                   </h4>
@@ -835,7 +832,7 @@ export default function SettingsPage() {
               </div>
 
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                  <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
                     <input
                       type="checkbox"
                       checked={manualPortalSession}
@@ -855,8 +852,8 @@ export default function SettingsPage() {
               {manualPortalSession && (
               <div className="space-y-4 p-4 bg-gray-50/70 rounded-xl border border-gray-200">
                 <div>
-                  <label htmlFor="bearer_token" className="block text-sm font-semibold text-gray-700  mb-1">
-                    Current Portal Bearer Token ({envPrefix}_KARIX_BEARER_TOKEN)
+                  <label htmlFor="bearer_token" className="block text-sm font-medium text-gray-700  mb-1">
+                    Current portal bearer token ({envPrefix}_KARIX_BEARER_TOKEN)
                   </label>
                   <input
                     id="bearer_token"
@@ -867,14 +864,14 @@ export default function SettingsPage() {
                     className="workspace-input w-full font-mono"
                   />
                   <p className="text-sm text-gray-500 mt-1">
-                    Accepts the token alone, <code>Bearer …</code>, or <code>Authorization: Bearer …</code>. Test Connection checks this portal session, not the separate WABA API token. Copy Session ID and User from the same request.
+                    Accepts the token alone, <code>Bearer …</code>, or <code>Authorization: Bearer …</code>. Test connection checks this portal session, not the separate WABA API token. Copy Session ID and User from the same request.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="session" className="block text-sm font-semibold text-gray-700  mb-1">
-                      Portal Session ID ({envPrefix}_KARIX_SESSION)
+                    <label htmlFor="session" className="block text-sm font-medium text-gray-700  mb-1">
+                      Portal session ID ({envPrefix}_KARIX_SESSION)
                     </label>
                     <input
                       id="session"
@@ -887,8 +884,8 @@ export default function SettingsPage() {
                   </div>
 
                   <div>
-                    <label htmlFor="user" className="block text-sm font-semibold text-gray-700  mb-1">
-                      Portal User Header ({envPrefix}_KARIX_USER)
+                    <label htmlFor="user" className="block text-sm font-medium text-gray-700  mb-1">
+                      Portal user header ({envPrefix}_KARIX_USER)
                     </label>
                     <input
                       id="user"
@@ -908,9 +905,9 @@ export default function SettingsPage() {
             <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900 flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-2">
                     <span>Account identifiers &amp; WABA API token</span>
-                    <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                    <span className="px-2 py-0.5 rounded-lg text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
                       One-time setup
                     </span>
                   </h4>
@@ -921,7 +918,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setEditPermanent((prev) => !prev)}
-                  className="px-2.5 py-1 text-sm font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
+                  className="px-2.5 py-1 text-sm font-medium text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition-colors"
                 >
                   {editPermanent ? 'Done' : 'Edit identifiers'}
                 </button>
@@ -929,44 +926,44 @@ export default function SettingsPage() {
 
               {!editPermanent ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 pt-1">
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-sm font-semibold text-gray-500 ">Official WABA Token</div>
-                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">
+                  <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-sm font-medium text-gray-500 ">Official WABA token</div>
+                    <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">
                       {wabaAuthToken ? 'New value entered' : 'Saved value not displayed'}
                     </div>
                     <div className="text-sm text-gray-500 font-medium mt-0.5">Provider-managed API token</div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-sm font-semibold text-gray-500 ">WABA ID</div>
-                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{wabaId || 'Not configured'}</div>
+                  <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-sm font-medium text-gray-500 ">WABA ID</div>
+                    <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{wabaId || 'Not configured'}</div>
                     <div className="text-sm text-gray-500 font-medium mt-0.5">Configured account identity</div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-sm font-semibold text-gray-500 ">DLT Entity ID</div>
-                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
+                  <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-sm font-medium text-gray-500 ">DLT entity ID</div>
+                    <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
                     <div className="text-sm text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-sm font-semibold text-gray-500 ">Namespace ID</div>
-                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{templateNamespaceId || 'Not configured'}</div>
+                  <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-sm font-medium text-gray-500 ">Namespace ID</div>
+                    <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{templateNamespaceId || 'Not configured'}</div>
                     <div className="text-sm text-gray-500 font-medium mt-0.5">Account namespace</div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-sm font-semibold text-gray-500 ">WhatsApp ESME Address</div>
-                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
+                  <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-sm font-medium text-gray-500 ">WhatsApp ESME address</div>
+                    <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
                     <div className="text-sm text-gray-500 font-medium mt-0.5">Configured WhatsApp routing identity</div>
                   </div>
-                  <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                    <div className="text-sm font-semibold text-gray-500 ">Portal User</div>
-                    <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{portalUsername || 'Standard'}</div>
+                  <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                    <div className="text-sm font-medium text-gray-500 ">Portal user</div>
+                    <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{portalUsername || 'Standard'}</div>
                     <div className="text-sm text-gray-500 font-medium mt-0.5">Karix Workspace</div>
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
                   <div className="sm:col-span-2">
-                    <label htmlFor="waba_auth_token" className="block text-sm font-semibold text-gray-700  mb-1">
-                      Official Permanent WABA API Token ({envPrefix}_WABA_AUTH_TOKEN)
+                    <label htmlFor="waba_auth_token" className="block text-sm font-medium text-gray-700  mb-1">
+                      Permanent WABA API token ({envPrefix}_WABA_AUTH_TOKEN)
                     </label>
                     <input
                       id="waba_auth_token"
@@ -981,7 +978,7 @@ export default function SettingsPage() {
                     <p className="text-sm text-gray-500 mt-1">Leave blank to keep the saved key. A value entered here is tested exactly as an official API token, not as a portal session. Save rejects invalid replacements and preserves the previous key.</p>
                   </div>
                   <div>
-                    <label htmlFor="waba_id" className="block text-sm font-semibold text-gray-700  mb-1">
+                    <label htmlFor="waba_id" className="block text-sm font-medium text-gray-700  mb-1">
                       WABA ID
                     </label>
                     <input
@@ -994,13 +991,13 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="whatsapp_esmeaddr" className="block text-sm font-semibold text-gray-700  mb-1">WhatsApp ESME Address</label>
+                    <label htmlFor="whatsapp_esmeaddr" className="block text-sm font-medium text-gray-700  mb-1">WhatsApp ESME address</label>
                     <input id="whatsapp_esmeaddr" type="text" value={esmeaddr} onChange={(event) => setEsmeaddr(event.target.value)} placeholder="Provider-configured ESME address for this WhatsApp account" className="workspace-input w-full font-mono" />
                     <p className="text-sm text-gray-500 mt-1">Save this account’s ESME and WABA identifiers before pairing Auth Sync. This is separate from RCS routing.</p>
                   </div>
                   <div>
-                    <label htmlFor="entity_id" className="block text-sm font-semibold text-gray-700  mb-1">
-                      DLT Principal Entity ID
+                    <label htmlFor="entity_id" className="block text-sm font-medium text-gray-700  mb-1">
+                      DLT principal entity ID
                     </label>
                     <input
                       id="entity_id"
@@ -1012,8 +1009,8 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="template_namespace_id" className="block text-sm font-semibold text-gray-700  mb-1">
-                      Template Namespace ID
+                    <label htmlFor="template_namespace_id" className="block text-sm font-medium text-gray-700  mb-1">
+                      Template namespace ID
                     </label>
                     <input
                       id="template_namespace_id"
@@ -1025,8 +1022,8 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="portal_username" className="block text-sm font-semibold text-gray-700  mb-1">
-                      Portal Username
+                    <label htmlFor="portal_username" className="block text-sm font-medium text-gray-700  mb-1">
+                      Portal username
                     </label>
                     <input
                       id="portal_username"
@@ -1049,20 +1046,20 @@ export default function SettingsPage() {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900">
-                    Karix RCS Authorization
+                  <h4 className="text-sm font-medium text-gray-900">
+                    Karix RCS authorization
                   </h4>
                   <p className="text-sm text-gray-500">
                     Leave manual override off to keep the latest saved RCS session. WhatsApp credentials are never used for RCS. Configure and save routing identifiers before replacing the session.
                   </p>
                 </div>
                 {rcsAuthToken && (
-                  <span className="text-sm font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 shrink-0">
+                  <span className="text-sm font-medium text-gray-700 bg-gray-50 px-2.5 py-1 rounded-lg border border-gray-200 shrink-0">
                     Token entered — test to verify
                   </span>
                 )}
               </div>
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
                 <input type="checkbox" checked={manualPortalSession} onChange={(event) => {
                   setManualPortalSession(event.target.checked);
                   setRcsAuthToken('');
@@ -1073,8 +1070,8 @@ export default function SettingsPage() {
               </label>
               {manualPortalSession && (
               <div className="p-4 bg-gray-50/70 rounded-xl border border-gray-200">
-                <label htmlFor="rcs_auth_token" className="block text-sm font-semibold text-gray-700  mb-1">
-                  Current RCS Bearer Token ({envPrefix}_RCS_AUTH_TOKEN)
+                <label htmlFor="rcs_auth_token" className="block text-sm font-medium text-gray-700  mb-1">
+                  Current RCS bearer token ({envPrefix}_RCS_AUTH_TOKEN)
                 </label>
                 <input
                   id="rcs_auth_token"
@@ -1086,7 +1083,7 @@ export default function SettingsPage() {
                   className="workspace-input w-full font-mono"
                 />
                 <p className="text-sm text-gray-500 mt-1">
-                  Test Connection checks this token against the RCS template API without saving it.
+                  Test connection checks this token against the RCS template API without saving it.
                   After a successful test, save it to use for whitelisting. A Lounge session cookie is not an RCS bearer token.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
@@ -1105,9 +1102,9 @@ export default function SettingsPage() {
             <div className="mt-6 p-4 rounded-xl border border-gray-200 bg-gray-50/70 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h4 className="text-sm font-semibold text-gray-900 flex flex-wrap items-center gap-2">
-                    <span>RCS Routing Identifiers</span>
-                    <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  <h4 className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-2">
+                    <span>RCS routing identifiers</span>
+                    <span className="px-2 py-0.5 rounded-lg text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
                       Account routing
                     </span>
                   </h4>
@@ -1118,7 +1115,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setEditPermanent((prev) => !prev)}
-                  className="px-2.5 py-1 text-sm font-semibold text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition"
+                  className="px-2.5 py-1 text-sm font-medium text-gray-600 hover:text-gray-900 bg-white border border-gray-200 rounded-lg shadow-2xs transition-colors"
                 >
                   {editPermanent ? 'Done' : 'Edit identifiers'}
                 </button>
@@ -1127,30 +1124,30 @@ export default function SettingsPage() {
               {!editPermanent ? (
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
-                    <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                      <div className="text-sm font-semibold text-gray-500 ">
-                        {selectedAccount === 'apparel' ? 'RCS bot IDs (10 configured)' : 'RCS Bot ID'}
+                    <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                      <div className="text-sm font-medium text-gray-500 ">
+                        {selectedAccount === 'apparel' ? 'RCS bot IDs (10 configured)' : 'RCS bot ID'}
                       </div>
-                      <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{rcsBotId || 'Not configured'}</div>
+                      <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{rcsBotId || 'Not configured'}</div>
                       <div className="text-sm text-gray-500 font-medium mt-0.5">Configured brand bot</div>
                     </div>
-                    <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                      <div className="text-sm font-semibold text-gray-500 ">Karix ESME Address</div>
-                      <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
+                    <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                      <div className="text-sm font-medium text-gray-500 ">Karix ESME address</div>
+                      <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{esmeaddr || 'Not configured'}</div>
                       <div className="text-sm text-gray-500 font-medium mt-0.5">ESME routing address</div>
                     </div>
-                    <div className="p-2.5 bg-white rounded-lg border border-gray-200 shadow-2xs">
-                      <div className="text-sm font-semibold text-gray-500 ">DLT Principal Entity ID</div>
-                      <div className="text-sm font-mono font-semibold text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
+                    <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs">
+                      <div className="text-sm font-medium text-gray-500 ">DLT principal entity ID</div>
+                      <div className="text-sm font-mono font-medium text-gray-900 mt-0.5 truncate">{entityId || 'Not configured'}</div>
                       <div className="text-sm text-gray-500 font-medium mt-0.5">Provider-issued entity ID</div>
                     </div>
                   </div>
                   {selectedAccount === 'apparel' && (
-                    <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs space-y-1.5 mt-2">
-                      <div className="text-sm font-semibold text-gray-500 ">
-                        All Configured Apparel RCS Sender IDs (10 Karix Bot IDs)
+                    <div className="p-3 bg-white rounded-lg border border-gray-200 shadow-2xs space-y-2 mt-2">
+                      <div className="text-sm font-medium text-gray-500 ">
+                        Configured Apparel RCS sender IDs (10 Karix bot IDs)
                       </div>
-                      <div className="flex flex-wrap gap-1.5 pt-1">
+                      <div className="flex flex-wrap gap-2 pt-1">
                         {[
                           "P7hzkqCcW3x96I6T",
                           "6aa232b4734aa52ea966d1b4",
@@ -1177,8 +1174,8 @@ export default function SettingsPage() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
                   <div>
-                    <label htmlFor="rcs_bot_id" className="block text-sm font-semibold text-gray-700  mb-1">
-                      Karix RCS Bot ID
+                    <label htmlFor="rcs_bot_id" className="block text-sm font-medium text-gray-700  mb-1">
+                      Karix RCS bot ID
                     </label>
                     <input
                       id="rcs_bot_id"
@@ -1190,8 +1187,8 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="esmeaddr" className="block text-sm font-semibold text-gray-700  mb-1">
-                      Karix ESME Address
+                    <label htmlFor="esmeaddr" className="block text-sm font-medium text-gray-700  mb-1">
+                      Karix ESME address
                     </label>
                     <input
                       id="esmeaddr"
@@ -1203,8 +1200,8 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label htmlFor="entity_id" className="block text-sm font-semibold text-gray-700  mb-1">
-                      DLT Entity ID
+                    <label htmlFor="entity_id" className="block text-sm font-medium text-gray-700  mb-1">
+                      DLT entity ID
                     </label>
                     <input
                       id="entity_id"
@@ -1224,17 +1221,17 @@ export default function SettingsPage() {
         {/* Action Buttons */}
         {!isSms && <div className="flex flex-col items-stretch gap-4 pt-4 border-t border-gray-200">
           <div className="text-sm text-gray-500">
-            Current operator: <span className="font-semibold text-gray-600">{currentOperator}</span>
+            Current operator: <span className="font-medium text-gray-600">{currentOperator}</span>
           </div>
-          <p className="text-sm text-gray-500">Test Connection checks unsaved edits when present; otherwise it checks the saved connection. Testing does not save credentials.</p>
+          <p className="text-sm text-gray-500">Test connection checks unsaved edits when present; otherwise it checks the saved connection. Testing does not save credentials.</p>
 
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" onClick={() => { setLoadedScope(''); setSyncRevision((revision) => revision + 1); }} disabled={testing || saving || !isAssigned || loadedScope !== settingsScope} className="px-3 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Discard unsaved edits</button>
+            <button type="button" onClick={() => { setLoadedScope(''); setSyncRevision((revision) => revision + 1); }} disabled={testing || saving || !isAssigned || loadedScope !== settingsScope} className="px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">Discard unsaved edits</button>
             <button
               type="button"
               onClick={handleTest}
               disabled={testing || saving || !isAssigned || loadedScope !== settingsScope}
-              className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 sm:flex-none px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {testing ? (
                 <>
@@ -1245,7 +1242,7 @@ export default function SettingsPage() {
                   Testing...
                 </>
               ) : (
-                'Test Connection'
+                'Test connection'
               )}
             </button>
 
@@ -1253,7 +1250,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleSave}
               disabled={saving || testing || !isAssigned || loadedScope !== settingsScope}
-              className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex-1 sm:flex-none px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {saving ? (
                 <>
@@ -1264,7 +1261,7 @@ export default function SettingsPage() {
                   Saving...
                 </>
               ) : (
-                'Save Credentials'
+                'Save credentials'
               )}
             </button>
           </div>
@@ -1273,24 +1270,21 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Gemini Semantic Decision Engine */}
+      {/* Gemini semantic checks */}
       {currentUser?.role === 'superadmin' && <div className="bg-white rounded-xl border border-gray-200 shadow-xs p-6 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">Gemini Semantic Decision Engine</h3>
+            <h3 className="text-sm font-medium text-gray-900">Gemini semantic checks</h3>
             <p className="text-sm text-gray-500 mt-1">
               Uses Google Gemini for semantic checks on identified components: category, language,
               template completeness, and rejecting internal workflow identifiers (like ticket keys and sheet names) from customer headings.
             </p>
           </div>
-          <span className="shrink-0 px-2 py-1 rounded-md bg-violet-50 text-violet-700 text-sm font-semibold uppercase tracking-wide">
-            AI-assisted
-          </span>
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex-1">
-            <label htmlFor="gemini_api_key" className="block text-sm font-semibold text-gray-700  mb-1">
-              Google AI Studio API Key
+            <label htmlFor="gemini_api_key" className="block text-sm font-medium text-gray-700  mb-1">
+              Google AI Studio API key
             </label>
             <input
               id="gemini_api_key"
@@ -1306,11 +1300,11 @@ export default function SettingsPage() {
               type="button"
               onClick={handleTestGemini}
               disabled={geminiTesting || saving || !geminiApiKey.trim()}
-              className="w-full sm:w-auto px-4 py-2 bg-violet-100 hover:bg-violet-200 text-violet-800 text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+              className="w-full sm:w-auto px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
             >
               {geminiTesting ? 'Testing...' : 'Test Gemini'}
             </button>
-            <button type="button" onClick={handleSaveGemini} disabled={saving || geminiTesting || !isAssigned || !geminiApiKey.trim()} className="ml-2 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-semibold disabled:opacity-50">
+            <button type="button" onClick={handleSaveGemini} disabled={saving || geminiTesting || !isAssigned || !geminiApiKey.trim()} className="ml-2 px-4 py-2 rounded-lg bg-gray-600 text-white text-sm font-medium disabled:opacity-50">
               {saving ? 'Saving...' : 'Save Gemini key'}
             </button>
           </div>
@@ -1322,7 +1316,7 @@ export default function SettingsPage() {
       </div>}
       </>}
       <details className="rounded-2xl border border-gray-200 bg-white p-6">
-        <summary className="cursor-pointer text-sm font-semibold text-gray-900">Team &amp; administration</summary>
+        <summary className="cursor-pointer text-sm font-medium text-gray-900">Team &amp; administration</summary>
         <div className="pt-5 space-y-4">
         {!isTenantLocked && (
           <button
@@ -1330,37 +1324,37 @@ export default function SettingsPage() {
               setShowAddModal(true);
               setCreateError(null);
             }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors self-start sm:self-auto"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors self-start sm:self-auto"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
             </svg>
-            Add New Account
+            Add account
           </button>
         )}
           {!isTenantLocked && isCustomAccount && selectedAccountItem && (
-            <button type="button" onClick={() => setAccountToDelete({ id: selectedAccountItem.id, name: selectedAccountItem.name })} className="rounded-lg border border-red-200 px-3.5 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">
+            <button type="button" onClick={() => setAccountToDelete({ id: selectedAccountItem.id, name: selectedAccountItem.name })} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50">
               Delete {accountTitle} account
             </button>
           )}
           <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-gray-100">
           <div>
-            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+            <h3 className="text-sm font-medium text-gray-900 flex items-center gap-2">
               <span>Organization team</span>
-              <span className="px-2 py-0.5 rounded-full text-sm font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                {teamMembers.length} Members
+              <span className="text-sm font-mono font-normal text-gray-500">
+                {teamMembers.length} members
               </span>
             </h3>
             <p className="text-sm text-gray-500 mt-0.5">
-              Team accounts registered for <strong>{teamTenant ? getAccountLabel(teamTenant) : 'all organizations'}</strong>.
+              Team accounts registered for <strong className="font-medium">{teamTenant ? getAccountLabel(teamTenant) : 'all organizations'}</strong>.
             </p>
           </div>
           {canManageTeam && Boolean(teamTenant) && (
             <button
               type="button"
               onClick={() => setShowInviteModal(true)}
-              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold shadow-2xs transition flex items-center gap-1.5"
+              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium shadow-2xs transition-colors flex items-center gap-2"
             >
               <span>Add colleague</span>
             </button>
@@ -1376,29 +1370,20 @@ export default function SettingsPage() {
             {teamMembers.map((member) => (
               <div
                 key={member.id || member.email}
-                className="p-3.5 rounded-xl border border-gray-200 bg-gray-50/50 flex items-start gap-3 hover:bg-white hover:border-blue-300 transition"
+                className="p-4 rounded-xl border border-gray-200 bg-gray-50/50 flex items-start gap-3 hover:bg-white hover:border-gray-300 transition-colors"
               >
-                <div className="w-8 h-8 rounded-full bg-indigo-600 text-white font-semibold text-sm flex items-center justify-center shrink-0 shadow-2xs">
-                  {(member.name || member.email || 'U').charAt(0).toUpperCase()}
-                </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center justify-between gap-3 gap-1">
-                    <h4 className="text-sm font-semibold text-gray-900 truncate">{member.name}</h4>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h4 className="text-sm font-medium text-gray-900 truncate">{member.name}</h4>
                     <span
-                      className={`px-1.5 py-0.5 rounded text-sm font-semibold uppercase font-mono ${
-                        member.role === 'superadmin'
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : member.role === 'admin'
-                          ? 'bg-purple-100 text-purple-800'
-                          : 'bg-blue-100 text-blue-800'
-                      }`}
+                      className="px-2 py-1 rounded text-sm font-mono text-gray-600 bg-gray-100"
                     >
                       {member.role || 'Operator'}
                     </span>
                   </div>
                   <p className="text-sm text-gray-500 font-mono truncate">{member.email}</p>
                   <div className="mt-1 flex flex-wrap items-center justify-between gap-3 text-sm text-gray-500">
-                    <span className="font-semibold text-gray-600">{getAccountLabel(member.tenant_id)}</span>
+                    <span className="font-medium text-gray-600">{getAccountLabel(member.tenant_id)}</span>
                   </div>
                 </div>
               </div>
@@ -1410,12 +1395,12 @@ export default function SettingsPage() {
           <section className="border-t border-gray-100 pt-4 space-y-3" aria-labelledby="access-requests-heading">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h4 id="access-requests-heading" className="text-sm font-semibold text-gray-900">Pending access requests</h4>
+                <h4 id="access-requests-heading" className="text-sm font-medium text-gray-900">Pending access requests</h4>
                 <p className="text-sm text-gray-500">Approval grants operator access only to the requested organization.</p>
               </div>
               {currentUser?.role === 'superadmin' && (
                 <div>
-                  <label htmlFor="access-request-filter" className="block text-sm font-semibold text-gray-600 mb-1">Requested organization</label>
+                  <label htmlFor="access-request-filter" className="block text-sm font-medium text-gray-600 mb-1">Requested organization</label>
                   <select id="access-request-filter" value={requestFilter} disabled={Boolean(approvingUserId)} onChange={(e) => setRequestFilter(e.target.value as RequestedTenant | '')} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
                     <option value="">All organizations</option>
                     <option value="bajaj">Bajaj Finserv</option>
@@ -1433,13 +1418,13 @@ export default function SettingsPage() {
             ) : (
               <div className="space-y-2">
                 {pendingRequests.map((applicant) => (
-                  <div key={applicant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50/50 p-3">
+                  <div key={applicant.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50/50 p-3">
                     <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">{applicant.name}</p>
+                      <p className="text-sm font-medium text-gray-900">{applicant.name}</p>
                       <p className="text-sm text-gray-600 break-all">{applicant.email}</p>
-                      <p className="text-sm text-blue-700 mt-1">Requested: {getAccountLabel(applicant.requested_tenant_id || '')}</p>
+                      <p className="text-sm text-gray-700 mt-1">Requested: {getAccountLabel(applicant.requested_tenant_id || '')}</p>
                     </div>
-                    <button type="button" disabled={Boolean(approvingUserId)} onClick={() => handleApprove(applicant)} aria-label={`Approve ${applicant.name || applicant.email} for ${getAccountLabel(applicant.requested_tenant_id || '')}`} className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 px-3.5 py-2 text-sm font-semibold text-white">
+                    <button type="button" disabled={Boolean(approvingUserId)} onClick={() => handleApprove(applicant)} aria-label={`Approve ${applicant.name || applicant.email} for ${getAccountLabel(applicant.requested_tenant_id || '')}`} className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 px-4 py-2 text-sm font-medium text-white">
                       {approvingUserId === applicant.id ? 'Approving...' : 'Approve'}
                     </button>
                   </div>
@@ -1454,11 +1439,11 @@ export default function SettingsPage() {
 
       {/* Invite Modal */}
       {showInviteModal && canManageTeam && teamTenant && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div role="dialog" aria-label="Add team colleague" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-base font-semibold text-gray-900">Add Team Colleague</h3>
-              <button type="button" aria-label="Close colleague dialog" onClick={() => setShowInviteModal(false)} className="text-gray-500 hover:text-gray-600 font-semibold">
+              <h3 className="text-base font-medium text-gray-900">Add colleague</h3>
+              <button type="button" aria-label="Close colleague dialog" onClick={() => setShowInviteModal(false)} className="text-gray-500 hover:text-gray-600 font-medium">
                 &times;
               </button>
             </div>
@@ -1490,8 +1475,8 @@ export default function SettingsPage() {
               className="space-y-3"
             >
               <div>
-                <label htmlFor="invite-name" className="block text-sm font-semibold text-gray-700  mb-1">
-                  Full Name <span className="text-red-500">*</span>
+                <label htmlFor="invite-name" className="block text-sm font-medium text-gray-700  mb-1">
+                  Full name <span className="text-red-500">*</span>
                 </label>
                 <input id="invite-name"
                   type="text"
@@ -1503,8 +1488,8 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
-                <label htmlFor="invite-email" className="block text-sm font-semibold text-gray-700  mb-1">
-                  Work Email <span className="text-red-500">*</span>
+                <label htmlFor="invite-email" className="block text-sm font-medium text-gray-700  mb-1">
+                  Work email <span className="text-red-500">*</span>
                 </label>
                 <input id="invite-email"
                   type="email"
@@ -1516,8 +1501,8 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
-                <label htmlFor="invite-password" className="block text-sm font-semibold text-gray-700  mb-1">
-                  Initial Password <span className="text-red-500">*</span>
+                <label htmlFor="invite-password" className="block text-sm font-medium text-gray-700  mb-1">
+                  Initial password <span className="text-red-500">*</span>
                 </label>
                 <input id="invite-password"
                   type="password"
@@ -1531,7 +1516,7 @@ export default function SettingsPage() {
                 />
               </div>
               <div>
-                <label htmlFor="invite-role" className="block text-sm font-semibold text-gray-700  mb-1">
+                <label htmlFor="invite-role" className="block text-sm font-medium text-gray-700  mb-1">
                   Role
                 </label>
                 <select id="invite-role"
@@ -1539,24 +1524,24 @@ export default function SettingsPage() {
                   onChange={(e) => setInviteRole(e.target.value)}
                   className="workspace-input w-full"
                 >
-                  <option value="operator">Operator (Preview, Submit, Poll)</option>
-                  <option value="admin">Admin (Manage Team & Credentials)</option>
+                  <option value="operator">Operator (preview, submit, poll)</option>
+                  <option value="admin">Admin (manage team and credentials)</option>
                 </select>
               </div>
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowInviteModal(false)}
-                  className="px-3.5 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
+                  className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={inviting}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-semibold"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg text-sm font-medium"
                 >
-                  {inviting ? 'Creating...' : 'Create Account'}
+                  {inviting ? 'Creating...' : 'Create account'}
                 </button>
               </div>
             </form>
@@ -1567,15 +1552,15 @@ export default function SettingsPage() {
 
       {/* Add Account Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div role="dialog" aria-label="Add client account" className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-md w-full p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h3 className="text-base font-semibold text-gray-900">Add New Client Account</h3>
+              <h3 className="text-base font-medium text-gray-900">Add client account</h3>
               <button
                 type="button"
                 aria-label="Close account dialog"
                 onClick={() => setShowAddModal(false)}
-                className="text-gray-500 hover:text-gray-600 font-semibold"
+                className="text-gray-500 hover:text-gray-600 font-medium"
               >
                 &times;
               </button>
@@ -1587,8 +1572,8 @@ export default function SettingsPage() {
 
             <form onSubmit={handleCreateAccount} className="space-y-4">
               <div>
-                <label htmlFor="account-name" className="block text-sm font-semibold text-gray-700  mb-1">
-                  Account Display Name <span className="text-red-500">*</span>
+                <label htmlFor="account-name" className="block text-sm font-medium text-gray-700  mb-1">
+                  Account display name <span className="text-red-500">*</span>
                 </label>
                 <input id="account-name"
                   type="text"
@@ -1601,8 +1586,8 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label htmlFor="account-slug" className="block text-sm font-semibold text-gray-700  mb-1">
-                  Account Identifier Slug <span className="text-gray-500 font-normal">(Optional)</span>
+                <label htmlFor="account-slug" className="block text-sm font-medium text-gray-700  mb-1">
+                  Account identifier <span className="text-gray-500 font-normal">(optional)</span>
                 </label>
                 <input id="account-slug"
                   type="text"
@@ -1623,16 +1608,16 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors"
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={creatingAccount || !newAccountName.trim()}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
-                  {creatingAccount ? 'Creating...' : 'Create Account'}
+                  {creatingAccount ? 'Creating...' : 'Create account'}
                 </button>
               </div>
             </form>
@@ -1642,22 +1627,20 @@ export default function SettingsPage() {
 
       {/* Delete Confirmation Modal */}
       {accountToDelete && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-h-[90dvh] overflow-y-auto max-w-sm w-full p-6 shadow-sm border border-gray-100 space-y-4">
             <div className="flex items-center gap-3 text-red-600">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5 text-red-600" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-              </div>
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6m4-6v6" />
+              </svg>
               <div>
-                <h3 className="text-base font-semibold text-gray-900">Delete Account?</h3>
+                <h3 className="text-base font-medium text-gray-900">Delete account?</h3>
                 <p className="text-sm text-gray-500">This action cannot be undone.</p>
               </div>
             </div>
 
             <p className="text-sm text-gray-600 leading-relaxed">
-              Are you sure you want to delete <span className="font-semibold text-gray-900">&quot;{accountToDelete.name}&quot;</span>? All saved WABA tokens, IDs, and configurations for this brand will be removed.
+              Are you sure you want to delete <span className="font-medium text-gray-900">&quot;{accountToDelete.name}&quot;</span>? All saved WABA tokens, IDs, and configurations for this brand will be removed.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2">
@@ -1665,7 +1648,7 @@ export default function SettingsPage() {
                 type="button"
                 onClick={() => setAccountToDelete(null)}
                 disabled={deleting}
-                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-semibold rounded-lg transition-colors"
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium rounded-lg transition-colors"
               >
                 Cancel
               </button>
@@ -1673,9 +1656,9 @@ export default function SettingsPage() {
                 type="button"
                 onClick={handleConfirmDelete}
                 disabled={deleting}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
               >
-                {deleting ? 'Deleting...' : 'Delete Account'}
+                {deleting ? 'Deleting...' : 'Delete account'}
               </button>
             </div>
           </div>

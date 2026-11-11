@@ -93,9 +93,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return (
         <main className="min-h-screen flex items-center justify-center p-6">
           <div className="max-w-md space-y-4 rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-gray-800">
-            <h1 className="font-semibold">Session verification unavailable</h1>
+            <h1 className="font-medium">Session verification unavailable</h1>
             <p role="alert">{sessionError || 'The service could not verify your session. Your sign-in is retained, and protected workspace data stays hidden until verification succeeds.'}</p>
-            <button type="button" onClick={() => { void retrySession(); }} disabled={retryingSession} className="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">
+            <button type="button" onClick={() => { void retrySession(); }} disabled={retryingSession} className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white disabled:opacity-50">
               {retryingSession ? 'Checking your session...' : 'Retry session verification'}
             </button>
           </div>
@@ -126,7 +126,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     key={path}
                     className={`group inline-flex items-center gap-2 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
                       isActive
-                        ? 'border-blue-600 text-blue-700 font-semibold'
+                        ? 'border-blue-600 text-gray-900 font-medium'
                         : 'border-transparent text-gray-500 hover:text-gray-900 hover:bg-gray-50'
                     }`}
                   >

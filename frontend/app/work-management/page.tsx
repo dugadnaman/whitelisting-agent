@@ -359,9 +359,9 @@ export default function WorkManagementPage() {
       });
       const wa = res.whatsapp_result;
       if (wa?.delivered) {
-        alert(`✅ WhatsApp message delivered to "${wa.recipient || whatsappGroupName}"! Check your group.`);
+        alert(`WhatsApp message delivered to "${wa.recipient || whatsappGroupName}". Check your group.`);
       } else {
-        alert(`⚠️ WhatsApp delivery failed: ${wa?.error || wa?.message || 'Gateway unreachable'}`);
+        alert(`WhatsApp delivery failed: ${wa?.error || wa?.message || 'Gateway unreachable'}`);
       }
     } catch (err: unknown) {
       alert(`Failed to send test message: ${err instanceof Error ? err.message : String(err)}`);
@@ -470,8 +470,8 @@ export default function WorkManagementPage() {
         force: forceOffSchedule,
       });
 
-      let summary = `${dryRun ? 'Dry Run' : 'Dispatch'} Complete!\nStage: ${res.stage}\n\n`;
-      summary += `🔒 Jira is strictly read-only: zero comments or updates posted to Jira.\n`;
+      let summary = `${dryRun ? 'Dry run' : 'Dispatch'} complete\nStage: ${res.stage}\n\n`;
+      summary += `Jira is strictly read-only: zero comments or updates posted to Jira.\n`;
       if (sendGoogleChat) {
         const chat = res.google_chat_result;
         const status = chat?.simulated
@@ -481,10 +481,10 @@ export default function WorkManagementPage() {
           : chat?.delivered
           ? 'Card posted to Google Chat Space'
           : chat?.error || chat?.message || 'Not delivered';
-        summary += `• 💬 Google Chat: ${status}\n`;
+        summary += `Google Chat: ${status}\n`;
       }
       if (sendDirectEmail) {
-        summary += `• ✉️ Direct Outbound Email: ${res.real_sent_count} sent, ${res.failed_count} failed\n`;
+        summary += `Direct outbound email: ${res.real_sent_count} sent, ${res.failed_count} failed\n`;
       }
       if (sendWhatsApp) {
         const wa = res.whatsapp_result;
@@ -493,7 +493,7 @@ export default function WorkManagementPage() {
           : wa?.delivered
           ? `Delivered to WhatsApp group (${wa.recipient || whatsappGroupName})`
           : wa?.error || wa?.message || 'Not delivered';
-        summary += `• 📱 WhatsApp Group: ${status}\n`;
+        summary += `WhatsApp group: ${status}\n`;
       }
       alert(summary);
       setShowAlertModal(false);
@@ -604,11 +604,11 @@ export default function WorkManagementPage() {
       setHandoverNote('');
       await handleRefresh();
       if (!syncToJira) {
-        alert(`✅ Ticket ${transferItem.key} reassigned to ${res.assignee_name} in Agent (Jira Cloud update skipped).`);
+        alert(`Ticket ${transferItem.key} reassigned to ${res.assignee_name} in Agent (Jira Cloud update skipped).`);
       } else if (res?.virtual_assignment) {
-        alert(`✅ Ticket ${transferItem.key} operationally assigned to ${res.assignee_name} (Jira seat not required).`);
+        alert(`Ticket ${transferItem.key} operationally assigned to ${res.assignee_name} (Jira seat not required).`);
       } else {
-        alert(`✅ Ticket ${transferItem.key} successfully transferred in Jira Cloud!`);
+        alert(`Ticket ${transferItem.key} transferred in Jira Cloud.`);
       }
     } catch (err: unknown) {
       alert(`Transfer failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -637,10 +637,10 @@ export default function WorkManagementPage() {
   };
 
   const channelBadges: Record<string, string> = {
-    WhatsApp: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    RCS: 'bg-purple-50 text-purple-700 border-purple-200',
-    SMS: 'bg-amber-50 text-amber-700 border-amber-200',
-    Email: 'bg-blue-50 text-blue-700 border-blue-200',
+    WhatsApp: 'bg-gray-50 text-gray-700 border-gray-200',
+    RCS: 'bg-gray-50 text-gray-700 border-gray-200',
+    SMS: 'bg-gray-50 text-gray-700 border-gray-200',
+    Email: 'bg-gray-50 text-gray-700 border-gray-200',
     General: 'bg-gray-100 text-gray-700 border-gray-200',
   };
 
@@ -700,13 +700,13 @@ export default function WorkManagementPage() {
   };
 
   return (
-    <div className="workspace-page min-w-0 space-y-6 max-w-7xl mx-auto pb-16">
+    <div className="workspace-page min-w-0 tabular-nums space-y-6 pb-16">
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-gray-200 pb-6">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="workspace-heading">Jira Work Management & Dispatcher</h1>
-            <span className="inline-flex flex-wrap items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <h1 className="workspace-heading">Jira work management</h1>
+            <span className="inline-flex flex-wrap items-center gap-2 px-2.5 py-0.5 rounded-md text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
               <span className="w-2 h-2 rounded-full bg-emerald-500 " />
               Jira Project: {selectedProject}
             </span>
@@ -718,7 +718,7 @@ export default function WorkManagementPage() {
 
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex flex-wrap min-w-0 max-w-full items-center gap-2">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Project:</label>
+            <label className="text-sm font-medium text-gray-500  ">Project:</label>
             <select
               value={selectedProject}
               aria-label="Jira project scope"
@@ -740,11 +740,11 @@ export default function WorkManagementPage() {
             className="workspace-button-primary"
           >
             <svg
-              className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`}
+              className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.5"
+              strokeWidth="1.5"
             >
               <polyline points="23 4 23 10 17 10" />
               <polyline points="1 20 1 14 7 14" />
@@ -761,7 +761,7 @@ export default function WorkManagementPage() {
             
             <span>{assigningUnassigned ? 'Assigning to Neel...' : 'Assign Unassigned to Neel'}</span>
             {data?.unassigned_count ? (
-              <span className="text-xs bg-amber-600 text-white px-1.5 py-0.5 rounded-full font-semibold">
+              <span className="text-sm bg-amber-600 text-white px-1.5 py-0.5 rounded-md font-medium">
                 {data.unassigned_count}
               </span>
             ) : null}
@@ -772,8 +772,8 @@ export default function WorkManagementPage() {
             title="Dispatch 10:00 AM, 1:00 PM, or 4:00 PM SLA Due Today Email Reminders"
           >
             
-            <span>Daily SLA Reminders</span>
-            <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded-full font-semibold">
+            <span>Daily SLA reminders</span>
+            <span className="text-sm bg-white/20 px-1.5 py-0.5 rounded-md font-medium">
               10am • 1pm • 4pm
             </span>
           </button>
@@ -785,9 +785,9 @@ export default function WorkManagementPage() {
         <button
           onClick={() => setActiveTab('OPERATIONS')}
           aria-pressed={activeTab === 'OPERATIONS'}
-          className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex flex-wrap items-center gap-2 ${
+          className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex flex-wrap items-center gap-2 ${
             activeTab === 'OPERATIONS'
-              ? 'bg-gray-900 text-white shadow-sm'
+              ? 'bg-gray-900 text-white '
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
           }`}
         >
@@ -796,22 +796,22 @@ export default function WorkManagementPage() {
         <button
           onClick={() => setActiveTab('ANALYTICS')}
           aria-pressed={activeTab === 'ANALYTICS'}
-          className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors flex flex-wrap items-center gap-2 ${
+          className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex flex-wrap items-center gap-2 ${
             activeTab === 'ANALYTICS'
-              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100'
+              ? 'bg-indigo-600 text-white  '
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
           }`}
         >
           Turnaround & bottlenecks
-          <span className="text-xs bg-white/20 px-1.5 py-0.5 rounded-full font-semibold">
-            SLA View
+          <span className="text-sm bg-white/20 px-1.5 py-0.5 rounded-md font-medium">
+            SLA view
           </span>
         </button>
       </div>
       {error && (
-        <div role="alert" className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex flex-wrap items-center gap-3">
+        <div role="alert" className="p-4 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 flex flex-wrap items-center gap-3">
           <svg className="w-5 h-5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <div className="flex-1">{error}</div>
         </div>
@@ -852,22 +852,22 @@ export default function WorkManagementPage() {
             <div className="workspace-panel p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-red-500/20 text-red-700 border border-red-500/30 flex flex-wrap items-center gap-1.5">
+                  <span className="px-2.5 py-0.5 rounded-md text-sm font-medium   bg-red-500/20 text-red-700 border border-red-500/30 flex flex-wrap items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-red-400 " />
                     Overdue briefs: {data?.timeline_counts.OVERDUE ?? '—'}
                   </span>
-                  <span className="text-xs font-medium text-gray-600">
-                    Project: <span className="font-semibold text-gray-900">{selectedProject}</span>
+                  <span className="text-sm font-medium text-gray-600">
+                    Project: <span className="font-medium text-gray-900">{selectedProject}</span>
                   </span>
-                  <span className="text-xs text-gray-500">•</span>
-                  <span className="text-xs text-indigo-700 font-medium">
+                  <span className="text-sm text-gray-500">•</span>
+                  <span className="text-sm text-gray-700 font-medium">
                     Evaluated against Tata Capital & Karix Carrier SLA thresholds
                   </span>
                 </div>
-                <h2 className="text-lg font-semibold text-gray-900 tracking-tight">
+                <h2 className="text-lg font-medium text-gray-900 ">
                   Turnaround & bottleneck attribution
                 </h2>
-                <p className="text-xs text-gray-600 max-w-2xl leading-relaxed">
+                <p className="text-sm text-gray-600 max-w-2xl leading-relaxed">
                   Real-time cycle time auditing from brief creation to Done. Isolates client-side data mart dependencies from carrier whitelisting latency and internal operations queues.
                 </p>
               </div>
@@ -875,12 +875,12 @@ export default function WorkManagementPage() {
               <div className="flex flex-wrap items-center gap-2 self-start md:self-center shrink-0">
                 <button
                   onClick={handleExportSlaCsv}
-                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 inline-flex flex-wrap items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl shadow-md transition-colors "
+                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 inline-flex flex-wrap items-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm rounded-lg  transition-colors "
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
-                  Export SLA Report (CSV)
+                  Export SLA report (CSV)
                 </button>
               </div>
             </div>
@@ -888,79 +888,79 @@ export default function WorkManagementPage() {
             {/* 2. Executive 3-Number Metric Strip */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Metric 1: Avg Turnaround Velocity */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm  transition-colors flex flex-col justify-between relative overflow-hidden">
+              <div className="bg-white border border-gray-200 rounded-xl p-5   transition-colors flex flex-col justify-between relative overflow-hidden">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Metric 1 • Turnaround Velocity
+                    <span className="text-sm font-medium   text-gray-500">
+                      Average turnaround
                     </span>
-                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className="px-2 py-0.5 rounded text-sm font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                        Record: {fastestHours}h
                     </span>
                   </div>
-                  <div className="text-3xl font-semibold text-gray-900 mt-2 flex items-baseline gap-1.5">
-                    {analyticsData.team_avg_cycle_time_days} <span className="text-sm font-semibold text-gray-500">Days</span>
-                    <span className="text-xs text-gray-500 font-normal">({analyticsData.team_avg_cycle_time_hours} hrs)</span>
+                  <div className="text-3xl font-medium text-gray-900 mt-2 flex items-baseline gap-2">
+                    {analyticsData.team_avg_cycle_time_days} <span className="text-sm font-medium text-gray-500">Days</span>
+                    <span className="text-sm text-gray-500 font-normal">({analyticsData.team_avg_cycle_time_hours} hrs)</span>
                   </div>
-                  <p className="text-xs text-gray-600 mt-1 font-medium">
+                  <p className="text-sm text-gray-600 mt-1 font-medium">
                     Average duration from brief submission to Done / Approved.
                   </p>
                 </div>
-                <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                  <span className="text-gray-500 font-medium">Delivered Briefs:</span>
-                  <span className="font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-sm">
+                  <span className="text-gray-500 font-medium">Delivered briefs:</span>
+                  <span className="font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
                     {analyticsData.completed_count} Completed
                   </span>
                 </div>
               </div>
 
               {/* Metric 2: Primary Bottleneck Driver */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm  transition-colors flex flex-col justify-between relative overflow-hidden">
+              <div className="bg-white border border-gray-200 rounded-xl p-5   transition-colors flex flex-col justify-between relative overflow-hidden">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Metric 2 • Bottleneck Driver
+                    <span className="text-sm font-medium   text-gray-500">
+                      Client dependencies
                     </span>
-                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                      Client-Side Hold
+                    <span className="px-2 py-0.5 rounded text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
+                      Client-side hold
                     </span>
                   </div>
-                  <div className="text-3xl font-semibold text-blue-950 mt-2">
+                  <div className="text-3xl font-medium text-gray-950 mt-2">
                     {analyticsData.roadblock_attribution.tata_capital.percentage}%
                   </div>
-                  <p className="text-xs text-blue-700 mt-1 font-medium">
+                  <p className="text-sm text-gray-700 mt-1 font-medium">
                     {analyticsData.roadblock_attribution.tata_capital.count} tickets waiting on Tata Capital audience mart & approvals.
                   </p>
                 </div>
-                <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                  <span className="text-gray-500 font-medium">Carrier / Meta Gate:</span>
-                  <span className="font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-sm">
+                  <span className="text-gray-500 font-medium">Carrier / Meta gate:</span>
+                  <span className="font-medium text-gray-700 bg-gray-50 px-2 py-0.5 rounded border border-gray-100">
                     {analyticsData.roadblock_attribution.karix_meta.percentage}% ({analyticsData.roadblock_attribution.karix_meta.count} briefs)
                   </span>
                 </div>
               </div>
 
               {/* Metric 3: Active Capacity & Internal Attributics Queue */}
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm  transition-colors flex flex-col justify-between relative overflow-hidden">
+              <div className="bg-white border border-gray-200 rounded-xl p-5   transition-colors flex flex-col justify-between relative overflow-hidden">
                 <div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                      Metric 3 • Internal Attributics Ops
+                    <span className="text-sm font-medium   text-gray-500">
+                      Internal operations
                     </span>
-                    <span className="px-2 py-0.5 rounded text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                    <span className="px-2 py-0.5 rounded text-sm font-medium bg-amber-50 text-amber-700 border border-amber-200">
                       Queue: {analyticsData.roadblock_attribution.attributics.percentage}%
                     </span>
                   </div>
-                  <div className="text-3xl font-semibold text-amber-950 mt-2">
-                    {analyticsData.roadblock_attribution.attributics.count} <span className="text-sm font-semibold text-gray-500">Briefs</span>
+                  <div className="text-3xl font-medium text-amber-950 mt-2">
+                    {analyticsData.roadblock_attribution.attributics.count} <span className="text-sm font-medium text-gray-500">Briefs</span>
                   </div>
-                  <p className="text-xs text-amber-800 mt-1 font-medium">
+                  <p className="text-sm text-amber-800 mt-1 font-medium">
                     Active campaign drafting, formatting, and MoEngage setup.
                   </p>
                 </div>
-                <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-xs">
-                  <span className="text-gray-500 font-medium">Total Stalled Briefs:</span>
-                  <span className="font-semibold text-gray-900 bg-gray-100 px-2 py-0.5 rounded">
+                <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between text-sm">
+                  <span className="text-gray-500 font-medium">Total stalled briefs:</span>
+                  <span className="font-medium text-gray-900 bg-gray-100 px-2 py-0.5 rounded">
                     {analyticsData.active_roadblocks_count} Roadblocks
                   </span>
                 </div>
@@ -968,31 +968,31 @@ export default function WorkManagementPage() {
             </div>
 
             {/* 3. Interactive Blame Attribution Horizontal Stacked Bar */}
-            <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-4">
+            <div className="bg-white border border-gray-200 rounded-xl p-5  space-y-4">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-gray-100 pb-3">
                 <div>
-                  <h3 className="text-base font-semibold text-gray-900 flex flex-wrap items-center gap-2">
-                    Roadblock Attribution & Responsibility Split ({analyticsData.active_roadblocks_count} Stalled Tickets)
+                  <h3 className="text-base font-medium text-gray-900 flex flex-wrap items-center gap-2">
+                    Roadblock responsibility ({analyticsData.active_roadblocks_count} stalled tickets)
                   </h3>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-sm text-gray-500">
                     Separate client dependencies, carrier approval waits, and internal queues. Choose a category to filter stalled tickets.
                   </p>
                 </div>
                 {analyticsRoadblockFilter !== 'ALL' && (
                   <button
                     onClick={() => setAnalyticsRoadblockFilter('ALL')}
-                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-semibold text-indigo-600 hover:text-indigo-800 flex flex-wrap items-center gap-1 self-start md:self-auto"
+                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium text-gray-600 hover:text-gray-800 flex flex-wrap items-center gap-1 self-start md:self-auto"
                   >
-                    <span>✕</span> Reset Category Filter
+                    <span><svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg></span> Reset Category Filter
                   </button>
                 )}
               </div>
 
               {/* Stacked Visual Bar */}
-              <div className="w-full h-5 bg-gray-100 rounded-full overflow-hidden flex shadow-inner cursor-pointer">
+              <div className="w-full h-5 bg-gray-100 rounded-md overflow-hidden flex  cursor-pointer">
                 <div
                   onClick={() => setAnalyticsRoadblockFilter('TATA')}
-                  className={`bg-blue-600 h-full transition-colors hover:brightness-110 relative ${
+                  className={`bg-gray-800 h-full transition-colors hover:brightness-110 relative ${
                     analyticsRoadblockFilter === 'TATA' ? 'ring-2 ring-blue-900 z-10' : ''
                   }`}
                   style={{ width: `${Math.max(5, analyticsData.roadblock_attribution.tata_capital.percentage)}%` }}
@@ -1000,7 +1000,7 @@ export default function WorkManagementPage() {
                 />
                 <div
                   onClick={() => setAnalyticsRoadblockFilter('KARIX')}
-                  className={`bg-purple-500 h-full transition-colors hover:brightness-110 relative ${
+                  className={`bg-gray-500 h-full transition-colors hover:brightness-110 relative ${
                     analyticsRoadblockFilter === 'KARIX' ? 'ring-2 ring-purple-900 z-10' : ''
                   }`}
                   style={{ width: `${Math.max(5, analyticsData.roadblock_attribution.karix_meta.percentage)}%` }}
@@ -1008,7 +1008,7 @@ export default function WorkManagementPage() {
                 />
                 <div
                   onClick={() => setAnalyticsRoadblockFilter('ATTRIBUTICS')}
-                  className={`bg-amber-400 h-full transition-colors hover:brightness-110 relative ${
+                  className={`bg-gray-300 h-full transition-colors hover:brightness-110 relative ${
                     analyticsRoadblockFilter === 'ATTRIBUTICS' ? 'ring-2 ring-amber-900 z-10' : ''
                   }`}
                   style={{ width: `${Math.max(5, analyticsData.roadblock_attribution.attributics.percentage)}%` }}
@@ -1017,66 +1017,66 @@ export default function WorkManagementPage() {
               </div>
 
               {/* Clickable Legend Filter Tabs */}
-              <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+              <div className="flex flex-wrap items-center gap-2 pt-1 text-sm">
                 <button
                   onClick={() => setAnalyticsRoadblockFilter('ALL')}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-semibold transition-colors border ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-medium transition-colors border ${
                     analyticsRoadblockFilter === 'ALL'
-                      ? 'bg-gray-900 text-white border-gray-900 shadow-sm'
+                      ? 'bg-gray-900 text-white border-gray-900 '
                       : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
                   }`}
                 >
-                  All Stalled ({analyticsData.active_roadblocks_count})
+                  All stalled ({analyticsData.active_roadblocks_count})
                 </button>
                 <button
                   onClick={() => setAnalyticsRoadblockFilter('TATA')}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-semibold transition-colors flex flex-wrap items-center gap-2 border ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-medium transition-colors flex flex-wrap items-center gap-2 border ${
                     analyticsRoadblockFilter === 'TATA'
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                      : 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100'
+                      ? 'bg-blue-600 text-white border-gray-600 '
+                      : 'bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100'
                   }`}
                 >
-                  <span className="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white" />
-                  Tata Capital Client Dependencies ({analyticsData.roadblock_attribution.tata_capital.percentage}%) • {analyticsData.roadblock_attribution.tata_capital.count}
+                  <span className="w-2.5 h-2.5 rounded-full bg-gray-800 border border-white" />
+                  Tata Capital dependencies ({analyticsData.roadblock_attribution.tata_capital.percentage}%) • {analyticsData.roadblock_attribution.tata_capital.count}
                 </button>
                 <button
                   onClick={() => setAnalyticsRoadblockFilter('KARIX')}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-semibold transition-colors flex flex-wrap items-center gap-2 border ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-medium transition-colors flex flex-wrap items-center gap-2 border ${
                     analyticsRoadblockFilter === 'KARIX'
-                      ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
-                      : 'bg-purple-50 text-purple-800 border-purple-200 hover:bg-purple-100'
+                      ? 'bg-purple-600 text-white border-gray-600 '
+                      : 'bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100'
                   }`}
                 >
-                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500 border border-white" />
-                  Karix / Meta Carrier Gate ({analyticsData.roadblock_attribution.karix_meta.percentage}%) • {analyticsData.roadblock_attribution.karix_meta.count}
+                  <span className="w-2.5 h-2.5 rounded-full bg-gray-500 border border-white" />
+                  Karix / Meta review ({analyticsData.roadblock_attribution.karix_meta.percentage}%) • {analyticsData.roadblock_attribution.karix_meta.count}
                 </button>
                 <button
                   onClick={() => setAnalyticsRoadblockFilter('ATTRIBUTICS')}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-semibold transition-colors flex flex-wrap items-center gap-2 border ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg font-medium transition-colors flex flex-wrap items-center gap-2 border ${
                     analyticsRoadblockFilter === 'ATTRIBUTICS'
-                      ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                      ? 'bg-amber-600 text-white border-amber-600 '
                       : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
                   }`}
                 >
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 border border-white" />
-                  Attributics Internal Queue ({analyticsData.roadblock_attribution.attributics.percentage}%) • {analyticsData.roadblock_attribution.attributics.count}
+                  <span className="w-2.5 h-2.5 rounded-full bg-gray-300 border border-white" />
+                  Attributics queue ({analyticsData.roadblock_attribution.attributics.percentage}%) • {analyticsData.roadblock_attribution.attributics.count}
                 </button>
               </div>
 
               {/* Granular Root-Cause Breakdown Chips */}
               {Object.keys(analyticsData.roadblock_attribution.reasons_breakdown || {}).length > 0 && (
                 <div className="pt-2 border-t border-gray-100">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 block mb-2">
-                    Primary Roadblock Reasons Diagnosed:
+                  <span className="text-sm font-medium   text-gray-500 block mb-2">
+                    Roadblock reasons:
                   </span>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-2">
                     {Object.entries(analyticsData.roadblock_attribution.reasons_breakdown).map(([cause, cnt]) => (
                       <span
                         key={cause}
-                        className="px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200 flex flex-wrap items-center gap-1.5"
+                        className="px-2.5 py-1 rounded-md text-sm font-medium bg-gray-100 text-gray-700 border border-gray-200 flex flex-wrap items-center gap-2"
                       >
                         <span className="truncate max-w-xs">{cause}</span>
-                        <span className="px-1.5 py-0.2 rounded-full text-xs font-semibold bg-white text-gray-900 shadow-xs">
+                        <span className="px-1.5 py-0.5 rounded-md text-sm font-medium bg-white text-gray-900 ">
                           {cnt}
                         </span>
                       </span>
@@ -1087,24 +1087,24 @@ export default function WorkManagementPage() {
             </div>
 
             {/* 4. Operator Turnaround Velocity Leaderboard */}
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden ">
               <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-base font-semibold text-gray-900 flex flex-wrap items-center gap-2">
+                  <h3 className="text-base font-medium text-gray-900 flex flex-wrap items-center gap-2">
                     Operator turnaround ({selectedProject})
                   </h3>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-sm text-gray-500">
                     Measures end-to-end execution speed from brief intake to final deployment across core team members and interns.
                   </p>
                 </div>
                 {analyticsSelectedOperator && (
-                  <span className="inline-flex flex-wrap items-center gap-1.5 bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-lg border border-indigo-200">
-                    Filtered by Operator: {analyticsSelectedOperator}
+                  <span className="inline-flex flex-wrap items-center gap-2 bg-gray-50 text-gray-700 text-sm font-medium px-2.5 py-1 rounded-lg border border-gray-200">
+                    Operator: {analyticsSelectedOperator}
                     <button
                       onClick={() => setAnalyticsSelectedOperator(null)}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 hover:text-indigo-900 font-semibold ml-1"
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 hover:text-gray-900 font-medium ml-1"
                     >
-                      ✕
+                      <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
                     </button>
                   </span>
                 )}
@@ -1112,18 +1112,18 @@ export default function WorkManagementPage() {
 
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="bg-gray-50/80 text-gray-500 font-semibold uppercase text-xs border-b border-gray-200">
+                  <thead className="bg-gray-50/80 text-gray-500 font-medium  text-sm border-b border-gray-200">
                     <tr>
-                      <th className="py-3 px-4">Operator</th>
-                      <th className="py-3 px-3">Role</th>
-                      <th className="py-3 px-3 text-emerald-700">Completed (Done)</th>
-                      <th className="py-3 px-4">Cycle Time Benchmark</th>
-                      <th className="py-3 px-3">Avg (Days)</th>
-                      <th className="py-3 px-3">Avg (Hours)</th>
-                      <th className="py-3 px-3 text-emerald-600">Fastest Record</th>
-                      <th className="py-3 px-3 text-gray-500">Slowest Record</th>
-                      <th className="py-3 px-3 text-center">Velocity Rating</th>
-                      <th className="py-3 px-4 text-right">Action</th>
+                      <th className="font-medium py-3 px-4">Operator</th>
+                      <th className="font-medium py-3 px-3">Role</th>
+                      <th className="font-medium py-3 px-3 text-emerald-700">Completed (Done)</th>
+                      <th className="font-medium py-3 px-4">Cycle time benchmark</th>
+                      <th className="font-medium py-3 px-3">Avg (days)</th>
+                      <th className="font-medium py-3 px-3">Avg (hours)</th>
+                      <th className="font-medium py-3 px-3 text-emerald-600">Fastest record</th>
+                      <th className="font-medium py-3 px-3 text-gray-500">Slowest record</th>
+                      <th className="font-medium py-3 px-3 text-center">Velocity rating</th>
+                      <th className="font-medium py-3 px-4 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1135,18 +1135,18 @@ export default function WorkManagementPage() {
                       return (
                         <tr
                           key={op.name}
-                          className={`transition-colors ${isSelected ? 'bg-indigo-50/60' : 'hover:bg-gray-50/70'}`}
+                          className={`transition-colors ${isSelected ? 'bg-gray-50/60' : 'hover:bg-gray-50/70'}`}
                         >
-                          <td className="py-3 px-4 font-semibold text-gray-900">
+                          <td className="py-3 px-4 font-medium text-gray-900">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-800 text-xs font-semibold flex items-center justify-center">
+                              <span className="w-6 h-6 rounded-full bg-gray-100 text-gray-800 text-sm font-medium flex items-center justify-center">
                                 {op.name.charAt(0)}
                               </span>
                               <span>{op.name}</span>
                             </div>
                           </td>
                           <td className="py-3 px-3 text-gray-500 font-medium">
-                            <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                            <span className={`px-2 py-0.5 rounded text-sm font-medium ${
                               op.role.includes('Intern')
                                 ? 'bg-amber-50 text-amber-700 border border-amber-200'
                                 : 'bg-gray-100 text-gray-700'
@@ -1155,8 +1155,8 @@ export default function WorkManagementPage() {
                             </span>
                           </td>
                           <td className="py-3 px-3">
-                            <span className="inline-flex flex-wrap items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                              ✓ {op.completed_count}
+                            <span className="inline-flex flex-wrap items-center gap-1 font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              {op.completed_count}
                             </span>
                           </td>
                           <td className="py-3 px-4 w-40">
@@ -1170,21 +1170,21 @@ export default function WorkManagementPage() {
                                     style={{ width: `${Math.max(10, pct)}%` }}
                                   />
                                 </div>
-                                <span className="text-xs text-gray-500 font-medium">
+                                <span className="text-sm text-gray-500 font-medium">
                                   {op.avg_cycle_time_days <= 1.0 ? ' Ultra-Fast' : op.avg_cycle_time_days <= 2.5 ? 'Standard SLA' : 'Extended Cycle'}
                                 </span>
                               </div>
                             ) : (
-                              <span className="text-xs text-gray-500 italic">No completions</span>
+                              <span className="text-sm text-gray-500 ">No completions</span>
                             )}
                           </td>
-                          <td className="py-3 px-3 font-semibold text-gray-900">
+                          <td className="py-3 px-3 font-medium text-gray-900">
                             {op.completed_count > 0 ? `${op.avg_cycle_time_days}d` : '—'}
                           </td>
-                          <td className="py-3 px-3 text-gray-600 font-semibold">
+                          <td className="py-3 px-3 text-gray-600 font-medium">
                             {op.completed_count > 0 ? `${op.avg_cycle_time_hours}h` : '—'}
                           </td>
-                          <td className="py-3 px-3 font-semibold text-emerald-600">
+                          <td className="py-3 px-3 font-medium text-emerald-600">
                             {op.completed_count > 0 ? `${op.fastest_hours}h` : '—'}
                           </td>
                           <td className="py-3 px-3 font-medium text-gray-500">
@@ -1192,11 +1192,11 @@ export default function WorkManagementPage() {
                           </td>
                           <td className="py-3 px-3 text-center">
                             <span
-                              className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider ${
+                              className={`inline-flex px-2 py-0.5 rounded-md text-sm font-medium   ${
                                 op.velocity_rating === 'EXCELLENT'
                                   ? 'bg-emerald-100 text-emerald-800'
                                   : op.velocity_rating === 'FAST'
-                                  ? 'bg-blue-100 text-blue-800'
+                                  ? 'bg-gray-100 text-gray-800'
                                   : op.velocity_rating === 'STANDARD'
                                   ? 'bg-amber-100 text-amber-800'
                                   : 'bg-gray-100 text-gray-600'
@@ -1208,9 +1208,9 @@ export default function WorkManagementPage() {
                           <td className="py-3 px-4 text-right">
                             <button
                               onClick={() => setAnalyticsSelectedOperator(isSelected ? null : op.name)}
-                              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-semibold transition-colors ${
+                              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-medium transition-colors ${
                                 isSelected
-                                  ? 'bg-indigo-600 text-white shadow-xs'
+                                  ? 'bg-indigo-600 text-white '
                                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                               }`}
                             >
@@ -1226,13 +1226,13 @@ export default function WorkManagementPage() {
             </div>
 
             {/* 5. Interactive Stalled Tickets Diagnostic */}
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm space-y-3">
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden  space-y-3">
               <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-base font-semibold text-gray-900 flex flex-wrap items-center gap-2">
-                    Active Roadblock Tickets Diagnostic ({filteredBlockedTickets.length} of {analyticsData.blocked_tickets.length} Stalled Items)
+                  <h3 className="text-base font-medium text-gray-900 flex flex-wrap items-center gap-2">
+                    Active roadblocks ({filteredBlockedTickets.length} of {analyticsData.blocked_tickets.length} stalled items)
                   </h3>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-sm text-gray-500">
                     Granular breakdown of stalled tickets with root causes, responsible entities, and aging timers.
                   </p>
                 </div>
@@ -1253,7 +1253,7 @@ export default function WorkManagementPage() {
                         setAnalyticsSearchQuery('');
                         setAnalyticsSelectedOperator(null);
                       }}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-semibold text-gray-500 hover:text-gray-700 px-2 py-1.5 border border-gray-300 rounded-lg"
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium text-gray-500 hover:text-gray-700 px-2 py-1.5 border border-gray-300 rounded-lg"
                       title="Clear all filters"
                     >
                       Clear
@@ -1264,15 +1264,15 @@ export default function WorkManagementPage() {
 
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="bg-gray-50 text-gray-500 font-semibold uppercase text-xs border-b border-gray-200">
+                  <thead className="bg-gray-50 text-gray-500 font-medium  text-sm border-b border-gray-200">
                     <tr>
-                      <th className="py-2.5 px-4">Ticket</th>
-                      <th className="py-2.5 px-3">Assignee</th>
-                      <th className="py-2.5 px-4">Roadblock Root Cause</th>
-                      <th className="py-2.5 px-3">Responsible Party</th>
-                      <th className="py-2.5 px-3">Aging Time</th>
-                      <th className="py-2.5 px-3">Due Date</th>
-                      <th className="py-2.5 px-4 text-right">Quick Action</th>
+                      <th className="font-medium py-3 px-4">Ticket</th>
+                      <th className="font-medium py-3 px-3">Assignee</th>
+                      <th className="font-medium py-3 px-4">Roadblock root cause</th>
+                      <th className="font-medium py-3 px-3">Responsible party</th>
+                      <th className="font-medium py-3 px-3">Aging time</th>
+                      <th className="font-medium py-3 px-3">Due date</th>
+                      <th className="font-medium py-3 px-4 text-right">Quick action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1293,49 +1293,49 @@ export default function WorkManagementPage() {
 
                         return (
                           <tr key={t.key} className="hover:bg-gray-50/60 transition-colors">
-                            <td className="py-2.5 px-4 font-semibold">
+                            <td className="py-3 px-4 font-medium">
                               <a
                                 href={`https://tatacapital-team.atlassian.net/browse/${t.key}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="text-indigo-600 hover:text-indigo-800 hover:underline flex flex-wrap items-center gap-1"
+                                className="text-gray-600 hover:text-gray-800 hover:underline flex flex-wrap items-center gap-1"
                               >
                                 {t.key}
-                                <svg className="w-3 h-3 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                <svg className="w-4 h-4 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                 </svg>
                               </a>
                             </td>
-                            <td className="py-2.5 px-3 font-medium text-gray-800">
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="w-4 h-4 rounded-full bg-gray-200 text-xs font-semibold text-gray-700 flex items-center justify-center">
+                            <td className="py-3 px-3 font-medium text-gray-800">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="w-4 h-4 rounded-full bg-gray-200 text-sm font-medium text-gray-700 flex items-center justify-center">
                                   {t.assignee.charAt(0)}
                                 </span>
                                 <span>{t.assignee}</span>
                               </div>
                             </td>
-                            <td className="py-2.5 px-4 text-gray-800 font-medium">
+                            <td className="py-3 px-4 text-gray-800 font-medium">
                               <div>{t.root_cause}</div>
                               {t.summary && (
-                                <div className="text-xs text-gray-500 truncate max-w-md mt-0.5">{t.summary}</div>
+                                <div className="text-sm text-gray-500 truncate max-w-md mt-0.5">{t.summary}</div>
                               )}
                             </td>
-                            <td className="py-2.5 px-3">
+                            <td className="py-3 px-3">
                               <span
-                                className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                                className={`text-sm font-medium px-2 py-0.5 rounded-md border ${
                                   isTata
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    ? 'bg-gray-50 text-gray-700 border-gray-200'
                                     : isKarix
-                                    ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                    ? 'bg-gray-50 text-gray-700 border-gray-200'
                                     : 'bg-amber-50 text-amber-700 border-amber-200'
                                 }`}
                               >
                                 {t.roadblock_category}
                               </span>
                             </td>
-                            <td className="py-2.5 px-3">
+                            <td className="py-3 px-3">
                               <span
-                                className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                                className={`text-sm font-medium px-2 py-0.5 rounded ${
                                   isHighAging
                                     ? 'bg-red-50 text-red-700 border border-red-200'
                                     : 'bg-gray-100 text-gray-700'
@@ -1344,17 +1344,17 @@ export default function WorkManagementPage() {
                                 {t.aging_days}d ({t.aging_hours}h)
                               </span>
                             </td>
-                            <td className="py-2.5 px-3 text-gray-500 font-medium">
+                            <td className="py-3 px-3 text-gray-500 font-medium">
                               {t.duedate || 'No Due Date'}
                             </td>
-                            <td className="py-2.5 px-4 text-right">
+                            <td className="py-3 px-4 text-right">
                               {matchingItem && (
                                 <button
                                   onClick={() => {
                                     setTransferItem(matchingItem);
                                     setTransferTargetId(data?.assignees[0]?.account_id || '');
                                   }}
-                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded transition-colors"
+                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium text-gray-600 hover:text-gray-800 bg-gray-50 hover:bg-gray-100 px-2 py-1 rounded transition-colors"
                                 >
                                   Transfer
                                 </button>
@@ -1392,41 +1392,41 @@ export default function WorkManagementPage() {
         return (
           <div className="space-y-4">
             {/* Unified Operator Capacity & Throughput Table */}
-            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden ">
               <div className="p-4 border-b border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-gray-50">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-base font-semibold text-gray-900">
-                      Team Member Capacity & Delivery Throughput
+                    <h2 className="text-base font-medium text-gray-900">
+                      Team capacity & delivery
                     </h2>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                    <span className="text-sm font-medium px-2 py-0.5 rounded-md bg-gray-50 text-gray-700 border border-gray-200">
                       {selectedProject}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5">
+                  <p className="text-sm text-gray-500 mt-0.5">
                     Consolidated view of active queues, load capacity limits, SLA delivery, and completion rates. Click any row to filter tickets.
                   </p>
                 </div>
 
                 <div className="workspace-toolbar text-sm">
-                  <span className="px-2.5 py-1 rounded-lg bg-gray-100 font-semibold text-gray-700">
-                    Total Operators: <strong>{data.assignees.length}</strong>
+                  <span className="px-2.5 py-1 rounded-lg bg-gray-100 font-medium text-gray-700">
+                    Total Operators: <strong className="font-medium">{data.assignees.length}</strong>
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
-                    Active for Allocation: <strong>{data.assignees.filter(u => u.is_active_for_allocation ?? true).length} / {data.assignees.length}</strong>
+                  <span className="px-2.5 py-1 rounded-lg bg-gray-50 text-gray-700 border border-gray-200 font-medium">
+                    Active for Allocation: <strong className="font-medium">{data.assignees.filter(u => u.is_active_for_allocation ?? true).length} / {data.assignees.length}</strong>
                   </span>
-                  <span className={`px-2.5 py-1 rounded-lg font-semibold ${overloadedCount > 0 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-600'}`}>
-                    Overloaded (≥8): <strong>{overloadedCount}</strong>
+                  <span className={`px-2.5 py-1 rounded-lg font-medium ${overloadedCount > 0 ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-600'}`}>
+                    Overloaded (≥8): <strong className="font-medium">{overloadedCount}</strong>
                   </span>
-                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold">
-                    Available (&lt;4): <strong>{availableCount}</strong>
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium">
+                    Available (&lt;4): <strong className="font-medium">{availableCount}</strong>
                   </span>
                   {selectedAssignee !== 'ALL' && (
                     <button
                       onClick={() => setSelectedAssignee('ALL')}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition-colors flex flex-wrap items-center gap-1 shadow-2xs"
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition-colors flex flex-wrap items-center gap-1 "
                     >
-                      Filtered: {selectedAssignee} ✕
+                      Filtered: {selectedAssignee} <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
                     </button>
                   )}
                 </div>
@@ -1434,19 +1434,19 @@ export default function WorkManagementPage() {
 
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-sm">
-                  <thead className="bg-gray-50/80 text-gray-500 font-semibold uppercase text-xs border-b border-gray-100">
+                  <thead className="bg-gray-50/80 text-gray-500 font-medium  text-sm border-b border-gray-100">
                     <tr>
-                      <th className="py-2.5 px-4">Operator & Role</th>
-                      <th className="py-2.5 px-3">Workload Status</th>
-                      <th className="py-2.5 px-3 text-amber-700">Pending</th>
-                      <th className="py-2.5 px-3 text-purple-700">Blocked</th>
-                      <th className="py-2.5 px-3 text-red-600">Overdue SLA</th>
-                      <th className="py-2.5 px-3">Today / Tmrw</th>
-                      <th className="py-2.5 px-3 text-emerald-700">Completed</th>
-                      <th className="py-2.5 px-3">Handled</th>
-                      <th className="py-2.5 px-4">Completion %</th>
-                      <th className="py-2.5 px-3">Allocation</th>
-                      <th className="py-2.5 px-4 text-right">Quick Action</th>
+                      <th className="font-medium py-3 px-4">Operator & role</th>
+                      <th className="font-medium py-3 px-3">Workload status</th>
+                      <th className="font-medium py-3 px-3 text-amber-700">Pending</th>
+                      <th className="font-medium py-3 px-3 text-gray-700">Blocked</th>
+                      <th className="font-medium py-3 px-3 text-red-600">Overdue SLA</th>
+                      <th className="font-medium py-3 px-3">Today / tomorrow</th>
+                      <th className="font-medium py-3 px-3 text-emerald-700">Completed</th>
+                      <th className="font-medium py-3 px-3">Handled</th>
+                      <th className="font-medium py-3 px-4">Completion %</th>
+                      <th className="font-medium py-3 px-3">Allocation</th>
+                      <th className="font-medium py-3 px-4 text-right">Quick action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -1462,14 +1462,14 @@ export default function WorkManagementPage() {
                           onClick={() => setSelectedAssignee(isSelected ? 'ALL' : u.name)}
                           className={`cursor-pointer transition-colors ${
                             isSelected
-                              ? 'bg-blue-50/50 font-medium'
+                              ? 'bg-gray-50/50 font-medium'
                               : 'hover:bg-gray-50/70'
                           }`}
                         >
                           <td className="py-3 px-4">
-                            <div className="flex flex-wrap items-center gap-2.5">
+                            <div className="flex flex-wrap items-center gap-3">
                               <div
-                                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shadow-xs ${
+                                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium text-white  ${
                                   isOverloaded
                                     ? 'bg-red-600'
                                     : isModerate
@@ -1480,19 +1480,19 @@ export default function WorkManagementPage() {
                                 {getInitials(u.name)}
                               </div>
                               <div>
-                                <div className="font-semibold text-gray-900 flex flex-wrap items-center gap-1.5">
+                                <div className="font-medium text-gray-900 flex flex-wrap items-center gap-2">
                                   <span>{u.name}</span>
                                   {isSelected && (
-                                    <span className="text-xs text-blue-600 bg-blue-100 px-1.5 py-0.2 rounded font-semibold">
-                                      Active Filter
+                                    <span className="text-sm text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded font-medium">
+                                      Active filter
                                     </span>
                                   )}
                                 </div>
                                 <span
-                                  className={`text-xs font-semibold px-1.5 py-0.2 rounded-full inline-block mt-0.5 ${
+                                  className={`text-sm font-medium px-1.5 py-0.5 rounded-md inline-block mt-0.5 ${
                                     u.role === 'Core Operator'
-                                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                      : 'bg-purple-50 text-purple-700 border border-purple-200'
+                                      ? 'bg-gray-50 text-gray-700 border border-gray-200'
+                                      : 'bg-gray-50 text-gray-700 border border-gray-200'
                                   }`}
                                 >
                                   {u.role}
@@ -1504,7 +1504,7 @@ export default function WorkManagementPage() {
                           <td className="py-3 px-3">
                             <div className="space-y-1">
                               <span
-                                className={`inline-flex flex-wrap items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                                className={`inline-flex flex-wrap items-center gap-1 text-sm font-medium px-2 py-0.5 rounded-md border ${
                                   isOverloaded
                                     ? 'bg-red-50 text-red-700 border-red-200'
                                     : isModerate
@@ -1538,10 +1538,10 @@ export default function WorkManagementPage() {
                             </div>
                           </td>
 
-                          <td className="py-3 px-3 font-semibold text-amber-800">{u.open_tickets_count}</td>
-                          <td className="py-3 px-3 font-semibold text-purple-800">
+                          <td className="py-3 px-3 font-medium text-amber-800">{u.open_tickets_count}</td>
+                          <td className="py-3 px-3 font-medium text-gray-800">
                             {u.blocked_tickets_count > 0 ? (
-                              <span className="bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded font-semibold">
+                              <span className="bg-gray-50 text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded font-medium">
                                 {u.blocked_tickets_count}
                               </span>
                             ) : (
@@ -1550,7 +1550,7 @@ export default function WorkManagementPage() {
                           </td>
                           <td className="py-3 px-3">
                             {hasUrgentOverdue ? (
-                              <span className="inline-flex flex-wrap items-center gap-1 font-semibold text-red-700 bg-red-100/80 px-2 py-0.5 rounded border border-red-300 ">
+                              <span className="inline-flex flex-wrap items-center gap-1 font-medium text-red-700 bg-red-100/80 px-2 py-0.5 rounded border border-red-300 ">
                                  {u.overdue_count}
                               </span>
                             ) : (
@@ -1560,19 +1560,19 @@ export default function WorkManagementPage() {
                           <td className="py-3 px-3 text-gray-700 font-medium">
                             <span className="text-gray-500">{u.due_today_count} today</span>
                             <span className="mx-1 text-gray-300">/</span>
-                            <span className="font-semibold text-gray-800">{u.due_tomorrow_count} tmrw</span>
+                            <span className="font-medium text-gray-800">{u.due_tomorrow_count} tmrw</span>
                           </td>
                           <td className="py-3 px-3">
-                            <span className="inline-flex flex-wrap items-center gap-1 font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                              ✓ {u.completed_tickets_count}
+                            <span className="inline-flex flex-wrap items-center gap-1 font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                              {u.completed_tickets_count}
                             </span>
                           </td>
-                          <td className="py-3 px-3 font-semibold text-gray-900">{u.total_handled_count}</td>
+                          <td className="py-3 px-3 font-medium text-gray-900">{u.total_handled_count}</td>
                           <td className="py-3 px-4">
                             {u.total_handled_count > 0 ? (
                               <div className="space-y-1">
-                                <div className="flex items-center justify-between text-xs text-gray-500 font-semibold">
-                                  <span className="font-semibold text-gray-800">{u.completion_rate}%</span>
+                                <div className="flex items-center justify-between text-sm text-gray-500 font-medium">
+                                  <span className="font-medium text-gray-800">{u.completion_rate}%</span>
                                 </div>
                                 <div className="w-20 bg-gray-100 rounded-full h-1.5 overflow-hidden">
                                   <div
@@ -1592,7 +1592,7 @@ export default function WorkManagementPage() {
                               aria-pressed={u.is_active_for_allocation ?? true}
                               aria-label={`Allocation for ${u.name}: ${(u.is_active_for_allocation ?? true) ? 'active' : 'excluded'}`}
                               disabled={updatingAllocation[u.name]}
-                              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 inline-flex flex-wrap items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-semibold border transition cursor-pointer ${
+                              className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 inline-flex flex-wrap items-center gap-2 px-2.5 py-1 rounded-lg text-sm font-medium border transition-colors cursor-pointer ${
                                 (u.is_active_for_allocation ?? true)
                                   ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
                                   : 'bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200'
@@ -1607,10 +1607,10 @@ export default function WorkManagementPage() {
                           </td>
 
                           <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                            <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center justify-end gap-2">
                               <button
                                 onClick={() => setSelectedAssignee(isSelected ? 'ALL' : u.name)}
-                                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-semibold transition-colors ${
+                                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-medium transition-colors ${
                                   isSelected
                                     ? 'bg-blue-600 text-white'
                                     : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
@@ -1626,7 +1626,7 @@ export default function WorkManagementPage() {
                                     setAiPrompt(`Rebalance all active tickets from ${u.name} (excluded from allocation) to active team members`);
                                     setShowAiDrawer(true);
                                   }}
-                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors flex flex-wrap items-center gap-1 cursor-pointer"
+                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-medium bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors flex flex-wrap items-center gap-1 cursor-pointer"
                                   title="Offload tickets from this excluded member"
                                 >
                                   Offload
@@ -1638,7 +1638,7 @@ export default function WorkManagementPage() {
                                     setAiPrompt(`Relieve ${u.name} by reassigning tickets to available peers and interns`);
                                     setShowAiDrawer(true);
                                   }}
-                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors flex flex-wrap items-center gap-1 cursor-pointer"
+                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2 py-1 rounded text-sm font-medium bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 transition-colors flex flex-wrap items-center gap-1 cursor-pointer"
                                   title="Open AI rebalancing for this operator"
                                 >
                                   Rebalance
@@ -1658,31 +1658,26 @@ export default function WorkManagementPage() {
             <div className="workspace-panel p-4 sm:p-5">
               {/* Header Row / Quick Alert */}
               <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div className="flex items-start gap-3.5">
-                  <div className="p-2.5 bg-indigo-600/80 rounded-xl text-gray-900 shadow-sm shrink-0 mt-0.5">
-                    <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                  </div>
+                <div className="flex items-start gap-4">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-semibold text-gray-900">
+                      <h3 className="text-base font-medium text-gray-900">
                         Workload balancing
                       </h3>
-                      <span className="text-xs uppercase font-semibold px-2 py-0.5 rounded-full bg-indigo-500/30 text-indigo-700 border border-gray-200">
+                      <span className="text-sm  font-medium px-2 py-0.5 rounded-md bg-indigo-500/30 text-gray-700 border border-gray-200">
                         AI-assisted
                       </span>
                     </div>
-                    <p className="text-xs text-indigo-700 mt-1">
+                    <p className="text-sm text-gray-700 mt-1">
                       {maxLoadedUser && maxLoadedUser.open_tickets_count >= 8 ? (
                         <span>
-                          <strong className="text-amber-800">⚠️ Workload Imbalance Detected:</strong>{' '}
+                          <strong className="text-amber-800">Workload imbalance:</strong>{' '}
                           {maxLoadedUser.name} holds {maxLoadedUser.open_tickets_count} tickets ({maxLoadedUser.overdue_count} overdue).{' '}
                           {availableCount} available team members ready for delegation.
                         </span>
                       ) : (
                         <span>
-                          Queue is currently balanced. Use AI Dispatcher to redistribute tickets for tomorrow&apos;s upcoming campaign deadlines.
+                          The queue is balanced. Review transfers for upcoming campaign deadlines.
                         </span>
                       )}
                     </p>
@@ -1696,7 +1691,7 @@ export default function WorkManagementPage() {
                         setAiPrompt(`Relieve ${maxLoadedUser.name} of active tickets to available team members`);
                         setShowAiDrawer(true);
                       }}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-xl text-sm font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors flex flex-wrap items-center gap-1.5 shadow-sm"
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors flex flex-wrap items-center gap-2 "
                     >
                       Quick Rebalance ({maxLoadedUser.name})
                     </button>
@@ -1704,7 +1699,7 @@ export default function WorkManagementPage() {
                   <button
                     onClick={() => setShowAiDrawer(!showAiDrawer)}
                     aria-expanded={showAiDrawer}
-                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3.5 py-1.5 rounded-xl text-sm font-semibold bg-white hover:bg-white/20 text-gray-900 border border-gray-200 transition-colors flex flex-wrap items-center gap-1.5"
+                    className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3.5 py-1.5 rounded-lg text-sm font-medium bg-white hover:bg-white/20 text-gray-900 border border-gray-200 transition-colors flex flex-wrap items-center gap-2"
                   >
                     <span>{showAiDrawer ? 'Hide balancing controls' : 'Open balancing controls'}</span>
                   </button>
@@ -1716,14 +1711,14 @@ export default function WorkManagementPage() {
                 <div className="mt-5 pt-4 border-t border-gray-200 space-y-4">
                   <p className="workspace-guide text-sm text-gray-600">Review a proposed plan before applying transfers. Auto-execute changes Jira assignments when selected; Agent-only transfers remain separate from Jira.</p>
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <label className="flex flex-wrap items-center gap-2 text-xs font-semibold text-indigo-700 cursor-pointer">
+                    <label className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={autoExecute}
                         onChange={(e) => setAutoExecute(e.target.checked)}
-                        className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-gray-600 focus:ring-indigo-500"
                       />
-                      Auto-Execute Reassignments in Jira Cloud
+                      Auto-execute reassignments in Jira Cloud
                     </label>
 
                     <button
@@ -1733,22 +1728,22 @@ export default function WorkManagementPage() {
                     >
                       {aiLoading ? (
                         <>
-                          <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                           </svg>
-                          <span>Analyzing Workloads...</span>
+                          <span>Analyzing workloads…</span>
                         </>
                       ) : (
                         <>
                           
-                          <span>Run AI Rebalance</span>
+                          <span>Propose workload transfers</span>
                         </>
                       )}
                     </button>
                   </div>
 
-                  <div className="space-y-2.5">
+                  <div className="space-y-3">
                     <input
                       type="text"
                       value={aiPrompt}
@@ -1759,7 +1754,7 @@ export default function WorkManagementPage() {
                     />
 
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-semibold text-indigo-700 uppercase">Quick Suggestions:</span>
+                      <span className="text-sm font-medium text-gray-700 ">Suggestions:</span>
                       {[
                         `Relieve ${maxLoadedUser?.name || 'top operator'} to available peers & interns`,
                         'Rebalance tickets due tomorrow evenly across team',
@@ -1768,7 +1763,7 @@ export default function WorkManagementPage() {
                         <button
                           key={qp}
                           onClick={() => setAiPrompt(qp)}
-                          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium bg-white hover:bg-white/20 text-indigo-700 px-2.5 py-1 rounded-lg border border-gray-200 transition-colors"
+                          className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium bg-white hover:bg-white/20 text-gray-700 px-2.5 py-1 rounded-lg border border-gray-200 transition-colors"
                         >
                           {qp}
                         </button>
@@ -1778,32 +1773,32 @@ export default function WorkManagementPage() {
 
                   {/* AI Output Box */}
                   {aiReasoning && (
-                    <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200 shadow-sm space-y-3">
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-indigo-700">
+                    <div className="mt-4 p-4 bg-gray-50 rounded-xl border border-gray-200  space-y-3">
+                      <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-gray-700">
                         <svg className="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        <span>AI Dispatch Plan ({aiProposals.length} Rebalancing Proposals)</span>
+                        <span>Transfer plan ({aiProposals.length} proposals)</span>
                       </div>
-                      <p className="text-xs text-gray-600">{aiReasoning}</p>
+                      <p className="text-sm text-gray-600">{aiReasoning}</p>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
                         {aiProposals.map((p) => (
-                          <div key={p.issue_key} className="p-3 bg-white border border-gray-200 rounded-lg text-xs space-y-2">
-                            <div className="flex items-center justify-between font-semibold">
-                              <span className="text-indigo-700">{p.issue_key}</span>
-                              <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${p.executed ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
-                                {p.executed ? 'Applied ✓' : 'Proposed'}
+                          <div key={p.issue_key} className="p-3 bg-white border border-gray-200 rounded-lg text-sm space-y-2">
+                            <div className="flex items-center justify-between font-medium">
+                              <span className="text-gray-700">{p.issue_key}</span>
+                              <span className={`text-sm px-1.5 py-0.5 rounded font-medium ${p.executed ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                                {p.executed ? 'Applied' : 'Proposed'}
                               </span>
                             </div>
                             <p className="text-gray-600 truncate font-medium">{p.summary}</p>
-                            <div className="text-xs text-gray-500 flex flex-wrap items-center gap-1.5">
+                            <div className="text-sm text-gray-500 flex flex-wrap items-center gap-2">
                               <span>{p.current_assignee}</span>
                               <span>→</span>
-                              <span className="font-semibold text-gray-900">{p.target_assignee}</span>
+                              <span className="font-medium text-gray-900">{p.target_assignee}</span>
                             </div>
                             {!p.executed && (
-                              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                              <div className="flex flex-wrap items-center gap-2 pt-1">
                                 <button
                                   type="button"
                                   onClick={async () => {
@@ -1811,10 +1806,10 @@ export default function WorkManagementPage() {
                                     setAiProposals(prev => prev.map(item => item.issue_key === p.issue_key ? { ...item, executed: true } : item));
                                     await handleRefresh();
                                   }}
-                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 flex-1 py-1 px-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition cursor-pointer"
+                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 flex-1 py-1 px-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors cursor-pointer"
                                   title="Apply reassignment and update Jira Cloud"
                                 >
-                                  ✓ Confirm in Jira
+                                  Confirm in Jira
                                 </button>
                                 <button
                                   type="button"
@@ -1823,7 +1818,7 @@ export default function WorkManagementPage() {
                                     setAiProposals(prev => prev.map(item => item.issue_key === p.issue_key ? { ...item, executed: true } : item));
                                     await handleRefresh();
                                   }}
-                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 flex-1 py-1 px-2 rounded bg-white hover:bg-white/20 text-amber-800 border border-amber-400/30 text-sm font-semibold transition cursor-pointer"
+                                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 flex-1 py-1 px-2 rounded bg-white hover:bg-white/20 text-amber-800 border border-amber-400/30 text-sm font-medium transition-colors cursor-pointer"
                                   title="Apply reassignment in Agent only (skip Jira update)"
                                 >
                                    Skip Jira
@@ -1843,12 +1838,12 @@ export default function WorkManagementPage() {
       })()}
 
       {/* 3. Unified Command Bar & Filters */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3.5">
+      <div className="bg-white border border-gray-200 rounded-xl p-4  space-y-4">
         {/* Top Row: Primary Toggles & Search */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           {/* Status Pills */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 mr-1">Status:</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium   text-gray-500 mr-1">Status:</span>
             {[
               { id: 'ALL', label: `All (${data?.total_tickets || 0})`, icon: '●' },
               { id: 'PENDING', label: `Pending (${data?.status_counts.PENDING || 0})` },
@@ -1859,9 +1854,9 @@ export default function WorkManagementPage() {
                 key={st.id}
                 onClick={() => setSelectedStatus(st.id)}
                 aria-pressed={selectedStatus === st.id}
-                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-xl text-sm font-semibold transition-colors flex flex-wrap items-center gap-1.5 ${
+                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex flex-wrap items-center gap-2 ${
                   selectedStatus === st.id
-                    ? 'bg-gray-900 text-white shadow-sm'
+                    ? 'bg-gray-900 text-white '
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
               >
@@ -1872,17 +1867,17 @@ export default function WorkManagementPage() {
           </div>
 
           {/* Right Controls: Search, Channel & View Mode Toggle */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-3">
             {/* Channel Filter Dropdown */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Channel:</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-sm font-medium text-gray-500  ">Channel:</label>
               <select
                 value={selectedChannel}
                 aria-label="Ticket channel"
                 onChange={(e) => setSelectedChannel(e.target.value)}
-                className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 border border-gray-300 rounded-xl px-2.5 py-1.5 text-sm font-semibold bg-white text-gray-700 shadow-2xs focus:ring-2 focus:ring-blue-500"
+                className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm font-medium bg-white text-gray-700  focus:ring-2 focus:ring-blue-500"
               >
-                <option value="ALL">All Channels</option>
+                <option value="ALL">All channels</option>
                 <option value="WhatsApp">WhatsApp</option>
                 <option value="RCS">RCS</option>
                 <option value="SMS">SMS</option>
@@ -1900,16 +1895,16 @@ export default function WorkManagementPage() {
                 placeholder="Search key, title, channel..."
                 className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 workspace-search w-full pl-8 pr-9"
               />
-              <svg className="w-3.5 h-3.5 text-gray-500 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              <svg className="w-4 h-4 text-gray-500 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
                   aria-label="Clear ticket search"
-                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 absolute right-2.5 top-2 text-sm text-gray-500 hover:text-gray-600 font-semibold"
+                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 absolute right-2.5 top-2 text-sm text-gray-500 hover:text-gray-600 font-medium"
                 >
-                  ✕
+                  <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
                 </button>
               )}
             </div>
@@ -1919,26 +1914,26 @@ export default function WorkManagementPage() {
               <button
                 onClick={() => setViewMode('KANBAN')}
                 aria-pressed={viewMode === 'KANBAN'}
-                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex flex-wrap items-center gap-1.5 ${
+                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex flex-wrap items-center gap-2 ${
                   viewMode === 'KANBAN'
-                    ? 'bg-white text-gray-900 shadow-xs'
+                    ? 'bg-white text-gray-900 '
                     : 'text-gray-500 hover:text-gray-900'
                 }`}
               >
-                <span>▦</span>
-                <span>4-Stage Kanban</span>
+                
+                <span>Four-stage board</span>
               </button>
               <button
                 onClick={() => setViewMode('TABLE')}
                 aria-pressed={viewMode === 'TABLE'}
-                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex flex-wrap items-center gap-1.5 ${
+                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex flex-wrap items-center gap-2 ${
                   viewMode === 'TABLE'
-                    ? 'bg-white text-gray-900 shadow-xs'
+                    ? 'bg-white text-gray-900 '
                     : 'text-gray-500 hover:text-gray-900'
                 }`}
               >
-                <span>▤</span>
-                <span>Dense Table</span>
+                
+                <span>Table</span>
               </button>
             </div>
           </div>
@@ -1946,8 +1941,8 @@ export default function WorkManagementPage() {
 
         {/* Bottom Row: Timeline Filter Ribbon */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-100">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 mr-1">Timeline:</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium   text-gray-500 mr-1">Timeline:</span>
             {[
               { id: 'ALL', label: 'All timelines' },
               { id: 'OVERDUE', label: ` Overdue (${data?.timeline_counts.OVERDUE || 0})`, isAlert: true },
@@ -1960,14 +1955,14 @@ export default function WorkManagementPage() {
                 key={tab.id}
                 onClick={() => setSelectedTimeline(tab.id)}
                 aria-pressed={selectedTimeline === tab.id}
-                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 rounded-lg text-sm font-semibold transition-colors ${
+                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${
                   selectedTimeline === tab.id
                     ? tab.isAlert
-                      ? 'bg-red-600 text-white shadow-xs'
-                      : 'bg-blue-600 text-white shadow-xs'
+                      ? 'bg-red-600 text-white '
+                      : 'bg-blue-600 text-white '
                     : tab.isAlert
                     ? (data?.timeline_counts.OVERDUE || 0) > 0
-                      ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 font-semibold'
+                      ? 'bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 font-medium'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                     : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 }`}
@@ -1977,15 +1972,15 @@ export default function WorkManagementPage() {
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-gray-500 font-medium">
-              Showing <strong className="text-gray-900 font-semibold">{filteredItems.length}</strong> matching tickets
+              Showing <strong className="text-gray-900 font-medium">{filteredItems.length}</strong> matching tickets
             </span>
             {selectedAssignee !== 'ALL' && (
-              <span className="inline-flex flex-wrap items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold px-2 py-0.5 rounded-md">
+              <span className="inline-flex flex-wrap items-center gap-1 bg-gray-50 text-gray-700 border border-gray-200 text-sm font-medium px-2 py-0.5 rounded-md">
                 Assignee: {selectedAssignee}
-                <button onClick={() => setSelectedAssignee('ALL')} className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 hover:text-blue-900 font-semibold ml-0.5">
-                  ✕
+                <button onClick={() => setSelectedAssignee('ALL')} className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 hover:text-gray-900 font-medium ml-0.5">
+                  <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
                 </button>
               </span>
             )}
@@ -2006,17 +2001,17 @@ export default function WorkManagementPage() {
 
       {/* Floating / Sticky Bulk Selection Ribbon */}
       {selectedTicketKeys.length > 0 && (
-        <div className="sticky top-4 z-30 bg-white text-gray-900 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm border border-gray-200">
+        <div className="sticky top-4 z-30 bg-white text-gray-900 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3  border border-gray-200">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-semibold shadow-inner">
+            <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-sm font-medium ">
               {selectedTicketKeys.length}
             </span>
             <div>
-              <span className="text-sm font-semibold text-gray-900">
+              <span className="text-sm font-medium text-gray-900">
                 {selectedTicketKeys.length} ticket{selectedTicketKeys.length > 1 ? 's' : ''} selected across queues
               </span>
-              <span className="text-xs text-gray-600 block sm:inline sm:ml-2">
-                Ready for mass delegation or handover
+              <span className="text-sm text-gray-600 block sm:inline sm:ml-2">
+                Review a bulk reassignment
               </span>
             </div>
           </div>
@@ -2025,16 +2020,16 @@ export default function WorkManagementPage() {
               onClick={() => setSelectedTicketKeys([])}
               className="workspace-button"
             >
-              Clear Selection
+              Clear selection
             </button>
             <button
               onClick={() => {
                 setBulkTargetId(data?.assignees[0]?.account_id || '');
                 setBulkModalOpen(true);
               }}
-              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-1.5 rounded-xl text-sm font-semibold bg-indigo-500 hover:bg-indigo-400 text-white shadow-sm flex flex-wrap items-center gap-1.5 transition-colors"
+              className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-1.5 rounded-lg text-sm font-medium bg-indigo-500 hover:bg-gray-400 text-white  flex flex-wrap items-center gap-2 transition-colors"
             >
-              Bulk Reassign ({selectedTicketKeys.length})
+              Bulk reassign ({selectedTicketKeys.length})
             </button>
           </div>
         </div>
@@ -2044,8 +2039,8 @@ export default function WorkManagementPage() {
       {loading && !data ? (
         <div className="workspace-empty" role="status">Loading Jira tickets for {selectedProject}…</div>
       ) : filteredItems.length === 0 ? (
-        <div className="p-12 text-center bg-white border border-gray-200 rounded-xl text-gray-500 text-xs space-y-2">
-          <p className="font-semibold text-gray-600">No tickets match the selected filters.</p>
+        <div className="p-12 text-center bg-white border border-gray-200 rounded-xl text-gray-500 text-sm space-y-2">
+          <p className="font-medium text-gray-600">No tickets match the selected filters.</p>
           <button
             onClick={() => {
               setSelectedTimeline('ALL');
@@ -2054,9 +2049,9 @@ export default function WorkManagementPage() {
               setSelectedChannel('ALL');
               setSearchQuery('');
             }}
-            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 bg-indigo-50 text-indigo-700 font-semibold rounded-lg border border-indigo-200 hover:bg-indigo-100 transition-colors"
+            className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 bg-gray-50 text-gray-700 font-medium rounded-lg border border-gray-200 hover:bg-gray-100 transition-colors"
           >
-            Reset All Filters
+            Reset filters
           </button>
         </div>
       ) : viewMode === 'KANBAN' ? (
@@ -2069,7 +2064,7 @@ export default function WorkManagementPage() {
               subtitle: 'Waiting on Tata audience mart / client copy',
               badgeClass: 'bg-rose-50 text-rose-700 border-rose-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t-4 border-t-rose-500',
+              accentBorder: 'border-t border-t-gray-300',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 return (
@@ -2085,9 +2080,9 @@ export default function WorkManagementPage() {
               id: '2_ATTRIBUTICS_OPS',
               title: 'Attributics Ops Queue',
               subtitle: 'Drafting, MoEngage & creative formatting',
-              badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
+              badgeClass: 'bg-gray-50 text-gray-700 border-gray-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t-4 border-t-blue-500',
+              accentBorder: 'border-t border-t-gray-300',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 const isBlocked =
@@ -2113,9 +2108,9 @@ export default function WorkManagementPage() {
               id: '3_GATEWAY',
               title: 'Gateway Review Gate',
               subtitle: 'Karix submission & Meta approval latency',
-              badgeClass: 'bg-purple-50 text-purple-700 border-purple-200',
+              badgeClass: 'bg-gray-50 text-gray-700 border-gray-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t-4 border-t-purple-500',
+              accentBorder: 'border-t border-t-gray-300',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 const isDone =
@@ -2144,7 +2139,7 @@ export default function WorkManagementPage() {
               subtitle: 'Approved templates & completed campaigns',
               badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200',
               headerBg: 'bg-gray-50',
-              accentBorder: 'border-t-4 border-t-emerald-500',
+              accentBorder: 'border-t border-t-gray-300',
               items: filteredItems.filter((w) => {
                 const s = (w.status || '').toLowerCase();
                 return (
@@ -2166,29 +2161,29 @@ export default function WorkManagementPage() {
                 return (
                   <div
                     key={col.id}
-                    className={`bg-gray-50/70 border border-gray-200 rounded-xl flex flex-col justify-between overflow-hidden shadow-xs ${col.accentBorder}`}
+                    className={`bg-gray-50/70 border border-gray-200 rounded-xl flex flex-col justify-between overflow-hidden  ${col.accentBorder}`}
                   >
                     {/* Column Header */}
-                    <div className={`p-3.5 border-b border-gray-200/80 ${col.headerBg}`}>
+                    <div className={`p-4 border-b border-gray-200/80 ${col.headerBg}`}>
                       <div className="flex items-center justify-between">
-                        <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="sr-only">Stage:</span>
-                          <h3 className="text-base font-semibold text-gray-900">{col.title}</h3>
+                          <h3 className="text-base font-medium text-gray-900">{col.title}</h3>
                         </div>
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${col.badgeClass}`}>
+                        <span className={`text-sm font-medium px-2 py-0.5 rounded-md border ${col.badgeClass}`}>
                           {col.items.length}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-500 mt-1 truncate">{col.subtitle}</p>
+                      <p className="text-sm text-gray-500 mt-1 truncate">{col.subtitle}</p>
 
                       {col.items.length > 0 && (
-                        <div className="mt-2.5 pt-2 border-t border-gray-200/50 flex items-center justify-between text-xs">
-                          <label className="flex flex-wrap items-center gap-1.5 font-medium text-gray-600 cursor-pointer">
+                        <div className="mt-2.5 pt-2 border-t border-gray-200/50 flex items-center justify-between text-sm">
+                          <label className="flex flex-wrap items-center gap-2 font-medium text-gray-600 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={allColSelected}
                               onChange={() => handleSelectAll(colKeys)}
-                              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                              className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-gray-600 focus:ring-indigo-500 w-4 h-4"
                             />
                             Select All ({col.items.length})
                           </label>
@@ -2197,9 +2192,9 @@ export default function WorkManagementPage() {
                     </div>
 
                     {/* Cards Container */}
-                    <div className="p-2.5 space-y-2.5 overflow-y-auto max-h-[700px] flex-1">
+                    <div className="p-3 space-y-3 overflow-y-auto max-h-[700px] flex-1">
                       {col.items.length === 0 ? (
-                        <div className="p-6 text-center text-gray-500 text-xs font-medium border border-dashed border-gray-200 rounded-xl bg-white/50">
+                        <div className="p-6 text-center text-gray-500 text-sm font-medium border border-dashed border-gray-200 rounded-xl bg-white/50">
                           No tickets in this stage
                         </div>
                       ) : (
@@ -2212,9 +2207,9 @@ export default function WorkManagementPage() {
                           return (
                             <div
                               key={item.key}
-                              className={`bg-white border rounded-xl p-3 shadow-2xs  transition-colors flex flex-col justify-between space-y-2.5 ${
+                              className={`bg-white border rounded-xl p-3   transition-colors flex flex-col justify-between space-y-3 ${
                                 isSelected
-                                  ? 'border-indigo-500 ring-2 ring-indigo-200 bg-indigo-50/20'
+                                  ? 'border-gray-500 ring-2 ring-indigo-200 bg-gray-50/20'
                                   : 'border-gray-200 hover:border-gray-300'
                               }`}
                             >
@@ -2226,20 +2221,20 @@ export default function WorkManagementPage() {
                                     checked={isSelected}
                                     aria-label={`Select ${item.key}`}
                                     onChange={() => toggleSelectTicket(item.key)}
-                                    className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer mt-0.5"
+                                    className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-gray-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer mt-0.5"
                                   />
                                   <a
                                     href={`https://tatacapital-team.atlassian.net/browse/${item.key}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="text-xs font-semibold text-blue-600 hover:underline flex flex-wrap items-center gap-1"
+                                    className="text-sm font-medium text-gray-600 hover:underline flex flex-wrap items-center gap-1"
                                   >
                                     {item.key}
                                   </a>
                                 </div>
 
                                 <span
-                                  className={`text-xs font-semibold px-1.5 py-0.2 rounded-full border ${
+                                  className={`text-sm font-medium px-1.5 py-0.5 rounded-md border ${
                                     channelBadges[item.channel] || channelBadges.General
                                   }`}
                                 >
@@ -2248,26 +2243,26 @@ export default function WorkManagementPage() {
                               </div>
 
                               {/* Summary */}
-                              <p className="text-xs font-medium text-gray-800 line-clamp-2 leading-relaxed">
+                              <p className="text-sm font-medium text-gray-800 line-clamp-2 leading-relaxed">
                                 {item.summary}
                               </p>
 
                               {item.is_operational_assignment ? (
-                                <div className="inline-flex flex-wrap items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 max-w-full truncate" title={`Operationally assigned to ${item.assignee_name}. ${item.operational_note ? `Note: ${item.operational_note}` : ''}`}>
+                                <div className="inline-flex flex-wrap items-center gap-1 px-1.5 py-0.5 rounded text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200 max-w-full truncate" title={`Operationally assigned to ${item.assignee_name}. ${item.operational_note ? `Note: ${item.operational_note}` : ''}`}>
                                   
                                   <span>Operational: {item.assignee_name}</span>
                                   {item.original_assignee && (
-                                    <span className="text-xs text-indigo-500 font-normal truncate">
+                                    <span className="text-sm text-gray-500 font-normal truncate">
                                       (was {item.original_assignee})
                                     </span>
                                   )}
                                 </div>
                               ) : item.routed_to_soham ? (
-                                <div className="inline-flex flex-wrap items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 max-w-full truncate" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
+                                <div className="inline-flex flex-wrap items-center gap-1 px-1.5 py-0.5 rounded text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200 max-w-full truncate" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
                                   
                                   <span>Mention: Soham</span>
                                   {item.original_assignee && (
-                                    <span className="text-xs text-purple-500 font-normal truncate">
+                                    <span className="text-sm text-gray-500 font-normal truncate">
                                       (was {item.original_assignee})
                                     </span>
                                   )}
@@ -2275,24 +2270,24 @@ export default function WorkManagementPage() {
                               ) : null}
                               {/* Card Bottom: Assignee, SLA chip & Transfer button */}
                               <div className="pt-2 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-sm">
-                                <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                                  <span className="w-5 h-5 rounded-full bg-gray-200 text-xs font-semibold text-gray-700 flex items-center justify-center shrink-0">
+                                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                  <span className="w-5 h-5 rounded-full bg-gray-200 text-sm font-medium text-gray-700 flex items-center justify-center shrink-0">
                                     {item.assignee_name.charAt(0)}
                                   </span>
-                                  <span className="text-xs font-medium text-gray-700 truncate max-w-[90px]">
+                                  <span className="text-sm font-medium text-gray-700 truncate max-w-[90px]">
                                     {item.assignee_name}
                                   </span>
                                 </div>
 
-                                <div className="flex flex-wrap items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <span
-                                    className={`text-xs font-semibold px-1.5 py-0.5 rounded ${
+                                    className={`text-sm font-medium px-1.5 py-0.5 rounded ${
                                       isOverdue
                                         ? 'bg-red-50 text-red-700 border border-red-200'
                                         : isToday
                                         ? 'bg-amber-50 text-amber-700 border border-amber-200'
                                         : isTomorrow
-                                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                        ? 'bg-gray-50 text-gray-700 border border-gray-200'
                                         : 'bg-gray-50 text-gray-600 border border-gray-200'
                                     }`}
                                   >
@@ -2307,7 +2302,7 @@ export default function WorkManagementPage() {
 
                                   <a
                                     href={`/briefs?key=${item.key}&project=${selectedProject}`}
-                                    className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded transition-colors flex flex-wrap items-center gap-0.5"
+                                    className="text-sm font-medium text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded transition-colors flex flex-wrap items-center gap-0.5"
                                     title="Extract templates from Jira brief and whitelist to Karix"
                                   >
                                     
@@ -2322,9 +2317,9 @@ export default function WorkManagementPage() {
                                       setTransferItem(item);
                                       setTransferTargetId(data?.assignees[0]?.account_id || '');
                                     }}
-                                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-semibold px-1.5 py-0.5 rounded transition-colors ${
+                                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium px-1.5 py-0.5 rounded transition-colors ${
                                       canTransferTickets
-                                        ? 'text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100'
+                                        ? 'text-gray-600 hover:text-gray-800 bg-gray-50 hover:bg-gray-100'
                                         : 'text-gray-500 bg-gray-100 cursor-not-allowed'
                                     }`}
                                     title={canTransferTickets ? 'Reassign this single ticket' : 'Transfer power is restricted to Dnyanesh, Neel, and Mrunali'}
@@ -2346,20 +2341,20 @@ export default function WorkManagementPage() {
         })()
       ) : (
         /* VIEW B: DENSE SORTABLE DATA GRID */
-        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-          <div className="p-3.5 border-b border-gray-100 flex items-center justify-between bg-gray-50/80">
-            <div className="flex flex-wrap items-center gap-3 text-xs">
-              <label className="flex flex-wrap items-center gap-2 font-semibold text-gray-700 cursor-pointer">
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden ">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/80">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <label className="flex flex-wrap items-center gap-2 font-medium text-gray-700 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={sortedItems.length > 0 && sortedItems.every((i) => selectedTicketKeys.includes(i.key))}
                   onChange={() => handleSelectAll(sortedItems.map((i) => i.key))}
-                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-gray-600 focus:ring-indigo-500 w-4 h-4"
                 />
                 <span>Select All ({sortedItems.length} matching tickets)</span>
               </label>
               {selectedTicketKeys.length > 0 && (
-                <span className="text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                <span className="text-gray-700 font-medium bg-gray-50 px-2 py-0.5 rounded-md border border-gray-200">
                   {selectedTicketKeys.length} selected
                 </span>
               )}
@@ -2371,18 +2366,18 @@ export default function WorkManagementPage() {
                   setBulkTargetId(data?.assignees[0]?.account_id || '');
                   setBulkModalOpen(true);
                 }}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-sm transition-colors shadow-xs flex flex-wrap items-center gap-1.5"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg text-sm transition-colors  flex flex-wrap items-center gap-2"
               >
-                Bulk Reassign ({selectedTicketKeys.length})
+                Bulk reassign ({selectedTicketKeys.length})
               </button>
             )}
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="bg-gray-50 text-gray-500 font-semibold uppercase text-xs border-b border-gray-100">
+              <thead className="bg-gray-50 text-gray-500 font-medium  text-sm border-b border-gray-100">
                 <tr>
-                  <th className="py-2.5 px-3 w-10 text-center">
+                  <th className="font-medium py-3 px-3 w-10 text-center">
                     <span className="sr-only">Select</span>
                   </th>
                   <th
@@ -2393,7 +2388,7 @@ export default function WorkManagementPage() {
                       if (sortField === 'key') setSortAsc(!sortAsc);
                       else { setSortField('key'); setSortAsc(true); }
                     }}
-                    className="py-2.5 px-3 cursor-pointer hover:text-gray-900"
+                    className="py-3 px-3 cursor-pointer hover:text-gray-900"
                   >
                     Ticket Key {sortField === 'key' ? (sortAsc ? '▲' : '▼') : ''}
                   </th>
@@ -2405,7 +2400,7 @@ export default function WorkManagementPage() {
                       if (sortField === 'summary') setSortAsc(!sortAsc);
                       else { setSortField('summary'); setSortAsc(true); }
                     }}
-                    className="py-2.5 px-3 cursor-pointer hover:text-gray-900"
+                    className="py-3 px-3 cursor-pointer hover:text-gray-900"
                   >
                     Summary {sortField === 'summary' ? (sortAsc ? '▲' : '▼') : ''}
                   </th>
@@ -2417,7 +2412,7 @@ export default function WorkManagementPage() {
                       if (sortField === 'channel') setSortAsc(!sortAsc);
                       else { setSortField('channel'); setSortAsc(true); }
                     }}
-                    className="py-2.5 px-3 cursor-pointer hover:text-gray-900"
+                    className="py-3 px-3 cursor-pointer hover:text-gray-900"
                   >
                     Channel {sortField === 'channel' ? (sortAsc ? '▲' : '▼') : ''}
                   </th>
@@ -2429,7 +2424,7 @@ export default function WorkManagementPage() {
                       if (sortField === 'status') setSortAsc(!sortAsc);
                       else { setSortField('status'); setSortAsc(true); }
                     }}
-                    className="py-2.5 px-3 cursor-pointer hover:text-gray-900"
+                    className="py-3 px-3 cursor-pointer hover:text-gray-900"
                   >
                     Status {sortField === 'status' ? (sortAsc ? '▲' : '▼') : ''}
                   </th>
@@ -2441,7 +2436,7 @@ export default function WorkManagementPage() {
                       if (sortField === 'assignee') setSortAsc(!sortAsc);
                       else { setSortField('assignee'); setSortAsc(true); }
                     }}
-                    className="py-2.5 px-3 cursor-pointer hover:text-gray-900"
+                    className="py-3 px-3 cursor-pointer hover:text-gray-900"
                   >
                     Assignee {sortField === 'assignee' ? (sortAsc ? '▲' : '▼') : ''}
                   </th>
@@ -2453,11 +2448,11 @@ export default function WorkManagementPage() {
                       if (sortField === 'duedate') setSortAsc(!sortAsc);
                       else { setSortField('duedate'); setSortAsc(true); }
                     }}
-                    className="py-2.5 px-3 cursor-pointer hover:text-gray-900"
+                    className="py-3 px-3 cursor-pointer hover:text-gray-900"
                   >
                     SLA / Due Date {sortField === 'duedate' ? (sortAsc ? '▲' : '▼') : ''}
                   </th>
-                  <th className="py-2.5 px-4 text-right">Quick Action</th>
+                  <th className="font-medium py-3 px-4 text-right">Quick action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -2471,43 +2466,43 @@ export default function WorkManagementPage() {
                     <tr
                       key={item.key}
                       className={`hover:bg-gray-50/60 transition-colors ${
-                        isSelected ? 'bg-indigo-50/40' : ''
+                        isSelected ? 'bg-gray-50/40' : ''
                       }`}
                     >
-                      <td className="py-2.5 px-3 text-center">
+                      <td className="py-3 px-3 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
                                     aria-label={`Select ${item.key}`}
                           onChange={() => toggleSelectTicket(item.key)}
-                          className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                          className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded border-gray-300 text-gray-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
                         />
                       </td>
-                      <td className="py-2.5 px-3 font-semibold">
+                      <td className="py-3 px-3 font-medium">
                         <a
                           href={`https://tatacapital-team.atlassian.net/browse/${item.key}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline"
+                          className="text-gray-600 hover:underline"
                         >
                           {item.key}
                         </a>
                       </td>
-                      <td className="py-2.5 px-3 text-gray-900 font-medium max-w-md truncate" title={item.summary}>
+                      <td className="py-3 px-3 text-gray-900 font-medium max-w-md truncate" title={item.summary}>
                         {item.summary}
                       </td>
-                      <td className="py-2.5 px-3">
+                      <td className="py-3 px-3">
                         <span
-                          className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                          className={`text-sm font-medium px-2 py-0.5 rounded-md border ${
                             channelBadges[item.channel] || channelBadges.General
                           }`}
                         >
                           {item.channel}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3">
+                      <td className="py-3 px-3">
                         <span
-                          className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          className={`text-sm font-medium px-2 py-0.5 rounded-md ${
                             item.status_category === 'DONE'
                               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                               : item.status_category === 'BLOCKED'
@@ -2518,36 +2513,36 @@ export default function WorkManagementPage() {
                           {item.status}
                         </span>
                       </td>
-                      <td className="py-2.5 px-3">
+                      <td className="py-3 px-3">
                         <div className="flex flex-col">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="w-5 h-5 rounded-full bg-gray-200 text-xs font-semibold text-gray-700 flex items-center justify-center">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-gray-200 text-sm font-medium text-gray-700 flex items-center justify-center">
                               {item.assignee_name.charAt(0)}
                             </span>
                             <span className="font-medium text-gray-800">{item.assignee_name}</span>
                           </div>
                           {item.is_operational_assignment ? (
-                            <span className="text-xs text-indigo-700 font-semibold bg-indigo-50 px-1 rounded border border-indigo-100 mt-0.5 inline-flex flex-wrap items-center gap-0.5 max-w-fit" title={`Operationally assigned to ${item.assignee_name}. ${item.operational_note || ''}`}>
+                            <span className="text-sm text-gray-700 font-medium bg-gray-50 px-1 rounded border border-gray-100 mt-0.5 inline-flex flex-wrap items-center gap-0.5 max-w-fit" title={`Operationally assigned to ${item.assignee_name}. ${item.operational_note || ''}`}>
                                Operational: {item.assignee_name}
                               {item.original_assignee && ` (was ${item.original_assignee})`}
                             </span>
                           ) : item.routed_to_soham ? (
-                            <span className="text-xs text-purple-700 font-semibold bg-purple-50 px-1 rounded border border-purple-100 mt-0.5 inline-flex flex-wrap items-center gap-0.5 max-w-fit" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
+                            <span className="text-sm text-gray-700 font-medium bg-gray-50 px-1 rounded border border-gray-100 mt-0.5 inline-flex flex-wrap items-center gap-0.5 max-w-fit" title={`Auto-assigned to Soham due to mention in ${item.soham_mention_reasons?.join(', ') || 'comment/attachment'}`}>
                                Mention in {item.soham_mention_reasons?.join('/') || 'comment'}
                               {item.original_assignee && ` (was ${item.original_assignee})`}
                             </span>
                           ) : null}
                         </div>
                       </td>
-                      <td className="py-2.5 px-3">
+                      <td className="py-3 px-3">
                         <span
-                          className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                          className={`text-sm font-medium px-2 py-0.5 rounded ${
                             isOverdue
                               ? 'bg-red-50 text-red-700 border border-red-200'
                               : isToday
                               ? 'bg-amber-50 text-amber-700 border border-amber-200'
                               : isTomorrow
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              ? 'bg-gray-50 text-gray-700 border border-gray-200'
                               : 'bg-gray-50 text-gray-600 border border-gray-200'
                           }`}
                         >
@@ -2560,11 +2555,11 @@ export default function WorkManagementPage() {
                             : item.duedate || 'No Due Date'}
                         </span>
                       </td>
-                      <td className="py-2.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
                           <a
                             href={`/briefs?key=${item.key}&project=${selectedProject}`}
-                            className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-md transition-colors flex flex-wrap items-center gap-1"
+                            className="text-sm font-medium text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-md transition-colors flex flex-wrap items-center gap-1"
                             title="Extract brief and whitelist to Karix"
                           >
                             
@@ -2579,9 +2574,9 @@ export default function WorkManagementPage() {
                               setTransferItem(item);
                               setTransferTargetId(data?.assignees[0]?.account_id || '');
                             }}
-                            className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-semibold px-2 py-1 rounded-md transition-colors ${
+                            className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-sm font-medium px-2 py-1 rounded-md transition-colors ${
                               canTransferTickets
-                                ? 'text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100'
+                                ? 'text-gray-600 hover:text-gray-800 bg-gray-50 hover:bg-gray-100'
                                 : 'text-gray-500 bg-gray-100 cursor-not-allowed'
                             }`}
                             title={canTransferTickets ? 'Reassign this single ticket' : 'Transfer power is restricted to Dnyanesh, Neel, and Mrunali'}
@@ -2606,27 +2601,27 @@ export default function WorkManagementPage() {
           <div role="dialog" aria-modal="true" aria-label="Transfer Jira ticket" className="bg-white rounded-xl shadow-xl max-w-md min-w-0 w-full max-h-[90vh] overflow-y-auto p-6 border border-gray-200 space-y-4">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900">Transfer Ticket {transferItem.key}</h3>
-                <p className="text-xs text-gray-500">Direct assignee update in Jira Cloud &amp; Dashboard (Zero comments posted to Jira).</p>
+                <h3 className="text-sm font-medium text-gray-900">Transfer ticket {transferItem.key}</h3>
+                <p className="text-sm text-gray-500">Update the assignee in Jira Cloud and the dashboard. No comments are posted to Jira.</p>
               </div>
               <button onClick={() => setTransferItem(null)} aria-label="Close ticket transfer" className="workspace-button">
-                ✕
+                <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
 
             <form onSubmit={handleExecuteTransfer} className="space-y-4">
               <div>
-                <span className="text-xs font-semibold text-gray-500">Summary:</span>
-                <p className="text-xs font-medium text-gray-800 mt-0.5">{transferItem.summary}</p>
+                <span className="text-sm font-medium text-gray-500">Summary:</span>
+                <p className="text-sm font-medium text-gray-800 mt-0.5">{transferItem.summary}</p>
               </div>
 
               <div>
-                <span className="text-xs font-semibold text-gray-500">Current Assignee:</span>
-                <p className="text-xs font-semibold text-gray-900">{transferItem.assignee_name}</p>
+                <span className="text-sm font-medium text-gray-500">Current assignee:</span>
+                <p className="text-sm font-medium text-gray-900">{transferItem.assignee_name}</p>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Target Assignee</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Target assignee</label>
                 <select
                   value={transferTargetId}
                   aria-label="Transfer target assignee"
@@ -2643,47 +2638,47 @@ export default function WorkManagementPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Internal Note (Optional — saved only on dashboard, never posted to Jira)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Internal note (optional — saved only on dashboard, never posted to Jira)</label>
                 <textarea
                   value={handoverNote}
                   aria-label="Internal transfer note"
                   onChange={(e) => setHandoverNote(e.target.value)}
                   placeholder="e.g. 'Handing over WhatsApp campaign brief. Creative images approved, needs template creation.'"
                   rows={3}
-                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg p-2.5 text-sm text-gray-800 placeholder-gray-400"
+                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg p-3 text-sm text-gray-800 placeholder-gray-400"
                 />
               </div>
               {/* Jira Reassignment Confirmation */}
-              <div className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-2">
-                <span className="block text-xs font-semibold text-indigo-900 uppercase tracking-wider">
-                  Jira Reassignment Confirmation
+              <div className="p-3 rounded-xl border border-gray-200 bg-gray-50/40 space-y-2">
+                <span className="block text-sm font-medium text-gray-900  ">
+                  Jira reassignment confirmation
                 </span>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setSyncToJira(true)}
-                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition cursor-pointer ${
+                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition-colors cursor-pointer ${
                       syncToJira
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        ? 'bg-indigo-600 text-white border-gray-600 '
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    <div className="text-xs font-semibold">✓ Confirm in Jira</div>
-                    <div className={`text-xs mt-0.5 ${syncToJira ? 'text-indigo-100' : 'text-gray-500'}`}>
+                    <div className="text-sm font-medium">Confirm in Jira</div>
+                    <div className={`text-sm mt-0.5 ${syncToJira ? 'text-gray-100' : 'text-gray-500'}`}>
                       Reflect change in Jira Cloud &amp; Agent
                     </div>
                   </button>
                   <button
                     type="button"
                     onClick={() => setSyncToJira(false)}
-                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition cursor-pointer ${
+                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition-colors cursor-pointer ${
                       !syncToJira
-                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                        ? 'bg-amber-600 text-white border-amber-600 '
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    <div className="text-xs font-semibold">⏸️ Skip Jira Update</div>
-                    <div className={`text-xs mt-0.5 ${!syncToJira ? 'text-amber-100' : 'text-gray-500'}`}>
+                    <div className="text-sm font-medium">Skip Jira update</div>
+                    <div className={`text-sm mt-0.5 ${!syncToJira ? 'text-amber-100' : 'text-gray-500'}`}>
                       Reassign within Agent only
                     </div>
                   </button>
@@ -2694,14 +2689,14 @@ export default function WorkManagementPage() {
                 <button
                   type="button"
                   onClick={() => setTransferItem(null)}
-                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={transferring}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 text-white rounded-lg text-sm font-semibold shadow-sm cursor-pointer ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 text-white rounded-lg text-sm font-medium  cursor-pointer ${
                     syncToJira ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-amber-600 hover:bg-amber-700'
                   }`}
                 >
@@ -2723,23 +2718,23 @@ export default function WorkManagementPage() {
           <div role="dialog" aria-modal="true" aria-label="Bulk reassign Jira tickets" className="bg-white rounded-xl shadow-xl max-w-md min-w-0 w-full max-h-[90vh] overflow-y-auto p-6 border border-gray-200 space-y-4">
             <div className="flex items-center justify-between border-b border-gray-100 pb-3">
               <div>
-                <h3 className="text-sm font-semibold text-gray-900 flex flex-wrap items-center gap-2">
-                  Bulk Reassign ({selectedTicketKeys.length} Tickets)
+                <h3 className="text-sm font-medium text-gray-900 flex flex-wrap items-center gap-2">
+                  Bulk reassign ({selectedTicketKeys.length} Tickets)
                 </h3>
-                <p className="text-xs text-gray-500">Direct bulk assignee update in Jira Cloud &amp; Dashboard (Zero comments posted to Jira).</p>
+                <p className="text-sm text-gray-500">Update assignees in Jira Cloud and the dashboard. No comments are posted to Jira.</p>
               </div>
               <button onClick={() => setBulkModalOpen(false)} aria-label="Close bulk reassignment" className="workspace-button">
-                ✕
+                <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
 
             <div className="p-3 bg-gray-50 rounded-xl border border-gray-200 max-h-32 overflow-y-auto">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
+              <span className="text-sm font-medium text-gray-500   block mb-1.5">
                 Selected Tickets ({selectedTicketKeys.length}):
               </span>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {selectedTicketKeys.map((k) => (
-                  <span key={k} className="px-2 py-0.5 rounded bg-white border border-gray-200 text-xs font-semibold text-indigo-700">
+                  <span key={k} className="px-2 py-0.5 rounded bg-white border border-gray-200 text-sm font-medium text-gray-700">
                     {k}
                   </span>
                 ))}
@@ -2748,7 +2743,7 @@ export default function WorkManagementPage() {
 
             <form onSubmit={handleExecuteBulkTransfer} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Target Assignee</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Target assignee</label>
                 <select
                   value={bulkTargetId}
                   aria-label="Bulk transfer target assignee"
@@ -2765,47 +2760,47 @@ export default function WorkManagementPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Internal Audit Note (Optional — saved only on dashboard, never posted to Jira)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Internal audit note (optional — saved only on dashboard, never posted to Jira)</label>
                 <textarea
                   value={bulkHandoverNote}
                   aria-label="Internal bulk transfer note"
                   onChange={(e) => setBulkHandoverNote(e.target.value)}
                   placeholder="e.g. 'Batch reallocating marketing campaign briefs to available intern queue.'"
                   rows={3}
-                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg p-2.5 text-sm text-gray-800 placeholder-gray-400"
+                  className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full border border-gray-300 rounded-lg p-3 text-sm text-gray-800 placeholder-gray-400"
                 />
               </div>
               {/* Jira Reassignment Confirmation */}
-              <div className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-2">
-                <span className="block text-xs font-semibold text-indigo-900 uppercase tracking-wider">
-                  Jira Reassignment Confirmation
+              <div className="p-3 rounded-xl border border-gray-200 bg-gray-50/40 space-y-2">
+                <span className="block text-sm font-medium text-gray-900  ">
+                  Jira reassignment confirmation
                 </span>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setBulkSyncToJira(true)}
-                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition cursor-pointer ${
+                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition-colors cursor-pointer ${
                       bulkSyncToJira
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                        ? 'bg-indigo-600 text-white border-gray-600 '
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    <div className="text-xs font-semibold">✓ Confirm in Jira</div>
-                    <div className={`text-xs mt-0.5 ${bulkSyncToJira ? 'text-indigo-100' : 'text-gray-500'}`}>
+                    <div className="text-sm font-medium">Confirm in Jira</div>
+                    <div className={`text-sm mt-0.5 ${bulkSyncToJira ? 'text-gray-100' : 'text-gray-500'}`}>
                       Reflect in Jira Cloud &amp; Agent
                     </div>
                   </button>
                   <button
                     type="button"
                     onClick={() => setBulkSyncToJira(false)}
-                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition cursor-pointer ${
+                    className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 p-2 rounded-lg text-left border transition-colors cursor-pointer ${
                       !bulkSyncToJira
-                        ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                        ? 'bg-amber-600 text-white border-amber-600 '
                         : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
                     }`}
                   >
-                    <div className="text-xs font-semibold">⏸️ Skip Jira Update</div>
-                    <div className={`text-xs mt-0.5 ${!bulkSyncToJira ? 'text-amber-100' : 'text-gray-500'}`}>
+                    <div className="text-sm font-medium">Skip Jira update</div>
+                    <div className={`text-sm mt-0.5 ${!bulkSyncToJira ? 'text-amber-100' : 'text-gray-500'}`}>
                       Reassign within Agent only
                     </div>
                   </button>
@@ -2816,14 +2811,14 @@ export default function WorkManagementPage() {
                 <button
                   type="button"
                   onClick={() => setBulkModalOpen(false)}
-                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                  className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={bulkTransferring}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 text-white rounded-lg text-sm font-semibold shadow-sm flex flex-wrap items-center gap-1.5 cursor-pointer ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 text-white rounded-lg text-sm font-medium  flex flex-wrap items-center gap-2 cursor-pointer ${
                     bulkSyncToJira ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-amber-600 hover:bg-amber-700'
                   }`}
                 >
@@ -2848,23 +2843,23 @@ export default function WorkManagementPage() {
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   
-                  <h3 className="text-base font-semibold text-gray-900">
-                    Automated 3-Stage Daily SLA Dispatcher
+                  <h3 className="text-base font-medium text-gray-900">
+                    Daily SLA dispatcher
                   </h3>
-                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  <span className="px-2 py-0.5 rounded text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
                     IST (UTC+5:30)
                   </span>
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <p className="text-sm text-gray-500 mt-0.5">
                   10:00 AM Kickoff &rarr; 1:00 PM Checkpoint &rarr; 4:00 PM Urgent Attention Required.
                 </p>
               </div>
               <button
                 onClick={() => setShowAlertModal(false)}
                 aria-label="Close SLA reminders"
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-gray-500 hover:text-gray-600 font-semibold text-base px-2 py-1"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-gray-500 hover:text-gray-600 font-medium text-base px-2 py-1"
               >
-                ✕
+                <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
 
@@ -2872,21 +2867,21 @@ export default function WorkManagementPage() {
             <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4">
 
             {/* Scheduler Status Banner */}
-            <div className="bg-gray-50 text-gray-900 border border-gray-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm shrink-0">
-              <div className="flex flex-wrap items-center gap-2.5">
+            <div className="bg-gray-50 text-gray-900 border border-gray-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-sm shrink-0">
+              <div className="flex flex-wrap items-center gap-3">
                 <span className={`w-2.5 h-2.5 rounded-full ${schedulerStatus?.enabled ? 'bg-emerald-400 ' : 'bg-red-400'}`} />
                 <div>
-                  <span className="font-semibold">
+                  <span className="font-medium">
                     Automated Scheduler: {schedulerStatus?.enabled ? 'ACTIVE (10:00, 13:00, 16:00 IST)' : 'DISABLED'}
                   </span>
-                  <span className="block text-xs text-gray-600">
-                    Current Server IST Time: <span className="font-mono text-indigo-700 font-semibold">{schedulerStatus?.ist_time || 'Calculating...'}</span>
+                  <span className="block text-sm text-gray-600">
+                    Current Server IST Time: <span className="font-mono text-gray-700 font-medium">{schedulerStatus?.ist_time || 'Calculating...'}</span>
                   </span>
                 </div>
               </div>
               <button
                 onClick={handleToggleScheduler}
-                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors self-start sm:self-auto border ${
+                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors self-start sm:self-auto border ${
                   schedulerStatus?.enabled
                     ? 'bg-white hover:bg-white/20 text-gray-900 border-gray-200'
                     : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-500'
@@ -2898,25 +2893,24 @@ export default function WorkManagementPage() {
 
             {/* Sender Account Status Banner */}
             {alertsPreview?.sender_info && (
-              <div className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 ${
+              <div className={`p-3 rounded-xl border text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 ${
                 alertsPreview.sender_info.is_configured
                   ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
                   : 'bg-amber-50 text-amber-900 border-amber-200'
               }`}>
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="text-base">{alertsPreview.sender_info.is_configured ? '🟢' : '🟡'}</span>
+                <div className="flex flex-wrap items-center gap-3">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold">
+                      <span className="font-medium">
                         From Account: <span className="font-mono">{alertsPreview.sender_info.from_email}</span>
                       </span>
-                      <span className={`px-1.5 py-0.2 rounded text-xs font-semibold uppercase ${
+                      <span className={`px-1.5 py-0.5 rounded text-sm font-medium  ${
                         alertsPreview.sender_info.is_configured ? 'bg-emerald-200 text-emerald-800' : 'bg-amber-200 text-amber-800'
                       }`}>
                         {alertsPreview.sender_info.mode}
                       </span>
                     </div>
-                    <span className="block text-xs opacity-85 mt-0.5">
+                    <span className="block text-sm opacity-85 mt-0.5">
                       {alertsPreview.sender_info.is_configured
                         ? `Live SMTP Server Connected: ${alertsPreview.sender_info.smtp_host}:${alertsPreview.sender_info.smtp_port}`
                         : 'Safe Simulation Mode: Emails are logged, not sent over wire. Add SMTP_HOST, SMTP_USER, SMTP_PASSWORD in Render to send live emails.'}
@@ -2928,7 +2922,7 @@ export default function WorkManagementPage() {
 
             {/* Stage Selector Tabs */}
             <div className="flex flex-wrap items-center gap-2 shrink-0 border-b border-gray-100 pb-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 mr-1">Alert Stage:</span>
+              <span className="text-sm font-medium   text-gray-500 mr-1">Alert stage:</span>
               {[
                 { id: 'AUTO', label: ' Auto-Detect (Current IST Time)' },
                 { id: 'MORNING', label: ' 10:00 AM Kickoff (Daily Brief)' },
@@ -2938,9 +2932,9 @@ export default function WorkManagementPage() {
                 <button
                   key={s.id}
                   onClick={() => handleChangeAlertStage(s.id as 'AUTO' | 'MORNING' | 'MIDDAY' | 'EOD')}
-                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors border ${
+                  className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${
                     alertStage === s.id
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                      ? 'bg-indigo-600 text-white border-gray-600 '
                       : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
                   }`}
                 >
@@ -2950,24 +2944,24 @@ export default function WorkManagementPage() {
             </div>
 
             {alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && (
-              <div role="status" className="p-3 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs">
-                <strong>Google Chat paused on Saturdays and Sundays (IST).</strong> No Chat webhook will be posted, even with Force Override. Direct email remains available.
+              <div role="status" className="p-3 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-sm">
+                <strong className="font-medium">Google Chat paused on Saturdays and Sundays (IST).</strong> No Chat webhook will be posted, even with Force Override. Direct email remains available.
               </div>
             )}
             {/* Stage Timing & Status Banner */}
             {alertsPreview && (
               <div
-                className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                className={`p-3 rounded-xl border text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                   !alertsPreview.is_valid_window
                     ? 'bg-amber-50 border-amber-300 text-amber-900'
                     : alertsPreview.already_sent_today
-                    ? 'bg-blue-50 border-blue-200 text-blue-900'
+                    ? 'bg-gray-50 border-gray-200 text-gray-900'
                     : 'bg-emerald-50 border-emerald-200 text-emerald-900'
                 }`}
               >
                 <div className="space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-sm">
+                    <span className="font-medium text-sm">
                       {!alertsPreview.is_valid_window
                         ? ' Off-Schedule Slot'
                         : alertsPreview.already_sent_today
@@ -2976,11 +2970,11 @@ export default function WorkManagementPage() {
                         ? ' Active Email Slot (Chat Paused)'
                         : ' Active Scheduled Slot'}
                     </span>
-                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-white/80 border">
+                    <span className="font-mono text-sm px-2 py-0.5 rounded bg-white/80 border">
                       Scheduled: {alertsPreview.scheduled_time || alertsPreview.stage} ({alertsPreview.window_label || 'Current Window'})
                     </span>
                   </div>
-                  <p className="text-xs opacity-90">
+                  <p className="text-sm opacity-90">
                     {!alertsPreview.is_valid_window
                       ? `It is currently ${alertsPreview.ist_time}. The ${alertsPreview.stage} alert is designated for ${alertsPreview.scheduled_time}. Sending now may result in out-of-order messages in Google Chat.`
                       : alertsPreview.already_sent_today
@@ -2999,28 +2993,28 @@ export default function WorkManagementPage() {
                       onChange={(e) => setForceOffSchedule(e.target.checked)}
                       className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 rounded text-amber-600 focus:ring-amber-500"
                     />
-                    <span className="text-xs font-semibold text-gray-800">
-                      Allow Force Override
+                    <span className="text-sm font-medium text-gray-800">
+                      Allow force override
                     </span>
                   </label>
                 )}
               </div>
             )}
             {/* Multi-Channel Dispatch Selector */}
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-3.5 space-y-2.5 shrink-0 text-xs">
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3 shrink-0 text-sm">
               <div className="flex items-center justify-between">
-                <span className="font-semibold text-gray-900 uppercase text-xs tracking-wider">
-                  Select Notification Channels:
+                <span className="font-medium text-gray-900  text-sm ">
+                  Notification channels:
                 </span>
-                <span className="text-xs text-gray-500">
+                <span className="text-sm text-gray-500">
                   Multiple channels can be dispatched simultaneously
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Channel 1: Google Chat */}
-                <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-colors ${
-                  sendGoogleChat ? 'bg-white border-emerald-500 ring-2 ring-emerald-50 shadow-xs' : 'bg-gray-100/60 border-gray-200 opacity-60'
+                <label className={`p-3 rounded-lg border flex items-start gap-3 cursor-pointer transition-colors ${
+                  sendGoogleChat ? 'bg-white border-emerald-500 ring-2 ring-emerald-50 ' : 'bg-gray-100/60 border-gray-200 opacity-60'
                 }`}>
                   <input
                     type="checkbox"
@@ -3029,38 +3023,38 @@ export default function WorkManagementPage() {
                     className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
                   />
                   <div>
-                    <span className="font-semibold text-gray-900 block flex flex-wrap items-center gap-1">
-                      Google Chat Space
+                    <span className="font-medium text-gray-900 block flex flex-wrap items-center gap-1">
+                      Google Chat space
                     </span>
-                    <span className="text-xs text-gray-500 leading-tight block mt-0.5">
+                    <span className="text-sm text-gray-500 leading-tight block mt-0.5">
                       Posts rich interactive card with ticket links into Google Chat room.
                     </span>
                   </div>
                 </label>
 
                 {/* Channel 2: Direct Outbound Email */}
-                <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-colors ${
-                  sendDirectEmail ? 'bg-white border-blue-500 ring-2 ring-blue-50 shadow-xs' : 'bg-gray-100/60 border-gray-200 opacity-60'
+                <label className={`p-3 rounded-lg border flex items-start gap-3 cursor-pointer transition-colors ${
+                  sendDirectEmail ? 'bg-white border-gray-500 ring-2 ring-blue-50 ' : 'bg-gray-100/60 border-gray-200 opacity-60'
                 }`}>
                   <input
                     type="checkbox"
                     checked={sendDirectEmail}
                     onChange={(e) => setSendDirectEmail(e.target.checked)}
-                    className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 mt-0.5 rounded text-blue-600 focus:ring-blue-500"
+                    className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 mt-0.5 rounded text-gray-600 focus:ring-blue-500"
                   />
                   <div>
-                    <span className="font-semibold text-gray-900 block flex flex-wrap items-center gap-1">
-                      Direct Outbound Email
+                    <span className="font-medium text-gray-900 block flex flex-wrap items-center gap-1">
+                      Direct outbound email
                     </span>
-                    <span className="text-xs text-gray-500 leading-tight block mt-0.5">
+                    <span className="text-sm text-gray-500 leading-tight block mt-0.5">
                       Sends via Brevo/SMTP directly to operators with automatic BCC to sender.
                     </span>
                   </div>
                 </label>
 
                 {/* Channel 3: WhatsApp Group Broadcast */}
-                <label className={`p-2.5 rounded-lg border flex items-start gap-2.5 cursor-pointer transition-colors ${
-                  sendWhatsApp ? 'bg-white border-green-500 ring-2 ring-green-50 shadow-xs' : 'bg-gray-100/60 border-gray-200 opacity-60'
+                <label className={`p-3 rounded-lg border flex items-start gap-3 cursor-pointer transition-colors ${
+                  sendWhatsApp ? 'bg-white border-green-500 ring-2 ring-green-50 ' : 'bg-gray-100/60 border-gray-200 opacity-60'
                 }`}>
                   <input
                     type="checkbox"
@@ -3069,11 +3063,11 @@ export default function WorkManagementPage() {
                     className="min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 mt-0.5 rounded text-green-600 focus:ring-green-500"
                   />
                   <div>
-                    <span className="font-semibold text-gray-900 block flex flex-wrap items-center gap-1">
-                      WhatsApp Group
+                    <span className="font-medium text-gray-900 block flex flex-wrap items-center gap-1">
+                      WhatsApp group
                     </span>
-                    <span className="text-xs text-gray-500 leading-tight block mt-0.5">
-                      Posts 3-stage SLA alert to your team's WhatsApp group free of cost.
+                    <span className="text-sm text-gray-500 leading-tight block mt-0.5">
+                      Posts a three-stage SLA alert to your team's WhatsApp group.
                     </span>
                   </div>
                 </label>
@@ -3083,7 +3077,7 @@ export default function WorkManagementPage() {
                 <div className="pt-2 border-t border-gray-200/80 space-y-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2 flex-1">
-                      <span className="text-xs font-semibold text-gray-600 shrink-0">WhatsApp Group:</span>
+                      <span className="text-sm font-medium text-gray-600 shrink-0">WhatsApp Group:</span>
                       <input
                         type="text"
                         value={whatsappGroupName}
@@ -3097,34 +3091,34 @@ export default function WorkManagementPage() {
                       type="button"
                       onClick={handleSendTestWhatsApp}
                       disabled={testingWhatsApp}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex flex-wrap items-center gap-1.5 shrink-0 transition disabled:opacity-50"
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 text-sm font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg flex flex-wrap items-center gap-2 shrink-0 transition-colors disabled:opacity-50"
                     >
                       {testingWhatsApp ? 'Sending...' : 'Ping Group Test'}
                     </button>
                     <button
                       type="button"
                       onClick={handleOpenWhatsAppModal}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 text-sm font-semibold text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg flex flex-wrap items-center gap-1.5 shrink-0 transition"
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-2.5 py-1 text-sm font-medium text-green-700 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg flex flex-wrap items-center gap-2 shrink-0 transition-colors"
                     >
-                      {whatsappGatewayStatus?.connected ? 'Gateway Linked ✓' : 'Link WhatsApp (Scan QR)'}
+                      {whatsappGatewayStatus?.connected ? 'Gateway linked' : 'Link WhatsApp (Scan QR)'}
                     </button>
                   </div>
                   {whatsappGatewayStatus?.connected && (
-                    <div className="text-xs text-green-700 font-medium flex flex-wrap items-center gap-1">
+                    <div className="text-sm text-green-700 font-medium flex flex-wrap items-center gap-1">
                       Gateway Connected as {whatsappGatewayStatus.user?.name || whatsappGatewayStatus.user?.id || 'Connected User'}
                     </div>
                   )}
                 </div>
               )}
 
-              <div className="flex flex-wrap items-center gap-1.5 text-xs text-gray-500 bg-gray-100/70 p-2 rounded-lg">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 bg-gray-100/70 p-2 rounded-lg">
                 
-                <span><strong>Jira is strictly read-only:</strong> The alert system will never write comments, update tickets, or modify anything in Jira Cloud.</span>
+                <span><strong className="font-medium">Jira is strictly read-only:</strong> The alert system will never write comments, update tickets, or modify anything in Jira Cloud.</span>
               </div>
 
               {sendGoogleChat && (
                 <div className="pt-2 border-t border-gray-200/80 flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-semibold text-gray-600 shrink-0">Google Chat Webhook:</span>
+                  <span className="text-sm font-medium text-gray-600 shrink-0">Google Chat webhook:</span>
                   <input
                     type="text"
                     value={googleChatWebhookUrl}
@@ -3141,24 +3135,24 @@ export default function WorkManagementPage() {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-3 md:h-80 border border-gray-200 rounded-xl overflow-hidden bg-white">
               {/* Left Column: Operators List */}
               <div className="md:col-span-5 min-w-0 max-h-72 md:max-h-none border border-gray-200 rounded-xl overflow-hidden flex flex-col bg-gray-50/50">
-                <div className="p-3 bg-gray-100/70 border-b border-gray-200 text-xs font-semibold text-gray-700 flex items-center justify-between">
+                <div className="p-3 bg-gray-100/70 border-b border-gray-200 text-sm font-medium text-gray-700 flex items-center justify-between">
                   <span>Target Operators ({alertsPreview?.recipient_count || 0})</span>
-                  <span className="text-xs text-gray-500 font-normal">
+                  <span className="text-sm text-gray-500 font-normal">
                     {alertsPreview?.total_due_today_incomplete || 0} unfinished tickets
                   </span>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
                   {alertsLoading ? (
-                    <div className="py-8 text-center text-xs text-gray-500 flex flex-col items-center gap-2">
-                      <svg className="w-5 h-5 animate-spin text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <div className="py-8 text-center text-sm text-gray-500 flex flex-col items-center gap-2">
+                      <svg className="w-5 h-5 animate-spin text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                         <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
                       </svg>
                       <span>Evaluating tickets due today...</span>
                     </div>
                   ) : alertsPreview?.drafts.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-gray-500">
-                      <span> All campaigns due today are completed!</span>
+                    <div className="py-8 text-center text-sm text-gray-500">
+                      <span>All campaigns due today are completed</span>
                     </div>
                   ) : (
                     alertsPreview?.drafts.map((d) => {
@@ -3169,20 +3163,20 @@ export default function WorkManagementPage() {
                           onClick={() => setActivePreviewEmail(d)}
                           className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full text-left p-3 rounded-lg border text-sm transition-colors ${
                             isSelected
-                              ? 'bg-white border-indigo-500 shadow-sm ring-2 ring-indigo-50'
+                              ? 'bg-white border-gray-500  ring-2 ring-indigo-50'
                               : 'bg-white border-gray-200 hover:border-gray-300'
                           }`}
                         >
-                          <div className="flex items-center justify-between font-semibold text-gray-900">
+                          <div className="flex items-center justify-between font-medium text-gray-900">
                             <span>{d.recipient_name}</span>
-                            <span className="px-1.5 py-0.5 rounded text-xs bg-red-50 text-red-700 border border-red-200">
+                            <span className="px-1.5 py-0.5 rounded text-sm bg-red-50 text-red-700 border border-red-200">
                               {d.pending_count} Pending
                             </span>
                           </div>
-                          <div className="text-xs text-gray-500 mt-0.5 truncate">
+                          <div className="text-sm text-gray-500 mt-0.5 truncate">
                             {d.recipient_email}
                           </div>
-                          <div className="text-xs text-indigo-600 font-mono mt-1 font-semibold truncate">
+                          <div className="text-sm text-gray-600 font-mono mt-1 font-medium truncate">
                             {d.ticket_keys.join(', ')}
                           </div>
                         </button>
@@ -3194,25 +3188,25 @@ export default function WorkManagementPage() {
 
               {/* Right Column: Live Email Preview */}
               <div className="md:col-span-7 min-w-0 min-h-64 border border-gray-200 rounded-xl overflow-hidden flex flex-col bg-white">
-                <div className="p-3 bg-gray-50 border-b border-gray-200 text-xs flex flex-col gap-1">
-                  <div className="flex flex-wrap items-center gap-1.5 font-semibold text-gray-900 truncate">
+                <div className="p-3 bg-gray-50 border-b border-gray-200 text-sm flex flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-2 font-medium text-gray-900 truncate">
                     <span className="text-gray-500">Subject:</span>
                     <span className="truncate">{activePreviewEmail?.subject || 'Select an operator'}</span>
                   </div>
-                  <div className="text-xs text-gray-500 flex flex-wrap items-center gap-1.5">
+                  <div className="text-sm text-gray-500 flex flex-wrap items-center gap-2">
                     <span className="text-gray-500">To:</span>
-                    <span className="font-mono text-indigo-700 font-semibold">{activePreviewEmail?.recipient_email || '—'}</span>
+                    <span className="font-mono text-gray-700 font-medium">{activePreviewEmail?.recipient_email || '—'}</span>
                   </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 bg-gray-50/30">
                   {activePreviewEmail ? (
                     <div
-                      className="prose prose-xs max-w-none text-xs"
+                      className="prose prose-xs max-w-none text-sm"
                       dangerouslySetInnerHTML={{ __html: activePreviewEmail.body_html }}
                     />
                   ) : (
-                    <div className="py-16 text-center text-xs text-gray-500">
+                    <div className="py-16 text-center text-sm text-gray-500">
                       Select an operator on the left to preview their customized email.
                     </div>
                   )}
@@ -3223,7 +3217,7 @@ export default function WorkManagementPage() {
 
           {/* Modal Footer Actions (Sticky Bottom) */}
           <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 bg-gray-50 rounded-b-2xl z-10">
-            <div className="text-xs text-gray-500">
+            <div className="text-sm text-gray-500">
               Stage: <strong className="text-gray-900">{alertsPreview?.stage}</strong> • Recipients: <strong className="text-gray-900">{alertsPreview?.recipient_count} operators</strong>
             </div>
 
@@ -3231,7 +3225,7 @@ export default function WorkManagementPage() {
               <button
                 type="button"
                 onClick={() => setShowAlertModal(false)}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100"
               >
                 Close
               </button>
@@ -3239,7 +3233,7 @@ export default function WorkManagementPage() {
                 type="button"
                 onClick={() => handleDispatchAlerts(true)}
                 disabled={alertsDispatching || alertsPreview?.recipient_count === 0}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-sm font-semibold border border-gray-300 transition-colors"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-sm font-medium border border-gray-300 transition-colors"
               >
                 {alertsDispatching ? 'Running...' : 'Send Dry-Run (Simulation)'}
               </button>
@@ -3252,7 +3246,7 @@ export default function WorkManagementPage() {
                   ((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule) ||
                   (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail && !sendWhatsApp)
                 }
-                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-5 py-2 rounded-lg text-sm font-semibold shadow-md transition-colors flex flex-wrap items-center gap-1.5  ${
+                className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-5 py-2 rounded-lg text-sm font-medium  transition-colors flex flex-wrap items-center gap-2  ${
                   (((!alertsPreview?.is_valid_window || alertsPreview?.already_sent_today) && !forceOffSchedule) ||
                     (alertsPreview?.recipient_count === 0 && !forceOffSchedule) ||
                     (alertsPreview?.google_chat_skipped_weekend && sendGoogleChat && !sendDirectEmail && !sendWhatsApp))
@@ -3286,37 +3280,37 @@ export default function WorkManagementPage() {
               <div className="flex flex-wrap items-center gap-2">
                 
                 <div>
-                  <h3 className="font-semibold text-sm">Self-Hosted WhatsApp Gateway</h3>
-                  <p className="text-xs text-gray-500">100% Free &amp; Private Outbound Group Dispatcher</p>
+                  <h3 className="font-medium text-sm">WhatsApp gateway</h3>
+                  <p className="text-sm text-gray-500">Outbound group dispatcher</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowWhatsAppModal(false)}
                 aria-label="Close WhatsApp gateway"
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-gray-500 hover:text-gray-900 text-lg font-semibold p-1"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 text-gray-500 hover:text-gray-900 text-lg font-medium p-1"
               >
-                ✕
+                <svg aria-hidden="true" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m6 6 12 12M18 6 6 18" /></svg>
               </button>
             </div>
 
-            <div className="p-5 space-y-4 text-xs">
+            <div className="p-5 space-y-4 text-sm">
               {loadingQr ? (
                 <div className="py-12 text-center text-gray-500">Checking gateway &amp; loading QR code...</div>
               ) : whatsappGatewayStatus?.connected ? (
                 <div className="space-y-4">
                   <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-800 space-y-1">
-                    <div className="font-semibold flex flex-wrap items-center gap-1.5">
-                      WhatsApp Gateway Connected
+                    <div className="font-medium flex flex-wrap items-center gap-2">
+                      WhatsApp gateway connected
                     </div>
-                    <p className="text-xs text-green-700">
-                      Linked as: <strong>{whatsappGatewayStatus.user?.name || whatsappGatewayStatus.user?.id}</strong>
+                    <p className="text-sm text-green-700">
+                      Linked as: <strong className="font-medium">{whatsappGatewayStatus.user?.name || whatsappGatewayStatus.user?.id}</strong>
                     </p>
                   </div>
 
                   {whatsappGroups.length > 0 && (
                     <div className="space-y-1.5">
-                      <label className="font-semibold text-gray-700 block">Select Target WhatsApp Group:</label>
+                      <label className="font-medium text-gray-700 block">Target WhatsApp group:</label>
                       <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
                         {whatsappGroups.map((g) => (
                           <button
@@ -3330,12 +3324,12 @@ export default function WorkManagementPage() {
                                 localStorage.setItem('whatsapp_sla_group_id', g.id);
                               }
                             }}
-                            className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full text-left p-2.5 text-sm hover:bg-gray-50 transition flex items-center justify-between ${
-                              whatsappGroupName === g.name ? 'bg-green-50 font-bold text-green-800' : 'text-gray-800'
+                            className={`focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 w-full text-left p-3 text-sm hover:bg-gray-50 transition-colors flex items-center justify-between ${
+                              whatsappGroupName === g.name ? 'bg-green-50 font-medium text-green-800' : 'text-gray-800'
                             }`}
                           >
                             <span>{g.name}</span>
-                            <span className="text-xs text-gray-500">{g.participants_count} members</span>
+                            <span className="text-sm text-gray-500">{g.participants_count} members</span>
                           </button>
                         ))}
                       </div>
@@ -3344,24 +3338,24 @@ export default function WorkManagementPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div className="text-gray-600 leading-relaxed text-xs">
+                  <div className="text-gray-600 leading-relaxed text-sm">
                     <ol className="list-decimal pl-4 space-y-1">
-                      <li>Open <strong>WhatsApp</strong> on your phone</li>
-                      <li>Tap <strong>Settings / Menu (⋮)</strong> &rarr; <strong>Linked Devices</strong></li>
-                      <li>Tap <strong>Link a Device</strong></li>
+                      <li>Open <strong className="font-medium">WhatsApp</strong> on your phone</li>
+                      <li>Tap <strong className="font-medium">Settings / Menu (⋮)</strong> &rarr; <strong className="font-medium">Linked Devices</strong></li>
+                      <li>Tap <strong className="font-medium">Link a Device</strong></li>
                       <li>Scan the QR code below:</li>
                     </ol>
                   </div>
 
-                  <div className="w-56 h-56 mx-auto bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-center p-2 shadow-inner">
+                  <div className="w-56 h-56 mx-auto bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-center p-2 ">
                     {whatsappQr?.qr_image ? (
                       <img src={whatsappQr.qr_image} alt="WhatsApp QR Code" className="w-full h-full object-contain rounded-lg" />
                     ) : (
-                      <div className="text-gray-500 text-center text-xs">
+                      <div className="text-gray-500 text-center text-sm">
                         {whatsappGatewayStatus?.status === 'OFFLINE' ? (
                           <div className="space-y-1 p-2">
-                            <p className="font-semibold text-amber-700">Gateway Offline</p>
-                            <p className="text-xs text-gray-500">Run: <code>cd whatsapp-gateway &amp;&amp; npm start</code></p>
+                            <p className="font-medium text-amber-700">Gateway offline</p>
+                            <p className="text-sm text-gray-500">Run: <code>cd whatsapp-gateway &amp;&amp; npm start</code></p>
                           </div>
                         ) : (
                           'Generating QR code...'
@@ -3374,9 +3368,9 @@ export default function WorkManagementPage() {
                     <button
                       type="button"
                       onClick={handleOpenWhatsAppModal}
-                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-semibold transition"
+                      className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition-colors"
                     >
-                       Refresh QR Code / Check Connection
+                       Refresh QR code / check connection
                     </button>
                   </div>
                 </div>
@@ -3387,7 +3381,7 @@ export default function WorkManagementPage() {
               <button
                 type="button"
                 onClick={() => setShowWhatsAppModal(false)}
-                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-1.5 bg-gray-800 text-white rounded-lg text-sm font-semibold hover:bg-gray-900 transition"
+                className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 px-4 py-1.5 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 transition-colors"
               >
                 Done
               </button>
