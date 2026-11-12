@@ -172,8 +172,8 @@ def _segment_text_components(raw_text: str) -> ExtractedTemplateComponent:
         filtered_lines = []
         for line in lines:
             llow = line.lower().strip()
-            if llow.startswith(
-                ("hi ", "hello ", "dear team", "please find", "please whitelist", "campaign:", "channel:")
+            if llow.startswith(("please find", "please whitelist", "campaign:", "channel:")) or re.match(
+                r"^(?:hi|hello|dear)\s+(?:team|all)\b", llow
             ):
                 continue
             filtered_lines.append(line)

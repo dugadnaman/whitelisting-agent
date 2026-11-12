@@ -723,29 +723,31 @@ def is_cta_cell(val: str) -> bool:
     return False
 
 
-def split_multi_campaign_cell(text: str) -> list[str]:
-    """
-    Split a single spreadsheet cell into multiple separate campaign template copies
-    when a copywriter placed numbered variants (e.g. 1. ... 2. ...) in one cell.
-    Strips leading option numbers (e.g. '1. Hello' -> 'Hello') so templates begin
-    cleanly with customer greetings.
-    """
+def split_multi_campaign_cell(text: str, *, numbered_greetings_only: bool = False) -> list[str]:
+    """Split explicit variants; Jira's bare list markers must start customer messages."""
     clean = text.strip()
     if not clean:
         return []
 
-    split_pattern = r"(?:^|\n+)(?:(?:Option|Variant|Campaign|Draft)\s*)?([1-9]\d*)[.)\-:]\s*"
+    split_pattern = (
+        r"(?:^|\n+)\s*(?:(?P<label>Option|Variant|Campaign|Draft)\s*"
+        r"(?P<label_number>[1-9]\d*)[.)\-:]?(?=\s|$)\s*|(?P<number>[1-9]\d*)[.)\-:]\s*)"
+    )
     matches = list(re.finditer(split_pattern, clean, re.IGNORECASE))
     if len(matches) >= 2:
-        numbers = [int(m.group(1)) for m in matches]
-        if numbers == list(range(1, len(numbers) + 1)):
-            parts = []
-            for i, m in enumerate(matches):
-                start = m.end()
-                end = matches[i + 1].start() if i + 1 < len(matches) else len(clean)
-                segment = clean[start:end].strip()
-                if len(segment) > 25:
-                    parts.append(segment)
+        numbers = [int(m.group("label_number") or m.group("number")) for m in matches]
+        parts = [
+            clean[m.end():matches[i + 1].start() if i + 1 < len(matches) else len(clean)].strip()
+            for i, m in enumerate(matches)
+        ]
+        greetings = [bool(re.match(r"^(?:dear|hi|hello|hey|namaste)\b", part, re.IGNORECASE)) for part in parts]
+        sequential = numbers == list(range(1, len(numbers) + 1))
+        restarted = all(number == 1 for number in numbers) and all(greetings)
+        message_boundaries = all(m.group("label") or greeting for m, greeting in zip(matches, greetings))
+        if (sequential or restarted) and (not numbered_greetings_only or message_boundaries):
+            if numbered_greetings_only:
+                return parts if all(parts) else [clean]
+            parts = [part for part in parts if len(part) > 25]
             if len(parts) >= 2:
                 return parts
 
@@ -3280,31 +3282,33 @@ def parse_jira_brief(
         try:
             from jira_extractor import extract_template_from_jira_text
 
-            semantic_res = extract_template_from_jira_text(desc_text, summary=summary, allow_ai=use_ai)
-            t_comp = semantic_res.template
-            if t_comp.body_text and is_valid_template_copy(t_comp.body_text):
-                chan_decision = semantic_res.routing.target_channel
-                channels_to_emit = (
-                    ["WA", "RCS", "SMS"]
-                    if chan_decision == "MULTI_CHANNEL"
-                    else (["WA"] if chan_decision == "WHATSAPP" else [chan_decision])
-                )
-                for c_tag in channels_to_emit:
-                    extracted_items.append(
-                        {
-                            "channel": c_tag,
-                            "text": t_comp.body_text,
-                            "header": t_comp.header_text,
-                            "footer": t_comp.footer_text,
-                            "button_text": t_comp.button_text,
-                            "button_url": t_comp.button_url,
-                            "button_type": t_comp.button_type,
-                            "variant": semantic_res.routing.campaign_purpose,
-                            "source": "jira_typesafe_extractor",
-                            "variables": semantic_res.variables,
-                            "sample_values": semantic_res.sample_values,
-                        }
+            for copy in split_multi_campaign_cell(desc_text, numbered_greetings_only=True):
+                semantic_res = extract_template_from_jira_text(copy, summary=summary, allow_ai=use_ai)
+                t_comp = semantic_res.template
+                if t_comp.body_text and is_valid_template_copy(t_comp.body_text):
+                    chan_decision = semantic_res.routing.target_channel
+                    channels_to_emit = (
+                        ["WA", "RCS", "SMS"]
+                        if chan_decision == "MULTI_CHANNEL"
+                        else (["WA"] if chan_decision == "WHATSAPP" else [chan_decision])
                     )
+                    for c_tag in channels_to_emit:
+                        extracted_items.append(
+                            {
+                                "channel": c_tag,
+                                "text": t_comp.body_text,
+                                "raw_source": copy,
+                                "header": t_comp.header_text,
+                                "footer": t_comp.footer_text,
+                                "button_text": t_comp.button_text,
+                                "button_url": t_comp.button_url,
+                                "button_type": t_comp.button_type,
+                                "variant": semantic_res.routing.campaign_purpose,
+                                "source": "jira_typesafe_extractor",
+                                "variables": semantic_res.variables,
+                                "sample_values": semantic_res.sample_values,
+                            }
+                        )
         except Exception as ex:
             logger.warning("TypeSafe semantic Jira extraction skipped: %s", ex)
 
@@ -3395,7 +3399,7 @@ def parse_jira_brief(
                     button_url=b_url,
                     variables=resolved_vars,
                     sample_values=resolved_samples,
-                    raw_source=clean_content,
+                    raw_source=item.get("raw_source") or clean_content,
                     source_origin=source_origin,
                 )
             )

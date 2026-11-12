@@ -2166,6 +2166,19 @@ export default function JiraBriefsPage() {
                     <div className="flex flex-wrap items-center justify-end gap-3">
                       <button
                         type="button"
+                        onClick={() => {
+                          if (window.confirm('Reload this ticket from Jira? This replaces local template edits and selections with the current source.')) {
+                            setConfirmationMode(null);
+                            loadBrief(brief.issue_key, true);
+                          }
+                        }}
+                        disabled={submitting || loadingBrief}
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        Reload from Jira
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => addTemplate(activeTab)}
                         disabled={submitting}
                         className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
