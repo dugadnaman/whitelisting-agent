@@ -22,6 +22,10 @@ TATA_ENTITY_NAME = "TATA CAPITAL LIMITED"
 _ADD = "/content_templates/contentAdd/"
 _INDEX = "/content_templates/contentIndex/"
 _INVENTORY = "/content_templates/contentTemplateJson/"
+UNKNOWN_OUTCOME_ERROR = (
+    "Registration outcome unknown. Do not resubmit automatically; refresh job status "
+    "to reconcile VILPOWER inventory before a new review."
+)
 _VARIABLE = re.compile(r"\{#(num|alp|urg|uro|cbn|eml)#\}")
 _SAMPLE_PATTERNS = {
     "num": r"[0-9]{1,40}",
@@ -372,10 +376,34 @@ def _sample_matches(body, variables, sample):
 
 
 
+def matches_sms_identity(draft: dict, item: dict) -> bool:
+    """Only a verified Tata entity, exact name, copy and sender prove identity."""
+    return (
+        item.get("provider") == "vilpower" and item.get("entity_id") == TATA_ENTITY_ID
+        and bool(item.get("template_id"))
+        and isinstance(draft.get("template_name"), str) and bool(draft["template_name"])
+        and isinstance(draft.get("text"), str) and bool(draft["text"])
+        and isinstance(draft.get("header"), str) and bool(draft["header"])
+        and item.get("template_name") == draft["template_name"]
+        and item.get("template_message") == draft["text"]
+        and item.get("header") == draft["header"]
+        and all(field not in draft or draft[field] == "tata" for field in ("client", "account", "tenant_id"))
+        and draft.get("channel", "sms") == "sms"
+        and draft.get("entity_id", TATA_ENTITY_ID) == TATA_ENTITY_ID
+        and draft.get("provider", "vilpower") == "vilpower"
+    )
+
+
 def validate_sms_template(draft: dict) -> list[str]:
     if not isinstance(draft, dict):
         return ["SMS DLT template must be an object"]
     errors = []
+    if any(field in draft and draft[field] != "tata" for field in ("client", "account", "tenant_id")):
+        errors.append("SMS DLT template account must be Tata Capital")
+    if draft.get("channel", "sms") != "sms" or draft.get("provider", "vilpower") != "vilpower":
+        errors.append("SMS DLT template destination must be VILPOWER SMS")
+    if draft.get("entity_id", TATA_ENTITY_ID) != TATA_ENTITY_ID:
+        errors.append("SMS DLT template principal entity must be Tata Capital")
     for field in ("template_name", "text", "category_id", "header_id", "header"):
         if not isinstance(draft.get(field), str) or not draft[field].strip():
             errors.append(f"{field} is required")
@@ -418,10 +446,12 @@ def validate_sms_template(draft: dict) -> list[str]:
 
 
 def _result(draft, status, *, item=None, error=None, attempted=False, unknown=False):
+    if unknown and not str(error or "").startswith("Registration outcome unknown."):
+        error = UNKNOWN_OUTCOME_ERROR + (" " + str(error) if error else "")
     return SubmissionResult(source_ref=str(draft.get("source_ref", "")), template_name=str(draft.get("template_name", "")),
         status=status, provider_ref_id=item["template_id"] if item else None,
         provider_response={"provider": "vilpower", "registration_attempted": attempted, "outcome": "unknown" if unknown else ("verified" if item else "failed"),
-            "retry_safe": not attempted, **({"template": item} if item else {})}, error=error,
+            "retry_safe": not attempted and not item, **({"template": item} if item else {})}, error=error,
         approval_status=ApprovalStatus(item["status"]) if item else ApprovalStatus.UNKNOWN,
         approval_reason=item.get("approval_reason") if item else None, client="tata", channel="sms",
         submitted_by=str(draft.get("submitted_by") or "Anonymous Operator"), source_file=draft.get("source_file"))
@@ -438,9 +468,12 @@ def submit_sms_template(draft: dict, client="tata") -> SubmissionResult:
         portal.identity()
         existing = [item for item in portal.inventory(draft["template_name"]) if item["template_name"] == draft["template_name"]]
         if existing:
-            exact = next((item for item in existing if item["template_message"] == draft["text"] and item["header"] == draft["header"]), None)
-            if exact:
-                return _result(draft, SubmissionStatus.DUPLICATE, item=exact)
+            exact = [item for item in existing if matches_sms_identity(draft, item)]
+            if len(exact) == 1:
+                return _result(draft, SubmissionStatus.DUPLICATE, item=exact[0])
+            if len(exact) > 1:
+                return _result(draft, SubmissionStatus.FAILED,
+                               error="Multiple VILPOWER IDs match this exact template; reconcile the inventory before a new review")
             return _result(draft, SubmissionStatus.FAILED, error="A different VILPOWER template already uses this exact name")
         page = portal.form()
         options = portal.options(draft["template_type"], draft["category_id"], draft["header"], draft.get("service_type", ""), page)
@@ -475,13 +508,13 @@ def submit_sms_template(draft: dict, client="tata") -> SubmissionResult:
         except VilpowerUnavailable as exc:
             post_error = str(exc)
         try:
-            confirmed = [item for item in portal.inventory(draft["template_name"]) if item["template_name"] == draft["template_name"] and item["template_message"] == draft["text"] and item["header"] == draft["header"]]
+            confirmed = [item for item in portal.inventory(draft["template_name"]) if matches_sms_identity(draft, item)]
         except VilpowerUnavailable:
             confirmed = []
         if len(confirmed) == 1:
             return _result(draft, SubmissionStatus.SUBMITTED, item=confirmed[0], attempted=True)
         return _result(draft, SubmissionStatus.FAILED, attempted=True, unknown=True,
-            error="Registration outcome unknown. Do not resubmit automatically; reconcile VILPOWER inventory before a new review." + (" " + post_error if post_error else ""))
+            error=UNKNOWN_OUTCOME_ERROR + (" " + post_error if post_error else ""))
     except (VilpowerUnavailable, ValueError, OSError) as exc:
         return _result(draft, SubmissionStatus.FAILED, error=str(exc), attempted=attempted, unknown=attempted)
     finally:

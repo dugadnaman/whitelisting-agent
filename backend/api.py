@@ -2025,16 +2025,30 @@ async def submit_file(
 
 
 @app.get("/api/jobs/{job_id}")
-def get_job_endpoint(job_id: str, current_user: dict = Depends(get_current_user)):
+def get_job_endpoint(job_id: str, reconcile: bool = Query(False), current_user: dict = Depends(get_current_user)):
     """Fetch status and per-template tasks for an asynchronous ingestion job."""
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
     require_tenant_access(job["tenant_id"], current_user)
+    if job["channel"] == "sms":
+        from sms_dlt import sms_task_registration_outcome
+    if reconcile and job["channel"] == "sms":
+        from sms_dlt import reconcile_job
+        from vilpower_client import VilpowerUnavailable
+
+        try:
+            reconcile_job(job_id, job["tenant_id"])
+        except VilpowerUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
+        job = get_job(job_id)
     tasks = get_job_tasks(job_id)
     return {
         "job": _json_safe(job),
-        "tasks": [_json_safe({key: value for key, value in t.items() if key != "payload_json"}) for t in tasks],
+        "tasks": [_json_safe({
+            **{key: value for key, value in t.items() if key != "payload_json"},
+            **({"registration_outcome": sms_task_registration_outcome(t)} if job["channel"] == "sms" else {}),
+        }) for t in tasks],
     }
 
 

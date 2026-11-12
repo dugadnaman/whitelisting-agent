@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import csv
 import threading
 from concurrent.futures import Future
-from datetime import UTC, datetime
 from os.path import commonprefix
 from pathlib import Path
 
 from db import get_db
-from db_queue import create_job_with_tasks
+from db_queue import (
+    create_job_with_tasks, get_job, get_job_tasks, reconcile_sms_task, sms_reconciliation_payload,
+)
 from tracker import _row_to_entry_dict
 
 DRAFT_FIELDS = (
@@ -53,6 +55,8 @@ def require_tata(account: str) -> None:
 
 
 def draft_from_row(row: dict, account: str = "tata") -> dict:
+    from vilpower_client import TATA_ENTITY_ID
+
     require_tata(account)
     if not isinstance(row, dict):
         raise ValueError("Each SMS template must be an object.")
@@ -61,6 +65,10 @@ def draft_from_row(row: dict, account: str = "tata") -> dict:
             raise ValueError("SMS template account does not match Tata Capital.")
     if row.get("channel") and row["channel"] != "sms":
         raise ValueError("SMS template channel does not match the selected destination.")
+    if row.get("entity_id", TATA_ENTITY_ID) != TATA_ENTITY_ID:
+        raise ValueError("SMS template principal entity does not match Tata Capital.")
+    if row.get("provider", "vilpower") != "vilpower":
+        raise ValueError("SMS template provider does not match VILPOWER.")
     draft = {key: str(row[key]) if row.get(key) is not None else "" for key in DRAFT_FIELDS}
     draft["text"] = str(next((row[key] for key in ("text", "body", "message", "template_message")
                               if row.get(key) is not None), ""))
@@ -144,7 +152,7 @@ def preview_drafts(rows: list[dict], account: str = "tata") -> list[dict]:
 
 
 def stage_batch(rows: list[dict], account: str, user: str, filename: str, skip_duplicates: bool = True) -> dict:
-    from vilpower_client import validate_sms_template
+    from vilpower_client import TATA_ENTITY_ID, matches_sms_identity, validate_sms_template
 
     require_tata(account)
     if not rows:
@@ -159,15 +167,25 @@ def stage_batch(rows: list[dict], account: str, user: str, filename: str, skip_d
     by_name = {}
     for item in inventory:
         by_name.setdefault(item["template_name"].casefold(), []).append(item)
+    _reconcile_tasks(_history_tasks(account), account, inventory)
+    previous_tasks = _history_tasks(account)
     tasks = []
     seen = {}
     for index, draft in enumerate(drafts, 1):
         key = draft["template_name"].casefold()
         candidates = by_name.get(key, [])
-        exact = [item for item in candidates if item.get("template_message") == draft["text"] and item.get("header") == draft["header"]]
-        exact.sort(key=lambda item: item.get("status") != "approved")
+        exact = [item for item in candidates if matches_sms_identity(draft, item)]
+        if len(exact) > 1:
+            raise ValueError(f"Row {index}: multiple VILPOWER IDs match '{draft['template_name']}'. Reconcile the inventory before a new review.")
         live = exact[0] if exact else None
-        payload = {**draft, "client": account, "channel": "sms", "provider": "vilpower",
+        for previous in previous_tasks:
+            if previous["template_name"].casefold() != key:
+                continue
+            if previous["status"] in {"PENDING", "PROCESSING"}:
+                raise ValueError(f"Row {index}: '{draft['template_name']}' already has an active SMS queue task. Refresh its job status; do not submit it again.")
+            if not live and previous["status"] == "FAILED" and sms_reconciliation_payload(previous) is not None:
+                raise ValueError(f"Row {index}: '{draft['template_name']}' has registration outcome unknown. Refresh its job status to reconcile VILPOWER inventory; do not resubmit it.")
+        payload = {**draft, "client": account, "channel": "sms", "provider": "vilpower", "entity_id": TATA_ENTITY_ID,
                    "source_ref": draft.get("source_ref") or draft["template_name"], "submitted_by": user,
                    "source_file": draft.get("source_file") or filename,
                    "category": {"1": "PROMOTIONAL", "2": "TRANSACTIONAL", "3": "SERVICE"}[draft["template_type"]],
@@ -177,7 +195,7 @@ def stage_batch(rows: list[dict], account: str, user: str, filename: str, skip_d
         fields = tuple(draft[field] for field in DRAFT_FIELDS)
         if key in seen and seen[key] != fields:
             raise ValueError(f"Row {index}: duplicate name has different SMS DLT fields. Use a distinct name.")
-        if (live and skip_duplicates) or key in seen:
+        if live or key in seen:
             payload.update(status="DUPLICATE", approval_status=live.get("status", "unknown") if live else "unknown",
                            provider_ref_id=live.get("template_id") if live else None,
                            error="Already registered on VILPOWER." if live else "Duplicate name within this batch.")
@@ -186,16 +204,37 @@ def stage_batch(rows: list[dict], account: str, user: str, filename: str, skip_d
     return create_job_with_tasks(account, "sms", filename, user, tasks)
 
 
-def load_history(account: str = "tata") -> list[dict]:
+def _history_tasks(account: str, job_id: str | None = None) -> list[dict]:
     require_tata(account)
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM job_tasks WHERE tenant_id = ? AND channel = 'sms' ORDER BY created_at DESC", (account,)).fetchall()
-    return [_row_to_entry_dict(dict(row)) for row in rows]
+        sql = "SELECT * FROM job_tasks WHERE tenant_id = ? AND channel = 'sms'"
+        params = [account]
+        if job_id is not None:
+            sql += " AND job_id = ?"
+            params.append(job_id)
+        rows = conn.execute(sql + " ORDER BY created_at DESC", params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def load_history(account: str = "tata") -> list[dict]:
+    return [_row_to_entry_dict(row) for row in _history_tasks(account)]
+
+
+def sms_task_registration_outcome(task: dict) -> str | None:
+    """Expose only the safe registration scalar, never the stored draft payload."""
+    try:
+        payload = json.loads(task.get("payload_json") or "{}")
+        response = payload.get("provider_response") if isinstance(payload, dict) else None
+        outcome = response.get("outcome") if isinstance(response, dict) else None
+        return outcome if isinstance(outcome, str) and outcome in {"unknown", "verified", "failed"} else None
+    except (TypeError, ValueError):
+        return None
 
 
 def merged_inventory(account: str = "tata") -> list[dict]:
     require_tata(account)
     live = _inventory(account)
+    _reconcile_tasks(_history_tasks(account), account, live)
     history = load_history(account)
     by_id = {}
     live_ids = {str(item["template_id"]) for item in live}
@@ -220,30 +259,38 @@ def merged_inventory(account: str = "tata") -> list[dict]:
     return merged
 
 
+def _reconcile_tasks(tasks: list[dict], account: str, inventory: list[dict] | None = None) -> dict:
+    from vilpower_client import matches_sms_identity
+
+    candidates = [(task, payload) for task in tasks if (payload := sms_reconciliation_payload(task)) is not None]
+    if not candidates:
+        return {"checked": 0, "updated": 0}
+    # Read the complete authoritative catalog, not a potentially delayed name search.
+    live = _inventory(account) if inventory is None else inventory
+    by_name = {}
+    for item in live:
+        by_name.setdefault(item["template_name"], []).append(item)
+    updated = 0
+    for task, payload in candidates:
+        matches = [item for item in by_name.get(task["template_name"], []) if matches_sms_identity(payload, item)
+                   and (not task.get("provider_ref_id") or str(item["template_id"]) == str(task["provider_ref_id"]))]
+        if len(matches) == 1:
+            updated += int(reconcile_sms_task(task["id"], matches[0]))
+    return {"checked": len(candidates), "updated": updated}
+
+
+def reconcile_job(job_id: str, account: str = "tata") -> dict:
+    """Explicit status refresh: inventory reads only, never registration or replay."""
+    require_tata(account)
+    job = get_job(job_id)
+    if not job or job["tenant_id"] != account or job["channel"] != "sms":
+        raise ValueError("Job does not belong to the selected Tata SMS destination.")
+    return _reconcile_tasks(get_job_tasks(job_id), account)
+
+
 def poll_approvals(account: str = "tata") -> dict:
     require_tata(account)
-    pending = [row for row in load_history(account) if row["status"] in {"submitted", "duplicate"}
-               and row["approval_status"] in {"pending", "unknown"} and row.get("provider_ref_id")]
-    if not pending:
-        return {"checked": 0, "updated": 0}
-    inventory = {str(item["template_id"]): item for item in _inventory(account)}
-    updated = 0
-    with get_db() as conn:
-        for entry in pending:
-            live = inventory.get(str(entry["provider_ref_id"]))
-            if not live or live.get("template_name") != entry["template_name"]:
-                continue
-            status = live.get("status", "unknown")
-            if status not in {"pending", "approved", "rejected"} or status == entry["approval_status"]:
-                continue
-            cur = conn.execute(
-                "UPDATE job_tasks SET approval_status = ?, approval_reason = ?, updated_at = ? "
-                "WHERE id = ? AND tenant_id = ? AND channel = 'sms' AND provider_ref_id = ? "
-                "AND approval_status IN ('pending', 'unknown')",
-                (status, live.get("approval_reason"), datetime.now(UTC).isoformat(), entry["task_id"], account, entry["provider_ref_id"]),
-            )
-            updated += cur.rowcount
-    return {"checked": len(pending), "updated": updated}
+    return _reconcile_tasks(_history_tasks(account), account)
 
 
 def identify_drafts(rows: list[dict], account: str = "tata") -> dict:

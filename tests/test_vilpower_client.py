@@ -350,6 +350,49 @@ def test_timeout_can_be_proved_registered_by_exact_inventory_without_replay(port
     assert len(registration_calls(portal)) == 1
 
 
+def test_lost_registration_response_recovers_authoritative_approval_without_replay(portal):
+    portal["registration"] = requests.Timeout("fixture lost response")
+    portal["after_rows"] = [row(status="Approved")]
+    result = vilpower.submit_sms_template(DRAFT)
+    assert (result.status, result.approval_status, result.provider_ref_id) == (
+        SubmissionStatus.SUBMITTED, ApprovalStatus.APPROVED, "1177000000000000001")
+    assert result.error is None
+    assert result.provider_response["outcome"] == "verified"
+    assert len(registration_calls(portal)) == 1
+
+
+@pytest.mark.parametrize("change", [{"vcTemplateMessage": "Changed copy."}, {"vcHeader": "OTHERT"},
+                                   {"vcTemplateName": DRAFT["template_name"].upper()}])
+def test_lost_response_never_confirms_name_only_or_different_header(portal, change):
+    portal["registration"] = requests.Timeout("fixture lost response")
+    portal["after_rows"] = [{**row(status="Approved"), **change}]
+    result = vilpower.submit_sms_template(DRAFT)
+    assert result.status == SubmissionStatus.FAILED
+    assert result.approval_status == ApprovalStatus.UNKNOWN
+    assert result.provider_ref_id is None
+    assert result.provider_response["outcome"] == "unknown"
+    assert result.provider_response["retry_safe"] is False
+    assert len(registration_calls(portal)) == 1
+
+
+def test_multiple_exact_ids_are_not_arbitrarily_adopted_or_registered_again(portal):
+    portal["rows"] = [row("1177000000000000001"), row("1177000000000000002", status="Approved")]
+    result = vilpower.submit_sms_template(DRAFT)
+    assert result.status == SubmissionStatus.FAILED
+    assert result.provider_ref_id is None
+    assert "multiple" in result.error.lower()
+    assert not registration_calls(portal)
+
+
+@pytest.mark.parametrize("scope", [{"client": "bajaj"}, {"account": "bajaj"}, {"channel": "whatsapp"},
+                                  {"entity_id": "1101000000000000000"}])
+def test_draft_identity_cannot_cross_tata_entity_or_channel(portal, scope):
+    result = vilpower.submit_sms_template({**DRAFT, **scope})
+    assert result.status == SubmissionStatus.FAILED
+    assert result.approval_status == ApprovalStatus.UNKNOWN
+    assert not portal["calls"]
+
+
 def test_same_name_different_body_does_not_prove_registration(portal):
     portal["after_rows"] = [row(body="Different text")]
     assert vilpower.submit_sms_template(DRAFT).status == SubmissionStatus.FAILED

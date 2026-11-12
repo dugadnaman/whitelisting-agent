@@ -133,9 +133,13 @@ silently redirects credentials or submissions to another account.
 The portal session expires and requires normal human sign-in again. Reloading the
 inventory then captures the renewed session; reconnecting the extension is not
 required. There is no automatic login, paid API activation, or automatic registration replay.
-Timeouts and unverified outcomes stay failed/unknown: inspect VILPOWER/history
-before creating another reviewed batch. Full historical inventory reads can take
-several minutes; unavailable or incomplete data is not treated as an empty catalog.
+Timeouts after registration remain **Registration unconfirmed**, not a DLT rejection.
+**Refresh job status** reconciles settled uncertain rows against VILPOWER by exact
+Tata entity, template name, message and sender header; verified matches repair the
+stored queue result, approval, template ID and job counts without another registration.
+Routine job polling reads stored state only. Unresolved rows cannot be resubmitted
+automatically. Full historical inventory reads can take several minutes; unavailable
+or incomplete data is not treated as an empty catalog.
 The client reads all dates using count-verified disjoint date windows because
 VILPOWER's default date range is only a week and offset pagination can skip rows
 with identical request dates.

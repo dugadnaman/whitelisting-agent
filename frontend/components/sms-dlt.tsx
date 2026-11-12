@@ -18,6 +18,11 @@ const buttonClass = 'workspace-button-primary';
 const emptyOptions: SmsDltOptions = { categories: [], headers: [], brands: [] };
 const typeLabels = { '1': 'Promotional', '2': 'Transactional', '3': 'Service' };
 
+function registrationUnconfirmed(task: Pick<JobTask, 'status' | 'approval_status' | 'error' | 'registration_outcome'>): boolean {
+  return task.registration_outcome === 'unknown' || (task.status === 'FAILED' && task.approval_status === 'unknown'
+    && /outcome (?:may be )?unknown/i.test(task.error || ''));
+}
+
 export function SmsDltSessionForm({ account, onDirty }: { account: string; onDirty?: (dirty: boolean) => void }) {
   const [session, setSession] = useState<SmsDltSession | null>(null);
   const [cookie, setCookie] = useState('');
@@ -193,6 +198,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const [tasks, setTasks] = useState<JobTask[]>([]);
   const [jobStatus, setJobStatus] = useState('');
   const [pollRevision, setPollRevision] = useState(0);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
   const [sharedSettings, setSharedSettings] = useState(() => smsDltDraft({ template_name: 'Batch settings', text: '' }));
   const [sharedSettingsReady, setSharedSettingsReady] = useState(false);
   const active = useRef(true);
@@ -213,14 +219,17 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     if (!batch?.job_id || !destinationValid) return;
     let cancelled = false;
     let timer: NodeJS.Timeout;
+    let reconcile = pollRevision > 0;
     async function poll() {
       try {
-        const snapshot = await fetchJob(batch!.job_id!);
+        const snapshot = await fetchJob(batch!.job_id!, reconcile);
+        reconcile = false;
         if (cancelled) return;
         setTasks(snapshot.tasks); setJobStatus(snapshot.job.status);
         if (snapshot.job.error_message) setError(snapshot.job.error_message);
         if (!['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(snapshot.job.status)) timer = setTimeout(poll, 2500);
       } catch (err) { if (!cancelled) setError(`Job status unavailable: ${formatError(err)}. The batch may still be processing; do not resubmit it. Check History or retry status.`); }
+      finally { if (!cancelled) setRefreshingStatus(false); }
     }
     void poll();
     return () => { cancelled = true; clearTimeout(timer); };
@@ -333,10 +342,25 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
       </div></div>}
     </>}
     {batch && <div className="space-y-3 text-xs">
-      <p role="status" className="font-medium">Tata Capital · VILPOWER · {jobStatus || batch.status}{batch.job_id ? ` · Job ${batch.job_id}` : ''}</p>
-      <p>Registration and approval are separate. Pending does not mean approved. Refresh approval status in History. Expired portal sessions must be replaced in <a href="/settings" className="underline text-blue-700">Settings</a>; failed templates require a new review, not automatic replay.</p>
-      <button type="button" className="underline text-blue-700" onClick={() => { setError(''); setPollRevision((value) => value + 1); }}>Refresh job status</button>
-      <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr><th className="p-2">Template</th><th className="p-2">Queue status</th><th className="p-2">DLT approval</th><th className="p-2">DLT template ID</th><th className="p-2">Error / reason</th></tr></thead><tbody>{tasks.length ? tasks.map((task) => <tr key={task.id} className="border-t border-gray-100"><td className="p-2">{task.template_name}</td><td className="p-2">{task.status}</td><td className="p-2">{task.approval_status}</td><td className="p-2 font-mono">{task.provider_ref_id || '—'}</td><td className="p-2 text-red-700">{task.error || task.approval_reason || '—'}</td></tr>) : batch.results.map((result, index) => <tr key={result.task_id || index} className="border-t border-gray-100"><td className="p-2">{result.template_name}</td><td className="p-2">{result.status}</td><td className="p-2">{result.approval_status || 'pending'}</td><td className="p-2 font-mono">{result.provider_ref_id || '—'}</td><td className="p-2 text-red-700">{result.error || result.approval_reason || '—'}</td></tr>)}</tbody></table></div>
+      <p role="status" className="font-medium">Tata Capital · VILPOWER · Queue: {jobStatus || batch.status}{tasks.some(registrationUnconfirmed) ? ' · Registration unconfirmed' : ''}{batch.job_id ? ` · Job ${batch.job_id}` : ''}</p>
+      <p>Registration and DLT approval are separate. Unknown is not rejection. Refresh job status to reconcile VILPOWER without registering again; unresolved registrations must not be resubmitted. Replace expired Tata SMS sessions in <a href="/settings" className="underline text-blue-700">Settings</a>.</p>
+      <button type="button" disabled={refreshingStatus} className="underline text-blue-700 disabled:opacity-50" onClick={() => { setError(''); setRefreshingStatus(true); setPollRevision((value) => value + 1); }}>{refreshingStatus ? 'Reconciling VILPOWER…' : 'Refresh job status'}</button>
+      <div className="overflow-x-auto"><table className="w-full text-left">
+        <thead><tr><th className="p-2">Template</th><th className="p-2">Registration / queue</th><th className="p-2">DLT approval</th><th className="p-2">DLT template ID</th><th className="p-2">Error / reason</th></tr></thead>
+        <tbody>{tasks.length ? tasks.map((task) => <tr key={task.id} className="border-t border-gray-100">
+          <td className="p-2">{task.template_name}</td>
+          <td className="p-2">{registrationUnconfirmed(task) ? `Registration unconfirmed (queue ${task.status})` : task.status}</td>
+          <td className="p-2">{task.approval_status === 'unknown' ? 'Unknown (not rejected)' : task.approval_status}</td>
+          <td className="p-2 font-mono">{task.provider_ref_id || '—'}</td>
+          <td className={`p-2 ${task.error ? 'text-red-700' : 'text-gray-600'}`}>{task.error || task.approval_reason || '—'}</td>
+        </tr>) : batch.results.map((result, index) => <tr key={result.task_id || index} className="border-t border-gray-100">
+          <td className="p-2">{result.template_name}</td>
+          <td className="p-2">{result.provider_response?.outcome === 'unknown' ? 'Registration unconfirmed' : result.status}</td>
+          <td className="p-2">{result.approval_status || 'unknown'}</td>
+          <td className="p-2 font-mono">{result.provider_ref_id || '—'}</td>
+          <td className="p-2 text-red-700">{result.error || result.approval_reason || '—'}</td>
+        </tr>)}</tbody>
+      </table></div>
       {onClose && <button type="button" className="underline" onClick={onClose}>Return to source drafts</button>}
     </div>}
   </section>;

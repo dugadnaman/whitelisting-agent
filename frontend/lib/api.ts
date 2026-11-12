@@ -520,10 +520,13 @@ export type JobTask = {
   provider_ref_id?: string;
   error?: string;
   approval_reason?: string;
+  registration_outcome?: "unknown" | "verified" | "failed";
 };
 
-export async function fetchJob(jobId: string): Promise<{ job: IngestionJob; tasks: JobTask[] }> {
-  const res = await fetchWithRetry(getApiUrl(`/api/jobs/${encodeURIComponent(jobId)}`));
+export async function fetchJob(jobId: string, reconcile = false): Promise<{ job: IngestionJob; tasks: JobTask[] }> {
+  const query = reconcile ? '?reconcile=true' : '';
+  const res = await fetchWithRetry(getApiUrl(`/api/jobs/${encodeURIComponent(jobId)}${query}`),
+    { cache: 'no-store' }, reconcile ? 0 : 2, 800, reconcile ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
 }

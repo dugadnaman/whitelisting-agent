@@ -374,6 +374,88 @@ def record_task_result(
         return dict(updated_task) if updated_task else None
 
 
+def sms_reconciliation_payload(task: dict[str, Any]) -> dict[str, Any] | None:
+    """Select only settled Tata SMS outcomes; never race an active registration."""
+    if task.get("tenant_id") != "tata" or task.get("channel") != "sms":
+        return None
+    if task.get("approval_status") not in {"pending", "unknown"}:
+        return None
+    try:
+        payload = json.loads(task["payload_json"])
+        validate_task_scope(task, payload, "tata", "sms")
+    except (KeyError, TypeError, ValueError):
+        return None
+    if task.get("status") in {"SUBMITTED", "DUPLICATE"}:
+        return payload
+    response = payload.get("provider_response")
+    unknown = isinstance(response, dict) and response.get("outcome") == "unknown" and response.get("retry_safe") is False
+    # Old interrupted workers did not always persist structured provider metadata.
+    error = str(task.get("error") or "").lower()
+    unknown = unknown or "outcome unknown" in error or "outcome may be unknown" in error
+    if task.get("status") == "FAILED" and task.get("approval_status") == "unknown" and unknown:
+        return payload
+    return None
+
+
+def reconcile_sms_task(task_id: str, item: dict[str, Any]) -> bool:
+    """Persist authoritative inventory proof, including a failed/unknown counter repair."""
+    from vilpower_client import matches_sms_identity
+
+    now = datetime.now(UTC).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE ingestion_jobs SET updated_at = updated_at WHERE id = (SELECT job_id FROM job_tasks WHERE id = ?)",
+            (task_id,),
+        )
+        row = conn.execute("SELECT * FROM job_tasks WHERE id = ?", (task_id,)).fetchone()
+        if not row:
+            return False
+        task = dict(row)
+        payload = sms_reconciliation_payload(task)
+        job = conn.execute("SELECT tenant_id, channel FROM ingestion_jobs WHERE id = ?", (task["job_id"],)).fetchone()
+        if payload is None or not job or job["tenant_id"] != "tata" or job["channel"] != "sms":
+            return False
+        if not matches_sms_identity(payload, item):
+            return False
+        identifier = str(item["template_id"])
+        if task.get("provider_ref_id") and str(task["provider_ref_id"]) != identifier:
+            return False
+        approval = item.get("status", "unknown")
+        if approval not in APPROVAL_PRECEDENCE:
+            return False
+        if APPROVAL_PRECEDENCE[approval] < APPROVAL_PRECEDENCE[task["approval_status"]]:
+            approval = task["approval_status"]
+        status = "SUBMITTED" if task["status"] == "FAILED" else task["status"]
+        reason = item.get("approval_reason")
+        if (status, approval, identifier, reason, None) == (
+            task["status"], task["approval_status"], task["provider_ref_id"], task["approval_reason"], task["error"],
+        ):
+            return False
+        response = payload.get("provider_response")
+        payload.update(
+            status=status.lower(), approval_status=approval, provider_ref_id=identifier,
+            approval_reason=reason, error=None,
+            provider_response={**(response if isinstance(response, dict) else {}),
+                               "provider": "vilpower", "outcome": "verified", "retry_safe": False,
+                               "reconciled_from_inventory": True, "template": item},
+        )
+        conn.execute(
+            "UPDATE job_tasks SET status = ?, approval_status = ?, provider_ref_id = ?, approval_reason = ?, "
+            "error = NULL, payload_json = ?, updated_at = ? WHERE id = ?",
+            (status, approval, identifier, reason, json.dumps(payload, default=str), now, task_id),
+        )
+        if task["status"] == "FAILED":
+            conn.execute(
+                "UPDATE ingestion_jobs SET submitted_count = submitted_count + 1, failed_count = failed_count - 1 "
+                "WHERE id = ?", (task["job_id"],),
+            )
+        conn.execute(
+            "UPDATE ingestion_jobs SET error_message = NULL WHERE id = ? AND failed_count = 0", (task["job_id"],),
+        )
+        _settle_job(conn, task["job_id"], now)
+        return True
+
+
 def update_template_approval_monotonic(
     tenant_id: str,
     template_name: str,
