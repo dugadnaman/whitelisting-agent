@@ -135,11 +135,12 @@ inventory then captures the renewed session; reconnecting the extension is not
 required. There is no automatic login, paid API activation, or automatic registration replay.
 Timeouts after registration remain **Registration unconfirmed**, not a DLT rejection.
 **Refresh job status** reconciles settled uncertain rows against VILPOWER by exact
-Tata entity, template name, message and sender header; verified matches repair the
-stored queue result, approval, template ID and job counts without another registration.
-Routine job polling reads stored state only. Unresolved rows cannot be resubmitted
-automatically. Full historical inventory reads can take several minutes; unavailable
-or incomplete data is not treated as an empty catalog.
+Tata entity, template name, message (including VILPOWER's appended brand signature
+when present) and sender header using a prefix/date-scoped inventory read; verified
+matches repair the stored queue result, approval, template ID and job counts without
+another registration. Routine job polling reads stored state only. Unresolved rows
+cannot be resubmitted automatically. Full historical inventory reads can take several
+minutes; unavailable or incomplete data is not treated as an empty catalog.
 The client reads all dates using count-verified disjoint date windows because
 VILPOWER's default date range is only a week and offset pagination can skip rows
 with identical request dates.

@@ -6,6 +6,7 @@ import json
 import csv
 import threading
 from concurrent.futures import Future
+from datetime import date, datetime, timedelta
 from os.path import commonprefix
 from pathlib import Path
 
@@ -20,15 +21,15 @@ DRAFT_FIELDS = (
     "brand_id", "message_type", "sample_message", "service_type",
 )
 
-_inventory_flights: dict[tuple[str, str], Future] = {}
+_inventory_flights: dict[tuple[str, str, date | None], Future] = {}
 _inventory_lock = threading.Lock()
 
 
-def _inventory(account: str, search: str = "") -> list[dict]:
+def _inventory(account: str, search: str = "", from_date: date | None = None) -> list[dict]:
     """Share concurrent catalog reads, without caching stale approvals or failures."""
     from vilpower_client import fetch_sms_templates
     require_tata(account)
-    key = (account, search)
+    key = (account, search, from_date)
     with _inventory_lock:
         flight = _inventory_flights.get(key)
         leader = flight is None
@@ -38,8 +39,10 @@ def _inventory(account: str, search: str = "") -> list[dict]:
     if not leader:
         return flight.result()
     try:
-        rows = fetch_sms_templates(client=account, search=search)
-        flight.set_result(rows)
+        kwargs = {"client": account, "search": search}
+        if from_date is not None:
+            kwargs["from_date"] = from_date
+        rows = fetch_sms_templates(**kwargs)
         return rows
     except BaseException as exc:
         flight.set_exception(exc)
@@ -279,18 +282,46 @@ def _reconcile_tasks(tasks: list[dict], account: str, inventory: list[dict] | No
     return {"checked": len(candidates), "updated": updated}
 
 
+def _job_inventory_since(job: dict) -> date | None:
+    raw = str(job.get("created_at") or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).date() - timedelta(days=2)
+    except ValueError:
+        return None
+
+
+def _candidate_inventory_scope(candidates: list[dict], fallback_job: dict | None = None) -> tuple[str, date | None]:
+    prefix = commonprefix([task["template_name"].casefold() for task in candidates])
+    if len(prefix) >= 4:
+        return prefix, None
+    dates = [d for d in (_job_inventory_since(t) for t in ([fallback_job] if fallback_job else candidates)) if d is not None]
+    return "", min(dates) if dates else None
+
+
 def reconcile_job(job_id: str, account: str = "tata") -> dict:
     """Explicit status refresh: inventory reads only, never registration or replay."""
     require_tata(account)
     job = get_job(job_id)
     if not job or job["tenant_id"] != account or job["channel"] != "sms":
         raise ValueError("Job does not belong to the selected Tata SMS destination.")
-    return _reconcile_tasks(get_job_tasks(job_id), account)
+    tasks = get_job_tasks(job_id)
+    candidates = [task for task in tasks if sms_reconciliation_payload(task) is not None]
+    if not candidates:
+        return {"checked": 0, "updated": 0}
+    search, since = _candidate_inventory_scope(candidates, fallback_job=job)
+    return _reconcile_tasks(tasks, account, _inventory(account, search=search, from_date=since))
 
 
 def poll_approvals(account: str = "tata") -> dict:
     require_tata(account)
-    return _reconcile_tasks(_history_tasks(account), account)
+    tasks = _history_tasks(account)
+    candidates = [task for task in tasks if sms_reconciliation_payload(task) is not None]
+    if not candidates:
+        return {"checked": 0, "updated": 0}
+    search, since = _candidate_inventory_scope(candidates)
+    return _reconcile_tasks(tasks, account, _inventory(account, search=search, from_date=since))
 
 
 def identify_drafts(rows: list[dict], account: str = "tata") -> dict:

@@ -361,6 +361,28 @@ def test_lost_registration_response_recovers_authoritative_approval_without_repl
     assert len(registration_calls(portal)) == 1
 
 
+def test_brand_suffix_added_by_portal_matches_exact_registration_identity(portal):
+    portal["registration"] = requests.Timeout("fixture lost response")
+    portal["after_rows"] = [{
+        **row(status="Approved"),
+        "brand_name": "Tata Capital",
+        "vcTemplateMessage": f'<span class="break-all">{DRAFT["text"]} -Tata Capital</span>',
+    }]
+    result = vilpower.submit_sms_template(DRAFT)
+    assert (result.status, result.approval_status, result.provider_ref_id) == (
+        SubmissionStatus.SUBMITTED, ApprovalStatus.APPROVED, "1177000000000000001")
+    assert result.error is None
+
+
+def test_unverified_brand_suffix_or_altered_text_never_matches(portal):
+    portal["registration"] = requests.Timeout("fixture lost response")
+    portal["after_rows"] = [{
+        **row(status="Approved"),
+        "vcTemplateMessage": f'<span class="break-all">{DRAFT["text"]} -Tata Capital</span>',
+    }]
+    assert vilpower.submit_sms_template(DRAFT).status == SubmissionStatus.FAILED
+
+
 @pytest.mark.parametrize("change", [{"vcTemplateMessage": "Changed copy."}, {"vcHeader": "OTHERT"},
                                    {"vcTemplateName": DRAFT["template_name"].upper()}])
 def test_lost_response_never_confirms_name_only_or_different_header(portal, change):

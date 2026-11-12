@@ -205,7 +205,7 @@ class _Portal:
             raise VilpowerUnavailable("VILPOWER could not load the requested inventory or options")
         return result
 
-    def inventory(self, search=""):
+    def inventory(self, search="", from_date=None):
         csrf = self.form().value("csrfmiddlewaretoken")
         server_search = search if len(search) >= 4 or search.isdigit() else ""
 
@@ -236,7 +236,8 @@ class _Portal:
         # Offset paging is unsafe: the portal ignores order parameters and ties
         # in RequestedDate repeat/skip rows across pages. Page by disjoint dates
         # instead, proving each complete partition against the server's counts.
-        total, batch = window(date.min, date.max)
+        earliest = from_date or date.min
+        total, batch = window(earliest, date.max)
         count, last = total, date.max
         rows, seen = [], set()
 
@@ -249,18 +250,18 @@ class _Portal:
 
         while count > len(batch):
             pivot = min(requested_day(item) for item in batch)
-            older_count, older = window(date.min, pivot)
+            older_count, older = window(earliest, pivot)
             cutoff = pivot
             if older_count == count:
                 # A day's bulk registrations can exceed the normal page size.
-                cutoff = pivot - timedelta(days=1) if pivot > date.min else None
-                older_count, older = window(date.min, cutoff) if cutoff else (0, [])
+                cutoff = pivot - timedelta(days=1) if pivot > earliest else None
+                older_count, older = window(earliest, cutoff) if cutoff else (0, [])
             newer_count = count - older_count
             if not 0 < newer_count <= count:
                 raise VilpowerUnavailable("VILPOWER inventory changed during date pagination; reload it")
             newer = [item for item in batch if cutoff is None or requested_day(item) > cutoff]
             if len(newer) != newer_count:
-                verified_count, newer = window(cutoff + timedelta(days=1) if cutoff else date.min, last, newer_count)
+                verified_count, newer = window(cutoff + timedelta(days=1) if cutoff else earliest, last, newer_count)
                 if verified_count != newer_count or len(newer) != newer_count:
                     raise VilpowerUnavailable("VILPOWER returned an incomplete date partition; reload it")
             append_complete(newer)
@@ -331,11 +332,11 @@ def validate_session(cookie: str, entity_id: str, client="tata") -> dict[str, st
         portal.close()
 
 
-def fetch_sms_templates(client="tata", *, credentials=None, search="") -> list[dict]:
+def fetch_sms_templates(client="tata", *, credentials=None, search="", from_date=None) -> list[dict]:
     portal = _Portal(_credentials(client, credentials))
     try:
         portal.identity()
-        return portal.inventory(search)
+        return portal.inventory(search, from_date=from_date)
     finally:
         portal.close()
 
@@ -377,15 +378,25 @@ def _sample_matches(body, variables, sample):
 
 
 def matches_sms_identity(draft: dict, item: dict) -> bool:
-    """Only a verified Tata entity, exact name, copy and sender prove identity."""
+    """Only a verified Tata entity, exact name, copy (or portal brand suffix) and sender prove identity."""
+    brand = str(item.get("brand") or "").strip()
+    text = draft.get("text")
+    message = item.get("template_message")
+    body_matches = isinstance(text, str) and bool(text) and (
+        message == text
+        or (
+            bool(brand)
+            and not text.rstrip().endswith(f"-{brand}")
+            and message in (f"{text} -{brand}", f"{text.rstrip()} -{brand}")
+        )
+    )
     return (
         item.get("provider") == "vilpower" and item.get("entity_id") == TATA_ENTITY_ID
         and bool(item.get("template_id"))
         and isinstance(draft.get("template_name"), str) and bool(draft["template_name"])
-        and isinstance(draft.get("text"), str) and bool(draft["text"])
         and isinstance(draft.get("header"), str) and bool(draft["header"])
         and item.get("template_name") == draft["template_name"]
-        and item.get("template_message") == draft["text"]
+        and body_matches
         and item.get("header") == draft["header"]
         and all(field not in draft or draft[field] == "tata" for field in ("client", "account", "tenant_id"))
         and draft.get("channel", "sms") == "sms"

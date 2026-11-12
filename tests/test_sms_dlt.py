@@ -361,13 +361,14 @@ def test_tcn588_batch_refresh_reads_inventory_once_and_recovers_all_sixteen(monk
 
     def authoritative(**kwargs):
         reads.append(kwargs)
-        return [live(name, status="approved", ref=f"dlt-{i}") for i, name in enumerate(names, 1)]
+        return [{**live(name, status="approved", ref=f"dlt-{i}"), "brand": "Tata Capital",
+                 "template_message": f"{draft(name)['text']} -Tata Capital"} for i, name in enumerate(names, 1)]
 
     monkeypatch.setattr(vilpower_client, "fetch_sms_templates", authoritative)
     monkeypatch.setattr(vilpower_client, "submit_sms_template",
                         lambda *args, **kwargs: pytest.fail("Never replay a TCN588 registration"))
     assert sms_dlt.reconcile_job(job["id"]) == {"checked": 16, "updated": 16}
-    assert reads == [{"client": "tata", "search": ""}]
+    assert reads == [{"client": "tata", "search": "tcn_588_pqpl_bulls_eye_n_sms_"}]
     summary = db_queue.get_job(job["id"])
     assert (summary["status"], summary["submitted_count"], summary["failed_count"]) == ("COMPLETED", 16, 0)
     tasks = db_queue.get_job_tasks(job["id"])
