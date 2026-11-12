@@ -3744,6 +3744,11 @@ def _jira_draft_input(draft: dict, channel: str, account: str) -> dict:
     }
 
     def load_media(target, source):
+        if source.get("media_pairing_ambiguous") and not any(source.get(field) for field in (
+            "media_file", "media_url", "mediaUrl", "media_attachment_id", "attachment_id",
+        )):
+            target["media_error"] = "Creative mapping is ambiguous: attach the correct image for this message before whitelisting."
+            return
         try:
             creative = _resolve_jira_creative(
                 source.get("media_file") or source.get("media_url") or source.get("mediaUrl"),
@@ -3763,7 +3768,7 @@ def _jira_draft_input(draft: dict, channel: str, account: str) -> dict:
                 draft.get(field) for field in (
                     "media_file", "media_url", "mediaUrl", "media_attachment_id", "attachment_id",
                 )
-            ):
+            ) or (component.get("format") == "IMAGE" and draft.get("media_pairing_ambiguous")):
                 load_media(component, draft)
     else:
         cards = draft.get("carousel_cards") or []

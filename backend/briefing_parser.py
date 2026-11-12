@@ -59,6 +59,7 @@ class WhatsAppTemplateDraft:
     media_file: str | None = None
     media_filename: str | None = None
     media_attachment_id: str | None = None
+    media_pairing_ambiguous: bool = False
     button_type: str = "NONE"
     button_text: str | None = None
     button_url: str | None = None
@@ -78,6 +79,7 @@ class RcsTemplateDraft:
     media_file: str | None = None
     media_filename: str | None = None
     media_attachment_id: str | None = None
+    media_pairing_ambiguous: bool = False
     action_type: str = "URL"
     action_label: str = "Check Offer"
     action_url: str = TATA_CTA_URL
@@ -702,7 +704,7 @@ def extract_and_strip_cta(
             clean_body = f"{clean_body}\n\n{ef}".strip()
 
     final_btn_text = extracted_btn_text or "Check Offer"
-    final_url = resolve_cta_url(extracted_url or DEFAULT_CTA_URL, "tata")
+    final_url = resolve_cta_url(existing_btn_url if existing_btn_url and existing_btn_url != DEFAULT_CTA_URL else (extracted_url or DEFAULT_CTA_URL), "tata")
 
     return clean_body, final_btn_text, final_url, None
 
@@ -723,11 +725,140 @@ def is_cta_cell(val: str) -> bool:
     return False
 
 
+def _jira_copy_parts(text: str) -> list[str]:
+    """Split authored message boundaries, not numbered features within one copy."""
+    text = text.strip()
+    # Operational introductions and section labels are not customer copy.
+    lines = text.splitlines()
+    while lines and (
+        not lines[0].strip()
+        or re.match(r"^(?:(?:hi|hello|dear)\s+(?:team|all)\b|(?:please|pls|kindly|pfa|pfb)\b|content options\s*:|(?:promo|retargeting|content|hindi)\s*:?\s*$)", lines[0].strip(), re.I)
+    ):
+        lines.pop(0)
+    text = "\n".join(
+        line for line in lines
+        if not re.fullmatch(r"\s*Content pending for whitelisting\s*[-:–]?\s*", line, re.I)
+    ).strip()
+    if not text:
+        return []
+    first_customer = re.search(r"(?im)^\s*(?:dear|hi|hello|hey|namaste|greetings)\b(?!\s+(?:team|all)\b)", text)
+    if first_customer and re.search(r"\b(?:whitelist|whitelisting|release|content options)\b", text[:first_customer.start()], re.I):
+        text = text[first_customer.start():].strip()
+    marker = re.compile(
+        r"(?m)^[ \t]*(?:(?:Option|Variant|Campaign|Draft)\s+[1-9]\d*[.)\-:]?\s*|[1-9]\d*[.)\-:]\s*)", re.I
+    )
+    matches = list(marker.finditer(text))
+    if len(matches) >= 2:
+        parts = [text[m.end():matches[i + 1].start() if i + 1 < len(matches) else len(text)].strip() for i, m in enumerate(matches)]
+        if all(is_valid_template_copy(part) for part in parts):
+            prefix = text[:matches[0].start()].strip()
+            messages = ([prefix] if is_valid_template_copy(prefix) else []) + parts
+            return [copy for message in messages for copy in _jira_copy_parts(message)]
+    if matches and matches[0].start() == 0:
+        text = text[matches[0].end():].strip()
+    language = re.compile(r"(?im)^[ \t]*(English|Hindi|Marathi|Gujarati|Gujrati|Tamil|Telugu|Bengali|Punjabi|Odia|Kannada)\s*:\s*")
+    languages = list(language.finditer(text))
+    if len(languages) >= 2:
+        # A trailing link/button instruction applies to every translated variant,
+        # not only the last language in the authored block.
+        shared = re.search(r"(?im)^[ \t]*(?:(?:PFB|Please find below)\s+)?Links?\s*:\s*", text[languages[-1].end():])
+        shared_cta = ""
+        if shared:
+            tail_start = languages[-1].end() + shared.start()
+            tail = text[tail_start:]
+            urls = re.findall(r"https?://\S+", tail)
+            label = re.search(r"(?im)^\s*CTA\s*(?:button)?\s*(?:will be|is|[:\-–])\s*([^\n]+)", tail)
+            if urls:
+                shared_cta = "\nCTA: " + (label.group(1).strip() if label else "Apply Now") + "\n" + urls[0]
+                text = text[:tail_start].rstrip()
+        return [
+            copy
+            for i, m in enumerate(languages)
+            for copy in _jira_copy_parts(text[m.end():languages[i + 1].start() if i + 1 < len(languages) else len(text)] + shared_cta)
+        ]
+    # A complete terms line closes a copy; following CTA/signature lines belong
+    # to that copy. This also handles variants without an English greeting.
+    chunks: list[str] = []
+    current: list[str] = []
+    closed = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        cta_tail = bool(
+            is_pure_cta_cell(stripped)
+            or re.fullmatch(r"(?:<|\[)(?:Apply|Get|Claim|Continue|Complete|Verify|Explore|View|Check|Know|Interested)\b[^>\]\n]{0,30}(?:>|\])", stripped, re.I)
+            or re.fullmatch(r"(?:[👉🔗▶️📍📲➡️✅]\s*)?(?:Resume|Continue|Complete|Claim|Download)\s+(?:now|here|below|app)?\s*[:\-–]?\s*(?:\{link\}|<link>|\[link\]|https?://\S+)", stripped, re.I)
+        )
+        following_copy = (
+            stripped
+            and closed
+            and not cta_tail
+            and not re.match(r"^(?:CTA|Button|Link|T\s*&\s*C|Terms|[-–—•]?\s*Tata Capital|https?://|<link>|\{link\}|\[link\])", stripped, re.I)
+            and not re.fullmatch(r"[-–—•\s]*", stripped)
+        )
+        if following_copy:
+            chunks.append("\n".join(current).strip())
+            current = []
+            closed = False
+        if re.fullmatch(r"(?:Promo|Retargeting)\s*:?", stripped, re.I):
+            continue
+        current.append(line)
+        if re.search(r"T\s*&\s*Cs?\s*[Aa]pply|Terms\s*(?:and|&)\s*Conditions\s*[Aa]pply", stripped, re.I):
+            closed = True
+    if current:
+        chunks.append("\n".join(current).strip())
+    if len(chunks) >= 2 and all(is_valid_template_copy(part) for part in chunks):
+        return [copy for chunk in chunks for copy in _jira_copy_parts(chunk)]
+    # Repeated salutation paragraphs without terms are only boundaries when
+    # each segment independently contains a complete customer message.
+    greetings = list(re.finditer(r"(?im)^[ \t]*(?:[•*-]\s*)?(?:dear|hi|hello|hey|namaste|greetings)\b(?!\s+(?:team|all)\b)", text))
+    if len(greetings) >= 2:
+        starts = [m.start() for m in greetings]
+        if starts[0] and is_valid_template_copy(text[:starts[0]]):
+            starts.insert(0, 0)
+        parts = [text[start:starts[i + 1] if i + 1 < len(starts) else len(text)].strip().lstrip("• ") for i, start in enumerate(starts)]
+        if all(is_valid_template_copy(part) for part in parts):
+            return parts
+    return [text]
+
+
+def _jira_description_sections(text: str) -> list[tuple[str | None, str]]:
+    """Explicit channel headings scope only the prose that follows them."""
+    heading = re.compile(
+        r"^\s*(SMS|WA|WhatsApp|RCS)\s*(?:(?:Service|Implicit|Utility|Content|Promo|Promotional|Retargeting|Marketing)\s*)*[:\-–]*\s*$",
+        re.I,
+    )
+    sections: list[tuple[str | None, str]] = []
+    channel: str | None = None
+    lines: list[str] = []
+    for line in text.splitlines():
+        match = heading.fullmatch(line)
+        requested_channels = set()
+        if re.match(r"^\s*(?:please|pls|kindly|pfa|pfb)\b", line, re.I) and re.search(r"\b(?:whitelist|whitelisting|content)\b", line, re.I):
+            requested_channels = {
+                "WA" if value.upper() == "WHATSAPP" else value.upper()
+                for value in re.findall(r"\b(SMS|WA|WhatsApp|RCS)\b", line, re.I)
+            }
+        if match or len(requested_channels) == 1:
+            if lines:
+                sections.append((channel, "\n".join(lines)))
+            channel = match.group(1).upper() if match else requested_channels.pop()
+            if channel == "WHATSAPP":
+                channel = "WA"
+            lines = []
+        else:
+            lines.append(line)
+    if lines:
+        sections.append((channel, "\n".join(lines)))
+    return sections
+
+
 def split_multi_campaign_cell(text: str, *, numbered_greetings_only: bool = False) -> list[str]:
     """Split explicit variants; Jira's bare list markers must start customer messages."""
     clean = text.strip()
     if not clean:
         return []
+    if numbered_greetings_only:
+        return _jira_copy_parts(clean)
 
     split_pattern = (
         r"(?:^|\n+)\s*(?:(?P<label>Option|Variant|Campaign|Draft)\s*"
@@ -986,12 +1117,49 @@ def _find_adf_tables(node: Any) -> list[dict[str, Any]]:
     return tables
 
 
-def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str]]:
+def _parse_tables_from_adf(adf_doc: dict[str, Any] | None, summary: str = "") -> list[dict[str, Any]]:
     if not adf_doc:
         return []
 
     tables = _find_adf_tables(adf_doc)
     extracted_items: list[dict[str, str]] = []
+    contexts: dict[int, str] = {}
+    preceding = summary
+
+    def collect_context(node: dict[str, Any]) -> None:
+        nonlocal preceding
+        if node.get("type") == "table":
+            contexts[id(node)] = preceding
+        elif node.get("type") in ("paragraph", "heading"):
+            text = _extract_text_from_adf_node(node, preserve_formatting=False).strip()
+            if re.search(r"\b(?:wa|whatsapp|sms|rcs)\b", text, re.I):
+                preceding = text
+        else:
+            for child in node.get("content", []):
+                collect_context(child)
+
+    collect_context(adf_doc)
+
+    def label_channel(label: str) -> str | None:
+        match = re.search(r"\b(whatsapp|wa|sms|rcs|email|push|pn|apn)\b", label.replace("_", " "), re.I)
+        if not match:
+            return None
+        channel = match.group(1).upper()
+        return {"WHATSAPP": "WA", "PN": "PUSH", "APN": "PUSH"}.get(channel, channel)
+
+    product_urls: dict[str, str] = {}
+    for table in tables:
+        for row in table.get("content", []):
+            cells = row.get("content", [])
+            if len(cells) != 2:
+                continue
+            label = _extract_text_from_adf_node(cells[0], preserve_formatting=False).strip()
+            product = re.match(r"^(BL|UCL|PL|LAP|TW|NCL|EL)_", label, re.I)
+            urls = _extract_links_from_adf_node(cells[1])
+            if not urls:
+                urls = re.findall(r"https?://\S+", _extract_text_from_adf_node(cells[1], preserve_formatting=False))
+            if product and len(set(urls)) == 1:
+                product_urls[product.group(1).upper()] = urls[0]
 
     for tbl in tables:
         rows = tbl.get("content", [])
@@ -1012,80 +1180,138 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
             continue
 
         # Check Key-Value Campaign Metadata Tables (e.g. SWCM-61 where column 0 has metadata labels)
-        first_col_keys = [r[0].lower().strip() for r in raw_rows if r and len(r) >= 1]
+        first_col_keys = [r[0].strip("*_ ").lower().strip() for r in raw_rows if r and len(r) >= 1]
         is_kv_metadata = any(
             k.startswith(("campaign name", "date & time", "testing email", "testing mobile", "sftp", "database"))
             or k in ("sms text", "email text", "email html code", "wa text", "whatsapp text")
             for k in first_col_keys
         )
         if is_kv_metadata:
-            kv_dict = {r[0].lower().strip(): r[1].strip() for r in raw_rows if len(r) >= 2}
-            for k_prefix, chan_tag in [
-                ("wa text", "WA"),
-                ("whatsapp text", "WA"),
-                ("wa content", "WA"),
-                ("sms text", "SMS"),
-                ("sms content", "SMS"),
-                ("rcs text", "RCS"),
-                ("rcs content", "RCS"),
-                ("email text", "EMAIL"),
-                ("email content", "EMAIL"),
-                ("email html code", "EMAIL"),
-                ("mailer copy", "EMAIL"),
-            ]:
-                val = kv_dict.get(k_prefix, "")
-                if (
-                    val
-                    and val.upper() not in ("N/A", "NA", "--", "-", "ATTACHED", "NONE")
-                    and is_valid_template_copy(val)
-                ):
-                    extracted_items.append(
-                        {
-                            "channel": chan_tag,
-                            "text": val,
-                            "variant": "General",
-                            "source": "jira_adf_kv",
-                        }
-                    )
+            key = lambda value: re.sub(r"[*_]", "", value).strip().lower()
+            campaign_row = next((r for r in raw_rows if r and re.fullmatch(r"campaign\s+name", key(r[0]))), [])
+            width = len(campaign_row) or max(map(len, raw_rows))
+            while campaign_row and width > 2 and not campaign_row[width - 1].strip():
+                width -= 1
+            buffers: dict[int, list[str]] = {}
+            channels: dict[int, str] = {}
+            ctas: dict[int, str] = {}
+            active = False
+            for r in raw_rows:
+                r = list(r)
+                while len(r) > 1 and not r[-1].strip():
+                    r.pop()
+                label = key(r[0])
+                content_channel = next((chan for prefix, chan in (
+                    ("whatsapp", "WA"), ("wa", "WA"), ("rcs", "RCS"), ("sms", "SMS"),
+                    ("email", "EMAIL"), ("mailer", "EMAIL"),
+                ) if re.fullmatch(prefix + r"(?:\s+(?:text|content|copy|html code))?", label)), None)
+                variant = bool(re.fullmatch(r"(?:nc|oc|c)\s*\d+", label))
+                if content_channel or variant:
+                    active = True
+                    for col in range(1, width):
+                        campaign = campaign_row[col] if col < len(campaign_row) else ""
+                        campaign_channel = re.search(r"\b(whatsapp|wa|rcs|sms|email)\b", campaign.replace("_", " "), re.I)
+                        channels[col] = ("WA" if campaign_channel.group(1).upper() == "WHATSAPP" else campaign_channel.group(1).upper()) if campaign_channel else (content_channel or "SMS")
+                        if col < len(r):
+                            buffers.setdefault(col, []).append(r[col])
+                elif re.match(r"^(?:cta|link)", label):
+                    active = False
+                    for col in range(1, width):
+                        if col < len(r):
+                            ctas[col] = r[col]
+                elif re.match(r"^(?:campaign\s*name|date|testing|test\s|database|sftp|product|sub\s*product|campaign\s*tag|template\s*id)", label):
+                    active = False
+                elif active:
+                    # Jira drops empty label cells in continuation rows.
+                    values = r if len(r) == width - 1 else r[1:]
+                    for col, value in enumerate(values, 1):
+                        buffers.setdefault(col, []).append(value)
+            for col, values in buffers.items():
+                copies: list[str] = []
+                pending = ""
+                for value in values:
+                    previous_closed = bool(re.search(
+                        r"T\s*&\s*Cs?\s*apply|Terms\s*(?:and|&)\s*Conditions\s*apply|https?://|<link>|\[link\]|\{(?:link|#(?:link|url)#)\}",
+                        pending, re.I,
+                    ))
+                    next_greeting = bool(re.match(r"^(?:dear|hi|hello|hey|namaste|greetings)\b", value.strip(), re.I))
+                    if is_valid_template_copy(pending) and is_valid_template_copy(value) and (previous_closed or next_greeting):
+                        copies.append(pending)
+                        pending = value
+                    else:
+                        pending = "\n".join(part for part in (pending, value) if part).strip()
+                if pending:
+                    copies.append(pending)
+                for val in copies:
+                    if val and val.upper() not in ("N/A", "NA", "--", "-", "ATTACHED", "NONE"):
+                        item = {"channel": channels.get(col, "SMS"), "text": val, "variant": "General", "source": "jira_adf_kv"}
+                        cta = ctas.get(col, "")
+                        if re.search(r"https?://", cta):
+                            item["button_url"] = clean_safelink(re.search(r"https?://\S+", cta).group())
+                        extracted_items.append(item)
             continue
 
-        # Check Pattern B (Row-based channel tags)
-        start_idx = 0
+        # Variant/Copy grids and copy/character-count grids have no channel
+        # header. Their native cell boundaries still define distinct messages.
+        copy_col = next((i for i, value in enumerate(raw_rows[0]) if value.strip("* ").lower() in ("copy", "message copy")), None)
+        counted_copies = all(len(r) == 2 and r[1].isdigit() for r in raw_rows)
+        if copy_col is not None or counted_copies:
+            channel_match = re.search(r"\b(sms|rcs|wa|whatsapp)\b", summary, re.I)
+            channel = channel_match.group(1).upper() if channel_match else "WA"
+            channel = "WA" if channel == "WHATSAPP" else channel
+            for r in raw_rows[1:] if copy_col is not None else raw_rows:
+                col = copy_col if copy_col is not None else 0
+                if col < len(r):
+                    extracted_items.append({"channel": channel, "text": r[col], "variant": r[0] if copy_col else "General", "source": "jira_adf"})
+            continue
+
+        if all(len(r) == 1 for r in raw_rows):
+            channel = label_channel(contexts.get(id(tbl), summary))
+            if channel:
+                for r in raw_rows:
+                    extracted_items.append({"channel": channel, "text": r[0], "variant": "General", "source": "jira_adf"})
+                continue
+
         first_row = raw_rows[0]
-        first_col_0 = first_row[0].strip().upper() if first_row else ""
-        if first_col_0 in ("CHANNEL", "CHANNELS", "PLATFORM", "TYPE", "MEDIUM") and len(raw_rows) > 1:
-            start_idx = 1
-            first_col_val = raw_rows[1][0].strip().upper() if raw_rows[1] else ""
-        else:
-            first_col_val = first_col_0
+        contextual_headers = [
+            bool(re.fullmatch(r"(?:BL|UCL|PL|LAP|TW|NCL|EL|Non[ -]clicker|Retargeting|Teaser Content \d+|Content for [\d.]+)", value.strip("*_ "), re.I))
+            for value in first_row
+        ]
+        if any(contextual_headers) and all(header or not value.strip() for header, value in zip(contextual_headers, first_row)):
+            row_channel = label_channel(raw_rows[1][0]) if len(raw_rows) > 1 and len(raw_rows[1][0]) < 60 else None
+            context_channel = row_channel or label_channel(contexts.get(id(tbl), summary))
+            if context_channel:
+                for r in raw_rows[1:]:
+                    for col, value in enumerate(r):
+                        if col < len(contextual_headers) and contextual_headers[col]:
+                            item = {"channel": context_channel, "text": value, "variant": first_row[col], "source": "jira_adf"}
+                            if first_row[col].strip("*_ ").upper() in product_urls:
+                                item["button_url"] = product_urls[first_row[col].strip("*_ ").upper()]
+                            extracted_items.append(item)
+                continue
 
-        is_row_based = (
-            first_col_val in ("SMS", "WA", "RCS", "WHATSAPP", "EMAIL", "MAIL", "MAILER", "PUSH", "APN")
-            and len(raw_rows[start_idx]) >= 2
-        )
-
-        if is_row_based:
-            for r in raw_rows[start_idx:]:
-                if len(r) >= 2:
-                    chan_raw = r[0].strip().upper()
-                    if chan_raw in ("WA", "WHATSAPP"):
-                        chan_tag = "WA"
-                    elif chan_raw in ("EMAIL", "MAIL", "MAILER"):
-                        chan_tag = "EMAIL"
-                    elif chan_raw in ("PUSH", "APN"):
-                        chan_tag = "PUSH"
-                    else:
-                        chan_tag = chan_raw
-                    body_content = r[1].strip()
-                    if body_content and len(body_content) > 10 and is_valid_template_copy(body_content):
-                        extracted_items.append(
-                            {
-                                "channel": chan_tag,
-                                "text": body_content,
-                                "variant": "General",
-                                "source": "jira_adf",
-                            }
-                        )
+        # Channel-row tables retain unlabeled continuation rows until the next
+        # channel label. A greeting cell alone is not a complete template.
+        first_row = raw_rows[0]
+        row_labels = [
+            label_channel(r[0]) if r and len(r[0]) < 60 and re.match(r"^\*?(?:SMS|WA|WHATSAPP|RCS|EMAIL|PUSH|APN)\b", r[0], re.I) else None
+            for r in raw_rows
+        ]
+        column_headers = sum(label_channel(value) is not None for value in first_row if len(value) < 60) >= 2
+        if any(row_labels) and not column_headers:
+            active: dict[str, Any] | None = None
+            for r, channel in zip(raw_rows, row_labels):
+                if channel:
+                    if active:
+                        extracted_items.append(active)
+                    active = {"channel": channel, "text": "\n".join(r[1:]), "variant": r[0], "source": "jira_adf"}
+                elif active and not re.match(r"^(?:date|testing|database|sftp|product|campaign|report)", r[0].strip("*_ "), re.I):
+                    active["text"] += "\n" + "\n".join(r)
+                elif active:
+                    extracted_items.append(active)
+                    active = None
+            if active:
+                extracted_items.append(active)
             continue
         # Pattern A (Columnar headers in row 0)
         if len(raw_rows) >= 2:
@@ -1128,7 +1354,23 @@ def _parse_tables_from_adf(adf_doc: dict[str, Any] | None) -> list[dict[str, str
                                 }
                             )
 
-    return extracted_items
+    split_items: list[dict[str, Any]] = []
+    for item in extracted_items:
+        for copy in _jira_copy_parts(item["text"]):
+            if not is_valid_template_copy(copy):
+                continue
+            variant = {**item, "text": copy, "raw_source": copy}
+            if item["channel"] != "SMS":
+                cta = re.search(r"(?:^|\n|\s)CTA(?:\s*Button)?\s*[:\-–]\s*([^\n]+)", copy, re.I)
+                if cta:
+                    variant["text"] = (copy[:cta.start()].rstrip() + copy[cta.end():]).strip()
+                    variant["button_text"] = re.sub(r"[<>{}\[\]]", "", cta.group(1)).strip()
+                bracket = re.search(r"(?im)^\s*\[((?:Interested|Apply|Get|Claim|Continue|Complete|Verify|Explore|View|Check|Know)\b[^\]\n]{0,24})\]\s*$", variant["text"])
+                if bracket:
+                    variant["text"] = (variant["text"][:bracket.start()] + variant["text"][bracket.end():]).strip()
+                    variant["button_text"] = bracket.group(1)
+            split_items.append(variant)
+    return split_items
 
 
 def _extract_kv_metadata_from_adf_or_text(
@@ -1403,7 +1645,12 @@ def is_valid_template_copy(text: str) -> bool:
         )
         if not valid_feature:
             return False
-        if not has_customer_offer:
+        # Official-channel and fraud-awareness utility copy need not sell a loan.
+        informational_copy = (
+            has_brand and has_placeholder
+            and re.match(r"^(?:dear|hi|hello|hey|namaste|greetings)\b(?!\s+(?:team|all)\b)", s, re.I)
+        )
+        if not has_customer_offer and not informational_copy:
             return False
 
     # Must contain at least 4 whitespace-separated words in any case
@@ -1463,11 +1710,25 @@ def _match_sheet_channel(sname: str) -> str | None:
 
 def _load_spreadsheet_sheets(filepath: Path) -> dict[str, list[list[str]]]:
     """
-    Universally load any spreadsheet file (.xlsx, .csv, .xls) into a dictionary of
+    Universally load any spreadsheet file (.xlsx, .csv, .xls, .xlsb) into a dictionary of
     sheet_name -> 2D string matrix (raw_rows). Handles CSV encodings and Excel formats.
     """
     sheets: dict[str, list[list[str]]] = {}
     lower_path = str(filepath).lower()
+
+    if lower_path.endswith(".xlsb"):
+        from pyxlsb import open_workbook
+
+        with open_workbook(str(filepath)) as workbook:
+            for sname in workbook.sheets:
+                with workbook.get_sheet(sname) as sheet:
+                    rows = [
+                        [str(cell.v if cell.v is not None else "").strip() for cell in row]
+                        for row in sheet.rows()
+                    ]
+                if any(any(row) for row in rows):
+                    sheets[sname] = [row for row in rows if any(row)]
+        return sheets
 
     # 1. Handle CSV files with encoding fallback
     if lower_path.endswith(".csv"):
@@ -1642,6 +1903,108 @@ def _identify_sheet_columns(header_row: list[str]) -> dict[str, Any]:
 
     mapping["content_cols"] = content_cols
     return mapping
+def _pair_sheet_images(items: list[dict[str, Any]], images: list[str]) -> None:
+    """Reuse one shared creative, or pair equally sized ordered copy/creative lists."""
+    visual_items = [item for item in items if item["channel"] in ("WA", "RCS")]
+    for index, item in enumerate(visual_items):
+        if len(images) == 1 or len(images) == len(visual_items):
+            image = images[0 if len(images) == 1 else index]
+            item["media_file"] = image
+            item["media_filename"] = Path(image).name
+        elif images:
+            item["media_pairing_ambiguous"] = True
+
+
+def _parse_sheet_copy_blocks(
+    raw_rows: list[list[str]], sname: str, use_ai: bool,
+) -> list[dict[str, Any]] | None:
+    """Recognize explicit campaign forms and channel grids before scanning cells."""
+    items: list[dict[str, Any]] = []
+    campaign_channels: dict[int, str] = {}
+    for row in raw_rows:
+        if len(row) > 1 and re.sub(r"\s+", " ", row[0]).strip().lower() == "campaign name":
+            for column, value in enumerate(row[1:], 1):
+                channels = {
+                    channel for token in re.split(r"[^a-z]+", value.lower())
+                    if (channel := {"sms": "SMS", "rcs": "RCS", "wa": "WA", "whatsapp": "WA"}.get(token))
+                }
+                if len(channels) == 1:
+                    campaign_channels[column] = next(iter(channels))
+            break
+    if campaign_channels:
+        ctas = next((
+            row for row in raw_rows
+            if row and re.fullmatch(r"(?:cta|link|cta\s*/\s*link)", row[0], re.IGNORECASE)
+        ), [])
+        collecting = False
+        for r_idx, row in enumerate(raw_rows, 1):
+            label = row[0].lower().strip() if row else ""
+            if label:
+                collecting = label in ("sms text", "rcs text", "wa text", "whatsapp text", "content", "message", "body")
+            if not collecting:
+                continue
+            for column, campaign_channel in campaign_channels.items():
+                if column >= len(row) or not is_valid_template_copy(row[column]):
+                    continue
+                for copy in split_multi_campaign_cell(row[column]):
+                    normalized = re.sub(r"(?im)^(\s*body)\s*$", r"\1:", copy)
+                    cta = ctas[column] if column < len(ctas) else None
+                    decomp = decompose_content(normalized, neighbor_cta=cta, use_ai=use_ai)
+                    items.append({
+                        "channel": campaign_channel, "text": decomp["body"], "raw_text": copy,
+                        "header": decomp["header_text"], "button_text": decomp["button_text"],
+                        "button_url": decomp["button_url"], "language": decomp["language"],
+                        "variant": f"Copy {len(items) + 1}", "source": f"excel_form_{sname}_r{r_idx}_c{column + 1}",
+                    })
+        if items:
+            return items
+
+    if not raw_rows or not raw_rows[0] or raw_rows[0][0].lower().strip() != "channel":
+        return None
+    has_channel = any(row and row[0].upper().strip() in ("SMS", "RCS", "WA", "WHATSAPP") for row in raw_rows[1:])
+    has_terms_row = any(
+        not row[0].strip() and any(re.fullmatch(r"(?:t\s*&\s*c(?:s)?\s*apply[.\s]*)+", cell, re.IGNORECASE) for cell in row[1:])
+        for row in raw_rows[1:] if row
+    )
+    if not has_channel or not has_terms_row:
+        return None
+    current_channel = None
+    columns: dict[int, list[str]] = {}
+    starts: dict[int, int] = {}
+
+    def flush(column: int) -> None:
+        text = "\n".join(columns.pop(column, [])).strip()
+        if current_channel and is_valid_template_copy(text):
+            items.append({
+                "channel": current_channel, "text": text, "raw_text": text,
+                "variant": raw_rows[0][column] if column < len(raw_rows[0]) else f"Column {column + 1}",
+                "source": f"excel_grid_{sname}_r{starts[column]}_c{column + 1}",
+            })
+
+    for r_idx, row in enumerate(raw_rows[1:], 2):
+        if not row:
+            continue
+        channel = row[0].upper().strip()
+        if channel in ("SMS", "RCS", "WA", "WHATSAPP"):
+            for column in list(columns):
+                flush(column)
+            current_channel = "WA" if channel == "WHATSAPP" else channel
+        if not current_channel:
+            continue
+        for column, cell in enumerate(row[1:], 1):
+            if not cell.strip():
+                continue
+            if column not in columns:
+                columns[column] = []
+                starts[column] = r_idx
+            columns[column].append(cell.strip())
+            if re.fullmatch(r"(?:t\s*&\s*c(?:s)?\s*apply[.\s]*)+", cell.strip(), re.IGNORECASE):
+                flush(column)
+    for column in list(columns):
+        flush(column)
+    return items
+
+
 def _parse_raw_sheet_rows(
     raw_rows: list[list[str]], sname: str, sheet_images: list[str] | None = None,
     use_ai: bool = False,
@@ -1659,6 +2022,10 @@ def _parse_raw_sheet_rows(
     sheet_chan = _normalize_channel_tag(sname)
     if not raw_rows:
         return items
+    block_items = _parse_sheet_copy_blocks(raw_rows, sname, use_ai)
+    if block_items is not None:
+        _pair_sheet_images(block_items, sheet_images or [])
+        return block_items
 
     # 1. Detect candidate header row index
     def _is_real_header_row(row: list[str]) -> bool:
@@ -1666,16 +2033,19 @@ def _parse_raw_sheet_rows(
             return False
         if any(len(str(c or "").strip()) > 60 for c in row):
             return False
-        header_keywords = (
+        non_channel_keywords = (
             "channel", "content", "body", "copy", "template", "message", "text",
             "header", "button", "cta", "url", "category", "footer", "status", "date",
-            "sms", "wa", "whatsapp", "rcs", "pn", "push"
         )
         row_low = " ".join(str(c or "").lower() for c in row)
-        return any(k in row_low for k in header_keywords)
+        if any(k in row_low for k in non_channel_keywords):
+            return True
+        return sum(1 for c in row if _normalize_channel_tag(str(c or "")) is not None) >= 2
 
     header_row_idx = None
     for r_idx, row in enumerate(raw_rows[:5]):
+        if any(len(str(c or "").strip()) > 60 for c in row):
+            break
         if _is_real_header_row(row):
             header_row_idx = r_idx
             break
@@ -1829,10 +2199,6 @@ def _parse_raw_sheet_rows(
                     "variant": variant,
                     "source": f"excel_{sname}_r{r_num}_c{c_idx + 1}" + (f"_opt_{copy_idx + 1}" if len(copies) > 1 else ""),
                 }
-                if sheet_images:
-                    img_path = sheet_images[copy_idx % len(sheet_images)]
-                    item_dict["media_file"] = img_path
-                    item_dict["media_filename"] = Path(img_path).name
                 if template_name_col_idx is not None and template_name_col_idx < len(row) and row[template_name_col_idx]:
                     item_dict["template_name"] = row[template_name_col_idx].strip()
                 if header_col_idx is not None and header_col_idx < len(row) and row[header_col_idx]:
@@ -1927,11 +2293,8 @@ def _parse_raw_sheet_rows(
                         "variant": f"Cell_{r_idx + 1}_{c_idx + 1}" + (f"_opt_{copy_idx + 1}" if len(copies) > 1 else ""),
                         "source": f"excel_spatial_{sname}_r{r_idx + 1}_c{c_idx + 1}",
                     }
-                    if sheet_images:
-                        img_path = sheet_images[copy_idx % len(sheet_images)]
-                        item_dict["media_file"] = img_path
-                        item_dict["media_filename"] = Path(img_path).name
                     items.append(item_dict)
+    _pair_sheet_images(items, sheet_images or [])
     return items
 
 
@@ -2136,18 +2499,36 @@ def _parse_dlt_sms_sheet(raw_rows: list[list[str]], sname: str, filename: str = 
 
 def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False) -> list[dict[str, Any]]:
     """
-    Extract multi-channel customer communications (WhatsApp, SMS, Email) from Word documents (.docx).
-    Handles client communication briefs segmented by customer tiers (e.g. '1. Customers at or below 50% LTV...').
-    Identifies genuine customer-facing headlines for WhatsApp templates.
+    Extract explicitly channel-labeled Word copy, including table paragraphs.
+    A single channel named in the source filename can label language-only documents;
+    documents without channel evidence remain unassigned.
     """
+    from docx_carousel_parser import extract_docx_carousels
+
+    carousels = extract_docx_carousels(docx_path)
+    if carousels is not None:
+        return carousels
+
     paras: list[str] = []
 
     # 1. Try python-docx if installed
     try:
         import docx
+        from docx.oxml.ns import qn
+        from docx.text.paragraph import Paragraph
 
         doc = docx.Document(docx_path)
-        paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+        mapping_paragraphs = {
+            element
+            for table in doc.tables
+            if table.rows and {cell.text.strip().lower() for cell in table.rows[0].cells} == {"state", "languages"}
+            for element in table._tbl.iter(qn("w:p"))
+        }
+        paras = [
+            p.text.strip()
+            for element in doc.element.body.iter(qn("w:p"))
+            if element not in mapping_paragraphs and (p := Paragraph(element, doc)).text.strip()
+        ]
     except Exception:
         paras = []
 
@@ -2175,7 +2556,48 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
             return []
     items: list[dict[str, Any]] = []
     channel_blocks: list[dict[str, Any]] = []
-    curr_block: dict[str, Any] = {"channel": None, "tier": "General", "lines": []}
+    filename_channels = {
+        channel for token, channel in {
+            "whatsapp": "WA", "wa": "WA", "sms": "SMS", "rcs": "RCS",
+            "pn": "PN", "push": "PN", "email": "EMAIL",
+        }.items()
+        if re.search(rf"(?<![a-z]){token}(?=[^a-z]|regional|$)", Path(docx_path).stem.lower())
+    }
+    file_channel = next(iter(filename_channels)) if len(filename_channels) == 1 else None
+    languages = {
+        "english": "en", "hindi": "hi", "marathi": "mr", "bengali": "bn",
+        "bangla": "bn", "assamese": "as", "gujarati": "gu", "gujrati": "gu",
+        "punjabi": "pa", "tamil": "ta", "telugu": "te", "kannada": "kn",
+        "malayalam": "ml", "odia": "or", "oriya": "or",
+    }
+    normalized_paras: list[str] = []
+    language_prefix = re.compile(
+        rf"^(?:original\s+)?({'|'.join(languages)})(?=\b|Title:)"
+        r"(?:\s*\([^)]*\))?\s*[:\-–—]?\s*(.*)$",
+        re.IGNORECASE,
+    )
+    for paragraph in paras:
+        pending: list[str] = []
+        for line in re.sub(
+            rf"(?i)((?:original\s+)?(?:{'|'.join(languages)})(?:\s*\([^)]*\))?\s*:)",
+            r"\n\1",
+            paragraph,
+        ).splitlines():
+            clean = line.strip()
+            label = language_prefix.match(re.sub(r"^[^A-Za-z]+", "", clean))
+            if label:
+                if pending:
+                    normalized_paras.append("\n".join(pending))
+                    pending = []
+                normalized_paras.append(label.group(1))
+                if label.group(2).strip():
+                    pending.append(label.group(2).strip())
+            elif clean:
+                pending.append(clean)
+        if pending:
+            normalized_paras.append("\n".join(pending))
+    paras = normalized_paras
+    curr_block: dict[str, Any] = {"channel": file_channel, "tier": "General", "lines": [], "language": None}
     chan_names = {
         "whatsapp": "WA", "wa": "WA", "sms": "SMS", "email": "EMAIL", "rcs": "RCS",
         "pn": "PN", "push": "PN", "push notification": "PN"
@@ -2185,23 +2607,55 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
         clean_p = p.strip()
         low = clean_p.lower()
         norm_chan = re.sub(r"[\s\-–—:]+$", "", low).strip()
+        compact_heading = re.fullmatch(
+            r"(whatsapp|wa|sms|rcs|pn|push)(?:\s*(?:regional|promotional|utility|content|copy|\d+))*",
+            norm_chan,
+        )
+        if compact_heading:
+            norm_chan = compact_heading.group(1)
+        heading_channels = {
+            chan_names[token] for token in re.findall(r"[a-z]+", low)
+            if token in chan_names
+        }
+        heading_channel = (
+            next(iter(heading_channels))
+            if len(heading_channels) == 1 and len(clean_p) < 100 and not is_valid_template_copy(clean_p)
+            else None
+        )
+
+        if norm_chan in languages:
+            if curr_block["channel"] and curr_block["lines"]:
+                channel_blocks.append(curr_block)
+            curr_block = {
+                "channel": curr_block["channel"], "tier": clean_p,
+                "lines": [], "language": languages[norm_chan],
+            }
+            continue
 
         # Check tier header (e.g. 1. Customers at or below 50% LTV...)
         if re.match(r"^\d+\.\s+Customers?", p, re.IGNORECASE):
             if curr_block["channel"] and curr_block["lines"]:
                 channel_blocks.append(curr_block)
-            curr_block = {"channel": None, "tier": p, "lines": []}
+            curr_block = {"channel": file_channel, "tier": p, "lines": [], "language": None}
             continue
 
-        if norm_chan in chan_names:
+        if norm_chan in chan_names or heading_channel:
             if curr_block["channel"] and curr_block["lines"]:
                 channel_blocks.append(curr_block)
-            curr_block = {"channel": chan_names[norm_chan], "tier": curr_block.get("tier", "General"), "lines": []}
+            curr_block = {
+                "channel": chan_names.get(norm_chan) or heading_channel, "tier": curr_block.get("tier", "General"),
+                "lines": [], "language": curr_block.get("language"),
+            }
             continue
 
         # Handle section headers like 'Content to Referrer–', 'Not Contactable –'
         if clean_p.endswith(("-", "–", "—", ":")) and len(clean_p) < 40 and not any(k in low for k in ("t&c", "link", "tatacapital", "dear", "hello", "hi")):
-            curr_block["tier"] = clean_p.rstrip("-–—: ").strip()
+            if curr_block["channel"] and curr_block["lines"]:
+                channel_blocks.append(curr_block)
+            curr_block = {
+                "channel": curr_block["channel"], "tier": clean_p.rstrip("-–—: ").strip(),
+                "lines": [], "language": curr_block.get("language"),
+            }
             continue
 
         if curr_block["channel"]:
@@ -2217,7 +2671,20 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
         if not lines:
             continue
         header = None
-        if chan == "WA":
+
+        def valid_copy(text: str) -> bool:
+            if is_valid_template_copy(text):
+                return True
+            # An explicit regional language/channel heading is source authority;
+            # short native-script copy need not contain English loan vocabulary.
+            return bool(
+                b.get("language") not in (None, "en")
+                and len(text) >= 25 and len(text.split()) >= 4
+                and re.search(r"[\u0900-\u0dff\u0e80-\u0eff]", text)
+                and re.search(r"<[^>]+>|\{[^}]+\}|\[[^\]]+\]|https?://", text)
+            )
+
+        if chan in ("WA", "RCS"):
             current_wa: list[str] = []
             for line in lines:
                 is_new_wa = bool(
@@ -2226,15 +2693,16 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
                 )
                 if is_new_wa and current_wa:
                     combined = "\n".join(current_wa).strip()
-                    if is_valid_template_copy(combined):
+                    if valid_copy(combined):
                         decomp = decompose_content(combined, use_ai=use_ai)
                         items.append({
-                            "channel": "WA",
+                            "channel": chan,
                             "header": decomp["header_text"],
                             "text": decomp["body"],
                             "button_text": decomp["button_text"],
                             "button_url": decomp["button_url"],
                             "variant": tier,
+                            "language": b.get("language") or detect_language(combined),
                             "source": f"docx_{Path(docx_path).stem}",
                         })
                     current_wa = [line]
@@ -2242,15 +2710,16 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
                     current_wa.append(line)
             if current_wa:
                 combined = "\n".join(current_wa).strip()
-                if is_valid_template_copy(combined):
+                if valid_copy(combined):
                     decomp = decompose_content(combined, use_ai=use_ai)
                     items.append({
-                        "channel": "WA",
+                        "channel": chan,
                         "header": decomp["header_text"],
                         "text": decomp["body"],
                         "button_text": decomp["button_text"],
                         "button_url": decomp["button_url"],
                         "variant": tier,
+                        "language": b.get("language") or detect_language(combined),
                         "source": f"docx_{Path(docx_path).stem}",
                     })
         elif chan == "SMS":
@@ -2258,15 +2727,20 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
             for line in lines:
                 is_new_message = bool(
                     re.match(r"^(?:dear|hi|hello|hey|know someone|you have been|up to|unexpected|more orders|urgent)\b", line.lower())
-                    or (current_sms and len("\n".join(current_sms)) > 150)
+                    or (
+                        current_sms
+                        and re.search(r"t\s*&\s*c(?:s)?\b[^\n]*(?:\n[-–—][^\n]*)?$", "\n".join(current_sms), re.IGNORECASE)
+                        and valid_copy(line)
+                    )
                 )
                 if is_new_message and current_sms:
                     combined = "\n".join(current_sms).strip()
-                    if is_valid_template_copy(combined):
+                    if valid_copy(combined):
                         items.append({
                             "channel": "SMS",
                             "header": None,
                             "text": combined,
+                            "language": b.get("language") or detect_language(combined),
                             "variant": tier,
                             "source": f"docx_{Path(docx_path).stem}",
                         })
@@ -2275,11 +2749,12 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
                     current_sms.append(line)
             if current_sms:
                 combined = "\n".join(current_sms).strip()
-                if is_valid_template_copy(combined):
+                if valid_copy(combined):
                     items.append({
                         "channel": "SMS",
                         "header": None,
                         "text": combined,
+                        "language": b.get("language") or detect_language(combined),
                         "variant": tier,
                         "source": f"docx_{Path(docx_path).stem}",
                     })
@@ -2290,6 +2765,7 @@ def extract_templates_from_docx_file(docx_path: str | Path, use_ai: bool = False
                         "channel": "PN",
                         "header": line,
                         "text": line,
+                        "language": b.get("language") or detect_language(line),
                         "variant": tier,
                         "source": f"docx_{Path(docx_path).stem}",
                     })
@@ -2552,15 +3028,8 @@ def extract_templates_from_excel_file(
                     c_desc = "\n".join(lines[1:]).strip()
                 c_btn = card.get("button_text") or "Explore Now"
                 c_url = resolve_cta_url(card.get("button_url") or DEFAULT_CTA_URL, "tata")
-                if sheet_imgs and (c_idx - 1) < len(sheet_imgs):
-                    c_media = sheet_imgs[c_idx - 1]
-                    c_media_fn = Path(c_media).name
-                elif sheet_imgs:
-                    c_media = sheet_imgs[(c_idx - 1) % len(sheet_imgs)]
-                    c_media_fn = Path(c_media).name
-                else:
-                    c_media = card.get("media_file")
-                    c_media_fn = card.get("media_filename")
+                c_media = card.get("media_file") or card.get("media_url")
+                c_media_fn = card.get("media_filename")
                 c_cards.append({
                     "card_title": c_title,
                     "card_description": c_desc,
@@ -2589,6 +3058,7 @@ def extract_templates_from_excel_file(
                 "media_file": c_cards[0]["media_url"],
                 "media_filename": c_cards[0]["media_filename"],
                 "carousel_cards": c_cards,
+                "media_pairing_ambiguous": any(card.get("media_pairing_ambiguous") for card in sheet_items),
                 "source": f"excel_carousel_{sname}",
             }
             all_items.append(carousel_item)
@@ -2995,7 +3465,7 @@ def parse_jira_brief(
         "subject" in a.get("filename", "").lower() or a.get("filename", "").endswith((".docx", ".doc"))
         for a in raw_attachments
     )
-    has_excel = any(a.get("filename", "").lower().endswith((".xlsx", ".xls", ".csv")) for a in raw_attachments)
+    has_excel = any(a.get("filename", "").lower().endswith((".xlsx", ".xls", ".xlsb", ".csv")) for a in raw_attachments)
     has_docx = any(a.get("filename", "").lower().endswith((".docx", ".doc")) for a in raw_attachments)
     has_pptx = any(a.get("filename", "").lower().endswith((".pptx", ".ppt")) for a in raw_attachments)
     is_email_campaign = (
@@ -3011,6 +3481,7 @@ def parse_jira_brief(
     excel_attachment_paths: list[Path] = []
     docx_attachment_paths: list[Path] = []
     pptx_attachment_paths: list[Path] = []
+    pdf_attachment_paths: list[Path] = []
     zip_creative_paths: list[str] = []
 
     seen_copy_files: set[bytes] = set()
@@ -3020,7 +3491,7 @@ def parse_jira_brief(
         att_id = att.get("id")
         mime = att.get("mimeType", "")
         local_path: str | None = None
-        is_copy_doc = fn.lower().endswith((".xlsx", ".xls", ".csv", ".docx", ".doc", ".pptx", ".ppt"))
+        is_copy_doc = fn.lower().endswith((".xlsx", ".xls", ".xlsb", ".csv", ".docx", ".doc", ".pptx", ".ppt", ".pdf"))
         if att.get("local_path") and Path(att["local_path"]).exists():
             local_path = str(att["local_path"])
         elif (download_creatives or is_copy_doc) and att_id:
@@ -3038,7 +3509,7 @@ def parse_jira_brief(
                 duplicate_copy = digest in seen_copy_files
                 seen_copy_files.add(digest)
                 if not duplicate_copy:
-                    if fn.lower().endswith((".xlsx", ".xls", ".csv")):
+                    if fn.lower().endswith((".xlsx", ".xls", ".xlsb", ".csv")):
                         if is_inventory_dump_attachment(p.name):
                             logger.info("Skipping inventory dump / reference export attachment: %s", fn)
                         else:
@@ -3058,17 +3529,21 @@ def parse_jira_brief(
                                         })
                     elif fn.lower().endswith((".pptx", ".ppt")):
                         pptx_attachment_paths.append(p)
+                    elif fn.lower().endswith(".pdf"):
+                        pdf_attachment_paths.append(p)
                     else:
                         docx_attachment_paths.append(p)
                 if fn.lower().endswith(".zip"):
                     zip_creative_paths.extend(_extract_images_from_zip(p))
         fn_lower = fn.lower()
-        if fn_lower.endswith((".xlsx", ".xls", ".csv")):
+        if fn_lower.endswith((".xlsx", ".xls", ".xlsb", ".csv")):
             target_chan = "SPREADSHEET_BRIEF"
         elif fn_lower.endswith((".docx", ".doc")):
             target_chan = "DOCUMENT_BRIEF"
         elif fn_lower.endswith((".pptx", ".ppt")):
             target_chan = "PRESENTATION_BRIEF"
+        elif fn_lower.endswith(".pdf"):
+            target_chan = "PDF_BRIEF"
         elif fn_lower.endswith(".zip"):
             target_chan = "EMAIL_CREATIVE"
         elif "wa" in fn_lower or "whatsapp" in fn_lower:
@@ -3205,7 +3680,17 @@ def parse_jira_brief(
         pptx_items = extract_templates_from_pptx_file(pptx_path, use_ai=use_ai)
         if pptx_items:
             extracted_items.extend(pptx_items)
-    adf_items = _parse_tables_from_adf(desc_raw)
+    if pdf_attachment_paths:
+        from pdf_copy_parser import extract_templates_from_pdf_file
+
+        for pdf_path in pdf_attachment_paths:
+            try:
+                extracted_items.extend(extract_templates_from_pdf_file(
+                    pdf_path, description=desc_text, summary=summary,
+                ))
+            except ValueError as exc:
+                raise ValueError(f"PDF attachment {pdf_path.name}: {exc}") from exc
+    adf_items = _parse_tables_from_adf(desc_raw, summary=summary)
     if adf_items:
         extracted_items.extend(adf_items)
 
@@ -3253,6 +3738,22 @@ def parse_jira_brief(
                         "source": f"comment_rev_{c.get('id', '')}",
                     }
                 )
+        # Additional copy is often posted without an "Updated WA:" label.
+        # Require an explicit whitelisting request and an unambiguous WA channel.
+        if not pipe_m and not rev_m and re.search(r"\bwhitelist(?:ing|ed)?\b", c_body, re.IGNORECASE):
+            channel_context = c_body if re.search(r"\b(?:wa|whatsapp|sms|rcs|email|push|pn)\b", c_body, re.IGNORECASE) else summary
+            explicit_wa = re.search(r"\b(?:wa|whatsapp)\b", channel_context, re.IGNORECASE)
+            other_channel = re.search(r"\b(?:sms|rcs|email|push|pn)\b", channel_context, re.IGNORECASE)
+            replaces_copy = re.search(r"\b(?:delete|replace|discard|instead)\b", c_body, re.IGNORECASE)
+            greeting = re.search(r"(?im)^\s*(?:\d+[.)]\s*)?(?:dear|hi|hello|hey|namaste)\b", c_body)
+            if explicit_wa and not other_channel and not replaces_copy and greeting:
+                for copy in split_multi_campaign_cell(c_body[greeting.start():], numbered_greetings_only=True):
+                    if is_valid_template_copy(copy):
+                        comment_updates.append({
+                            "channel": "WA", "text": copy.strip(),
+                            "variant": f"Additional copy by {author}",
+                            "source": f"comment_{c.get('id', '')}",
+                        })
 
     if comment_updates:
         extracted_items.extend(comment_updates)
@@ -3368,17 +3869,32 @@ def parse_jira_brief(
             )
             sms_counter += 1
     # 3c. TypeSafe AI Semantic Extraction fallback for free-form Jira descriptions
-    desc_low = desc_text.lower()
+    description_copy = desc_text
+    has_description_tables = bool(_find_adf_tables(desc_raw))
+    if has_description_tables:
+        from jira_client import adf_to_text
+
+        def without_tables(node: dict[str, Any]) -> dict[str, Any]:
+            return {**node, "content": [without_tables(child) for child in node.get("content", []) if child.get("type") != "table"]}
+
+        description_copy = adf_to_text(without_tables(desc_raw))
+    desc_low = description_copy.lower()
     is_metadata_brief = any(k in desc_low for k in ("campaign name |", "sftp path", "date & time of execution"))
-    if not extracted_items and not swcm_campaigns and desc_text.strip() and not is_metadata_brief:
+    customer_copy = bool(re.search(r"(?:T\s*&\s*Cs?\s*apply|Terms\s*(?:and|&)\s*Conditions\s*apply)", description_copy, re.I))
+    if (not extracted_items or (has_description_tables and customer_copy)) and not swcm_campaigns and description_copy.strip() and not is_metadata_brief:
         try:
             from jira_extractor import extract_template_from_jira_text
 
-            for copy in split_multi_campaign_cell(desc_text, numbered_greetings_only=True):
+            variants = [
+                (channel, copy)
+                for channel, section in _jira_description_sections(description_copy)
+                for copy in split_multi_campaign_cell(section, numbered_greetings_only=True)
+            ]
+            for channel, copy in variants:
                 semantic_res = extract_template_from_jira_text(copy, summary=summary, allow_ai=use_ai)
                 t_comp = semantic_res.template
                 if t_comp.body_text and is_valid_template_copy(t_comp.body_text):
-                    chan_decision = semantic_res.routing.target_channel
+                    chan_decision = channel or semantic_res.routing.target_channel
                     channels_to_emit = (
                         ["WA", "RCS", "SMS"]
                         if chan_decision == "MULTI_CHANNEL"
@@ -3422,7 +3938,7 @@ def parse_jira_brief(
         resolved_samples = item.get("sample_values") or norm_samples
 
         if chan in ("WA", "WHATSAPP"):
-            img = wa_creatives[(wa_counter - 1) % len(wa_creatives)] if wa_creatives else None
+            img = wa_creatives[(wa_counter - 1) % len(wa_creatives)] if wa_creatives and not item.get("media_pairing_ambiguous") else None
             clean_body, cta_btn_text, cta_btn_url, cta_footer = extract_and_strip_cta(
                 norm_text,
                 existing_btn_text=item.get("button_text"),
@@ -3480,12 +3996,13 @@ def parse_jira_brief(
                     category=cat,
                     language=lang,
                     body=clean_body,
-                    header_type=item.get("header_type") or ("IMAGE" if (item.get("media_file") or img) else ("TEXT" if wa_header else "NONE")),
+                    header_type=item.get("header_type") or ("IMAGE" if (item.get("media_file") or img or item.get("media_pairing_ambiguous")) else ("TEXT" if wa_header else "NONE")),
                     header_text=None if (item.get("media_file") or img) else wa_header,
                     footer_text=None,
                     media_file=item.get("media_file") or (img.get("local_path") if img else None),
                     media_filename=item.get("media_filename") or (img.get("filename") if img else None),
                     media_attachment_id=item.get("media_attachment_id") or (img.get("id") if img else None),
+                    media_pairing_ambiguous=bool(item.get("media_pairing_ambiguous")),
                     button_type=b_type,
                     button_text=b_text,
                     button_url=b_url,
@@ -3498,7 +4015,7 @@ def parse_jira_brief(
             wa_counter += 1
 
         elif chan == "RCS":
-            img = rcs_creatives[(rcs_counter - 1) % len(rcs_creatives)] if rcs_creatives else None
+            img = rcs_creatives[(rcs_counter - 1) % len(rcs_creatives)] if rcs_creatives and not item.get("media_pairing_ambiguous") else None
             is_car = item.get("template_type") == "carousel" or bool(item.get("carousel_cards"))
             t_suffix = "rcs_carousel" if is_car else "rcs"
             tname = item.get("template_name") or _clean_template_name(base_name, t_suffix, rcs_counter)
@@ -3544,10 +4061,11 @@ def parse_jira_brief(
                     media_file=item.get("media_file") or (img.get("local_path") if img else None),
                     media_filename=item.get("media_filename") or (img.get("filename") if img else None),
                     media_attachment_id=item.get("media_attachment_id") or (img.get("id") if img else None),
+                    media_pairing_ambiguous=bool(item.get("media_pairing_ambiguous")),
                     action_type=item.get("button_type") or "URL",
                     action_label=cta_btn_text,
                     action_url=cta_btn_url,
-                    template_type="carousel" if is_car else ("richcard" if (item.get("media_file") or img) else "text"),
+                    template_type="carousel" if is_car else ("richcard" if (item.get("media_file") or img or item.get("media_pairing_ambiguous")) else "text"),
                     carousel_cards=item.get("carousel_cards", []),
                     variables=item.get("variables") or var_tags,
                     sample_values=item.get("sample_values") or resolved_samples[: len(var_tags)],
