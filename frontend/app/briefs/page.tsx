@@ -183,9 +183,9 @@ export default function JiraBriefsPage() {
   const matchingSmsIndices = useMemo(() => matchingBriefSmsIndices(smsTemplates, smsSearch), [smsTemplates, smsSearch]);
   const smsPage = useMemo(() => briefSmsPage(matchingSmsIndices, smsPageNumber), [matchingSmsIndices, smsPageNumber]);
   useEffect(() => {
-    // Migrate cached editable drafts once, without rewriting URL keystrokes.
-    setWaTemplates((drafts) => drafts.map((draft) => normalizeWhatsAppCtas(draft, account)));
-    setRcsTemplates((drafts) => drafts.map((draft) => normalizeRcsCtas(draft, account)));
+    // Migrate cached editable drafts once, without rewriting name/URL keystrokes.
+    setWaTemplates((drafts) => drafts.map((draft) => normalizeWhatsAppCtas({ ...draft, template_name: normalizeNewTemplateName(draft.template_name) }, account)));
+    setRcsTemplates((drafts) => drafts.map((draft) => normalizeRcsCtas({ ...draft, template_name: normalizeNewTemplateName(draft.template_name) }, account)));
   }, []);
   const [selectedWa, setSelectedWa] = useTabState<Set<number>>('briefs_selected_wa', new Set());
   const [selectedRcs, setSelectedRcs] = useTabState<Set<number>>('briefs_selected_rcs', new Set());
