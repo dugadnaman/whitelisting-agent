@@ -40,6 +40,7 @@ import { TATA_CTA_URL, isUrlCta, normalizeWhatsAppCtas, normalizeRcsCtas, resolv
 import { CAMPAIGN_NAME_HINT, campaignRowName, normalizeCampaignFields, normalizeCampaignName, requireCampaignName } from '@/lib/campaign-name';
 import type { SmsDltDraft } from '@/lib/api';
 import { BRIEF_SMS_PAGE_SIZE, BRIEF_SMS_REVIEW_LIMIT, matchingBriefSmsIndices, briefSmsPage, selectBriefSmsIndices, selectedBriefSmsDrafts } from '@/lib/brief-sms';
+import { prepareSmsDltDrafts } from '@/lib/sms-brief';
 
 const UNCHECKED_WARNINGS: DraftWarnings = {
   aspect_ratio_warnings: [],
@@ -3018,7 +3019,7 @@ export default function JiraBriefsPage() {
                           </div>
                           <button type="button" className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:bg-gray-200 disabled:text-gray-500" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT} onClick={() => {
                             if (account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT) return;
-                            setSmsReview({ issueKey: brief.issue_key, drafts: selectedSmsDrafts.map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text })), revision: Date.now() });
+                            setSmsReview({ issueKey: brief.issue_key, drafts: prepareSmsDltDrafts(selectedSmsDrafts.map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text }))), revision: Date.now() });
                           }}>Review selected SMS ({selectedSmsCount})</button>
                         </div>
                         {(account !== 'tata' || channel !== 'sms') && <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">Select Tata Capital (tata) · SMS in Whitelisting for. Other SMS accounts are not integrated; no Tata credentials or Bajaj routing will be inferred.</p>}

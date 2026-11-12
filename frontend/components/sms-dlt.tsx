@@ -471,7 +471,7 @@ export function SmsDltUpload() {
             service_type: typeof row.service_type === 'string' ? row.service_type : '',
             sample_message: typeof row.sample_message === 'string' ? row.sample_message : '',
           }));
-          setDrafts(missing); setFilename('Missing templates from DLT identification'); setRevision((value) => value + 1);
+          setDrafts(prepareSmsDltDrafts(missing)); setFilename('Missing templates from DLT identification'); setRevision((value) => value + 1);
           setTabState('submit_state', { step: 'previewed', previews: [] });
         }}>Review missing DLT templates ({identification.missing_templates.length})</button>
         {drafts && identification.missing_templates.length > 0 && <p className="text-gray-500">Clear the current review before loading missing templates. Queued jobs remain in History.</p>}

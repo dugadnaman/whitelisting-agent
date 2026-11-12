@@ -130,10 +130,14 @@ test('explicit DLT preparation fixes source placeholders, filled samples and enc
 });
 
 test('DLT preparation maps known aliases only and preserves explicit samples and brief decisions', () => {
-  const draft = { template_name: 'offer', text: 'Hi {#alphanumeric#}. {#url#}', sample_message: '', message_type: '1' };
+  const draft = { template_name: 'offer', text: 'Hi {#alphanumeric#}. {#numeric#} {#url#}', sample_message: '', message_type: '1' };
   const [prepared] = prepareSmsDltDrafts([draft]);
-  assert.equal(prepared.text, 'Hi {#alp#}. {#urg#}');
-  assert.equal(prepared.sample_message, 'Hi Customer. https://example.com/offer');
+  assert.equal(prepared.text, 'Hi {#alp#}. {#num#} {#urg#}');
+  assert.equal(prepared.sample_message, 'Hi Customer. 123 https://example.com/offer');
+  const [regional] = prepareSmsDltDrafts([{ template_name: 'guj', text: 'Hi <name>, ₹6 લાખ. <link> T&C લાગુ.', sample_message: '', message_type: '' }]);
+  assert.equal(regional.text, 'Hi {#alp#}, ₹6 લાખ. {#urg#} T&C લાગુ.');
+  assert.equal(regional.sample_message, 'Hi Customer, ₹6 લાખ. https://example.com/offer T&C લાગુ.');
+  assert.equal(regional.message_type, '2');
   const custom = { ...prepared, sample_message: 'Hi Asha. https://tata.example/offer' };
   assert.equal(prepareSmsDltDrafts([custom])[0].sample_message, custom.sample_message);
   assert.equal(prepareSmsDltDrafts([{ ...draft, text: 'Keep <offer> {#var#} {{1}}' }])[0].text, 'Keep <offer> {#var#} {{1}}');

@@ -92,7 +92,7 @@ export function applySmsDltSettings(
 
 /** Explicit, reviewable preparation; submission itself never rewrites source copy. */
 export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
-  const aliases: Record<string, string> = { name: 'alp', alphanumeric: 'alp', url: 'urg', link: 'urg' };
+  const aliases: Record<string, string> = { name: 'alp', alphanumeric: 'alp', numeric: 'num', url: 'urg', link: 'urg' };
   const examples: Record<string, string> = {
     num: '123', alp: 'Customer', urg: 'https://example.com/offer', uro: 'https://example.com/offer',
     cbn: '9876543210', eml: 'customer@example.com',
@@ -103,7 +103,7 @@ export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
     // Native briefs retain their explicit per-occurrence literal/type/sample decisions.
     const text = draft.brief ? draft.text : draft.text
       .replace(/<\s*(name|link|url)\s*>/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`)
-      .replace(/\{#(alphanumeric|url|link)#\}/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`);
+      .replace(/\{#(alphanumeric|numeric|url|link)#\}/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`);
     let sample = draft.sample_message;
     if (!draft.brief && (!sample.trim() || /(?:\{#|<\s*(?:name|link|url)\s*>)/i.test(sample) || text !== draft.text)) {
       sample = text.replace(/\{#(num|alp|urg|uro|cbn|eml)#\}/g, (_, kind: string) => examples[kind]);
