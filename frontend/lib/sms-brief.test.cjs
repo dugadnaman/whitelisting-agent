@@ -142,8 +142,13 @@ test('DLT preparation maps known aliases only and preserves explicit samples and
   assert.equal(prepareSmsDltDrafts([custom])[0].sample_message, custom.sample_message);
   assert.equal(prepareSmsDltDrafts([{ ...draft, text: 'Keep <offer> {#var#} {{1}}' }])[0].text, 'Keep <offer> {#var#} {{1}}');
   const brief = prepareSmsBriefDrafts([row('1')], ['1'], 'source.xlsx')[0];
-  assert.deepEqual(plain(prepareSmsDltDrafts([brief])[0].brief), plain(brief.brief));
-  assert.equal(prepareSmsDltDrafts([brief])[0].text, brief.text);
+  const [preparedBrief] = prepareSmsDltDrafts([brief]);
+  assert.equal(preparedBrief.brief.original_text, brief.brief.original_text);
+  assert.deepEqual(plain(preparedBrief.brief.sources), plain(brief.brief.sources));
+  assert.equal(preparedBrief.text, 'Exact offer {#alp#}.');
+  assert.equal(preparedBrief.sample_message, 'Exact offer Customer.');
+  const unknownBrief = prepareSmsBriefDrafts([row('2', { text: 'Offer <OfferName>.', variables: ['<OfferName>'] })], ['2'], 'source.xlsx')[0];
+  assert.equal(prepareSmsDltDrafts([unknownBrief])[0].text, unknownBrief.text);
 });
 
 test('DLT preparation separates conflicting names while exact repeated drafts remain deduplicatable', () => {
@@ -171,4 +176,19 @@ test('batch settings preserve exact message evidence and choose encoding separat
   assert.equal(native.brief.acknowledged, true);
   assert.deepEqual(plain(result[0].brief.sources), plain(native.brief.sources));
   assert.equal(applySmsDltSettings([ascii], { ...settings, message_type: '2' })[0].message_type, '2');
+  const resolved = applySmsDltSettings([native], settings, { '{#num#}': { kind: 'num', sample: '1200' } });
+  assert.equal(resolved[0].text, ' Hi ₹{#num#}.\r\n ');
+  assert.equal(resolved[0].sample_message, ' Hi ₹1200.\r\n ');
+  assert.equal(resolved[0].message_type, '2');
+  assert.equal(resolved[0].brief.acknowledged, true);
+  assert.equal(smsBriefReady(resolved[0]), true);
+  const autoResolved = applySmsDltSettings(
+    prepareSmsBriefDrafts([row('2', { text: 'Hi <name>, tap <url>.', variables: ['<name>', '<url>'] })], ['2'], 'source.xlsx'),
+    settings,
+    {},
+  );
+  assert.equal(autoResolved[0].text, 'Hi {#alp#}, tap {#urg#}.');
+  assert.equal(autoResolved[0].sample_message, 'Hi Customer, tap https://example.com/offer.');
+  assert.equal(autoResolved[0].brief.acknowledged, true);
+  assert.equal(smsBriefReady(autoResolved[0]), true);
 });

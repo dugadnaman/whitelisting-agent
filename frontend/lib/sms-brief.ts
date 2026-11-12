@@ -1,4 +1,26 @@
 import type { SmsBriefCandidate, SmsBriefReview, SmsDltDraft } from './api';
+import type { SmsBriefDecision } from './api';
+
+const KNOWN_BRIEF_TOKENS: Record<string, { kind: Exclude<SmsBriefDecision['kind'], '' | 'literal'>; sample: string }> = {
+  name: { kind: 'alp', sample: 'Customer' },
+  alphanumeric: { kind: 'alp', sample: 'Customer' },
+  alp: { kind: 'alp', sample: 'Customer' },
+  numeric: { kind: 'num', sample: '123' },
+  num: { kind: 'num', sample: '123' },
+  url: { kind: 'urg', sample: 'https://example.com/offer' },
+  link: { kind: 'urg', sample: 'https://example.com/offer' },
+  urg: { kind: 'urg', sample: 'https://example.com/offer' },
+  uro: { kind: 'uro', sample: 'https://example.com/offer' },
+  cbn: { kind: 'cbn', sample: '9876543210' },
+  eml: { kind: 'eml', sample: 'customer@example.com' },
+};
+
+export function knownSmsBriefDecision(token: string): { kind: SmsBriefDecision['kind']; sample: string } | null {
+  const match = token.match(/^(?:<\s*([a-z]+)\s*>|\{#\s*([a-z]+)\s*#\})$/i);
+  const key = (match?.[1] || match?.[2] || '').toLowerCase();
+  return KNOWN_BRIEF_TOKENS[key] ? { ...KNOWN_BRIEF_TOKENS[key] } : null;
+}
+
 
 /** Select first, then collapse only exact copy with unambiguous compatible hints. */
 export function prepareSmsBriefDrafts(candidates: SmsBriefCandidate[], selectedIds: string[], filename: string): SmsDltDraft[] {
@@ -74,20 +96,51 @@ export function editSmsBriefDraft(draft: SmsDltDraft, patch: Partial<SmsDltDraft
   return next;
 }
 
-/** Batch routing never changes copy or source evidence; each message keeps its own encoding. */
+/** Batch routing applies shared DLT settings and any batch placeholder decisions across every draft. */
 export function applySmsDltSettings(
   drafts: SmsDltDraft[],
   settings: Pick<SmsDltDraft, 'template_type' | 'category_id' | 'header_id' | 'header' | 'brand_id' | 'service_type' | 'message_type'>,
+  sharedDecisions?: Record<string, { kind: SmsBriefDecision['kind']; sample: string }>,
 ): SmsDltDraft[] {
-  return drafts.map((draft) => editSmsBriefDraft(draft, {
-    template_type: settings.template_type,
-    category_id: settings.category_id,
-    header_id: settings.header_id,
-    header: settings.header,
-    brand_id: settings.brand_id || '',
-    service_type: settings.service_type || '',
-    message_type: settings.message_type || (/[^\x00-\x7F]/.test(draft.text + draft.sample_message) ? '2' : '1'),
-  }));
+  return drafts.map((draft) => {
+    let nextText = draft.text;
+    let nextSample = draft.sample_message;
+    let nextBrief = draft.brief;
+    if (draft.brief && sharedDecisions !== undefined) {
+      const previousGenerated = applySmsBriefDecisions(draft.brief);
+      const canOverwriteCopy = draft.text === draft.brief.original_text
+        || (previousGenerated !== null && draft.text === previousGenerated.text && draft.sample_message === previousGenerated.sample_message);
+      const variables = draft.brief.variables.map((decision) => {
+        if (decision.kind && (decision.kind === 'literal' || decision.sample.trim())) return decision;
+        const batchChoice = sharedDecisions[decision.token];
+        if (batchChoice?.kind && (batchChoice.kind === 'literal' || batchChoice.sample.trim())) {
+          return { ...decision, kind: batchChoice.kind, sample: batchChoice.kind === 'literal' ? '' : batchChoice.sample };
+        }
+        const known = knownSmsBriefDecision(decision.token);
+        return known ? { ...decision, ...known } : decision;
+      });
+      const candidateBrief = { ...draft.brief, variables, acknowledged: false };
+      const generated = applySmsBriefDecisions(candidateBrief);
+      if (generated && canOverwriteCopy) {
+        nextText = generated.text;
+        nextSample = generated.sample_message;
+      }
+      nextBrief = { ...candidateBrief, acknowledged: Boolean(generated) };
+    }
+    const next = editSmsBriefDraft({ ...draft, text: nextText, sample_message: nextSample, brief: nextBrief }, {
+      template_type: settings.template_type,
+      category_id: settings.category_id,
+      header_id: settings.header_id,
+      header: settings.header,
+      brand_id: settings.brand_id || '',
+      service_type: settings.service_type || '',
+      message_type: settings.message_type || (/[^\x00-\x7F]/.test(nextText + nextSample) ? '2' : '1'),
+    });
+    if (sharedDecisions !== undefined && next.brief && nextBrief?.acknowledged) {
+      next.brief = { ...next.brief, acknowledged: true };
+    }
+    return next;
+  });
 }
 
 /** Explicit, reviewable preparation; submission itself never rewrites source copy. */
@@ -100,15 +153,34 @@ export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
   const reserved = new Set(drafts.map((draft) => draft.template_name.toLowerCase()));
   const seen = new Map<string, string>();
   return drafts.map((draft) => {
-    // Native briefs retain their explicit per-occurrence literal/type/sample decisions.
-    const text = draft.brief ? draft.text : draft.text
-      .replace(/<\s*(name|link|url)\s*>/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`)
-      .replace(/\{#(alphanumeric|numeric|url|link)#\}/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`);
+    let brief = draft.brief;
+    let text = draft.text;
     let sample = draft.sample_message;
-    if (!draft.brief && (!sample.trim() || /(?:\{#|<\s*(?:name|link|url)\s*>)/i.test(sample) || text !== draft.text)) {
-      sample = text.replace(/\{#(num|alp|urg|uro|cbn|eml)#\}/g, (_, kind: string) => examples[kind]);
-    } else if (!draft.brief && !/\{#|\{\{|<[^>]+>/.test(text)) {
-      sample = text;
+    if (brief) {
+      const previousGenerated = applySmsBriefDecisions(brief);
+      const canOverwriteCopy = draft.text === brief.original_text
+        || (previousGenerated !== null && draft.text === previousGenerated.text && draft.sample_message === previousGenerated.sample_message);
+      const variables = brief.variables.map((decision) => {
+        if (decision.kind && (decision.kind === 'literal' || decision.sample.trim())) return decision;
+        const known = knownSmsBriefDecision(decision.token);
+        return known ? { ...decision, ...known } : decision;
+      });
+      const updatedBrief = { ...brief, variables };
+      const generated = applySmsBriefDecisions(updatedBrief);
+      brief = updatedBrief;
+      if (generated && canOverwriteCopy) {
+        text = generated.text;
+        sample = generated.sample_message;
+      }
+    } else {
+      text = draft.text
+        .replace(/<\s*(name|link|url)\s*>/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`)
+        .replace(/\{#(alphanumeric|numeric|url|link)#\}/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`);
+      if (!sample.trim() || /(?:\{#|<\s*(?:name|link|url)\s*>)/i.test(sample) || text !== draft.text) {
+        sample = text.replace(/\{#(num|alp|urg|uro|cbn|eml)#\}/g, (_, kind: string) => examples[kind]);
+      } else if (!/\{#|\{\{|<[^>]+>/.test(text)) {
+        sample = text;
+      }
     }
     const message_type = /[^\x00-\x7F]/.test(text + sample) ? '2' : '1';
     let name = draft.template_name;
@@ -124,7 +196,11 @@ export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
     }
     reserved.add(name.toLowerCase());
     seen.set(name.toLowerCase(), fields);
-    if (name === draft.template_name && text === draft.text && sample === draft.sample_message && message_type === draft.message_type) return draft;
-    return editSmsBriefDraft(draft, { template_name: name, text, sample_message: sample, message_type });
+    if (name === draft.template_name && text === draft.text && sample === draft.sample_message && message_type === draft.message_type && brief === draft.brief) return draft;
+    const updated = editSmsBriefDraft(draft, { template_name: name, text, sample_message: sample, message_type, brief });
+    if (updated.brief && brief?.acknowledged && text === draft.text && sample === draft.sample_message) {
+      updated.brief = { ...updated.brief, acknowledged: true };
+    }
+    return updated;
   });
 }

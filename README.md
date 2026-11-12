@@ -102,8 +102,11 @@ silently redirects credentials or submissions to another account.
    generates example values when needed, preserves static copy (including ₹ and
    whitespace), and selects Unicode for non-ASCII copy, even in English.
    Generated samples and name suffixes are editable suggestions, not customer data
-   or approved links. Native brief per-occurrence decisions remain explicit.
-   VILPOWER requires lowercase `{#num#}`, `{#alp#}`, `{#urg#}`, `{#uro#}`,
+  or approved links. In **1. DLT settings for all messages**, known placeholders are
+  pre-filled and **Apply settings to all N messages** applies DLT routing, shared
+  placeholder decisions, body/sample generation, and per-message readiness across
+  every message at once (while keeping original source provenance intact and still
+  requiring final review in **3. Confirm SMS whitelisting**). VILPOWER requires lowercase `{#num#}`, `{#alp#}`, `{#urg#}`, `{#uro#}`,
    `{#cbn#}`, `{#eml#}` (maximum 15) and a complete filled sample with identical
    surrounding copy. Unknown `{#var#}` and WhatsApp `{{1}}` still need your decision.
    No preparation runs silently during submission; no grammar correction is applied.

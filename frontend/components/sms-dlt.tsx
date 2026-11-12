@@ -10,7 +10,7 @@ import {
   type TemplatePreview, type JobTask, type IdentificationReport, type SmsBriefExtraction, type SmsBriefDecision,
 } from '@/lib/api';
 import { formatError } from '@/lib/format';
-import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts, applySmsDltSettings } from '@/lib/sms-brief';
+import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts, applySmsDltSettings, knownSmsBriefDecision } from '@/lib/sms-brief';
 import KarixAuthSync from '@/components/KarixAuthSync';
 
 const inputClass = 'workspace-input';
@@ -201,6 +201,24 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const [refreshingStatus, setRefreshingStatus] = useState(false);
   const [sharedSettings, setSharedSettings] = useState(() => smsDltDraft({ template_name: 'Batch settings', text: '' }));
   const [sharedSettingsReady, setSharedSettingsReady] = useState(false);
+  const [sharedDecisions, setSharedDecisions] = useState<Record<string, { kind: SmsBriefDecision['kind']; sample: string }>>({});
+  const [batchNotice, setBatchNotice] = useState('');
+  const uniqueBriefTokens = Array.from(new Set(drafts.flatMap((draft) => draft.brief?.variables.map((v) => v.token) || [])));
+  useEffect(() => {
+    if (!uniqueBriefTokens.length) return;
+    setSharedDecisions((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const token of uniqueBriefTokens) {
+        if (!next[token]) {
+          const known = knownSmsBriefDecision(token);
+          next[token] = known || { kind: '', sample: '' };
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [uniqueBriefTokens.join('\0')]);
   const active = useRef(true);
   const requestVersion = useRef(0);
   const signature = JSON.stringify(drafts);
@@ -298,14 +316,36 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
         </>}
       </div>}
     {!batch && <>
-      <details className="space-y-3 rounded-xl border border-gray-200 p-4" open={!drafts.every((draft) => draft.template_type && draft.category_id && draft.header_id && draft.header && draft.message_type) || undefined}>
+      <details className="space-y-3 rounded-xl border border-gray-200 p-4" open>
         <summary className="cursor-pointer text-sm font-medium">1. DLT settings for all messages</summary>
-        <p className="text-sm text-gray-600">Choose these once for this batch. Applying replaces existing routing settings, not message copy. Each template can still be customized below.</p>
+        <p className="text-sm text-gray-600">Choose these once for this batch. Applying fills shared DLT routing, known placeholders and sample decisions across all messages without needing card-by-card clicks.</p>
         <SmsDltEditor settingsOnly draft={sharedSettings} disabled={busy} onChange={setSharedSettings} onReady={(value) => setSharedSettingsReady(value)} />
-        <button type="button" className={buttonClass} disabled={busy || !sharedSettingsReady} onClick={() => {
-          setDrafts((current) => applySmsDltSettings(current, sharedSettings));
-          setReviewed(null); setConfirmed(false);
-        }}>Apply settings to all {drafts.length} messages</button>
+        {uniqueBriefTokens.length > 0 && <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs">
+          <p className="font-medium">Shared placeholder decisions for all {drafts.length} messages</p>
+          <p>Known name/link tokens are pre-filled; decide any remaining placeholders once here before clicking Apply.</p>
+          {uniqueBriefTokens.map((token) => {
+            const choice = sharedDecisions[token] || knownSmsBriefDecision(token) || { kind: '', sample: '' };
+            return <div key={token} className="grid gap-2 rounded border border-amber-200 bg-white p-2 sm:grid-cols-3">
+              <p className="break-words font-mono self-center">{token}</p>
+              <label>Interpretation<select className={`${inputClass} mt-1`} value={choice.kind} onChange={(e) => setSharedDecisions((prev) => ({ ...prev, [token]: { kind: e.target.value as SmsBriefDecision['kind'], sample: prev[token]?.sample ?? choice.sample } }))}>
+                <option value="">Choose literal or variable</option><option value="literal">Keep exact literal text</option><option value="num">num · numeric · max 40</option><option value="alp">alp · mixed text · max 40</option><option value="urg">urg · website URL · max 120</option><option value="uro">uro · app / OTT download URL · max 120</option><option value="cbn">cbn · callback number · 3–14 digits</option><option value="eml">eml · email · max 40</option>
+              </select></label>
+              {choice.kind && choice.kind !== 'literal' && <label>Explicit sample value<input className={`${inputClass} mt-1`} value={choice.sample} onChange={(e) => setSharedDecisions((prev) => ({ ...prev, [token]: { kind: prev[token]?.kind || choice.kind, sample: e.target.value } }))} /></label>}
+            </div>;
+          })}
+        </div>}
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className={buttonClass} disabled={busy || !sharedSettingsReady} onClick={() => {
+            const updated = applySmsDltSettings(drafts, sharedSettings, sharedDecisions);
+            setDrafts(updated);
+            setReviewed(null); setConfirmed(false);
+            const unresolved = updated.filter((item) => !smsBriefReady(item)).length;
+            setBatchNotice(unresolved
+              ? `Applied DLT settings to ${updated.length} messages. Fill the remaining undecided placeholder(s) above or in the ${unresolved} highlighted message(s).`
+              : `Applied DLT settings, placeholders, and samples to all ${updated.length} messages. Ready for Review & whitelist.`);
+          }}>Apply settings to all {drafts.length} messages</button>
+          {batchNotice && <p role="status" className="text-xs font-medium text-blue-900">{batchNotice}</p>}
+        </div>
       </details>
       <h3 className="text-sm font-medium">2. Review messages ({drafts.length})</h3>
     </>}
