@@ -1633,7 +1633,8 @@ def _identify_sheet_columns(header_row: list[str]) -> dict[str, Any]:
     for idx, h in enumerate(headers):
         if idx in claimed_indices:
             continue
-        if any(k in h for k in ["body", "content", "copy", "message", "text", "communication", "whatsapp", "sms", "rcs", "english", "hindi"]):
+        h_words = h.split()
+        if any(k in h for k in ["body", "content", "copy", "message", "text", "communication", "whatsapp", "sms", "rcs", "english", "hindi"]) or any(w in ("wa", "whatsapp", "sms", "rcs", "pn", "push") for w in h_words):
             if not any(k in h for k in ["header", "footer", "button", "cta", "url", "link", "type", "channel", "name", "id"]):
                 content_cols.append(idx)
         elif not mapping and ("copy" in h or "content" in h or "message" in h or "text" in h):
@@ -1665,7 +1666,11 @@ def _parse_raw_sheet_rows(
             return False
         if any(len(str(c or "").strip()) > 60 for c in row):
             return False
-        header_keywords = ("channel", "content", "body", "copy", "template", "message", "text", "header", "button", "cta", "url", "category", "footer", "status", "date")
+        header_keywords = (
+            "channel", "content", "body", "copy", "template", "message", "text",
+            "header", "button", "cta", "url", "category", "footer", "status", "date",
+            "sms", "wa", "whatsapp", "rcs", "pn", "push"
+        )
         row_low = " ".join(str(c or "").lower() for c in row)
         return any(k in row_low for k in header_keywords)
 
@@ -1739,7 +1744,10 @@ def _parse_raw_sheet_rows(
         "exclusion", "criteria", "sftp", "remarks", "comments", "planner", "schedule", "execution",
     )
     targeting_col_indices = {
-        idx for idx, h in enumerate(header_row) if any(th in str(h).lower() for th in targeting_header_keywords)
+        idx
+        for idx, h in enumerate(header_row)
+        if any(re.search(r"\b" + re.escape(th) + r"\b", str(h).lower()) for th in targeting_header_keywords)
+        and "retarget" not in str(h).lower()
     }
     for r_num, row in enumerate(raw_rows[start_idx:], start=start_idx + 1):
         # Skip rows describing audience targeting cohorts rather than creative copy
@@ -1802,8 +1810,14 @@ def _parse_raw_sheet_rows(
             base_variant = "General"
             if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
                 base_variant = row[0].upper()
-            elif col_hdr and col_hdr not in ("content", "message", "copy", "text", "body"):
-                base_variant = col_hdr.title()
+            elif col_hdr:
+                c_low = col_hdr.lower()
+                if "external" in c_low:
+                    base_variant = "External"
+                elif "internal" in c_low:
+                    base_variant = "Internal"
+                elif c_low not in ("content", "message", "copy", "text", "body"):
+                    base_variant = col_hdr.title()
 
             copies = split_multi_campaign_cell(body_val)
             for copy_idx, copy_text in enumerate(copies):
@@ -1839,6 +1853,10 @@ def _parse_raw_sheet_rows(
                     item_dict["media_url"] = row[media_url_col_idx].strip()
                 if language_col_idx is not None and language_col_idx < len(row) and row[language_col_idx]:
                     item_dict["language"] = row[language_col_idx].strip()
+                elif row and row[0] and len(str(row[0]).strip()) < 30:
+                    inferred_l = detect_language("", column_name=str(row[0]).strip())
+                    if inferred_l and (inferred_l != "en" or str(row[0]).strip().lower() in ("english", "eng")):
+                        item_dict["language"] = inferred_l
 
                 if "Title:" in copy_text and "Body:" in copy_text:
                     title_m = re.search(r"Title:\s*([^\n]+)", copy_text)
@@ -2042,9 +2060,36 @@ def _parse_excel_key_value_blocks(wb: openpyxl.Workbook) -> list[dict[str, str]]
     return items
 
 
+def is_inventory_dump_attachment(filename: str, row_count: int | None = None) -> bool:
+    """Identify reference database dumps and portal inventory exports (not campaign briefs)."""
+    fn = filename.lower()
+    dump_markers = (
+        "wholecontent",
+        "whole_content",
+        "whole content",
+        "all_content",
+        "all content",
+        "all_templates",
+        "all templates",
+        "master_export",
+        "catalog_export",
+        "inventory_dump",
+        "dlt_export",
+        "vilpower_export",
+        "database_dump",
+    )
+    if any(marker in fn for marker in dump_markers):
+        return True
+    if row_count is not None and row_count > 500:
+        return True
+    return False
+
+
 def _is_dlt_sms_sheet(raw_rows: list[list[str]], filename: str = "") -> bool:
     """Detect if an Excel spreadsheet is an official DLT SMS template export."""
     if not raw_rows or len(raw_rows) < 2:
+        return False
+    if is_inventory_dump_attachment(filename, row_count=len(raw_rows)):
         return False
     header_row = [str(c or "").strip().upper() for c in raw_rows[0]]
     if "TEMPLATE ID" in header_row and ("TEMPLATE MESSAGE" in header_row or "REGISTERED DLT" in header_row):
@@ -2437,6 +2482,7 @@ def extract_templates_from_pptx_file(
 def extract_templates_from_excel_file(
     filepath: Path,
     target_month: str | None = None,
+    explicit_sheet_refs: list[str] | None = None,
     sheet_images_map: dict[str, list[str]] | None = None,
     use_ai: bool = False,
 ) -> list[dict[str, Any]]:
@@ -2446,6 +2492,10 @@ def extract_templates_from_excel_file(
     Filters out historical past-month sheets and administrative planner sheets.
     Deduplicates identical templates so multi-sheet workbooks don't produce duplicate cards.
     """
+    if is_inventory_dump_attachment(filepath.name):
+        logger.info("Skipping inventory dump file in Excel extractor: %s", filepath.name)
+        return []
+
     sheets = _load_spreadsheet_sheets(filepath)
     if not sheets:
         return []
@@ -2456,9 +2506,35 @@ def extract_templates_from_excel_file(
     all_items: list[dict[str, Any]] = []
     seen_texts: set[str] = set()
 
+    if not target_month:
+        target_month = detect_ticket_month(filepath.stem)
+
+    clean_tm = (target_month or "").lower().strip()
+    has_target_month_sheets = bool(
+        clean_tm and any(detect_sheet_month(s) == clean_tm or clean_tm in s.lower() for s in sheets.keys())
+    )
+    has_month_partitioned_sheets = any(detect_sheet_month(s) is not None for s in sheets.keys())
+
     for sname, raw_rows in sheets.items():
-        if should_skip_sheet(sname, target_month=target_month):
+        s_clean = re.sub(r"[\s_\-]+", " ", sname.lower()).strip()
+        is_explicit_ref = bool(
+            explicit_sheet_refs and any(
+                s_clean == re.sub(r"[\s_\-]+", " ", ref.lower()).strip()
+                for ref in explicit_sheet_refs
+            )
+        )
+        if is_explicit_ref:
+            pass
+        elif should_skip_sheet(sname, target_month=target_month):
             continue
+        elif clean_tm and has_target_month_sheets:
+            s_m = detect_sheet_month(sname)
+            if s_m != clean_tm and clean_tm not in sname.lower():
+                continue
+        elif clean_tm and has_month_partitioned_sheets:
+            s_m = detect_sheet_month(sname)
+            if s_m and s_m != clean_tm:
+                continue
         sheet_imgs = (sheet_images_map or {}).get(sname, [])
         if _is_dlt_sms_sheet(raw_rows, filename=filepath.name):
             sheet_items = _parse_dlt_sms_sheet(raw_rows, sname, filename=filepath.name)
@@ -2963,25 +3039,29 @@ def parse_jira_brief(
                 seen_copy_files.add(digest)
                 if not duplicate_copy:
                     if fn.lower().endswith((".xlsx", ".xls", ".csv")):
-                        excel_attachment_paths.append(p)
-                        if fn.lower().endswith(".xlsx"):
-                            xlsx_imgs = _extract_images_from_xlsx(p)
-                            excel_images[p] = xlsx_imgs
-                            for s_name, img_paths in xlsx_imgs.items():
-                                zip_creative_paths.extend(img_paths)
-                                for ip in img_paths:
-                                    mapped_attachments.append({
-                                        "id": Path(ip).stem,
-                                        "filename": Path(ip).name,
-                                        "local_path": ip,
-                                        "mime": "image/jpeg",
-                                        "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
-                                    })
+                        if is_inventory_dump_attachment(p.name):
+                            logger.info("Skipping inventory dump / reference export attachment: %s", fn)
+                        else:
+                            excel_attachment_paths.append(p)
+                            if fn.lower().endswith(".xlsx"):
+                                xlsx_imgs = _extract_images_from_xlsx(p)
+                                excel_images[p] = xlsx_imgs
+                                for s_name, img_paths in xlsx_imgs.items():
+                                    zip_creative_paths.extend(img_paths)
+                                    for ip in img_paths:
+                                        mapped_attachments.append({
+                                            "id": Path(ip).stem,
+                                            "filename": Path(ip).name,
+                                            "local_path": ip,
+                                            "mime": "image/jpeg",
+                                            "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
+                                        })
                     elif fn.lower().endswith((".pptx", ".ppt")):
                         pptx_attachment_paths.append(p)
                     else:
                         docx_attachment_paths.append(p)
-                zip_creative_paths.extend(_extract_images_from_zip(p))
+                if fn.lower().endswith(".zip"):
+                    zip_creative_paths.extend(_extract_images_from_zip(p))
         fn_lower = fn.lower()
         if fn_lower.endswith((".xlsx", ".xls", ".csv")):
             target_chan = "SPREADSHEET_BRIEF"
@@ -3094,6 +3174,15 @@ def parse_jira_brief(
 
     # 2. Extract templates from attached Word (.docx) and Excel (.xlsx) files
     target_month = detect_ticket_month(summary, desc_text)
+    explicit_sheet_refs: list[str] = []
+    if desc_text:
+        ref_matches = re.findall(
+            r"(?:sheet\s*(?:reference|ref|name)?|reference)\s*[:\-–]\s*([A-Za-z0-9_\- ]+)",
+            desc_text,
+            re.IGNORECASE,
+        )
+        explicit_sheet_refs = [r.strip() for r in ref_matches if r.strip()]
+
     extracted_items: list[dict[str, str]] = []
 
     for docx_path in docx_attachment_paths:
@@ -3103,7 +3192,10 @@ def parse_jira_brief(
 
     for excel_path in excel_attachment_paths:
         items = extract_templates_from_excel_file(
-            excel_path, target_month=target_month, sheet_images_map=excel_images.get(excel_path),
+            excel_path,
+            target_month=target_month,
+            explicit_sheet_refs=explicit_sheet_refs,
+            sheet_images_map=excel_images.get(excel_path),
             use_ai=use_ai,
         )
         if items:
