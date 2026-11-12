@@ -16,6 +16,7 @@ from pathlib import Path
 from config import get_waba_id
 from models import TemplateComponent, TemplateSubmission
 from cta import TATA_CTA_URL, normalize_whatsapp_cta_buttons
+from campaign_names import normalize_campaign_name
 
 logger = logging.getLogger(__name__)
 # Mirror of submission_client._TATA_GROUP — kept in sync manually.
@@ -235,10 +236,10 @@ def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
     return [(m["filename"], m["bytes"]) for m in _extract_media_from_xlsx(path) if m["kind"] == "IMAGE"]
 
 def normalize_whatsapp_template_name(name: str) -> str:
-    """Normalize template name to Meta guidelines: lowercase letters, numbers, underscores only."""
+    """Canonical new WhatsApp name: att_ plus Meta-safe lowercase characters."""
     clean = re.sub(r"[^a-zA-Z0-9_]+", "_", str(name or "").strip()).lower().strip("_")
     clean = re.sub(r"_+", "_", clean)
-    return clean or "template"
+    return normalize_campaign_name(clean or "template")
 
 
 
@@ -520,7 +521,7 @@ def _dynamic_template_name(row: dict[str, str], source_name: str, row_number: in
         stem = Path(source_name).stem
         candidate = f"{stem}_{row_number}"
     clean = re.sub(r"[^a-zA-Z0-9]+", "_", candidate).strip("_").lower()
-    return (clean or f"template_{row_number}")[:60]
+    return normalize_campaign_name(clean or f"template_{row_number}")[:60]
 
 
 def _dynamic_row_to_submission(
@@ -653,7 +654,7 @@ def _build_single_cell_card_submission(
     idx: int, block: str, client: str, clean_name: str, extracted_media: list, waba_cache: dict
 ) -> TemplateSubmission:
     parsed = parse_single_cell_whatsapp_block(block, client=client)
-    t_name = f"{client.lower()}_{clean_name}_card_{idx}"[:30]
+    t_name = normalize_whatsapp_template_name(f"{client.lower()}_{clean_name}_card_{idx}")[:30]
 
     components = []
     if (idx - 1) < len(extracted_media):

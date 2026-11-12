@@ -1,4 +1,4 @@
-"""Canonical names for newly created campaigns; never rewrite template identities."""
+"""Canonical names for new campaigns and whitelisting drafts, not provider readbacks."""
 
 CAMPAIGN_PREFIX = "att_"
 

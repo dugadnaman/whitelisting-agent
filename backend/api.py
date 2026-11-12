@@ -3718,8 +3718,15 @@ def _jira_rcs_suggestions(draft: dict, carousel: bool = False) -> list[dict]:
 
 def _jira_draft_input(draft: dict, channel: str, account: str) -> dict:
     # Never trust browser warning flags or mutate the operator's draft.
+    from loader import normalize_whatsapp_template_name
+    from campaign_names import normalize_campaign_name
+
     item = {
-        "template_name": draft.get("template_name"), "category": draft.get("category", "MARKETING"),
+        "template_name": (
+            normalize_whatsapp_template_name(draft.get("template_name"))
+            if channel == "whatsapp" else normalize_campaign_name(str(draft.get("template_name") or ""))
+        ),
+        "category": draft.get("category", "MARKETING"),
     }
 
     def load_media(target, source):
@@ -3775,6 +3782,7 @@ def _inspect_jira_draft(draft: dict, channel: str, account: str, live_names=None
     item = _jira_draft_input(draft, channel, account)
     inspected = _inspect_single_submission(item, live_names or set(), {}, account, channel)
     result = dict(draft)
+    result["template_name"] = item["template_name"]
     for field in (
         "aspect_ratio_warnings", "aspect_ratio_blocked", "grammar_warnings", "compliance_warnings",
     ):
@@ -3914,11 +3922,13 @@ def get_jira_brief_endpoint(
                     inventory_errors["rcs"] = str(exc)
 
         from submission_client import _match_template
+        from loader import normalize_whatsapp_template_name
 
         wa_with_live = []
         for wa in parsed.whatsapp_templates:
             wa_copy = dict(wa)
-            matched = _match_template(live_templates, wa["template_name"]) if live_templates else None
+            wa_copy["template_name"] = normalize_whatsapp_template_name(wa_copy.get("template_name"))
+            matched = _match_template(live_templates, wa_copy["template_name"]) if live_templates else None
             if matched:
                 wa_copy["exists_on_waba"] = True
                 wa_copy["live_status"] = str(
@@ -3931,7 +3941,7 @@ def get_jira_brief_endpoint(
                 wa_copy["live_ref_id"] = None
             wa_with_live.append(_inspect_jira_draft(
                 wa_copy, "whatsapp", target_client,
-                {wa["template_name"].lower()} if matched else set(),
+                {wa_copy["template_name"].lower()} if matched else set(),
             ))
         parsed_dict = {
             "issue_key": parsed.issue_key,
@@ -4152,6 +4162,7 @@ async def submit_jira_brief_endpoint(
     if "whatsapp" in req.channels:
         for wa in wa_sources:
             actual = await asyncio.to_thread(_jira_draft_input, wa, "whatsapp", acc)
+            wa = {**wa, "template_name": actual["template_name"]}
             quality = _inspect_single_submission(actual, set(), {}, acc, "whatsapp")
             if quality["aspect_ratio_blocked"]:
                 res = SubmissionResult(
@@ -4211,6 +4222,7 @@ async def submit_jira_brief_endpoint(
     if "rcs" in req.channels:
         for rcs in rcs_sources:
             actual = await asyncio.to_thread(_jira_draft_input, rcs, "rcs", acc)
+            rcs = {**rcs, "template_name": actual["template_name"]}
             quality = _inspect_single_submission(actual, set(), {}, acc, "rcs")
             if quality["aspect_ratio_blocked"]:
                 rcs_res = RcsSubmissionResult(

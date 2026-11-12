@@ -9,6 +9,7 @@ import { formatChannel, formatError } from '@/lib/format';
 import { destinationLabel } from '@/lib/destination';
 import type { Channel } from '@/lib/api';
 import { SmsDltUpload } from '@/components/sms-dlt';
+import { WHITELIST_NAME_HINT } from '@/lib/jira-template-name';
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     pending: 'bg-amber-100 text-amber-800 border border-amber-200',
@@ -912,6 +913,7 @@ export default function SubmitPage() {
                 </button>
               </div>
             </div>
+          <p className="px-5 py-3 text-xs text-blue-900 bg-blue-50/30 border-b border-blue-100">{WHITELIST_NAME_HINT} Preview shows the names returned for submission.</p>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead>

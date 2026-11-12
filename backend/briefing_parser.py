@@ -22,6 +22,7 @@ from typing import Any
 import openpyxl
 
 from cta import TATA_CTA_URL, ensure_dynamic_cta_url, resolve_cta_url
+from campaign_names import normalize_campaign_name
 from jira_client import MEDIA_CACHE_DIR, download_jira_attachment
 
 logger = logging.getLogger(__name__)
@@ -900,6 +901,8 @@ def decompose_content(
 def _clean_template_name(base: str, channel: str, idx: int) -> str:
     clean = re.sub(r"[^a-zA-Z0-9_]", "_", base.lower()).strip("_")
     clean = re.sub(r"_+", "_", clean)
+    if channel.lower().startswith(("wa", "rcs")):
+        clean = normalize_campaign_name(clean or "template")
     suffix = f"_{channel.lower()}_{idx}"
     maximum = 25 - len(suffix) if channel.lower().startswith("rcs") else 26
     short = clean[:maximum].strip("_")

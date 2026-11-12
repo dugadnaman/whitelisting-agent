@@ -37,6 +37,7 @@ from config import (
     get_waba_id,
 )
 from cta import normalize_whatsapp_cta_buttons
+from campaign_names import normalize_campaign_name
 from models import (
     ApprovalStatus,
     SubmissionResult,
@@ -230,10 +231,10 @@ def _provider_failure(data: object) -> bool:
 
 
 def normalize_whatsapp_template_name(name: str) -> str:
-    """Normalize template name to Meta guidelines: lowercase letters, numbers, underscores only."""
+    """Canonical new WhatsApp name: att_ plus Meta-safe lowercase characters."""
     clean = re.sub(r"[^a-zA-Z0-9_]+", "_", str(name or "").strip()).lower().strip("_")
     clean = re.sub(r"_+", "_", clean)
-    return clean or "template"
+    return normalize_campaign_name(clean or "template")
 
 
 def _extract_provider_error(data: object) -> str:
@@ -1068,6 +1069,7 @@ def submit_template(
     If official WABA static token exists, uses Official API.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
+    payload.template_name = normalize_whatsapp_template_name(payload.template_name)
 
     # Optional TypeSafe AI Pre-Flight Gate
     if validate_ai:

@@ -114,6 +114,27 @@ def image_bytes(color="red"):
     return stream.getvalue()
 
 
+@pytest.mark.parametrize("name", ["Loan_Offer", "ATT_Loan_Offer", "att_Loan_Offer"])
+def test_new_rcs_identity_matches_preview_provider_and_result(provider, name):
+    submission = load_rcs_from_list([{
+        "template_name": name, "body": "Your statement is ready.", "source_ref": "sheet:2",
+    }], client="tcl_promo")[0]
+    assert submission.template_name == "att_Loan_Offer"
+    result = rcs_client.submit_rcs_template(submission)
+    assert result.status == RcsSubmissionStatus.SUBMITTED
+    assert json.loads(provider.calls[0][1])["viTemplate"]["name"] == result.template_name == submission.template_name
+    assert result.source_ref == "sheet:2"
+
+
+@pytest.mark.parametrize("length,expected", [(21, RcsSubmissionStatus.SUBMITTED), (22, RcsSubmissionStatus.FAILED)])
+def test_rcs_prefix_counts_toward_provider_name_limit(provider, length, expected):
+    payload = text_submission()
+    payload.template_name = "x" * length
+    result = rcs_client.submit_rcs_template(payload)
+    assert result.status == expected
+    assert len(provider.calls) == (1 if expected == RcsSubmissionStatus.SUBMITTED else 0)
+
+
 @pytest.mark.parametrize("response", [
     {}, {"status": "success", "message": "Template Added"}, [], b"<html>login</html>",
     {"id": True}, {"id": []}, {"id": {}}, {"id": "  "}, {"id": "null"},

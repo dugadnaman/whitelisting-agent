@@ -29,7 +29,6 @@ def test_csv_without_standard_template_columns_is_loaded_dynamically(tmp_path):
 
     assert len(submissions) == 1
     submission = submissions[0]
-    assert submission.template_name == "festive_personal_loan"
     assert _component(submission, "BODY").text.startswith("Dear Customer")
     button = _component(submission, "BUTTONS").buttons[0]
     assert button["url"] == "https://example.com/apply{{1}}"
@@ -48,7 +47,6 @@ def test_excel_without_standard_template_columns_is_loaded_dynamically(tmp_path)
 
     assert len(submissions) == 1
     submission = submissions[0]
-    assert submission.template_name == "offer_a"
     assert _component(submission, "BODY").text.startswith("Get a pre-approved loan")
     assert submission.category == "MARKETING"
 

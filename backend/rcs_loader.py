@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 from cta import ensure_dynamic_cta_url
+from campaign_names import normalize_campaign_name
 from rcs_client import _resolve_rcs_action_url
 from rcs_config import _account_prefix, get_rcs_bot_id, get_rcs_entity_id, get_rcs_esmeaddr
 from rcs_models import RcsTemplateSubmission
@@ -251,6 +252,8 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         or row.get("campaign")
         or f"rcs_template_{fallback_idx}"
     ).strip()
+    source_ref = row.get("source_ref") or template_name
+    template_name = normalize_campaign_name(template_name)
 
     configured_bot = get_rcs_bot_id(c)
     bot_id = str(row.get("bot_id") or row.get("sender_id") or configured_bot).strip()
@@ -337,7 +340,7 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
         entity_id=str(row.get("entity_id") or get_rcs_entity_id(c)).strip(),
         client=c,
         channel="rcs",
-        source_ref=row.get("source_ref") or template_name,
+        source_ref=source_ref,
     )
 
 
@@ -661,7 +664,7 @@ def _brief_rcs_row(row: dict, client: str) -> dict:
     if not any(row.get(key, "").strip() for key in ("template_name", "campaign_name")):
         digest = hashlib.sha256(json.dumps(row, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:10]
         sheet = re.sub(r"[^a-z0-9]", "_", row["sheet"].lower()).strip("_")[:6] or "sheet"
-        result["template_name"] = f"{sheet}_{row['excel_row']}_{digest}"[:25]
+        result["template_name"] = normalize_campaign_name(f"{sheet}_{row['excel_row']}_{digest}")[:25]
     kind = row.get("header_type", "").strip().lower()
     result["template_type"] = kind if kind in ("carousel", "richcard") else ""
     if kind == "carousel":
@@ -780,7 +783,8 @@ def load_rcs_from_excel(
 
             base_name = Path(path).stem
             clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name).strip("_")
-            t_name = f"{client.lower()}_{clean_name}_carousel"[:25].rstrip("_")
+            source_ref = f"{client.lower()}_{clean_name}_carousel"[:25].rstrip("_")
+            t_name = normalize_campaign_name(source_ref)[:25].rstrip("_")
 
             sub = RcsTemplateSubmission(
                 template_name=t_name,
@@ -791,7 +795,7 @@ def load_rcs_from_excel(
                 entity_id=get_rcs_entity_id(client),
                 client=client.lower(),
                 channel="rcs",
-                source_ref=t_name,
+                source_ref=source_ref,
             )
             sub._excel_row = 1
             _upload_and_bind_rcs_images(

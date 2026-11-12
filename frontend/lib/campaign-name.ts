@@ -1,7 +1,7 @@
 import type { MoEngageDraftRow } from './api';
 
 export const CAMPAIGN_NAME_RULE = 'Campaign names require lowercase att_ followed by a nonempty name.';
-export const CAMPAIGN_NAME_HINT = 'Lowercase att_ is added automatically on blur or preview. Enter a name after the prefix; template names and IDs stay unchanged.';
+export const CAMPAIGN_NAME_HINT = 'Lowercase att_ is added automatically on blur or preview. New WhatsApp/RCS whitelisting names also use att_; existing approved template references and IDs stay unchanged.';
 
 export function normalizeCampaignName(value: string): string {
   const name = value.trim();

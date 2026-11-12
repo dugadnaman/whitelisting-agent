@@ -13,6 +13,7 @@ from uuid import uuid4
 import requests
 
 from cta import CTA_VARIABLE_PATTERN, ensure_dynamic_cta_url, resolve_cta_url
+from campaign_names import normalize_campaign_name, require_campaign_name
 from rcs_config import (
     KARIX_RCS_SAVE_URL,
     KARIX_RCS_FETCH_TEMPLATES_URL,
@@ -435,7 +436,7 @@ def _build_rcs_save_payload(payload: RcsTemplateSubmission, client: str = "tata"
     esme_addr = int(esme_addr_raw)
     if esme_addr <= 0 or str(esme_addr) != str(esme_addr_raw):
         raise ValueError("RCS ESME address must be a positive decimal identifier without leading zeros")
-    safe_name = normalize_rcs_template_name(payload.template_name)
+    safe_name = normalize_rcs_template_name(require_campaign_name(normalize_campaign_name(payload.template_name)))
     t_type = str(payload.template_type).strip().lower()
     if t_type in ("carousel", "carousal", "carousel_cards", "multi_card"):
         if not isinstance(payload.carousel_cards, list) or not 2 <= len(payload.carousel_cards) <= 10 or not all(isinstance(card, dict) for card in payload.carousel_cards):
@@ -469,6 +470,7 @@ def submit_rcs_template(payload: RcsTemplateSubmission, client: str | None = Non
     """Submit once: save is not idempotent, so uncertain outcomes require reconciliation."""
     selected_client = client if client is not None else payload.client
     c = selected_client.strip().lower() if isinstance(selected_client, str) else ""
+    payload.template_name = normalize_campaign_name(payload.template_name)
     result = RcsSubmissionResult(
         source_ref=payload.source_ref,
         template_name=payload.template_name,

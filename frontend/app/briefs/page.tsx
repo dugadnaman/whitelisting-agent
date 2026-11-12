@@ -33,7 +33,7 @@ import {
 import { formatError, formatDate } from '@/lib/format';
 import { JiraCreativeImage, JiraCreativeDownload } from '@/components/jira-creative';
 import { carouselCardWarnings, carouselSelectionError, selectedRcsDraft, type SelectableRcsDraft } from '@/lib/jira-carousel';
-import { newRcsTemplateName } from '@/lib/jira-template-name';
+import { newRcsTemplateName, normalizeNewTemplateName, WHITELIST_NAME_HINT } from '@/lib/jira-template-name';
 import { destinationAccountLabel, destinationLabel } from '@/lib/destination';
 import { SmsDltReview, smsDltDraft } from '@/components/sms-dlt';
 import { TATA_CTA_URL, isUrlCta, normalizeWhatsAppCtas, normalizeRcsCtas, resolveCtaUrl } from '@/lib/cta';
@@ -710,6 +710,19 @@ export default function JiraBriefsPage() {
     }
   };
 
+  const validateSelectedTemplateNames = () => {
+    const drafts = channel === 'whatsapp'
+      ? waTemplates.filter((_, index) => selectedWa.has(index))
+      : rcsTemplates.filter((_, index) => selectedRcs.has(index));
+    try {
+      for (const draft of drafts) requireCampaignName(draft.template_name);
+      return true;
+    } catch {
+      setFeedback({ message: 'New whitelisting names require lowercase att_ followed by a nonempty name. Finish editing the template name before submitting.', type: 'error' });
+      return false;
+    }
+  };
+
   // Submission handler with selective channel filtering
   const handleSubmitChannel = async (channelMode: 'all' | 'whatsapp' | 'rcs') => {
     if (!brief) return;
@@ -717,6 +730,7 @@ export default function JiraBriefsPage() {
       setFeedback({ message: `Choose the matching account and channel in “Whitelisting for” before submitting. Current destination: ${selectedDestinationLabel}.`, type: 'error' });
       return;
     }
+    if (!validateSelectedTemplateNames()) return;
     const signature = previewSignature;
     if (!validationReady) {
       setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
@@ -789,6 +803,7 @@ export default function JiraBriefsPage() {
       setFeedback({ message: `Use “Whitelisting for” to select the matching destination. Current destination: ${selectedDestinationLabel}.`, type: 'error' });
       return;
     }
+    if (!validateSelectedTemplateNames()) return;
     if (!validationReady) {
       setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
       return;
@@ -825,7 +840,8 @@ export default function JiraBriefsPage() {
       templateName = newRcsTemplateName(brief.issue_key, names, 'rcs_manual');
     } else {
       const suffix = channel === 'whatsapp' ? 'wa' : channel;
-      const prefix = `${brief.issue_key.toLowerCase().replace(/[^a-z0-9_]/g, '_')}_${suffix}_manual`;
+      const base = `${brief.issue_key.toLowerCase().replace(/[^a-z0-9_]/g, '_')}_${suffix}_manual`;
+      const prefix = channel === 'whatsapp' ? normalizeNewTemplateName(base) : base;
       let sequence = 1;
       while (names.has(`${prefix}_${sequence}`)) sequence += 1;
       templateName = `${prefix}_${sequence}`;
@@ -1212,7 +1228,7 @@ export default function JiraBriefsPage() {
 
       if (toChannel === 'whatsapp') {
         const newWa: JiraWhatsAppDraft = {
-          template_name: rcs.template_name.replace(/_rcs(?:_carousel)?_\d+$/, '_wa_1').replace(/_rcs$/, '_wa') || `${rcs.template_name}_wa`,
+          template_name: normalizeNewTemplateName(rcs.template_name.replace(/_rcs(?:_carousel)?_\d+$/, '_wa_1').replace(/_rcs$/, '_wa') || `${rcs.template_name}_wa`),
           category: 'MARKETING',
           language: 'en',
           header_type: rcs.media_file ? 'IMAGE' : (rcs.card_title ? 'TEXT' : 'NONE'),
@@ -1256,7 +1272,7 @@ export default function JiraBriefsPage() {
 
       if (toChannel === 'whatsapp') {
         const newWa: JiraWhatsAppDraft = {
-          template_name: sms.template_name.replace(/_sms_\d+$/, '_wa_1').replace(/_sms$/, '_wa') || `${sms.template_name}_wa`,
+          template_name: normalizeNewTemplateName(sms.template_name.replace(/_sms_\d+$/, '_wa_1').replace(/_sms$/, '_wa') || `${sms.template_name}_wa`),
           category: 'MARKETING',
           language: 'en',
           header_type: 'NONE',
@@ -2143,6 +2159,9 @@ export default function JiraBriefsPage() {
 
                 {/* Tab Content Panels */}
                 <div className="p-4 space-y-4">
+                  {(activeTab === 'whatsapp' || activeTab === 'rcs') && (
+                    <p className="text-xs text-blue-900 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">{WHITELIST_NAME_HINT}</p>
+                  )}
                   {(activeTab === 'whatsapp' || activeTab === 'rcs' || activeTab === 'sms') && (
                     <div className="flex flex-wrap items-center justify-end gap-3">
                       <button
@@ -2217,6 +2236,7 @@ export default function JiraBriefsPage() {
                                           type="text"
                                           value={wa.template_name}
                                           onChange={(e) => updateWaField(idx, 'template_name', e.target.value)}
+                                          onBlur={(e) => updateWaField(idx, 'template_name', normalizeNewTemplateName(e.target.value))}
                                           className="break-all max-w-full font-mono text-sm font-medium border border-gray-300 rounded-lg px-2 py-1 bg-white"
                                         />
                                       </div>
@@ -2596,6 +2616,7 @@ export default function JiraBriefsPage() {
                                         type="text"
                                         value={rcs.template_name}
                                         onChange={(e) => updateRcsField(idx, 'template_name', e.target.value)}
+                                        onBlur={(e) => updateRcsField(idx, 'template_name', normalizeNewTemplateName(e.target.value))}
                                         className="break-all max-w-full font-mono text-sm font-medium border border-gray-300 rounded-lg px-2 py-1 bg-white"
                                       />
                                     </div>

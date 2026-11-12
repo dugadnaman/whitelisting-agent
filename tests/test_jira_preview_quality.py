@@ -187,9 +187,9 @@ def test_jira_submission_rechecks_media_and_preserves_valid_siblings(preview_cas
     assert preview.status_code == 200, preview.text
     assert preview.json()["whatsapp_templates"][0]["aspect_ratio_blocked"] is False
     results = {row["template_name"]: row for row in response.json()["whatsapp_submitted"]}
-    assert results[blocked["template_name"]]["status"] in {"blocked", "blocked_aspect_ratio"}
-    assert results[valid["template_name"]]["status"] == "submitted"
-    assert submitted_names == ["valid_text_sibling"]
+    assert results[f"att_{blocked['template_name']}"]["status"] in {"blocked", "blocked_aspect_ratio"}
+    assert results["att_valid_text_sibling"]["status"] == "submitted"
+    assert submitted_names == ["att_valid_text_sibling"]
 
 
 @pytest.mark.parametrize("placeholder", [False, True])

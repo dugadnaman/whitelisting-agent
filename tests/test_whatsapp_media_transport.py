@@ -125,6 +125,19 @@ def create_calls(provider):
 
 
 @pytest.mark.parametrize("portal", [False, True])
+@pytest.mark.parametrize("name", ["Loan Offer", "ATT_Loan_Offer", "att_loan_offer"])
+def test_new_whitelisting_identity_matches_provider_and_result(provider, monkeypatch, portal, name):
+    if portal:
+        portal_credentials(monkeypatch)
+    payload = submission(template_name=name)
+    result = submit(payload)
+    call = create_calls(provider)[0]
+    body = json.loads(multipart(call)["request"].get_payload(decode=True)) if portal else json.loads(call[2])
+    assert body["template_name"] == result.template_name == "att_loan_offer"
+    assert result.source_ref == "local-sheet:2"
+
+
+@pytest.mark.parametrize("portal", [False, True])
 @pytest.mark.parametrize("http,response", [
     (200, {}), (200, []), (200, {"status": "success"}), (200, {"success200": "ok"}),
     (201, {"success201": True}), (200, b"<html>login</html>"),
@@ -458,7 +471,7 @@ def test_duplicate_does_not_fabricate_provider_identity_or_approval(provider, mo
 def test_duplicate_reconciles_only_verified_live_provider_record(provider, approval):
     provider.routes["/official/local-TCL_PROMO-waba"] = (409, {"Failed": "Template already exists"})
     provider.routes[("GET", "/official/local-TCL_PROMO-waba")] = (200, {"response": {"templates": [{
-        "template_name": "boundary_campaign", "language": "en", "waba_id": "local-TCL_PROMO-waba",
+        "template_name": "att_boundary_campaign", "language": "en", "waba_id": "local-TCL_PROMO-waba",
         "esmeaddr": 0, "fb_template_id": "existing-verified-id", "template_create_status": approval,
     }]}})
     result = submit(submission())
@@ -474,7 +487,7 @@ def test_duplicate_reconciles_only_verified_live_provider_record(provider, appro
 ])
 def test_duplicate_cannot_adopt_an_unrelated_or_unverifiable_record(provider, different):
     provider.routes["/official/local-TCL_PROMO-waba"] = (409, {"Failed": "Template already exists"})
-    row = {"template_name": "boundary_campaign", "language": "en", "waba_id": "local-TCL_PROMO-waba",
+    row = {"template_name": "att_boundary_campaign", "language": "en", "waba_id": "local-TCL_PROMO-waba",
            "esmeaddr": 0, "fb_template_id": "existing-verified-id", "template_create_status": "APPROVED", **different}
     provider.routes[("GET", "/official/local-TCL_PROMO-waba")] = (200, {"response": {"templates": [row]}})
     result = submit(submission())
@@ -517,7 +530,7 @@ def test_batch_records_provider_outcomes_on_its_own_rows(
     batch = response.json()
     assert batch["status"] == job_status, batch
     assert [(row["template_name"], row["status"], row["provider_ref_id"]) for row in batch["results"]] == [
-        ("batch_offer", status, reference),
+        ("att_batch_offer", status, reference),
     ]
     snapshot = TestClient(api.app).get(f"/api/jobs/{batch['job_id']}", headers=headers).json()
     assert snapshot["job"]["total_count"] == 1
