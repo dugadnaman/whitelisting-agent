@@ -90,8 +90,8 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="workspace-page min-h-screen w-full flex items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 sm:py-12">
-      <main className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm space-y-6">
+    <div className="workspace-page min-h-screen w-full flex items-center justify-center px-4 py-8 sm:px-6 sm:py-12">
+      <main className="w-full max-w-md rounded-2xl border border-white/70 bg-white/80 backdrop-blur-xl p-6 sm:p-8 shadow-2xl space-y-6">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-3">
             <img src="/logo.svg" alt="" className="w-10 h-10 rounded-lg" />

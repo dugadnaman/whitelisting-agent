@@ -163,7 +163,7 @@ export default function Nav() {
       </div>
       <button id="workspace-menu-toggle" type="button" aria-controls="workspace-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)} className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 focus-visible:ring-2 focus-visible:ring-blue-500">Menu</button>
     </header>
-    {mobileOpen && <button type="button" aria-label="Close navigation" onClick={() => { setMobileOpen(false); document.getElementById('workspace-menu-toggle')?.focus(); }} className="md:hidden fixed inset-0 z-40 bg-black/30" />}
+    {mobileOpen && <button type="button" aria-label="Close navigation" onClick={() => { setMobileOpen(false); document.getElementById('workspace-menu-toggle')?.focus(); }} className="md:hidden fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-xs" />}
     <aside id="workspace-navigation" aria-label="Workspace navigation" role={mobileOpen ? 'dialog' : undefined} aria-modal={mobileOpen || undefined} onKeyDown={(event) => {
       if (event.key === 'Escape') {
         setMobileOpen(false);
@@ -178,7 +178,7 @@ export default function Nav() {
           (event.shiftKey ? last : first)?.focus();
         }
       }
-    }} className={`fixed top-0 left-0 w-64 h-dvh overflow-y-auto bg-gray-100 border-r border-gray-200 flex-col z-50 md:z-30 ${mobileOpen ? 'flex' : 'hidden md:flex'}`}>
+    }} className={`fixed top-0 left-0 w-64 h-dvh overflow-y-auto bg-gray-100/85 backdrop-blur-xl border-r border-gray-200/80 shadow-xs flex-col z-50 md:z-30 ${mobileOpen ? 'flex' : 'hidden md:flex'}`}>
       <button id="workspace-navigation-close" type="button" onClick={() => { setMobileOpen(false); document.getElementById('workspace-menu-toggle')?.focus(); }} className="md:hidden self-end rounded-lg border border-gray-200 m-3 px-3 py-2 text-sm font-medium">Close navigation</button>
       <div className="px-6 py-6">
         <div className="flex items-center gap-2.5">

@@ -13,7 +13,13 @@
     -webkit-text-size-adjust: 100%;
   }
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply text-gray-900 antialiased min-h-screen;
+    background-color: #f8fafc;
+    background-image:
+      radial-gradient(at 15% 15%, rgba(219, 234, 254, 0.45) 0px, transparent 55%),
+      radial-gradient(at 85% 10%, rgba(224, 231, 255, 0.4) 0px, transparent 50%),
+      radial-gradient(at 50% 90%, rgba(241, 245, 249, 0.8) 0px, transparent 60%);
+    background-attachment: fixed;
     font-size: 0.875rem;
     line-height: 1.6;
     font-optical-sizing: auto;
@@ -48,26 +54,62 @@
   dialog {
     max-height: calc(100dvh - 2rem);
     overflow-y: auto;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-color: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   }
   dialog[open] { animation: workspace-enter 180ms var(--workspace-ease); }
-  dialog::backdrop { background: rgb(17 21 16 / 40%); }
+  dialog::backdrop {
+    background: rgb(17 21 16 / 30%);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
 }
 
 @layer components {
   .workspace-shell { min-height: 100dvh; }
-  .workspace-chrome { @apply bg-white; }
+  .workspace-chrome {
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+  }
   .workspace-content {
     @apply mx-auto w-full;
     max-width: 100rem;
   }
   .workspace-page { animation: workspace-fade 220ms var(--workspace-ease); }
-  .workspace-panel { @apply rounded-xl border border-gray-200 bg-white; }
+  .workspace-panel {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border-color: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+    @apply rounded-xl border;
+  }
   .workspace-heading { @apply text-[28px] font-medium text-gray-900 sm:text-[32px]; }
   .workspace-description { @apply mt-2 max-w-3xl text-sm leading-relaxed text-gray-600; }
   .workspace-input, .workspace-select {
-    @apply w-full min-w-0 rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500;
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: all 0.15s ease-out;
+    @apply w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500;
   }
-  .workspace-input:focus, .workspace-select:focus { @apply border-blue-500 ring-2 ring-blue-100; }
+  .workspace-input:focus, .workspace-select:focus {
+    background: #ffffff;
+    @apply border-blue-500 ring-2 ring-blue-100;
+  }
+  .glass-card,
+  .bg-white.rounded-xl,
+  .bg-white.rounded-2xl {
+    background-color: rgba(255, 255, 255, 0.8) !important;
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border-color: rgba(255, 255, 255, 0.7) !important;
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03);
+  }
   .workspace-button {
     @apply inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50;
   }
@@ -125,9 +167,19 @@
   input:not([type='checkbox']):not([type='radio']), select, textarea { font-size: 1rem; }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .workspace-chrome {
-    background: #fff;
-    backdrop-filter: none;
+  body {
+    background-image: none !important;
+  }
+  .workspace-chrome,
+  .workspace-panel,
+  .workspace-guide,
+  .glass-card,
+  .bg-white.rounded-xl,
+  .bg-white.rounded-2xl,
+  dialog {
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }
 @media (prefers-reduced-motion: reduce) {

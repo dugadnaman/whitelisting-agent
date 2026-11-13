@@ -2,6 +2,9 @@ name: Daily SLA Alert Keepalive & Scheduler Trigger
 
 on:
   schedule:
+    # Working Hours Keepalive (08:30 AM - 08:30 PM IST = 03:00 - 15:00 UTC)
+    # Ping every 12 minutes to prevent Render free instance 15-minute idle spin-down
+    - cron: '*/12 3-14 * * *'
     # Morning Kickoff (09:50, 09:55, 10:00, 10:05 AM IST = 04:20, 04:25, 04:30, 04:35 UTC)
     - cron: '20 4 * * *'
     - cron: '25 4 * * *'
@@ -27,7 +30,7 @@ jobs:
       - name: Wakeup Render Service
         run: |
           echo "Pinging whitelisting-agent.onrender.com/api/health..."
-          curl -f -s --max-time 45 https://whitelisting-agent.onrender.com/api/health || true
+          curl -f -s --max-time 60 --retry 2 --retry-delay 5 https://whitelisting-agent.onrender.com/api/health || true
 
       - name: Trigger SLA Dispatch
         run: |

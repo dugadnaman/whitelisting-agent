@@ -71,3 +71,66 @@ def test_numbered_features_inside_one_message_do_not_create_templates():
     parsed = parse_jira_brief(issue(copy), download_creatives=False)
     assert len(parsed.whatsapp_templates) == 1
     assert parsed.whatsapp_templates[0]["raw_source"] == copy
+
+def test_vernacular_indic_sms_campaign_tables_are_extracted():
+    hindi_copy = (
+        "प्रिय ग्राहक, कृपया सुनिश्चित करें कि आपका सही मोबाइल नंबर हमारे पास पंजीकृत है ताकि आपको अलर्ट और "
+        "महत्वपूर्ण संदेश प्राप्त हो सकें। यदि आप अपना मोबाइल नंबर बदलते हैं, तो कृपया टाटा कैपिटल के "
+        "अधिकृत प्रतिनिधि को सूचित करें ताकि आपका मोबाइल नंबर हमारे रिकॉर्ड में अपडेट हो जाए। – टाटा कैपिटल लिमिटेड"
+    )
+    gujarati_copy = (
+        "પ્રિય ગ્રાહક, કૃપા કરીને ખાતરી કરો કે તમારો સાચો મોબાઇલ નંબર અમારી સાથે નોંધાયેલ છે જેથી તમને ચેતવણીઓ અને "
+        "મહત્વપૂર્ણ સંદેશાઓ મળી શકે. જો તમે તમારો મોબાઇલ નંબર બદલો છો, તો કૃપા કરીને ટાટા કેપિટલના "
+        "અધિકૃત પ્રતિનિધિને જાણ કરો જેથી મોબાઇલ નંબર અમારા રેકોર્ડમાં અપડેટ થાય. – ટાટા કેપિટલ લિમિટેડ"
+    )
+    adf = {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "table",
+                "content": [
+                    {"type": "tableRow", "content": [{"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "SMS Campaign execution format"}]}]}]},
+                    {"type": "tableRow", "content": [
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Campaign Name"}]}]},
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "TCLMFI_Contact Update_Cust_Hindi"}]}]},
+                    ]},
+                    {"type": "tableRow", "content": [
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "SMS Content"}]}]},
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": hindi_copy}]}]},
+                    ]},
+                ],
+            },
+            {
+                "type": "table",
+                "content": [
+                    {"type": "tableRow", "content": [{"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "SMS Campaign execution format"}]}]}]},
+                    {"type": "tableRow", "content": [
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "Campaign Name"}]}]},
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "TCLMFI_Contact Update_Cust_Gujarati"}]}]},
+                    ]},
+                    {"type": "tableRow", "content": [
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "SMS Content"}]}]},
+                        {"type": "tableCell", "content": [{"type": "paragraph", "content": [{"type": "text", "text": gujarati_copy}]}]},
+                    ]},
+                ],
+            },
+        ],
+    }
+    parsed = parse_jira_brief(
+        issue(
+            adf_to_text(adf),
+            key="SWCM-233",
+            summary="TCL_Service_Customer Awareness MFI_Contact Update",
+            description_raw=adf,
+        ),
+        download_creatives=False,
+    )
+    assert len(parsed.sms_templates) == 2
+    assert parsed.channel_counts["sms"] == 2
+    assert parsed.sms_templates[0]["variant"] == "TCLMFI_Contact Update_Cust_Hindi"
+    assert parsed.sms_templates[0]["text"] == hindi_copy
+    assert parsed.sms_templates[1]["variant"] == "TCLMFI_Contact Update_Cust_Gujarati"
+    assert parsed.sms_templates[1]["text"] == gujarati_copy
+    assert len(parsed.whatsapp_templates) == 0
+    assert len(parsed.rcs_templates) == 0
