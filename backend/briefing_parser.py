@@ -1618,7 +1618,6 @@ def is_valid_template_copy(text: str) -> bool:
     # Candidate templates under 25 words are rejected UNLESS they start with an explicit
     # customer greeting ("Dear ...", "Hi ...", "Hey ...") AND contain genuine banking/loan offers.
     words = s.split()
-    has_indic = bool(re.search(r"[\u0900-\u0D7F]", s))
     has_greeting = bool(re.search(r"\b(dear|hi|hello|hey|namaste|congratulations)\b", s_low))
     has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
     has_link = bool(re.search(r"(?:https?://|www\.|<link>|u3\.mnge\.co)", s_low))
@@ -1636,40 +1635,28 @@ def is_valid_template_copy(text: str) -> bool:
         )
     )
     if len(words) < 25:
-        if has_indic:
-            has_indic_greeting = bool(
-                re.search(r"(प्रिय|પ્રિય|அன்புள்ள|ಪ್ರಿಯ|ప్రియమైన|ପ୍ରିୟ|নমস্কার|नमस्ते|வணக்கம்|నమస్కారం|ನಮಸ್ಕಾರ)", s)
-            )
-            has_indic_brand = bool(
-                re.search(r"(टाटा|केपिटल|કેપિટલ|கேபிடல்|ಕ್ಯಾಪಿಟಲ್|క్యాపిటల్|କ୍ୟାପିଟାଲ୍|tata|capital)", s_low)
-            )
-            if not (has_indic_greeting or has_indic_brand or has_placeholder or has_link or len(words) >= 8):
-                return False
-        else:
-            valid_feature = (
-                has_greeting
-                or has_placeholder
-                or has_link
-                or has_structured
-                or (has_brand and has_customer_offer)
-                or has_action_offer
-            )
-            if not valid_feature:
-                return False
-            # Official-channel and fraud-awareness utility copy need not sell a loan.
-            informational_copy = (
-                has_brand and has_placeholder
-                and re.match(r"^(?:dear|hi|hello|hey|namaste|greetings)\b(?!\s+(?:team|all)\b)", s, re.I)
-            )
-            if not has_customer_offer and not informational_copy:
-                return False
+        valid_feature = (
+            has_greeting
+            or has_placeholder
+            or has_link
+            or has_structured
+            or (has_brand and has_customer_offer)
+            or has_action_offer
+        )
+        if not valid_feature:
+            return False
+        # Official-channel and fraud-awareness utility copy need not sell a loan.
+        informational_copy = (
+            has_brand and has_placeholder
+            and re.match(r"^(?:dear|hi|hello|hey|namaste|greetings)\b(?!\s+(?:team|all)\b)", s, re.I)
+        )
+        if not has_customer_offer and not informational_copy:
+            return False
 
     # Must contain at least 4 whitespace-separated words in any case
     if len(words) < 4:
         return False
 
-    if has_indic:
-        return True
     # 7. Must contain human customer messaging vocabulary or placeholders
     has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
     has_messaging_keywords = bool(
@@ -3875,7 +3862,7 @@ def parse_jira_brief(
                     template_name=tname,
                     text=norm_text,
                     char_count=len(norm_text),
-                    variant=campaign.get("campaign_name") or f"SWCM {campaign['wa_label']}",
+                    variant=f"SWCM {campaign['wa_label']}",
                     variables=re.findall(r"\{#(num|alp|urg|uro|cbn|eml)#\}", norm_text),
                     raw_source=campaign["body"],
                 )

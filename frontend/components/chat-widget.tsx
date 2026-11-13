@@ -277,7 +277,7 @@ export default function ChatWidget() {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-5 right-4 sm:right-6 z-40 workspace-button shadow-lg bg-white/85 backdrop-blur-md border border-white/60"
+          className="fixed bottom-5 right-4 sm:right-6 z-40 workspace-button shadow-sm"
           aria-label="Open AI Copilot"
         >
           <svg aria-hidden="true" className="h-4 w-4 text-blue-700" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 4h14v10H8l-5 3V4Z" /></svg>
@@ -290,9 +290,9 @@ export default function ChatWidget() {
 
       {/* Slide-over Agent Drawer */}
       {isOpen && (
-        <div role="complementary" aria-label="AI Copilot" className="workspace-page fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white/90 backdrop-blur-2xl shadow-2xl border-l border-white/60 flex flex-col">
+        <div role="complementary" aria-label="AI Copilot" className="workspace-page fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white shadow-xl border-l border-gray-200 flex flex-col">
           {/* Header */}
-          <div className="px-5 py-4 border-b border-gray-200/70 flex items-center justify-between bg-white/60 backdrop-blur-md">
+          <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between bg-gray-50/70">
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-gray-900 text-white flex items-center justify-center font-medium text-xs shadow-sm">
                 AI
@@ -442,7 +442,7 @@ export default function ChatWidget() {
           </div>
 
           {/* Input Box */}
-          <div className="p-4 border-t border-gray-200/70 bg-white/80 backdrop-blur-md">
+          <div className="p-4 border-t border-gray-200 bg-white">
             <form
               onSubmit={(e) => {
                 e.preventDefault();

@@ -81,8 +81,8 @@ export default function LoginPage() {
 
 
   return (
-    <div className="workspace-page min-h-screen w-full flex items-center justify-center px-4 py-8 sm:px-6 sm:py-12">
-      <main className="w-full max-w-md bg-white/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/70 p-6 sm:p-8 space-y-6">
+    <div className="workspace-page min-h-screen w-full flex items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 sm:py-12">
+      <main className="w-full max-w-md bg-white rounded-xl shadow-sm border border-gray-200 p-6 sm:p-8 space-y-6">
         {/* Brand Header */}
         <div className="space-y-3">
           <div className="inline-flex items-center gap-3">
