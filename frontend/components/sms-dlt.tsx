@@ -298,7 +298,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     </details>}
       {!batch && <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs">
         <p className="font-medium">Need to prepare imported messages?</p>
-        <p>Preview fixes for known name/link placeholders, filled samples, encoding and duplicate names. Exact surrounding copy stays unchanged; nothing is applied or submitted automatically.</p>
+        <p>Preview fixes for known name/link placeholders, pre-approved phrases (any case, with or without a dash) as alphanumeric variables, filled samples, encoding and duplicate names. Exact surrounding copy stays unchanged; nothing is applied or submitted automatically.</p>
         <button type="button" disabled={busy} className={buttonClass} onClick={() => setPreparation({ signature, drafts: prepareSmsDltDrafts(drafts) })}>Prepare messages for review</button>
         {preparation?.signature === signature && <>
           {preparation.drafts.every((draft, index) => draft === drafts[index]) ? <p role="status">No preparation changes needed. Validate the drafts below.</p> : <>

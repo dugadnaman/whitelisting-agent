@@ -1,6 +1,18 @@
 import type { SmsBriefCandidate, SmsBriefReview, SmsDltDraft } from './api';
 import type { SmsBriefDecision } from './api';
 
+const PRE_APPROVED = String.raw`pre(?:[^\S\r\n]*[-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D][^\S\r\n]*|[^\S\r\n]+)?approved`;
+const preApprovedPhrase = new RegExp(`^${PRE_APPROVED}$`, 'iu');
+const preparationTokens = new RegExp(
+  String.raw`\{\{[^{}\r\n]+\}\}|\{#[^{}\r\n]+#\}|<[^<>\r\n]+>|\[[^\[\]\r\n]+\]|\(\s*${PRE_APPROVED}\s*\)|(?<![\p{L}\p{N}_/@.?&#=+%:\\-])${PRE_APPROVED}(?![\p{L}\p{N}_/@?&#=+%:\\-]|\.[\p{L}\p{N}])`,
+  'giu',
+);
+
+function preApprovedSample(token: string): string | null {
+  const phrase = token.replace(/^(?:\{\{|\{#|<|\[|\()\s*|\s*(?:\}\}|#\}|>|\]|\))$/g, '');
+  return preApprovedPhrase.test(phrase) ? phrase : null;
+}
+
 const KNOWN_BRIEF_TOKENS: Record<string, { kind: Exclude<SmsBriefDecision['kind'], '' | 'literal'>; sample: string }> = {
   name: { kind: 'alp', sample: 'Customer' },
   alphanumeric: { kind: 'alp', sample: 'Customer' },
@@ -16,6 +28,8 @@ const KNOWN_BRIEF_TOKENS: Record<string, { kind: Exclude<SmsBriefDecision['kind'
 };
 
 export function knownSmsBriefDecision(token: string): { kind: SmsBriefDecision['kind']; sample: string } | null {
+  const phrase = preApprovedSample(token);
+  if (phrase !== null) return { kind: 'alp', sample: phrase };
   const match = token.match(/^(?:<\s*([a-z]+)\s*>|\{#\s*([a-z]+)\s*#\})$/i);
   const key = (match?.[1] || match?.[2] || '').toLowerCase();
   return KNOWN_BRIEF_TOKENS[key] ? { ...KNOWN_BRIEF_TOKENS[key] } : null;
@@ -150,6 +164,9 @@ export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
     num: '123', alp: 'Customer', urg: 'https://example.com/offer', uro: 'https://example.com/offer',
     cbn: '9876543210', eml: 'customer@example.com',
   };
+  const normalizeAliases = (text: string) => text
+    .replace(/<\s*(name|link|url)\s*>/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`)
+    .replace(/\{#(alphanumeric|numeric|url|link)#\}/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`);
   const reserved = new Set(drafts.map((draft) => draft.template_name.toLowerCase()));
   const seen = new Map<string, string>();
   return drafts.map((draft) => {
@@ -158,14 +175,15 @@ export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
     let sample = draft.sample_message;
     if (brief) {
       const previousGenerated = applySmsBriefDecisions(brief);
-      const canOverwriteCopy = draft.text === brief.original_text
+      const canOverwriteCopy = (draft.text === brief.original_text && !draft.sample_message.trim())
         || (previousGenerated !== null && draft.text === previousGenerated.text && draft.sample_message === previousGenerated.sample_message);
       const variables = brief.variables.map((decision) => {
         if (decision.kind && (decision.kind === 'literal' || decision.sample.trim())) return decision;
         const known = knownSmsBriefDecision(decision.token);
-        return known ? { ...decision, ...known } : decision;
+        return known ? { ...decision, ...known, sample: decision.sample.trim() ? decision.sample : known.sample } : decision;
       });
-      const updatedBrief = { ...brief, variables };
+      const updatedBrief = variables.some((decision, index) => decision !== brief!.variables[index])
+        ? { ...brief, variables, acknowledged: false } : brief;
       const generated = applySmsBriefDecisions(updatedBrief);
       brief = updatedBrief;
       if (generated && canOverwriteCopy) {
@@ -173,11 +191,10 @@ export function prepareSmsDltDrafts(drafts: SmsDltDraft[]): SmsDltDraft[] {
         sample = generated.sample_message;
       }
     } else {
-      text = draft.text
-        .replace(/<\s*(name|link|url)\s*>/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`)
-        .replace(/\{#(alphanumeric|numeric|url|link)#\}/gi, (_, token: string) => `{#${aliases[token.toLowerCase()]}#}`);
+      text = normalizeAliases(draft.text.replace(preparationTokens, (token) => preApprovedSample(token) === null ? token : '{#alp#}'));
       if (!sample.trim() || /(?:\{#|<\s*(?:name|link|url)\s*>)/i.test(sample) || text !== draft.text) {
-        sample = text.replace(/\{#(num|alp|urg|uro|cbn|eml)#\}/g, (_, kind: string) => examples[kind]);
+        const filled = draft.text.replace(preparationTokens, (token) => preApprovedSample(token) ?? token);
+        sample = normalizeAliases(filled).replace(/\{#(num|alp|urg|uro|cbn|eml)#\}/g, (_, kind: string) => examples[kind]);
       } else if (!/\{#|\{\{|<[^>]+>/.test(text)) {
         sample = text;
       }

@@ -151,6 +151,84 @@ test('DLT preparation maps known aliases only and preserves explicit samples and
   assert.equal(prepareSmsDltDrafts([unknownBrief])[0].text, unknownBrief.text);
 });
 
+test('explicit preparation converts pre-approved variants once and keeps the source phrase as the sample', () => {
+  const phrases = ['pre-approved', 'PRE APPROVED', 'Preapproved', 'pre\u2011approved', 'Pre \u2014 Approved', 'pre\u00a0approved', 'pre\tapproved'];
+  const tokens = [...phrases, '<Pre-Approved>', '[pre approved]', '{{PREAPPROVED}}', '{#Pre\u2013Approved#}', '(pre approved)'];
+  const { knownSmsBriefDecision } = load('sms-brief.ts');
+  for (const token of tokens) {
+    const source = { template_name: 'offer', text: `Your ${token} offer.`, sample_message: '', message_type: '1', source_ref: 'SMS!B2' };
+    const [prepared] = prepareSmsDltDrafts([source]);
+    const phrase = token.replace(/^(?:\{\{|\{#|<|\[|\()\s*|\s*(?:\}\}|#\}|>|\]|\))$/g, '');
+    assert.deepEqual(plain(knownSmsBriefDecision(token)), { kind: 'alp', sample: phrase });
+    assert.equal(prepared.text, 'Your {#alp#} offer.');
+    assert.equal(prepared.sample_message, `Your ${phrase} offer.`);
+    assert.equal(prepared.source_ref, source.source_ref);
+    assert.deepEqual(plain(prepareSmsDltDrafts([prepared])), plain([prepared]));
+    assert.equal(source.text, `Your ${token} offer.`);
+  }
+});
+
+test('pre-approved preparation preserves URL segments, unrelated words, placeholders and explicit samples', () => {
+  const unchanged = 'Notpre-approved pre-approvals pre-approvedness re-pre-approved pre-approved-offer https://pre-approved.example/pre-approved?offer=pre-approved www.example.test/pre-approved /pre-approved {#alp#} <other pre-approved text> {{pre-approved offer}}';
+  const source = { template_name: 'offer', text: `Your pre-approved offer. ${unchanged}`, sample_message: '', message_type: '1' };
+  const [prepared] = prepareSmsDltDrafts([source]);
+  assert.equal(prepared.text, `Your {#alp#} offer. ${unchanged}`);
+  assert.equal(prepared.sample_message, `Your pre-approved offer. ${unchanged.replace('{#alp#}', 'Customer')}`);
+  const custom = { ...prepared, sample_message: 'Your eligible offer. Custom reviewed sample.' };
+  assert.equal(prepareSmsDltDrafts([custom])[0].sample_message, custom.sample_message);
+});
+
+test('native preparation resolves only undecided pre-approved occurrences and retains review evidence', () => {
+  const text = 'Your pre-approved, <PRE APPROVED>, [pre-approved] and preapproved offers.';
+  const source = prepareSmsBriefDrafts([row('1', { text, variables: ['pre-approved', '<PRE APPROVED>', '[pre-approved]', 'preapproved'] })], ['1'], 'source.xlsx')[0];
+  source.brief.variables[1] = { token: '<PRE APPROVED>', kind: 'literal', sample: '' };
+  source.brief.variables[2] = { token: '[pre-approved]', kind: 'alp', sample: 'eligible' };
+  source.brief.acknowledged = true;
+  const [prepared] = prepareSmsDltDrafts([source]);
+  assert.equal(prepared.text, 'Your {#alp#}, <PRE APPROVED>, {#alp#} and {#alp#} offers.');
+  assert.equal(prepared.sample_message, 'Your pre-approved, <PRE APPROVED>, eligible and preapproved offers.');
+  assert.equal(prepared.brief.original_text, text);
+  assert.deepEqual(plain(prepared.brief.sources), plain(source.brief.sources));
+  assert.deepEqual(plain(prepared.brief.warnings), plain(source.brief.warnings));
+  assert.equal(prepared.brief.acknowledged, false);
+  assert.equal(source.brief.acknowledged, true);
+  assert.equal(source.brief.variables[0].kind, '');
+  assert.deepEqual(plain(prepareSmsDltDrafts([prepared])), plain([prepared]));
+});
+
+test('native preparation keeps unresolved unrelated decisions and manually reviewed body and sample', () => {
+  const text = 'Hi <OfferName>, your pre-approved offer.';
+  const source = prepareSmsBriefDrafts([row('1', { text, variables: ['<OfferName>', 'pre-approved'] })], ['1'], 'source.xlsx')[0];
+  const [prepared] = prepareSmsDltDrafts([source]);
+  assert.equal(prepared.brief.variables[0].kind, '');
+  assert.equal(prepared.brief.variables[1].kind, 'alp');
+  assert.equal(prepared.brief.variables[1].sample, 'pre-approved');
+  assert.equal(smsBriefReady(prepared), false);
+  const manual = { ...source, text: 'Manually reviewed pre-approved offer.', sample_message: 'Manually reviewed pre-approved offer.' };
+  const [preserved] = prepareSmsDltDrafts([manual]);
+  assert.equal(preserved.text, manual.text);
+  assert.equal(preserved.sample_message, manual.sample_message);
+  const explicitSample = prepareSmsBriefDrafts([row('2', { text: 'Your pre-approved offer.', variables: ['pre-approved'] })], ['2'], 'source.xlsx')[0];
+  explicitSample.sample_message = 'Your eligible offer.';
+  const [withSample] = prepareSmsDltDrafts([explicitSample]);
+  assert.equal(withSample.text, explicitSample.text);
+  assert.equal(withSample.sample_message, explicitSample.sample_message);
+});
+
+test('deployed native aliases and batch preparation include pre-approved without losing occurrence choices', () => {
+  const text = 'Hi <name>, your Pre\u2011Approved offer. Tap <url>.';
+  const source = prepareSmsBriefDrafts([row('1', { text, variables: ['<name>', 'Pre\u2011Approved', '<url>'] })], ['1'], 'source.xlsx')[0];
+  const [prepared] = prepareSmsDltDrafts([source]);
+  assert.equal(prepared.text, 'Hi {#alp#}, your {#alp#} offer. Tap {#urg#}.');
+  assert.equal(prepared.sample_message, 'Hi Customer, your Pre\u2011Approved offer. Tap https://example.com/offer.');
+  assert.equal(prepared.message_type, '2');
+  const settings = { template_type: '1', category_id: 'finance', header_id: 'sender', header: 'PLTATA', message_type: '' };
+  const [batchPrepared] = applySmsDltSettings([source], settings, {});
+  assert.equal(batchPrepared.text, prepared.text);
+  assert.equal(batchPrepared.sample_message, prepared.sample_message);
+  assert.equal(batchPrepared.brief.original_text, text);
+});
+
 test('DLT preparation separates conflicting names while exact repeated drafts remain deduplicatable', () => {
   const first = { template_name: 'offer', text: 'First.', sample_message: 'First.', message_type: '1' };
   const result = prepareSmsDltDrafts([first, { ...first }, { ...first, text: 'Second.' }, { ...first, template_name: 'offer_2' }]);

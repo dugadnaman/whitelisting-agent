@@ -125,6 +125,21 @@ def test_shared_labels_parallel_variant_scopes_and_literal_looking_tokens(tmp_pa
     assert items[-1]["campaign"] == "Synthetic_Retarget_Nov26"
 
 
+def test_preapproved_tokens_preserve_occurrences_wrappers_and_url_segments(tmp_path):
+    tokens = ["pre-approved", "PRE APPROVED", "Preapproved", "pre\u2011approved",
+              "Pre \u2014 Approved", "pre\u00a0approved", "pre\tapproved",
+              "<Pre-Approved>", "[pre approved]", "{{PREAPPROVED}}", "{#Pre\u2013Approved#}", "(pre approved)"]
+    static = ("Notpre-approved pre-approvals pre-approvedness re-pre-approved pre-approved-offer "
+              "https://pre-approved.example/pre-approved?offer=pre-approved "
+              "www.example.test/pre-approved /pre-approved")
+    body = "Your " + ", ".join(tokens) + " offers. " + static
+    path = workbook(tmp_path, {"SMS": [["SMS", body]]})
+    item = parse_brief(str(path), path.name)["candidates"][0]
+    assert item["text"] == body
+    assert item["variables"] == tokens
+    assert any("pre-approved" in warning for warning in item["warnings"])
+
+
 def test_service_implicit_scope_survives_sms_utility_body_label(tmp_path):
     body = "Hello {#var#}, new details about {#var#}{#var#} are available."
     path = workbook(tmp_path, {"SMS": [
@@ -246,6 +261,19 @@ def test_review_literal_vs_variable_choices_are_per_occurrence():
     metadata["variables"][0].update(kind="literal", sample="")
     assert validate_brief_review(metadata, "Use [link] literally once, then {#urg#}.") == []
     assert validate_brief_review(metadata, "Use [link] twice: [link].")
+
+
+def test_review_preapproved_decisions_require_each_occurrence_and_explicit_acknowledgement():
+    metadata = review("Your pre-approved and <PRE APPROVED> offers.")
+    metadata["variables"][0]["sample"] = "pre-approved"
+    metadata["variables"][1].update(kind="literal", sample="")
+    assert validate_brief_review(metadata, "Your {#alp#} and <PRE APPROVED> offers.") == []
+    assert validate_brief_review(metadata, "Your pre-approved and <PRE APPROVED> offers.")
+    metadata["variables"].pop()
+    assert any("occurrence order" in error for error in validate_brief_review(metadata, "Your {#alp#} offers."))
+    metadata = review("Your pre-approved offer.")
+    metadata["acknowledged"] = False
+    assert any("Acknowledge" in error for error in validate_brief_review(metadata, "Your {#alp#} offer."))
 
 
 def test_review_token_order_acknowledgement_and_legacy_tokens():

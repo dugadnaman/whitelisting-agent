@@ -90,6 +90,7 @@ class RcsTemplateDraft:
     source_origin: str = "jira"
     template_type: str = "richcard"  # "text" | "richcard" | "carousel"
     carousel_cards: list[dict[str, Any]] = field(default_factory=list)
+    language: str = "en"
 
 @dataclass
 class SmsTemplateDraft:
@@ -101,6 +102,7 @@ class SmsTemplateDraft:
     sample_values: list[str] = field(default_factory=list)
     raw_source: str = ""
     source_origin: str = "jira"
+    language: str = "en"
 
 
 @dataclass
@@ -875,7 +877,7 @@ def split_multi_campaign_cell(text: str, *, numbered_greetings_only: bool = Fals
         sequential = numbers == list(range(1, len(numbers) + 1))
         restarted = all(number == 1 for number in numbers) and all(greetings)
         message_boundaries = all(m.group("label") or greeting for m, greeting in zip(matches, greetings))
-        if (sequential or restarted) and (not numbered_greetings_only or message_boundaries):
+        if (sequential or restarted) and (not clean[:matches[0].start()].strip() or message_boundaries) and (not numbered_greetings_only or message_boundaries):
             if numbered_greetings_only:
                 return parts if all(parts) else [clean]
             parts = [part for part in parts if len(part) > 25]
@@ -1602,8 +1604,9 @@ def is_valid_template_copy(text: str) -> bool:
     ):
         return False
 
-    # 4. Reject pipe-separated database / tracking headers
-    if "|" in s and ("created_at" in s_low or "valid_until" in s_low or "grand total" in s_low):
+    # 4. Reject database headers, not pipes used by customer-copy template filters.
+    header_text = re.sub(r"\{%.*?%\}|\{\{.*?\}\}", "", s_low, flags=re.DOTALL)
+    if "|" in header_text and any(marker in header_text for marker in ("created_at", "valid_until", "grand total")):
         return False
 
     # 5. Reject section headers that masquerade as copy
@@ -1618,6 +1621,7 @@ def is_valid_template_copy(text: str) -> bool:
     # Candidate templates under 25 words are rejected UNLESS they start with an explicit
     # customer greeting ("Dear ...", "Hi ...", "Hey ...") AND contain genuine banking/loan offers.
     words = s.split()
+    has_indic = bool(re.search(r"[\u0900-\u0D7F]", s))
     has_greeting = bool(re.search(r"\b(dear|hi|hello|hey|namaste|congratulations)\b", s_low))
     has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
     has_link = bool(re.search(r"(?:https?://|www\.|<link>|u3\.mnge\.co)", s_low))
@@ -1629,39 +1633,51 @@ def is_valid_template_copy(text: str) -> bool:
 
     has_customer_offer = bool(
         re.search(
-            r"\b(loan|loans|emi|emis|offer|offers|interest|apply|pay|disburs|pre-approved|approved|card|account|tenure|roi|funds?)\b|"
+            r"\b(loan|loans|emi|emis|offer|offers|interest|apply|applications?|pay|disburs|pre-approved|approved|card|account|tenure|roi|funds?)\b|"
             r"(?:₹|rs\.?\s*\d+|inr\s*\d+)",
             s_low,
         )
     )
     if len(words) < 25:
-        valid_feature = (
-            has_greeting
-            or has_placeholder
-            or has_link
-            or has_structured
-            or (has_brand and has_customer_offer)
-            or has_action_offer
-        )
-        if not valid_feature:
-            return False
-        # Official-channel and fraud-awareness utility copy need not sell a loan.
-        informational_copy = (
-            has_brand and has_placeholder
-            and re.match(r"^(?:dear|hi|hello|hey|namaste|greetings)\b(?!\s+(?:team|all)\b)", s, re.I)
-        )
-        if not has_customer_offer and not informational_copy:
-            return False
+        if has_indic:
+            has_indic_greeting = bool(
+                re.search(r"(प्रिय|પ્રિય|அன்புள்ள|ಪ್ರಿಯ|ప్రియమైన|ପ୍ରିୟ|নমস্কার|नमस्ते|வணக்கம்|నమస్కారం|ನಮಸ್ಕಾರ)", s)
+            )
+            has_indic_brand = bool(
+                re.search(r"(टाटा|केपिटल|કેપિટલ|கேபிடல்|ಕ್ಯಾಪಿಟಲ್|క్యాపిటల్|କ୍ୟାପିଟାଲ୍|tata|capital)", s_low)
+            )
+            if not (has_indic_greeting or has_indic_brand or has_placeholder or has_link or len(words) >= 8):
+                return False
+        else:
+            valid_feature = (
+                has_greeting
+                or has_placeholder
+                or has_link
+                or has_structured
+                or (has_brand and has_customer_offer)
+                or has_action_offer
+            )
+            if not valid_feature:
+                return False
+            # Official-channel and fraud-awareness utility copy need not sell a loan.
+            informational_copy = (
+                has_brand and has_placeholder
+                and re.match(r"^(?:dear|hi|hello|hey|namaste|greetings)\b(?!\s+(?:team|all)\b)", s, re.I)
+            )
+            if not has_customer_offer and not informational_copy:
+                return False
 
     # Must contain at least 4 whitespace-separated words in any case
     if len(words) < 4:
         return False
+    if has_indic:
+        return True
 
     # 7. Must contain human customer messaging vocabulary or placeholders
     has_placeholder = bool(re.search(r"(\{\{|\<|\[|#\{#[^#]+#\}#|\{#[^#]+#\}|\{[a-zA-Z0-9_\-\s]+\})", s))
     has_messaging_keywords = bool(
         re.search(
-            r"\b(loan|loans|offer|offers|tata|capital|emi|emis|interest|rate|roi|apply|pay|"
+            r"\b(loan|loans|offer|offers|tata|capital|emi|emis|interest|rate|roi|apply|applications?|pay|"
             r"lakh|lakhs|lacs|crore|card|cards|account|disbursal|bank|due|cashback|voucher|"
             r"disclaimer|t&c|terms|benefit|benefits|saving|savings|travel|trip|holiday|"
             r"upgrade|repayment|debt|debts|eligibility|pre-approved|approved|instant|quick|flexible)\b|"
@@ -1895,7 +1911,7 @@ def _identify_sheet_columns(header_row: list[str]) -> dict[str, Any]:
         if idx in claimed_indices:
             continue
         h_words = h.split()
-        if any(k in h for k in ["body", "content", "copy", "message", "text", "communication", "whatsapp", "sms", "rcs", "english", "hindi"]) or any(w in ("wa", "whatsapp", "sms", "rcs", "pn", "push") for w in h_words):
+        if any(k in h for k in ["body", "content", "copy", "message", "text", "communication", "whatsapp", "sms", "rcs", "english", "hindi", "marathi", "kannada", "tamil", "telugu", "bengali", "bangla", "gujarati", "gujrati", "punjabi", "malayalam"]) or any(w in ("wa", "whatsapp", "sms", "rcs", "pn", "push") for w in h_words):
             if not any(k in h for k in ["header", "footer", "button", "cta", "url", "link", "type", "channel", "name", "id"]):
                 content_cols.append(idx)
         elif not mapping and ("copy" in h or "content" in h or "message" in h or "text" in h):
@@ -2219,6 +2235,8 @@ def _parse_raw_sheet_rows(
                     item_dict["media_url"] = row[media_url_col_idx].strip()
                 if language_col_idx is not None and language_col_idx < len(row) and row[language_col_idx]:
                     item_dict["language"] = row[language_col_idx].strip()
+                elif col_hdr and (detect_language("", column_name=col_hdr) != "en" or col_hdr.lower() in ("english", "eng")):
+                    item_dict["language"] = detect_language("", column_name=col_hdr)
                 elif row and row[0] and len(str(row[0]).strip()) < 30:
                     inferred_l = detect_language("", column_name=str(row[0]).strip())
                     if inferred_l and (inferred_l != "en" or str(row[0]).strip().lower() in ("english", "eng")):
@@ -3840,6 +3858,7 @@ def parse_jira_brief(
                     template_name=tname,
                     card_title=rcs_card_title,
                     body=clean_body,
+                    language=lang,
                     media_file=media,
                     media_filename=media_fn,
                     media_attachment_id=media_att_id,
@@ -3862,6 +3881,7 @@ def parse_jira_brief(
                     template_name=tname,
                     text=norm_text,
                     char_count=len(norm_text),
+                    language=lang,
                     variant=f"SWCM {campaign['wa_label']}",
                     variables=re.findall(r"\{#(num|alp|urg|uro|cbn|eml)#\}", norm_text),
                     raw_source=campaign["body"],
@@ -3960,7 +3980,7 @@ def parse_jira_brief(
             has_action_offer = bool(re.search(r"\b(apply|get|enjoy|switch|transfer|repay|check)\b", clean_body.lower())) and bool(
                 re.search(r"\b(loan|loans|emi|emis|fund|funds|interest|offer|offers)\b", clean_body.lower())
             )
-            if len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_brand_offer or has_action_offer):
+            if len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_brand_offer or has_action_offer or is_valid_template_copy(clean_body)):
                 continue
             # Apply ticket intent instructions (e.g. No CTA, Utility category)
             if ticket_intent.get("no_cta"):
@@ -4038,7 +4058,7 @@ def parse_jira_brief(
             has_action_offer = bool(re.search(r"\b(apply|get|enjoy|switch|transfer|repay|check)\b", clean_body.lower())) and bool(
                 re.search(r"\b(loan|loans|emi|emis|fund|funds|interest|offer|offers)\b", clean_body.lower())
             )
-            if len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_structured or has_brand_offer or has_action_offer):
+            if len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_structured or has_brand_offer or has_action_offer or is_valid_template_copy(clean_body)):
                 continue
             raw_rcs_title = item.get("title") or item.get("header") or ""
             if raw_rcs_title and not is_internal_identifier(raw_rcs_title, summary=summary):
@@ -4058,6 +4078,7 @@ def parse_jira_brief(
                     template_name=tname,
                     card_title=rcs_card_title,
                     body=clean_body,
+                    language=item.get("language") or detect_language(clean_body, variant),
                     media_file=item.get("media_file") or (img.get("local_path") if img else None),
                     media_filename=item.get("media_filename") or (img.get("filename") if img else None),
                     media_attachment_id=item.get("media_attachment_id") or (img.get("id") if img else None),
@@ -4089,6 +4110,7 @@ def parse_jira_brief(
                     template_name=tname,
                     text=norm_text,
                     char_count=len(norm_text),
+                    language=item.get("language") or detect_language(norm_text, variant),
                     variant=variant,
                     variables=resolved_vars,
                     sample_values=resolved_samples,

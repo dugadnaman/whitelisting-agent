@@ -11,7 +11,11 @@ MAX_EXPANDED_BYTES = 80 * 1024 * 1024
 MAX_CELLS = 250_000
 MAX_CANDIDATES = 5_000
 MAX_TEXT = 32_767
-_TOKEN = re.compile(r"\{\{[^{}\r\n]+\}\}|\{#[^{}\r\n]+#\}|<[^<>\r\n]+>|\[[^\[\]\r\n]+\]|\(\s*[xX]{2,}\s*\)")
+_PRE_APPROVED = r"pre(?:[^\S\r\n]*[-\u2010-\u2015\u2212\uFE58\uFE63\uFF0D][^\S\r\n]*|[^\S\r\n]+)?approved"
+_TOKEN = re.compile(
+    rf"\{{\{{[^{{}}\r\n]+\}}\}}|\{{#[^{{}}\r\n]+#\}}|<[^<>\r\n]+>|\[[^\[\]\r\n]+\]"
+    rf"|\(\s*(?:[xX]{{2,}}|{_PRE_APPROVED})\s*\)"
+    rf"|(?<![\w/@.?&#=+%:\\-]){_PRE_APPROVED}(?![\w/@?&#=+%:\\-]|\.\w)", re.IGNORECASE)
 _TYPED = re.compile(r"\{#(?:num|alp|urg|uro|cbn|eml)#\}\Z")
 _KINDS = {"literal", "num", "alp", "urg", "uro", "cbn", "eml"}
 _LANGUAGES = {
@@ -177,7 +181,7 @@ def parse_brief(path: str, filename: str) -> dict:
         safe = re.sub(r"[^A-Za-z0-9_]+", "_", ascii_label).strip("_").lower() or "sms"
         warnings = _language_warnings(text, language)
         if _TOKEN.search(text):
-            warnings.append("Review every bracketed phrase or placeholder as literal text or a typed variable; no values have been invented.")
+            warnings.append("Review every bracketed phrase, placeholder or pre-approved occurrence as literal text or a typed variable; no values have been invented.")
         result["candidates"].append({
             "id": f"sms_{digest}", "sheet": sheet, "cell": cell, "text": text,
             "campaign": campaign, "segment": segment or sheet, "language": language,
