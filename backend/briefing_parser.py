@@ -16,6 +16,7 @@ import logging
 import re
 import urllib.parse
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -3456,6 +3457,50 @@ def parse_ticket_intent(desc: str) -> dict[str, Any]:
     return info
 
 
+_COPY_DOCUMENT_EXTENSIONS = (".xlsx", ".xls", ".xlsb", ".csv", ".docx", ".doc", ".pptx", ".ppt", ".pdf")
+
+
+def _active_copy_attachment_ids(issue_data: dict[str, Any]) -> set[str] | None:
+    """Only an explicit, resolved request changes the additive attachment default."""
+    copy_ids = {
+        str(attachment["id"])
+        for attachment in issue_data.get("attachments", [])
+        if attachment.get("id") is not None
+        and attachment.get("filename", "").lower().endswith(_COPY_DOCUMENT_EXTENSIONS)
+    }
+    requests = []
+    for index, comment in enumerate(issue_data.get("comments", [])):
+        text = comment.get("body_text", "")
+        if not re.search(r"\bwhitelist(?:ing|ed)?\b", text, re.IGNORECASE):
+            continue
+        if not re.search(r"\battach(?:ed|ment|ments)?\b", text, re.IGNORECASE):
+            continue
+        if re.search(
+            r"\b(?:do not|don't|not to|no need|not required|without)\b|\bnot\s+(?:whitelist|for whitelisting)\b",
+            text, re.IGNORECASE,
+        ):
+            continue
+        referenced = {str(value) for value in comment.get("attachment_ids", [])} & copy_ids
+        if not referenced:
+            continue
+        additive = bool(re.search(
+            r"\b(?:also|additional(?:ly)?|additive|alongside)\b|\bas well\b|\bin addition\b",
+            text, re.IGNORECASE,
+        ))
+        try:
+            created = datetime.fromisoformat(comment.get("created", "").replace("Z", "+00:00")).timestamp()
+        except (ValueError, TypeError):
+            created = 0
+        requests.append((created, index, referenced, additive))
+    active = None
+    for _, _, referenced, additive in sorted(requests, key=lambda request: request[:2]):
+        if not additive:
+            active = set(referenced)
+        elif active is not None:
+            active.update(referenced)
+    return active
+
+
 def parse_jira_brief(
     issue_data: dict[str, Any], download_creatives: bool = True, use_ai: bool = False,
 ) -> ParsedJiraBrief:
@@ -3476,6 +3521,7 @@ def parse_jira_brief(
 
     # Detect Email Mailer tickets (e.g. TCN-528 TCL Mailers Sept, SWCM-61)
     raw_attachments = issue_data.get("attachments", [])
+    active_copy_ids = _active_copy_attachment_ids(issue_data)
     has_mailers_zip = any(
         ("mailer" in a.get("filename", "").lower() or a.get("filename", "").endswith(".zip")) for a in raw_attachments
     )
@@ -3509,16 +3555,17 @@ def parse_jira_brief(
         att_id = att.get("id")
         mime = att.get("mimeType", "")
         local_path: str | None = None
-        is_copy_doc = fn.lower().endswith((".xlsx", ".xls", ".xlsb", ".csv", ".docx", ".doc", ".pptx", ".ppt", ".pdf"))
+        is_copy_doc = fn.lower().endswith(_COPY_DOCUMENT_EXTENSIONS)
+        included_in_brief = not is_copy_doc or active_copy_ids is None or str(att_id) in active_copy_ids
         if att.get("local_path") and Path(att["local_path"]).exists():
             local_path = str(att["local_path"])
-        elif (download_creatives or is_copy_doc) and att_id:
+        elif included_in_brief and (download_creatives or is_copy_doc) and att_id:
             try:
                 local_path = str(download_jira_attachment(att_id, fn))
             except Exception as exc:
                 raise RuntimeError(f"Could not download attachment {att_id} ({fn}) for {key}: {exc}") from exc
 
-        if local_path:
+        if local_path and included_in_brief:
             p = Path(local_path)
             if is_copy_doc:
                 # Jira reuploads may have unrelated/sanitized names; only identical bytes are duplicates.
@@ -3544,6 +3591,7 @@ def parse_jira_brief(
                                             "local_path": ip,
                                             "mime": "image/jpeg",
                                             "target_channel": "WHATSAPP" if "wa" in s_name.lower() else ("RCS" if "rcs" in s_name.lower() else "GENERAL"),
+                                            "included_in_brief": True,
                                         })
                     elif fn.lower().endswith((".pptx", ".ppt")):
                         pptx_attachment_paths.append(p)
@@ -3579,6 +3627,9 @@ def parse_jira_brief(
                 "local_path": local_path,
                 "mime": mime,
                 "target_channel": target_chan,
+                "included_in_brief": included_in_brief,
+                **({"scope_note": "Excluded by the latest explicit attached-copy whitelisting request."}
+                   if not included_in_brief else {}),
             }
         )
 
@@ -3614,6 +3665,8 @@ def parse_jira_brief(
 
     # Collect email mailer packages and subject line files from attachments
     for att in mapped_attachments:
+        if not att.get("included_in_brief", True):
+            continue
         fn = att.get("filename", "")
         lower_fn = fn.lower()
         is_email_doc = (

@@ -1966,6 +1966,10 @@ export default function JiraBriefsPage() {
                                 ? 'HTML Mailer ZIP'
                                 : att.target_channel || 'Attachment'}
                             </span>
+                            {att.included_in_brief !== undefined && <p className="text-xs font-medium text-gray-700">
+                              {att.included_in_brief ? 'Active copy source' : 'Reference only · excluded from drafts'}
+                            </p>}
+                            {att.scope_note && <p className="text-xs text-gray-500">{att.scope_note}</p>}
                             <div className="pt-1 border-t border-gray-200/80 flex items-center justify-between">
                               <span className="text-xs px-1.5 py-1 rounded-lg font-medium bg-white text-gray-600 border">
                                 {att.target_channel || 'BRIEF'}

@@ -1309,6 +1309,8 @@ export type JiraBriefData = {
     local_path?: string | null;
     mime: string;
     target_channel: string;
+    included_in_brief?: boolean;
+    scope_note?: string;
   }>;
   comments?: Array<{
     id: string;

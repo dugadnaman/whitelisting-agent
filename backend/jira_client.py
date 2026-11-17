@@ -8,8 +8,11 @@ import base64
 import logging
 import os
 import re
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+from uuid import UUID
 
 import requests
 
@@ -353,6 +356,114 @@ def list_jira_issues(
     return results
 
 
+_COPY_DOCUMENT_SUFFIXES = {".doc", ".docx", ".pdf", ".csv", ".xls", ".xlsx", ".xlsb", ".ppt", ".pptx"}
+
+
+def _is_copy_document(attachment: dict[str, Any]) -> bool:
+    return Path(str(attachment.get("filename") or "")).suffix.lower() in _COPY_DOCUMENT_SUFFIXES
+
+
+def _comment_requests_copy(text: str) -> bool:
+    """Only resolve media for positive, explicit attached-copy whitelist requests."""
+    return bool(
+        re.search(r"\bwhitelist(?:ing)?\b", text, re.I)
+        and re.search(r"\b(?:attach(?:ed|ment|ments)?|content|cop(?:y|ies)|document|templates?)\b", text, re.I)
+        and not re.search(r"\b(?:do\s+not|don't|not\s+to|no\s+need\s+to)\s+whitelist", text, re.I)
+        and not (
+            re.search(r"\b(?:image|images|logo|logos|creative|creatives)\b", text, re.I)
+            and not re.search(r"\b(?:content|cop(?:y|ies)|document|templates?)\b", text, re.I)
+        )
+    )
+
+
+def _adf_attachment_references(node: Any, base_url: str) -> tuple[set[str], set[str]]:
+    media_ids: set[str] = set()
+    attachment_ids: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, list):
+            for child in value:
+                visit(child)
+        elif isinstance(value, dict):
+            attrs = value.get("attrs") or {}
+            if value.get("type") in {"media", "mediaInline"} and attrs.get("type", "file") == "file":
+                try:
+                    media_ids.add(str(UUID(str(attrs.get("id", "")))))
+                except ValueError:
+                    raise RuntimeError("Requested Jira comment has an invalid media file reference") from None
+            if value.get("type") in {"link", "inlineCard", "blockCard"}:
+                link = urlsplit(str(attrs.get("href") or attrs.get("url") or ""))
+                if link.netloc == urlsplit(base_url).netloc and link.scheme == urlsplit(base_url).scheme:
+                    match = re.fullmatch(r"/(?:rest/api/[23]/attachment/content|secure/attachment)/(\d+)(?:/[^/]*)?", link.path)
+                    if match:
+                        attachment_ids.add(match.group(1))
+            for key in ("content", "marks"):
+                visit(value.get(key))
+
+    visit(node)
+    return media_ids, attachment_ids
+
+
+@lru_cache(maxsize=1024)
+def _attachment_media_id(base_url: str, attachment_id: str) -> str:
+    """Cache successful identities only; never follow or retain signed media URLs."""
+    if not attachment_id.isdecimal():
+        raise RuntimeError("Invalid Jira attachment ID")
+    try:
+        response = requests.get(
+            f"{base_url}/rest/api/3/attachment/content/{attachment_id}",
+            headers=get_jira_auth_headers(),
+            allow_redirects=False,
+            stream=True,
+            timeout=20,
+        )
+    except requests.RequestException:
+        raise RuntimeError(f"Unable to resolve Jira attachment {attachment_id}") from None
+    try:
+        location = urlsplit(response.headers.get("Location", ""))
+        match = re.fullmatch(r"/file/([^/]+)/binary", location.path)
+        if (
+            response.status_code not in {301, 302, 303, 307, 308}
+            or location.scheme != "https"
+            or location.netloc != "api.media.atlassian.com"
+            or not match
+        ):
+            raise ValueError
+        return str(UUID(match.group(1)))
+    except ValueError:
+        raise RuntimeError(f"Unable to resolve Jira attachment {attachment_id} media identity") from None
+    finally:
+        response.close()
+
+
+def _comment_attachment_ids(
+    body: Any, text: str, attachments: list[dict[str, Any]], base_url: str
+) -> list[str]:
+    if not _comment_requests_copy(text) or not any(_is_copy_document(a) for a in attachments):
+        return []
+    media_ids, direct_ids = _adf_attachment_references(body, base_url)
+    if not media_ids and not direct_ids:
+        return []
+    known_ids = {str(a.get("id")) for a in attachments}
+    if direct_ids - known_ids:
+        raise RuntimeError("Requested Jira comment references an unknown attachment")
+    selected = {str(a["id"]) for a in attachments if str(a.get("id")) in direct_ids and _is_copy_document(a)}
+    remaining = set(media_ids)
+    # Copy documents first; inspect other files only to distinguish image references.
+    for attachment in sorted(attachments, key=lambda a: not _is_copy_document(a)):
+        if not remaining:
+            break
+        attachment_id = str(attachment.get("id", ""))
+        media_id = _attachment_media_id(base_url, attachment_id)
+        if media_id in remaining:
+            remaining.remove(media_id)
+            if _is_copy_document(attachment):
+                selected.add(attachment_id)
+    if remaining:
+        raise RuntimeError("Unable to resolve requested Jira comment media references to attachments")
+    return sorted(selected)
+
+
 def fetch_jira_issue(issue_key: str) -> dict[str, Any]:
     """Fetch complete issue details, parsing description ADF to text."""
     base_url, _, _ = get_jira_credentials()
@@ -394,6 +505,7 @@ def fetch_jira_issue(issue_key: str) -> dict[str, Any]:
                 "created": c.get("created", ""),
                 "updated": c.get("updated", ""),
                 "body_text": c_text.strip(),
+                "attachment_ids": _comment_attachment_ids(c_body, c_text, attachments, base_url),
             }
         )
 
