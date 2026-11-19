@@ -115,33 +115,68 @@ export default function ConnectionWorkflow({ enabled, children }: { enabled: boo
     popup.current?.focus();
   };
   const reconnect = useCallback(() => setRecovering(true), []);
-  const actions = <div className="flex flex-wrap items-center gap-3">
-    <button type="button" className="workspace-button-primary" onClick={openSetup}>Connect this account</button>
-    <button type="button" className="workspace-button" disabled={check.state === 'checking'} onClick={() => { void ensureConnected(); }}>{check.state === 'checking' ? 'Checking connection…' : 'Retry connection check'}</button>
-    {popupBlocked && <p role="alert" className="text-xs text-amber-800">Allow this site’s connection window, or <a href={setupUrl} target="_blank" rel="noopener noreferrer" className="underline">open secure connection setup</a>, then return here. Your draft stays on this page.</p>}
+  const actions = <div className="connection-actions">
+    <button type="button" className="connection-primary" onClick={openSetup}>Connect this account</button>
+    <button type="button" className="connection-retry" disabled={check.state === 'checking'} onClick={() => { void ensureConnected(); }}>{check.state === 'checking' ? 'Checking connection…' : 'Retry connection check'}</button>
+    {popupBlocked && <p role="alert" className="w-full text-xs leading-relaxed text-amber-800">Allow this site’s connection window, or <a href={setupUrl} target="_blank" rel="noopener noreferrer" className="underline">open secure connection setup</a>, then return here. Your draft stays on this page.</p>}
+  </div>;
+  const destination = <p className="connection-destination"><span>Destination</span><strong>{label}</strong></p>;
+  const status = <div role={check.state === 'check_failed' ? 'alert' : 'status'} className="connection-status" data-state={check.state}>
+    <p className="connection-kicker">{check.state === 'checking' ? 'Checking connection' : check.state === 'check_failed' ? 'Connection check failed' : check.state === 'connected' ? 'Connection verified' : 'Connection required'}</p>
+    <p>{check.message}</p>
   </div>;
   const initialGate = enabled && validDestination && !entered;
 
   return <Context.Provider value={{ connected: check.state === 'connected', ensureConnected, reconnect }}>
-    {enabled && validDestination && (initialGate ? <section aria-label="Connect before whitelisting" className="workspace-panel space-y-4 rounded-xl border border-gray-200 bg-white p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Step 1 · Connection</p>
-      <h1 className="text-xl font-semibold">Connect before whitelisting</h1>
-      <p className="font-medium">{label}</p>
-      <p className="text-sm text-gray-600">Verify this exact account and channel first. Then upload templates or choose a Jira ticket. Existing drafts are kept while you reconnect.</p>
-      <p role={check.state === 'check_failed' ? 'alert' : 'status'} className="text-sm text-gray-700">{check.message}</p>
-      {actions}
+    {enabled && validDestination && (initialGate ? <section aria-label="Connect before whitelisting" className="connection-gate">
+      <ol className="connection-steps" aria-label="Whitelisting steps">
+        <li aria-current="step"><span>01</span> Connect</li>
+        <li><span>02</span> Review</li>
+        <li><span>03</span> Whitelist</li>
+      </ol>
+      <div className="connection-layout">
+        <div className="connection-intro">
+          <p className="connection-kicker connection-accent">Connection setup</p>
+          <h1>Connect before whitelisting</h1>
+          <p className="connection-description">One connection. A clear path from template to approval.</p>
+          {destination}
+          <p className="connection-explanation">Verify this exact account and channel first. Then upload templates or choose a Jira ticket to review.</p>
+          {status}
+          {actions}
+          <p className="connection-footnote">Setup opens in a separate window. Nothing is submitted when you connect.</p>
+        </div>
+        <figure className="connection-illustration">
+          <div className="connection-illustration-heading"><span>THE PATH TO WHITELISTING</span><span>01 — 03</span></div>
+          <div className="connection-diagram" aria-hidden="true">
+            <div className="connection-provider">
+              <span className="connection-provider-mark">K</span>
+              <div><strong>Provider access</strong><span>Your account + channel</span></div>
+            </div>
+            <div className="connection-link"><span>Connect to continue</span></div>
+            <div className="connection-preview">
+              <div className="connection-preview-heading"><strong>Template review</strong><span>Next step</span></div>
+              <div className="connection-preview-lines"><i /><i /><i /></div>
+              <div className="connection-preview-footer"><span>Review your draft</span><span>Then whitelist</span></div>
+            </div>
+          </div>
+          <figcaption>Illustration of the workflow, not a live connection or template.</figcaption>
+          <div className="connection-illustration-note"><strong>Connect first. Stay in control.</strong><p>Review every template before you choose to submit. Existing drafts stay here while you reconnect.</p></div>
+        </figure>
+      </div>
     </section> : <section aria-label="Provider connection" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs">
       <p><strong>{label}</strong> · {check.state === 'connected' ? 'Connection verified' : check.state === 'checking' ? 'Checking connection…' : 'Connection needs verification'}</p>
       <button type="button" className="workspace-button" onClick={reconnect}>Manage connection</button>
     </section>)}
     <div hidden={initialGate}>{children}</div>
-    <dialog ref={dialog} onCancel={() => setRecovering(false)} onClose={() => setRecovering(false)} aria-labelledby="reconnect-title" className="m-auto w-[calc(100%-2rem)] max-w-xl space-y-4 rounded-xl border border-gray-200 bg-white p-6 text-gray-900 shadow-xl backdrop:bg-black/40">
-      <h2 id="reconnect-title" className="text-xl font-semibold">Reconnect without losing your work</h2>
-      <p className="font-medium">{label}</p>
-      <p className="text-sm text-gray-600">Your uploaded file, edits and selections stay here. Connect in the secure setup window; we’ll verify the saved connection and return you to this review. Reconnecting never submits this draft.</p>
-      <p role="status" className="text-sm">{check.message}</p>
-      {actions}
-      <button type="button" className="workspace-button" onClick={() => setRecovering(false)}>Back to draft</button>
+    <dialog ref={dialog} onCancel={() => setRecovering(false)} onClose={() => setRecovering(false)} aria-labelledby="reconnect-title" className="connection-dialog">
+      <div className="connection-dialog-header"><p className="connection-kicker connection-accent">Keep your review moving</p><h2 id="reconnect-title">Reconnect without losing your work</h2></div>
+      <div className="connection-dialog-body">
+        {destination}
+        <p className="connection-explanation">Your uploaded file, edits and selections stay here. Connect in the secure setup window; we’ll verify the saved connection and return you to this review. Reconnecting never submits this draft.</p>
+        {status}
+        {actions}
+      </div>
+      <div className="connection-dialog-footer"><span>Your draft stays on this page.</span><button type="button" className="connection-retry" onClick={() => setRecovering(false)}>Back to draft</button></div>
     </dialog>
   </Context.Provider>;
 }

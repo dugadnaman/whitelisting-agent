@@ -1,7 +1,7 @@
 // File bytes belong in IndexedDB, never in the JSON tab-state cache.
 export type UploadDraftScope = { userId: string; tenant: string; account: string; channel: string };
 export function uploadDraftScope(scope: UploadDraftScope): string {
-  if (Object.values(scope).some((value) => !value || value === 'all')) throw new Error('Choose an authenticated upload destination.');
+  if (Object.values(scope).some((value) => !value) || scope.account === 'all') throw new Error('Choose an authenticated upload destination.');
   return JSON.stringify([scope.userId, scope.tenant, scope.account, scope.channel]);
 }
 

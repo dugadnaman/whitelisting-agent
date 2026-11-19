@@ -165,7 +165,7 @@ def test_real_file_and_matching_review_survive_reload(upload_page):
 
 
 @pytest.mark.parametrize("field,value", [
-    ("userId", "operator-2"), ("tenant", "other-tenant"), ("account", "tcl_trans"), ("channel", "rcs"),
+    ("userId", "operator-2"), ("tenant", "other-tenant"), ("tenant", "all"), ("account", "tcl_trans"), ("channel", "rcs"),
 ])
 def test_upload_scope_and_review_identity_do_not_cross(upload_page, field, value):
     result = upload_page.evaluate("""async ([field, value]) => {
@@ -387,3 +387,41 @@ def test_navigation_during_file_write_keeps_the_original_selection(upload_page):
         return await (await uploadDrafts.loadUploadDraft(selection.scope, selection.id)).file.text();
     }""")
     assert restored == "exact original file"
+
+
+@pytest.mark.parametrize("channel", ["whatsapp", "rcs", "sms"])
+def test_superadmin_workspace_can_open_selected_destination_without_crashing(upload_page, channel):
+    page = upload_page
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.evaluate("""channel => {
+        app.currentUser = {id: 'admin-1', tenant_id: 'all', role: 'superadmin'};
+        app.account = channel === 'sms' ? 'tata' : 'tcl_promo';
+        app.channel = channel;
+        mountUpload();
+    }""", channel)
+    if channel == "sms":
+        expect(page.get_by_text("Upload DLT CSV / Excel", exact=True)).to_be_visible()
+    else:
+        page.locator('input[type="file"]').first.set_input_files({
+            "name": "admin-review.csv", "mimeType": "text/csv", "buffer": b"exact admin source",
+        })
+        expect(page.get_by_text("admin-review.csv", exact=True)).to_be_visible()
+        page.wait_for_function("calls.previews.length === 1")
+        restored = page.evaluate("""async () => {
+            const selection = tabState.getTabState('submit_upload', null);
+            return (await uploadDrafts.loadUploadDraft(selection.scope, selection.id)).file.text();
+        }""")
+        assert restored == "exact admin source"
+    assert not errors, errors
+
+
+def test_all_accounts_overview_cannot_be_used_as_upload_destination(upload_page):
+    page = upload_page
+    page.evaluate("""() => {
+        app.currentUser = {id: 'admin-1', tenant_id: 'all', role: 'superadmin'};
+        app.account = 'all';
+        mountUpload();
+    }""")
+    expect(page.get_by_role("alert")).to_contain_text("Choose a specific account")
+    assert page.evaluate("calls.posts.length") == 0
