@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
+import { clearUploadDrafts } from './upload-draft';
 
 // In-memory cache for fast retrieval and storing live runtime objects
 const memoryCache = new Map<string, any>();
@@ -60,6 +61,11 @@ export function setTabState<T>(key: string, value: T): void {
  * Clear cached tab state, optionally matching a key prefix.
  */
 export function clearTabState(prefix?: string): void {
+  if (!prefix || 'submit_upload'.startsWith(prefix)) {
+    void clearUploadDrafts().catch(() => {
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('karix-upload-storage-error'));
+    });
+  }
   if (!prefix) {
     workspaceGeneration += 1;
     memoryCache.clear();
@@ -102,6 +108,7 @@ export function clearTabState(prefix?: string): void {
 export function hasWorkspaceDrafts(): boolean {
   const submission = getTabState<{ step?: string } | null>('submit_state', null);
   if (submission?.step && submission.step !== 'idle') return true;
+  if (getTabState('submit_upload', null)) return true;
   if (getTabState<unknown[] | null>('submit_sms_dlt_source', null)?.length) return true;
   if (getTabState('submit_sms_dlt_identification', null)) return true;
   if (getTabState<unknown[] | null>('submit_sms_dlt_brief_selected', null)?.length) return true;

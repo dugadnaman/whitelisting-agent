@@ -153,8 +153,10 @@ function extensionMessage(type: 'KARIX_EXTENSION_PING' | 'KARIX_EXTENSION_PAIR' 
   return promise;
 }
 
-export default function KarixAuthSync({ account, integration }: Scope) {
+export default function KarixAuthSync({ account, integration, onSessionChanged }: Scope & { onSessionChanged?: () => void }) {
   const { getAccountLabel } = useApp();
+  const sessionChanged = useRef(onSessionChanged);
+  sessionChanged.current = onSessionChanged;
   const accountTitle = destinationAccountLabel(account, getAccountLabel(account));
   const integrationTitle = integration === 'moengage' ? 'MoEngage' : integration === 'whatsapp' ? 'WhatsApp' : integration === 'sms' ? 'SMS DLT · VILPOWER' : integration.toUpperCase();
   const titleId = useId();
@@ -266,6 +268,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
         if (next?.last_synced_at && next.last_synced_at !== observedSync.current && !busy.current) {
           await readStatus(controller.signal);
           observedSync.current = next.last_synced_at;
+          if (!controller.signal.aborted) sessionChanged.current?.();
         }
       } catch { /* Detection and backend status failures are shown separately. */ }
       finally { readingBrowser = false; }
@@ -350,6 +353,7 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     void perform('check', async (signal) => {
       const next = await readStatus(signal, 'check', 'POST');
       if (next.validation_state !== 'valid') throw new Error(next.message || 'The saved session could not be validated. Log in and open the matching template list to sync again.');
+      sessionChanged.current?.();
       return 'Saved session validated by the backend. No credentials were changed by this check.';
     });
   }
@@ -371,7 +375,8 @@ export default function KarixAuthSync({ account, integration }: Scope) {
     void perform('retry', async (signal) => {
       try {
         await extensionMessage('KARIX_EXTENSION_RETRY', signal, { account, integration });
-        await readStatus(signal);
+        const next = await readStatus(signal);
+        if (next.validation_state === 'valid') sessionChanged.current?.();
         return 'The captured session for this account and integration was validated and synced. The existing device pairing was preserved.';
       } finally {
         await readBrowserStatus(signal).catch(() => {});

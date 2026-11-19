@@ -21,6 +21,10 @@ function createTestHarness() {
     key: (index) => Array.from(sessionStorageMap.keys())[index] || null,
   };
 
+  const uploadDraft = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(readFileSync(join(__dirname, 'upload-draft.ts'), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, uploadDraft);
   const sandbox = {
     module: { exports: {} },
     exports: {},
@@ -35,9 +39,11 @@ function createTestHarness() {
           useRef: (val) => ({ current: val }),
         };
       }
+      if (mod === './upload-draft') return uploadDraft.exports;
       return require(mod);
     },
-    window: {},
+    window: new EventTarget(),
+    Event,
     sessionStorage,
     Map,
     Set,

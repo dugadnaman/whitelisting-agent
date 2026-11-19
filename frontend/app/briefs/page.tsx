@@ -36,6 +36,7 @@ import { carouselCardWarnings, carouselSelectionError, selectedRcsDraft, type Se
 import { newRcsTemplateName, normalizeNewTemplateName, WHITELIST_NAME_HINT } from '@/lib/jira-template-name';
 import { destinationAccountLabel, destinationLabel } from '@/lib/destination';
 import { SmsDltReview, smsDltDraft } from '@/components/sms-dlt';
+import { useWhitelistingConnection } from '@/components/connection-workflow';
 import { TATA_CTA_URL, isUrlCta, normalizeWhatsAppCtas, normalizeRcsCtas, resolveCtaUrl } from '@/lib/cta';
 import { CAMPAIGN_NAME_HINT, campaignRowName, normalizeCampaignFields, normalizeCampaignName, requireCampaignName } from '@/lib/campaign-name';
 import type { SmsDltDraft } from '@/lib/api';
@@ -146,6 +147,8 @@ function BriefStatusBadge({ status }: { status?: string }) {
 
 export default function JiraBriefsPage() {
   const { account, channel, user, accounts, getAccountLabel, setDestination } = useApp();
+  const { ensureConnected, reconnect } = useWhitelistingConnection();
+  const connectionActionRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -243,6 +246,12 @@ export default function JiraBriefsPage() {
   const validationReady = validation.signature === previewSignature && validation.status === 'ready'
     && !loadingBrief && selectedKey === brief?.issue_key && !Object.values(uploadingCreative).some(Boolean);
   const destinationAvailable = Boolean(account && account !== 'all' && (channel === 'whatsapp' || channel === 'rcs'));
+  const workflowSignature = useMemo(
+    () => ({ previewSignature, selectedWa, selectedRcs, selectedSms, smsTemplates, brief, account, channel, activeTab, loadingBrief, uploadingCreative, validationReady, botId: currentRcs.botId }),
+    [previewSignature, selectedWa, selectedRcs, selectedSms, smsTemplates, brief, account, channel, activeTab, loadingBrief, uploadingCreative, validationReady, currentRcs.botId]
+  );
+  const workflowSignatureRef = useRef(workflowSignature);
+  workflowSignatureRef.current = workflowSignature;
   const getWaWarnings = (index: number): DraftWarnings => (channel === 'whatsapp' && validationReady ? validation.data?.whatsapp_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
   const validationError = validation.signature === previewSignature && validation.status === 'error' ? validation.error : undefined;
   const getRcsWarnings = (index: number): DraftWarnings => (channel === 'rcs' && validationReady ? validation.data?.rcs_templates[index] : undefined) ?? UNCHECKED_WARNINGS;
@@ -549,8 +558,9 @@ export default function JiraBriefsPage() {
     if (!key) return;
     const cleanKey = key.trim().toUpperCase();
     activeRequestKey.current = cleanKey;
-    if (!force && briefRef.current && briefRef.current.issue_key === cleanKey && waTemplatesRef.current.length > 0) {
-      // Retain active working drafts when returning to this tab
+    if (!force && briefRef.current?.issue_key === cleanKey) {
+      // A loaded brief owns the working drafts, even for RCS/SMS-only or empty selections.
+      setLoadingBrief(false);
       return;
     }
     try {
@@ -726,18 +736,20 @@ export default function JiraBriefsPage() {
 
   // Submission handler with selective channel filtering
   const handleSubmitChannel = async (channelMode: 'all' | 'whatsapp' | 'rcs') => {
-    if (!brief) return;
+    if (!brief || connectionActionRef.current || activeTab !== channel) return;
     if (!destinationAvailable || (channelMode !== 'all' && channelMode !== channel)) {
       setFeedback({ message: `Choose the matching account and channel in “Whitelisting for” before submitting. Current destination: ${selectedDestinationLabel}.`, type: 'error' });
       return;
     }
     if (!validateSelectedTemplateNames()) return;
     const signature = previewSignature;
+    const workflow = workflowSignature;
     if (!validationReady) {
       setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
       return;
     }
     try {
+      connectionActionRef.current = true;
       setSubmitting(true);
       setFeedback(null);
 
@@ -756,7 +768,8 @@ export default function JiraBriefsPage() {
       }
 
       if (rcsToSubmit.length > 0 && !currentRcs.botId) {
-        setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Refresh account settings before submitting.`, type: 'error' });
+        setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Reconnect the matching Karix session before submitting.`, type: 'error' });
+        reconnect();
         return;
       }
 
@@ -766,6 +779,8 @@ export default function JiraBriefsPage() {
         return;
       }
 
+      if (!await ensureConnected() || !mountedRef.current || workflowSignatureRef.current !== workflow) return;
+      setConfirmationMode(null);
       const res = await submitJiraBrief(
         brief.issue_key,
         submitChannels,
@@ -793,13 +808,18 @@ export default function JiraBriefsPage() {
       });
       loadBrief(brief.issue_key);
     } catch (err) {
-      if (mountedRef.current && previewSignatureRef.current === signature) setFeedback({ message: formatError(err), type: 'error' });
+      if (mountedRef.current && previewSignatureRef.current === signature) setFeedback({
+        message: `Whitelisting could not be confirmed: ${formatError(err)} Check History and the provider before trying again; the request may have been accepted. Reconnecting does not retry it.`,
+        type: 'error',
+      });
     } finally {
+      connectionActionRef.current = false;
       if (mountedRef.current) setSubmitting(false);
     }
   };
 
-  const requestWhitelist = (channelMode: 'all' | 'whatsapp' | 'rcs') => {
+  const requestWhitelist = async (channelMode: 'all' | 'whatsapp' | 'rcs') => {
+    if (connectionActionRef.current || activeTab !== channel) return;
     if (!destinationAvailable || (channelMode !== 'all' && channelMode !== channel)) {
       setFeedback({ message: `Use “Whitelisting for” to select the matching destination. Current destination: ${selectedDestinationLabel}.`, type: 'error' });
       return;
@@ -815,17 +835,41 @@ export default function JiraBriefsPage() {
       return;
     }
     if (channel === 'rcs' && selectedRcsCount > 0 && !currentRcs.botId) {
-      setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Refresh account settings before submitting.`, type: 'error' });
+      setFeedback({ message: `RCS bot is not configured for ${targetAccount.toUpperCase()}. Reconnect the matching Karix session before submitting.`, type: 'error' });
+      reconnect();
       return;
     }
-    setConfirmationMode(channel === 'whatsapp' ? 'whatsapp' : 'rcs');
+    const workflow = workflowSignature;
+    connectionActionRef.current = true;
+    setSubmitting(true);
+    try {
+      if (!await ensureConnected() || !mountedRef.current || workflowSignatureRef.current !== workflow) return;
+      setConfirmationMode(channel === 'whatsapp' ? 'whatsapp' : 'rcs');
+    } finally {
+      connectionActionRef.current = false;
+      if (mountedRef.current) setSubmitting(false);
+    }
   };
 
   const confirmWhitelist = async () => {
     if (!confirmationMode) return;
     const channelMode = confirmationMode;
-    setConfirmationMode(null);
     await handleSubmitChannel(channelMode);
+  };
+
+  const prepareSmsReview = async () => {
+    if (!brief || connectionActionRef.current || account !== 'tata' || channel !== 'sms' || activeTab !== 'sms'
+        || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT) return;
+    const workflow = workflowSignature;
+    connectionActionRef.current = true;
+    setSubmitting(true);
+    try {
+      if (!await ensureConnected() || !mountedRef.current || workflowSignatureRef.current !== workflow) return;
+      setSmsReview({ issueKey: brief.issue_key, drafts: prepareSmsDltDrafts(selectedSmsDrafts.map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text }))), revision: Date.now() });
+    } finally {
+      connectionActionRef.current = false;
+      if (mountedRef.current) setSubmitting(false);
+    }
   };
 
   // Editing helpers
@@ -1613,7 +1657,7 @@ export default function JiraBriefsPage() {
         <summary className="cursor-pointer font-medium text-gray-700">New to Jira review? A quick guide</summary>
         <ol className="mt-4 grid list-inside list-decimal gap-3 leading-relaxed sm:grid-cols-2">
           <li><strong className="text-gray-900">Choose a destination.</strong> Use “Whitelisting for” to explicitly select the account and channel. A ticket’s detected account is only a suggestion.</li>
-          <li><strong className="text-gray-900">Check the connection.</strong> Open <a href="/settings" className="font-medium text-blue-700 underline underline-offset-2">Settings</a> for the matching provider session. A selected destination does not mean it is connected.</li>
+          <li><strong className="text-gray-900">Check the connection.</strong> <button type="button" onClick={reconnect} className="font-medium text-blue-700 underline underline-offset-2">Reconnect here</button> if the provider session expires. Your ticket, edits and selections stay in place.</li>
           <li><strong className="text-gray-900">Select and review.</strong> Find a ticket, check exact copy and creatives, then select templates. SMS uses shared DLT settings in the next review.</li>
           <li><strong className="text-gray-900">Confirm deliberately.</strong> Resolve blocking errors and review the destination. Whitelisting requires a final confirmation; SMS registration does not send messages.</li>
         </ol>
@@ -1830,7 +1874,7 @@ export default function JiraBriefsPage() {
                         </details>
                         {!currentRcs.botId && (
                           <p role="alert" className="font-medium text-amber-800">
-                            RCS submission is unavailable: this account has no verified Karix bot. Refresh account settings.
+                            RCS submission is unavailable: this account has no verified Karix bot. <button type="button" onClick={reconnect} className="underline underline-offset-2">Reconnect Karix</button>.
                           </p>
                         )}
                         {brief.account && brief.account !== targetAccount && (
@@ -3021,10 +3065,7 @@ export default function JiraBriefsPage() {
                             <p className="max-w-xl leading-relaxed text-gray-600">Select source messages here. Next, apply shared DLT settings once and review exact copy before confirming registration. No SMS is sent.</p>
                             <p className="font-medium text-gray-800">{selectedSmsCount.toLocaleString()} selected across all pages · maximum {BRIEF_SMS_REVIEW_LIMIT} per review</p>
                           </div>
-                          <button type="button" className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:bg-gray-200 disabled:text-gray-500" disabled={account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT} onClick={() => {
-                            if (account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT) return;
-                            setSmsReview({ issueKey: brief.issue_key, drafts: prepareSmsDltDrafts(selectedSmsDrafts.map((draft) => smsDltDraft({ template_name: draft.template_name, text: draft.text }))), revision: Date.now() });
-                          }}>Review selected SMS ({selectedSmsCount})</button>
+                          <button type="button" className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:bg-gray-200 disabled:text-gray-500" disabled={submitting || account !== 'tata' || channel !== 'sms' || loadingBrief || selectedKey !== brief.issue_key || selectedSmsCount === 0 || selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT} onClick={prepareSmsReview}>Review selected SMS ({selectedSmsCount})</button>
                         </div>
                         {(account !== 'tata' || channel !== 'sms') && <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">Select Tata Capital (tata) · SMS in Whitelisting for. Other SMS accounts are not integrated; no Tata credentials or Bajaj routing will be inferred.</p>}
                         {selectedSmsCount > BRIEF_SMS_REVIEW_LIMIT && <p role="alert" className="mt-3 text-rose-800">This saved selection exceeds {BRIEF_SMS_REVIEW_LIMIT} messages. Deselect messages or clear the selection before opening a review. No drafts have been removed.</p>}

@@ -2,6 +2,9 @@
 set -eu
 
 python -m pytest -q \
+  tests/test_connection_workflow.py \
+  tests/test_upload_draft_storage.py \
+  tests/test_jira_connection_workflow.py \
   tests/test_whatsapp_native_upload.py \
   tests/test_dynamic_spreadsheet_loader.py \
   tests/test_upload_preview_connectivity.py \
@@ -16,3 +19,5 @@ python -m pytest -q \
   tests/test_jira_preview_quality.py \
   tests/test_portal_credential_validation.py \
   tests/test_inventory_contract.py
+
+node --test frontend/lib/tab-state.test.cjs

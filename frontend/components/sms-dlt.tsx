@@ -12,6 +12,7 @@ import {
 import { formatError } from '@/lib/format';
 import { prepareSmsBriefDrafts, applySmsBriefDecisions, smsBriefReady, editSmsBriefDraft, prepareSmsDltDrafts, applySmsDltSettings, knownSmsBriefDecision } from '@/lib/sms-brief';
 import KarixAuthSync from '@/components/KarixAuthSync';
+import { useWhitelistingConnection } from '@/components/connection-workflow';
 
 const inputClass = 'workspace-input';
 const buttonClass = 'workspace-button-primary';
@@ -96,20 +97,27 @@ export function smsDltDraft(value: { template_name: string; text: string } & Par
 function SmsDltEditor({ draft, onChange, disabled, onReady, settingsOnly = false }: {
   draft: SmsDltDraft; onChange: (draft: SmsDltDraft) => void; disabled: boolean; onReady: (ready: boolean, category?: string) => void; settingsOnly?: boolean;
 }) {
+  const { connected, reconnect } = useWhitelistingConnection();
   const [options, setOptions] = useState<SmsDltOptions>(emptyOptions);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
+  const loadedOptions = useRef<{ key: string; loaded: boolean }>({ key: '', loaded: false });
   useEffect(() => {
+    const key = JSON.stringify([draft.template_type, draft.category_id, draft.service_type, revision]);
+    // Ordinary preflight checks must not invalidate successfully loaded routing options.
+    if (loadedOptions.current.key === key && loadedOptions.current.loaded) return;
+    loadedOptions.current = { key, loaded: false };
     const controller = new AbortController();
     setLoading(true); setError(''); onReady(false);
+    if (!connected) { setOptions(emptyOptions); setLoading(false); return () => controller.abort(); }
     if (!draft.template_type) { setOptions(emptyOptions); setLoading(false); return () => controller.abort(); }
     fetchSmsDltOptions('tata', draft, '', controller.signal).then((result) => {
-      if (!controller.signal.aborted) { setOptions(result); setLoading(false); }
+      if (!controller.signal.aborted) { loadedOptions.current = { key, loaded: true }; setOptions(result); setLoading(false); }
     }).catch((err) => { if (!controller.signal.aborted) { setOptions(emptyOptions); setError(formatError(err)); setLoading(false); } });
     return () => controller.abort();
     // Copy edits do not change portal routing options.
-  }, [draft.template_type, draft.category_id, draft.service_type, revision]);
+  }, [draft.template_type, draft.category_id, draft.service_type, revision, connected]);
   useEffect(() => {
     if (!error) return;
     // A portal session may be renewed in another tab while this draft stays open.
@@ -139,7 +147,7 @@ function SmsDltEditor({ draft, onChange, disabled, onReady, settingsOnly = false
       <p className="font-medium">Could not load VILPOWER categories and sender headers.</p>
       <p className="mt-1">{error}</p>
       <div className="mt-2 flex flex-wrap gap-3">
-        <a href="/settings" className="underline">Refresh the Tata SMS portal session in Settings</a>
+        <button type="button" onClick={reconnect} className="underline">Reconnect Tata Capital · SMS here</button>
         <button type="button" className="font-medium underline" onClick={() => setRevision((value) => value + 1)}>Retry options</button>
       </div>
     </div>}
@@ -187,23 +195,25 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   initialDrafts: SmsDltDraft[]; storageKey: string; onClose?: () => void;
 }) {
   const { account, channel, user } = useApp();
+  const { ensureConnected, reconnect } = useWhitelistingConnection();
   const [drafts, setDrafts] = useTabState<SmsDltDraft[]>(`${storageKey}_drafts`, initialDrafts);
   const [batch, setBatch] = useTabState<SmsDltSubmission | null>(`${storageKey}_job`, null);
   const [ready, setReady] = useState<Record<number, boolean>>({});
-  const [categoryLabels, setCategoryLabels] = useState<Record<number, string>>({});
-  const [reviewed, setReviewed] = useState<{ signature: string; previews: TemplatePreview[] } | null>(null);
-  const [preparation, setPreparation] = useState<{ signature: string; drafts: SmsDltDraft[] } | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [categoryLabels, setCategoryLabels] = useTabState<Record<number, string>>(`${storageKey}_category_labels`, {});
+  const [reviewed, setReviewed] = useTabState<{ signature: string; previews: TemplatePreview[] } | null>(`${storageKey}_reviewed`, null);
+  const [preparation, setPreparation] = useTabState<{ signature: string; drafts: SmsDltDraft[] } | null>(`${storageKey}_preparation`, null);
+  const [confirmed, setConfirmed] = useTabState(`${storageKey}_confirmed`, false);
+  const [submissionUncertain, setSubmissionUncertain] = useTabState(`${storageKey}_submission_uncertain`, false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useTabState(`${storageKey}_error`, '');
   const [tasks, setTasks] = useState<JobTask[]>([]);
   const [jobStatus, setJobStatus] = useState('');
   const [pollRevision, setPollRevision] = useState(0);
   const [refreshingStatus, setRefreshingStatus] = useState(false);
-  const [sharedSettings, setSharedSettings] = useState(() => smsDltDraft({ template_name: 'Batch settings', text: '' }));
+  const [sharedSettings, setSharedSettings] = useTabState(`${storageKey}_shared_settings`, smsDltDraft({ template_name: 'Batch settings', text: '' }));
   const [sharedSettingsReady, setSharedSettingsReady] = useState(false);
-  const [sharedDecisions, setSharedDecisions] = useState<Record<string, { kind: SmsBriefDecision['kind']; sample: string }>>({});
-  const [batchNotice, setBatchNotice] = useState('');
+  const [sharedDecisions, setSharedDecisions] = useTabState<Record<string, { kind: SmsBriefDecision['kind']; sample: string }>>(`${storageKey}_shared_decisions`, {});
+  const [batchNotice, setBatchNotice] = useTabState(`${storageKey}_batch_notice`, '');
   const uniqueBriefTokens = Array.from(new Set(drafts.flatMap((draft) => draft.brief?.variables.map((v) => v.token) || [])));
   useEffect(() => {
     if (!uniqueBriefTokens.length) return;
@@ -226,7 +236,12 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const scope = useRef({ account, channel, signature });
   scope.current = { account, channel, signature };
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
-  useEffect(() => { requestVersion.current++; setBusy(false); setReviewed(null); }, [account, channel]);
+  const previousDestination = useRef({ account, channel });
+  useEffect(() => {
+    if (previousDestination.current.account === account && previousDestination.current.channel === channel) return;
+    previousDestination.current = { account, channel };
+    requestVersion.current++; setBusy(false); setReviewed(null);
+  }, [account, channel]);
   const destinationValid = account === 'tata' && channel === 'sms';
   const reviewedCurrent = reviewed?.signature === signature;
   const hasErrors = reviewed?.previews.some((preview) => preview.compliance_warnings?.some((warning) => warning.severity === 'error'));
@@ -235,7 +250,12 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const fieldsValid = drafts.length > 0 && drafts.length <= 500 && drafts.every((draft, index) => ready[index]
     && draft.template_type && draft.message_type && draft.template_name.trim() && draft.text.trim()
     && (!draft.text.includes('{#') || draft.sample_message.trim()) && smsBriefReady(draft));
-  useEffect(() => { setConfirmed(false); }, [signature, account, channel]);
+  const previousSignature = useRef(signature);
+  useEffect(() => {
+    if (previousSignature.current === signature) return;
+    previousSignature.current = signature;
+    setConfirmed(false);
+  }, [signature]);
   useEffect(() => {
     if (!batch?.job_id || !destinationValid) return;
     let cancelled = false;
@@ -259,8 +279,11 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     if (!destinationValid || !fieldsValid || busy) return;
     const requested = signature;
     const version = ++requestVersion.current;
-    setBusy(true); setError(''); setConfirmed(false);
+    setBusy(true); setError('');
     try {
+      if (!await ensureConnected()) return;
+      if (!active.current || version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
+      setConfirmed(false);
       const previews = await previewSmsDltDrafts(account, drafts);
       if (!active.current || version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
       if (previews.length !== drafts.length) throw new Error('The preview did not return every draft. Nothing has been submitted.');
@@ -269,14 +292,17 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     finally { if (active.current && version === requestVersion.current) setBusy(false); }
   }
   async function submit() {
-    if (!destinationValid || !fieldsValid || !reviewedCurrent || !confirmed || hasErrors || submissionUnavailable || busy || batch) return;
+    if (!destinationValid || !fieldsValid || !reviewedCurrent || !confirmed || hasErrors || submissionUnavailable || busy || batch || submissionUncertain) return;
     const requested = signature;
     const version = ++requestVersion.current;
     setBusy(true); setError('');
     try {
+      if (!await ensureConnected()) return;
+      if (!active.current || version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
+      setSubmissionUncertain(true);
       const result = await submitSmsDltDrafts(account, drafts, user);
       if (!active.current || version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms' || scope.current.signature !== requested) return;
-      setBatch(result); setJobStatus(result.status);
+      setBatch(result); setJobStatus(result.status); setSubmissionUncertain(false);
     } catch (err) { if (active.current && version === requestVersion.current) { setError(`${formatError(err)} Drafts are retained. If the request timed out, check History before retrying: the queue may already contain this batch.`); setConfirmed(false); } }
     finally { if (active.current && version === requestVersion.current) setBusy(false); }
   }
@@ -356,7 +382,12 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
       setReady((prev) => prev[index] === value ? prev : { ...prev, [index]: value });
       setCategoryLabels((prev) => prev[index] === category ? prev : { ...prev, [index]: category });
     }} onChange={(value) => { setReviewed(null); setDrafts((prev) => prev.map((item, idx) => idx === index ? value : item)); }} />)}
-    {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800"><p>{error}</p><p className="mt-1">For portal authentication errors, <a href="/settings" className="underline">replace the Tata SMS session in Settings</a>. Check <a href="/" className="underline">History</a> before retrying a submission.</p></div>}
+    {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-800"><p>{error}</p><p className="mt-1">For portal authentication errors, <button type="button" onClick={reconnect} className="underline">reconnect Tata Capital · SMS here</button>. Check <a href="/" className="underline">History</a> before retrying a submission.</p></div>}
+    {!batch && submissionUncertain && <div role="alert" className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+      <p>A submission was started, but its response is not confirmed. Check History: this batch may already be queued. Reconnecting never submits it again.</p>
+      <a href="/" className="underline">Check History</a>
+      <button type="button" disabled={busy} className="ml-3 underline" onClick={() => { if (window.confirm('Have you checked History and confirmed that this batch was not queued?')) { setSubmissionUncertain(false); setConfirmed(false); } }}>I checked: this batch was not queued</button>
+    </div>}
     {!batch && <>
       <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 sm:pr-44 shadow-sm">
         <button type="button" disabled={busy || !fieldsValid} onClick={review} className={buttonClass}>{busy ? 'Checking…' : `Review & whitelist (${drafts.length})`}</button>
@@ -370,7 +401,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
         {inventoryUnavailable && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <p>VILPOWER inventory could not be verified. Your drafts are retained, but registration is blocked; existing templates are unknown, not missing.</p>
           <p>{reviewed.previews.find((preview) => preview.inventory_error)?.inventory_error}</p>
-          <a href="/settings" className="underline">Reconnect Tata Capital · SMS in Settings</a>, then return to editing and review again.
+          <button type="button" onClick={reconnect} className="underline">Reconnect Tata Capital · SMS here</button>, then return to editing and review again.
         </div>}
         {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-lg border border-gray-200 bg-white p-3 text-xs">
           <p className="font-medium">{draft.template_name} · {draft.template_type ? typeLabels[draft.template_type] : ''}</p>
@@ -384,15 +415,16 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
           {reviewed.previews[index]?.compliance_warnings?.map((warning, idx) => <p key={idx} role={warning.severity === 'error' ? 'alert' : undefined} className={warning.severity === 'error' ? 'text-red-700' : 'text-amber-800'}>{warning.severity}: {warning.issue}</p>)}
         </div>)}
         <label className="flex gap-2 text-xs font-medium"><input type="checkbox" checked={confirmed} disabled={busy || hasErrors || submissionUnavailable} onChange={(e) => setConfirmed(e.target.checked)} />I reviewed the destination, DLT settings, and every message and filled sample. Register these templates; do not send SMS.</label>
+        {submissionUncertain && <p role="alert" className="text-amber-900">The last submission response is unconfirmed. Go back to editing and check History before retrying.</p>}
         <div className="flex flex-wrap gap-3">
           <button type="button" disabled={busy} onClick={() => { setReviewed(null); setConfirmed(false); }} className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-medium">Back to editing</button>
-          <button type="button" className={buttonClass} disabled={busy || hasErrors || submissionUnavailable || !confirmed || !fieldsValid} onClick={submit}>Confirm &amp; whitelist</button>
+          <button type="button" className={buttonClass} disabled={busy || submissionUncertain || hasErrors || submissionUnavailable || !confirmed || !fieldsValid} onClick={submit}>Confirm &amp; whitelist</button>
         </div>
       </div></div>}
     </>}
     {batch && <div className="space-y-3 text-xs">
       <p role="status" className="font-medium">Tata Capital · VILPOWER · Queue: {jobStatus || batch.status}{tasks.some(registrationUnconfirmed) ? ' · Registration unconfirmed' : ''}{batch.job_id ? ` · Job ${batch.job_id}` : ''}</p>
-      <p>Registration and DLT approval are separate. Unknown is not rejection. Refresh job status to reconcile VILPOWER without registering again; unresolved registrations must not be resubmitted. Replace expired Tata SMS sessions in <a href="/settings" className="underline text-blue-700">Settings</a>.</p>
+      <p>Registration and DLT approval are separate. Unknown is not rejection. Refresh job status to reconcile VILPOWER without registering again; unresolved registrations must not be resubmitted. <button type="button" onClick={reconnect} className="underline text-blue-700">Reconnect Tata Capital · SMS here</button> for an expired portal session.</p>
       <button type="button" disabled={refreshingStatus} className="underline text-blue-700 disabled:opacity-50" onClick={() => { setError(''); setRefreshingStatus(true); setPollRevision((value) => value + 1); }}>{refreshingStatus ? 'Reconciling VILPOWER…' : 'Refresh job status'}</button>
       <div className="overflow-x-auto"><table className="w-full text-left">
         <thead><tr><th className="p-2">Template</th><th className="p-2">Registration / queue</th><th className="p-2">DLT approval</th><th className="p-2">DLT template ID</th><th className="p-2">Error / reason</th></tr></thead>
@@ -417,6 +449,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
 
 export function SmsDltUpload() {
   const { account, channel } = useApp();
+  const { reconnect } = useWhitelistingConnection();
   const [drafts, setDrafts] = useTabState<SmsDltDraft[] | null>('submit_sms_dlt_source', null);
   const [filename, setFilename] = useTabState('submit_sms_dlt_filename', '');
   const [error, setError] = useState('');
@@ -476,7 +509,7 @@ export function SmsDltUpload() {
   if (account !== 'tata' || channel !== 'sms') return <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">SMS DLT whitelisting is available only for Tata Capital (tata) · SMS. Select it in Whitelisting for. Other accounts are not integrated; Tata credentials cannot be reused.</div>;
   return <div className="workspace-page min-w-0 space-y-6">
     <header className="workspace-toolbar items-start justify-between border-b border-gray-200 pb-6"><div><p className="workspace-eyebrow mb-2">Template library · SMS</p><h1 className="workspace-heading">SMS DLT whitelisting</h1><p className="workspace-description">Tata Capital · VILPOWER. Register exact templates, not messages to recipients.</p></div><a href={getSampleCsvUrl('sms')} download className="workspace-button">Download sample CSV</a></header>
-    <details className="workspace-guide"><summary className="cursor-pointer font-medium text-gray-800">Start with your connection and source file</summary><p className="mt-3">Upload CSV or Excel to read drafts without a portal connection. Template Name / SMS columns and regional language matrices are supported. Connect the <a href="/settings" className="text-blue-700 underline">Tata VILPOWER session in Settings</a> to verify duplicates and register. Choose missing DLT fields during review. No phone numbers, automatic grammar corrections or silent placeholder substitutions.</p></details>
+    <details className="workspace-guide"><summary className="cursor-pointer font-medium text-gray-800">Start with your connection and source file</summary><p className="mt-3">Upload CSV or Excel to read drafts. Template Name / SMS columns and regional language matrices are supported. <button type="button" onClick={reconnect} className="text-blue-700 underline">Reconnect Tata Capital · SMS here</button> to verify duplicates and register without leaving your drafts. Choose missing DLT fields during review. No phone numbers, automatic grammar corrections or silent placeholder substitutions.</p></details>
     {!drafts && <label className="block rounded-xl border-2 border-dashed border-gray-300 bg-white p-6 sm:p-8 text-sm font-medium">Upload DLT CSV / Excel<input type="file" accept=".csv,.xlsx,.xls" disabled={busy} className="mt-3 block max-w-full text-sm" onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ''; }} /></label>}
     {!drafts && <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
       <h2 className="text-sm font-medium">Import native client brief · choose SMS source candidates</h2>
@@ -526,7 +559,7 @@ export function SmsDltUpload() {
     </section>}
     {busy && <p role="status" className="text-xs">Reading DLT templates…</p>}
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
-    {drafts && inventoryNotice && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><p>At upload, VILPOWER inventory could not be verified; existing templates were unknown, not missing. Drafts remain editable. Registration requires a successful review.</p><p className="mt-1">{inventoryNotice}</p><a href="/settings" className="underline">Reconnect Tata Capital · SMS in Settings</a>, then review the retained drafts again.</div>}
+    {drafts && inventoryNotice && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><p>At upload, VILPOWER inventory could not be verified; existing templates were unknown, not missing. Drafts remain editable. Registration requires a successful review.</p><p className="mt-1">{inventoryNotice}</p><button type="button" onClick={reconnect} className="underline">Reconnect Tata Capital · SMS here</button>, then review the retained drafts again.</div>}
     {drafts && <><p className="text-xs font-medium">Source file: {filename}</p><SmsDltReview key={revision} initialDrafts={drafts} storageKey={`submit_sms_dlt_${revision}`} onClose={() => { if (!window.confirm('Clear this review? Any queued batch remains available in History.')) return; clearTabState(`submit_sms_dlt_${revision}`); setDrafts(null); setInventoryNotice(''); setTabState('submit_state', { step: 'idle' }); }} /></>}
     <details className="rounded-xl border border-gray-200 bg-white p-4 text-xs">
       <summary className="cursor-pointer font-medium">Identify templates against Tata VILPOWER inventory</summary>

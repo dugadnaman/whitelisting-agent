@@ -9,6 +9,7 @@ import { useTabState, clearTabState } from '@/lib/tab-state';
 import Nav from '@/components/nav';
 import ChatWidget from '@/components/chat-widget';
 import DestinationSwitcher from '@/components/DestinationSwitcher';
+import ConnectionWorkflow from '@/components/connection-workflow';
 
 const TAB_META: Record<string, { label: string }> = {
   '/': { label: 'Dashboard' },
@@ -156,7 +157,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
 
             {/* Page Content */}
-            <div key={scopeKey} className="workspace-content p-4 pb-24 sm:p-6 sm:pb-20 xl:p-8 xl:pb-20 flex-1 min-w-0">{children}</div>
+            <div key={scopeKey} className="workspace-content p-4 pb-24 sm:p-6 sm:pb-20 xl:p-8 xl:pb-20 flex-1 min-w-0">
+              <ConnectionWorkflow key={pathname} enabled={pathname === '/submit' || pathname === '/briefs'}>{children}</ConnectionWorkflow>
+            </div>
           </div>
         )}
       </main>

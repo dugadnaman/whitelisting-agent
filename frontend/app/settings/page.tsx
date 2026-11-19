@@ -2,16 +2,33 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { updateCredentials, testCredentials, testGemini, createAccount, deleteAccount, fetchCredentials, fetchTeam, inviteColleague, fetchMoEngageCredentials, saveMoEngageCredentials, testMoEngageConnection, canAccessAccount, authorizedAccount, accountOrganization, fetchAccessRequests, approveAccessRequest } from '@/lib/api';
-import type { AccountItem, AuthUser, RequestedTenant } from '@/lib/api';
+import type { AccountItem, AuthUser, RequestedTenant, Channel } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import { destinationAccountLabel } from '@/lib/destination';
 import { clearTabState, setTabState } from '@/lib/tab-state';
 import KarixAuthSync from '@/components/KarixAuthSync';
 import { SmsDltSessionForm } from '@/components/sms-dlt';
+import { FocusedConnectionSetup } from '@/components/connection-workflow';
 
 type Banner = { type: 'success' | 'error'; message: string } | null;
 
 export default function SettingsPage() {
+  const [setup, setSetup] = useState<{ account: string; channel: Channel } | false | null>(null);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const account = query.get('account');
+    const channel = query.get('channel');
+    if (query.get('connect') === '1' && account && (channel === 'whatsapp' || channel === 'rcs' || channel === 'sms')) {
+      setSetup({ account, channel });
+    } else {
+      setSetup(false);
+    }
+  }, []);
+  if (setup === null) return <p role="status">Loading connection setup…</p>;
+  return setup ? <FocusedConnectionSetup key={`${setup.account}:${setup.channel}`} {...setup} /> : <FullSettingsPage />;
+}
+
+function FullSettingsPage() {
   const {
     account: selectedAccount,
     channel: selectedChannel,
