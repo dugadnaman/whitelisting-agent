@@ -369,6 +369,46 @@ def test_outgoing_url_buttons_are_dynamic_and_explicit_samples_survive(provider,
     assert payload.components[2]["buttons"][0]["url"] == "https://www.tatacapital.com/offers"
 
 
+@pytest.mark.parametrize("portal", [False, True])
+@pytest.mark.parametrize("static_url", [False, True])
+@pytest.mark.parametrize("as_component", [False, True])
+def test_jira_button_labels_reach_provider_as_text(provider, monkeypatch, portal, static_url, as_component):
+    from copy import deepcopy
+    from models import TemplateComponent
+
+    if portal:
+        portal_credentials(monkeypatch)
+    buttons = [
+        {"type": "URL", "label": "Check Offer", "url": "https://www.tatacapital.com/{{1}}",
+         "example": ["https://www.tatacapital.com/my-offer"]},
+        {"type": "PHONE_NUMBER", "label": "Call Support", "phone_number": "+911234567890"},
+        {"type": "QUICK_REPLY", "label": "Old copy", "text": "Not now"},
+    ]
+    original = deepcopy(buttons)
+    payload = submission(
+        {"type": "BODY", "text": "Your offer is ready."},
+        {"type": "BUTTONS", "buttons": buttons},
+    )
+    if as_component:
+        payload.components = [TemplateComponent(**component) for component in payload.components]
+    if static_url:
+        buttons[0]["url"] = original[0]["url"] = "https://www.tatacapital.com/my-offer"
+    expected_url = original[0]["url"] + "{{1}}" if static_url else original[0]["url"]
+    expected_sample = original[0]["url"] + "sample" if static_url else original[0]["example"][0]
+    result = client.submit_template(payload, client=payload.client, fix_grammar=False)
+    assert result.status == SubmissionStatus.SUBMITTED
+    calls = create_calls(provider)
+    assert len(calls) == 1
+    body = json.loads(multipart(calls[0])["request"].get_payload(decode=True)) if portal else json.loads(calls[0][2])
+    assert body["components"][1]["buttons"] == [
+        {"type": "URL", "text": "Check Offer", "url": expected_url,
+         "example": [expected_sample]},
+        {"type": "PHONE_NUMBER", "text": "Call Support", "phone_number": "+911234567890"},
+        {"type": "QUICK_REPLY", "text": "Not now"},
+    ]
+    assert buttons == original
+
+
 def test_selected_account_cannot_be_overridden_by_payload_waba(provider):
     result = submit(submission(waba_id="local-TCHFL-waba"))
     assert result.status == SubmissionStatus.FAILED

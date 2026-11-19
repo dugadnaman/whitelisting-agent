@@ -56,8 +56,8 @@ async def import_brief(
         _authorize(account, current_user)
         filename = Path((file.filename or "").replace("\\", "/")).name
         suffix = Path(filename).suffix.lower()
-        if suffix not in {".xlsx", ".xls"}:
-            raise HTTPException(status_code=400, detail="Upload a client brief as XLSX or XLS.")
+        if suffix not in {".xlsx", ".xls", ".csv"}:
+            raise HTTPException(status_code=400, detail="Upload a client brief as XLSX, XLS, or CSV.")
         from sms_brief import parse_brief
 
         with tempfile.TemporaryDirectory(prefix="sms-brief-") as directory:

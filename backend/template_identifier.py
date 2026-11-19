@@ -566,7 +566,7 @@ def identify_master_templates(
     )
 
 
-def identify_from_file(file_path: str | Path, client: str = "bajaj") -> IdentificationReport:
+def identify_from_file(file_path: str | Path, client: str = "bajaj", source_name: str | None = None) -> IdentificationReport:
     """
     Load a master template catalog from CSV, Excel, or JSON and run Phase 1 Identification.
     """
@@ -576,9 +576,9 @@ def identify_from_file(file_path: str | Path, client: str = "bajaj") -> Identifi
 
     ext = p.suffix.lower()
     if ext == ".csv":
-        submissions = load_from_csv(str(p), client=client)
+        submissions = load_from_csv(str(p), client=client, source_name=source_name)
     elif ext in (".xlsx", ".xls"):
-        submissions = load_from_excel(str(p), client=client)
+        submissions = load_from_excel(str(p), client=client, source_name=source_name)
     elif ext == ".json":
         submissions = load_from_json(str(p), client=client)
     else:

@@ -312,7 +312,7 @@ def test_invalid_workbook_and_unsupported_extension_return_actionable_errors(tmp
     with pytest.raises(ValueError, match="valid.*xlsx"):
         parse_brief(str(path), path.name)
     with pytest.raises(ValueError, match="xlsx or .xls"):
-        parse_brief(str(path), "wrong.csv")
+        parse_brief(str(path), "wrong.txt")
 
 
 def test_expanded_size_and_cell_limits_fail_closed(tmp_path, monkeypatch):

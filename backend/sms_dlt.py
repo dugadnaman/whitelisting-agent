@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import csv
 import threading
 from concurrent.futures import Future
 from datetime import date, datetime, timedelta
@@ -43,6 +42,7 @@ def _inventory(account: str, search: str = "", from_date: date | None = None) ->
         if from_date is not None:
             kwargs["from_date"] = from_date
         rows = fetch_sms_templates(**kwargs)
+        flight.set_result(rows)
         return rows
     except BaseException as exc:
         flight.set_exception(exc)
@@ -75,7 +75,7 @@ def draft_from_row(row: dict, account: str = "tata") -> dict:
     draft = {key: str(row[key]) if row.get(key) is not None else "" for key in DRAFT_FIELDS}
     draft["text"] = str(next((row[key] for key in ("text", "body", "message", "template_message")
                               if row.get(key) is not None), ""))
-    for field in ("source_ref", "source_file"):
+    for field in ("source_ref", "source_file", "language"):
         if field in row:
             if not isinstance(row[field], str):
                 raise ValueError(f"{field} must be text.")
@@ -91,42 +91,38 @@ def draft_from_row(row: dict, account: str = "tata") -> dict:
     return draft
 
 
-def load_drafts(path: str, account: str = "tata") -> list[dict]:
+def load_drafts(path: str, account: str = "tata", source_filename: str | None = None) -> list[dict]:
+    """Use the pure brief reader for named tables and native multilingual layouts."""
+    from sms_brief import parse_brief
+
     require_tata(account)
-    suffix = Path(path).suffix.lower()
-    if suffix == ".xlsx":
-        import openpyxl
-        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        try:
-            rows = workbook.active.iter_rows(values_only=True)
-            headers = [str(value or "").strip().lower().replace(" ", "_") for value in next(rows, ())]
-            raw = [dict(zip(headers, values, strict=False)) for values in rows if any(value is not None for value in values)]
-        finally:
-            workbook.close()
-    elif suffix == ".xls":
-        import xlrd
-        workbook = xlrd.open_workbook(path)
-        sheet = workbook.sheet_by_index(0)
-        headers = [str(value).strip().lower().replace(" ", "_") for value in sheet.row_values(0)] if sheet.nrows else []
-        raw = [dict(zip(headers, sheet.row_values(index), strict=False)) for index in range(1, sheet.nrows)]
-    elif suffix == ".csv":
-        with open(path, newline="", encoding="utf-8-sig") as stream:
-            reader = csv.DictReader(stream)
-            raw = [{str(key).strip().lower().replace(" ", "_"): value for key, value in row.items() if key}
-                   for row in reader if any(value for value in row.values())]
-    else:
-        raise ValueError("SMS DLT imports accept CSV, XLSX, or XLS files.")
-    if not raw:
-        raise ValueError("No SMS DLT templates found. Include template_name and text columns; recipients are not required.")
-    return [draft_from_row(row, account) for row in raw]
+    filename = Path(source_filename or path).name
+    report = parse_brief(path, filename)
+    drafts = []
+    for item in report["candidates"]:
+        fields = item.get("draft_fields", {})
+        drafts.append(draft_from_row({
+            **fields, "template_name": item["suggested_template_name"], "text": item["text"],
+            "template_type": fields.get("template_type") or item["suggested_template_type"],
+            "language": item["language"], "source_file": filename,
+            "source_ref": f"{item['sheet']}!{item['cell']}",
+        }, account))
+    if not drafts:
+        raise ValueError("No SMS DLT templates found. Include template_name and text/SMS columns, language columns with SMS-number rows, or explicitly scoped SMS brief copy.")
+    return drafts
 
 
 def preview_drafts(rows: list[dict], account: str = "tata") -> list[dict]:
-    from vilpower_client import validate_sms_template
+    from vilpower_client import VilpowerUnavailable, validate_sms_template
 
     require_tata(account)
     drafts = [draft_from_row(row, account) for row in rows]
-    inventory = _inventory(account, commonprefix([draft["template_name"].casefold() for draft in drafts]))
+    inventory_error = None
+    try:
+        inventory = _inventory(account, commonprefix([draft["template_name"].casefold() for draft in drafts]))
+    except (VilpowerUnavailable, OSError) as exc:
+        inventory = []
+        inventory_error = str(exc)
     by_name = {}
     for item in inventory:
         by_name.setdefault(item["template_name"].casefold(), []).append(item)
@@ -143,10 +139,13 @@ def preview_drafts(rows: list[dict], account: str = "tata") -> list[dict]:
         previews.append({
             "template_name": draft["template_name"], "client": account, "channel": "sms",
             "category": {"1": "PROMOTIONAL", "2": "TRANSACTIONAL", "3": "SERVICE"}.get(draft["template_type"], "UNKNOWN"),
-            "language": "en" if draft["message_type"] == "1" else "regional",
+            "language": draft.get("language") or ("en" if draft["message_type"] == "1" else "regional"),
             "components": [{"type": "BODY", "text": draft["text"]}],
-            "sms_dlt": draft, "provider": "vilpower", "status": "INVALID" if errors else "VALID",
-            "already_exists_on_waba": bool(existing), "exists_on_waba": False,
+            "sms_dlt": draft, "provider": "vilpower",
+            "status": "INVALID" if errors else ("UNVERIFIED" if inventory_error is not None else "VALID"),
+            "inventory_status": "unverified" if inventory_error is not None else "verified",
+            "inventory_error": inventory_error, "submission_ready": not errors and inventory_error is None,
+            "already_exists_on_waba": bool(existing) if inventory_error is None else None, "exists_on_waba": False,
             "existing_templates": existing,
             "compliance_warnings": [{"severity": "error", "issue": error, "recommendation": "Correct the DLT draft before submitting."} for error in errors],
             "aspect_ratio_warnings": [], "grammar_warnings": [],
@@ -192,7 +191,7 @@ def stage_batch(rows: list[dict], account: str, user: str, filename: str, skip_d
                    "source_ref": draft.get("source_ref") or draft["template_name"], "submitted_by": user,
                    "source_file": draft.get("source_file") or filename,
                    "category": {"1": "PROMOTIONAL", "2": "TRANSACTIONAL", "3": "SERVICE"}[draft["template_type"]],
-                   "language": "en" if draft["message_type"] == "1" else "regional"}
+                   "language": draft.get("language") or ("en" if draft["message_type"] == "1" else "regional")}
         if candidates and not live:
             raise ValueError(f"Row {index}: '{draft['template_name']}' already exists with different DLT content or a different header. Use a distinct name; registered copy is never overwritten.")
         fields = tuple(draft[field] for field in DRAFT_FIELDS)
@@ -350,7 +349,7 @@ def identify_drafts(rows: list[dict], account: str = "tata") -> dict:
             action = {"WHITELISTED": "NONE", "PENDING": "WAIT", "REJECTED": "REMEDIATE"}[status]
         counts[status] += 1
         items.append({"template_name": draft["template_name"], "status": status,
-                      "category": draft["template_type"], "language": "en" if draft["message_type"] == "1" else "regional",
+                      "category": draft["template_type"], "language": draft.get("language") or ("en" if draft["message_type"] == "1" else "regional"),
                       "master_body": draft["text"], "live_body": match.get("template_message", "") if match else "",
                       "match_confidence": 1.0 if match and match.get("template_message") == draft["text"] else 0.0,
                       "match_method": "EXACT" if match else "NONE", "diff_summary": status.replace("_", " "),

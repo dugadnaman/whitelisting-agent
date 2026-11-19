@@ -61,6 +61,20 @@ def test_native_brief_upload_extracts_exact_sms_without_a_portal_session(provisi
     assert result["candidates"][0]["variables"] == ["<Name>"]
 
 
+@pytest.mark.parametrize("filename", ["Autumn_OFFER-318.csv", "review_7821_regional.csv"])
+def test_native_csv_upload_preserves_named_source_without_credentials(provision_user, monkeypatch, filename):
+    _, headers = provision_user("tata")
+    monkeypatch.setattr(vilpower_client.requests.Session, "request", no_provider)
+    response = TestClient(api.app, headers=headers).post(
+        "/api/sms-dlt/brief?account=tata",
+        files={"file": (filename, b'Template Name,SMS 2\r\nfixture_name,"  Original offer copy.  "\r\n')})
+    assert response.status_code == 200, response.text
+    item, = response.json()["candidates"]
+    assert item["suggested_template_name"] == "fixture_name"
+    assert item["text"] == "  Original offer copy.  "
+    assert (item["sheet"], item["cell"]) == (filename[:-4], "B2")
+
+
 @pytest.mark.parametrize("tenant,account,status", [("bajaj", "tata", 403), ("all", "bajaj", 400)])
 def test_brief_upload_cannot_cross_destination_scope(provision_user, tenant, account, status):
     _, headers = provision_user(tenant, role="superadmin" if tenant == "all" else "operator")
@@ -78,7 +92,7 @@ def test_brief_upload_requires_authentication():
 @pytest.mark.parametrize("filename,contents,reason", [
     ("bad.xlsx", b"not a workbook", r"(?i)workbook|excel|xlsx"),
     ("empty.xlsx", b"", r"(?i)empty"),
-    ("brief.csv", b"Channel,Content", r"(?i)xlsx.*xls"),
+    ("empty.csv", b"", r"(?i)empty"),
 ])
 def test_invalid_brief_upload_returns_actionable_error(provision_user, filename, contents, reason):
     _, headers = provision_user("tata")

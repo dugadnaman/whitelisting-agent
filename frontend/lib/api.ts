@@ -204,14 +204,18 @@ export type DraftWarnings = {
 export type TemplatePreview = DraftWarnings & {
   template_name: string;
   sms_dlt?: SmsDltDraft;
+  inventory_status?: 'verified' | 'unverified';
+  inventory_error?: string | null;
+  submission_ready?: boolean;
+  import_notes?: string[];
   category?: string;
   language?: string;
   client?: string;
   channel?: string;
   waba_id?: string;
   source_ref?: string;
-  already_exists_on_waba?: boolean;
-  exists_on_waba?: boolean;
+  already_exists_on_waba?: boolean | null;
+  exists_on_waba?: boolean | null;
   account_detection?: AccountDetection;
   components?: Array<{
     type: string;
@@ -865,6 +869,7 @@ export type SmsDltDraft = {
   service_type?: string;
   source_ref?: string;
   source_file?: string;
+  language?: string;
   brief?: SmsBriefReview;
 };
 export type SmsDltOption = { id: string; text: string };

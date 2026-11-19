@@ -165,10 +165,13 @@ class _Portal:
             raise VilpowerUnavailable("VILPOWER did not return a verifiable response") from None
         location = response.headers.get("Location", "")
         target = urlparse(urljoin(BASE_URL + path, location))
-        if response.status_code in {401, 403} or (300 <= response.status_code < 400 and ("login" in target.path.lower() or target.path == "/")):
+        origin = urlparse(BASE_URL)
+        same_origin = (target.scheme, target.netloc) == (origin.scheme, origin.netloc)
+        auth_path = re.search(r"/(?:login|signin|sign-in)(?:/|$)", target.path, re.IGNORECASE)
+        if response.status_code in {401, 403} or (300 <= response.status_code < 400 and same_origin and (auth_path or target.path == "/")):
             raise VilpowerAuthExpired("VILPOWER session expired; refresh the Tata Capital session in Settings")
         if 300 <= response.status_code < 400:
-            if method == "POST" and path == _ADD and target.netloc == urlparse(BASE_URL).netloc and target.path == _INDEX:
+            if method == "POST" and path == _ADD and same_origin and target.path == _INDEX and not target.query and not target.fragment:
                 return response
             raise VilpowerUnavailable("VILPOWER returned an unexpected redirect")
         if response.status_code != 200:

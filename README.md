@@ -39,6 +39,31 @@ retain workflow order, quiet badges and borders, prioritize real content, and
 limit motion to feedback. Imported copy, user-generated emoji, provider statuses
 and identifiers remain unchanged. No generated artwork or story video is used.
 
+## Import and submission safeguards
+
+- Native WhatsApp workbooks are read across worksheets and months, using explicit
+  channel scope and language/variant headers—not the active sheet or first long row.
+  Preview retains filename/sheet/cell provenance, shows body/buttons, and discloses
+  excluded or ambiguous sections. Unscoped native copy is not guessed into WhatsApp.
+- Generated names reserve a stable source/content suffix, so temporary upload paths
+  and truncation cannot collapse different messages into one name.
+- SMS named tables such as `Template Name, SMS 2` retain supplied names and exact
+  copy. Numbered SMS rows with language columns expand into separate drafts.
+  CSV/XLS/XLSX extraction does not require a live portal session.
+- Every WhatsApp writer serializes only verified URL, reply and phone button fields.
+  Legacy `label` becomes `text`; existing reviewed `text` wins. UI/source metadata
+  never reaches Meta. Unsupported action types fail before provider side effects.
+- Unavailable, malformed, contradictory or wrong-account provider catalogs remain
+  unverified, never empty/missing. Previews retain editable drafts; registration and
+  duplicate-checked submissions stay blocked until a successful fresh review.
+- VILPOWER `/signin/` and `/sign-in/` redirects identify session expiry without
+  following redirects or replaying registration. Human login/Auth Sync is still
+  required; Karix and VILPOWER sessions remain separate per integration/account.
+
+These rules are layout/ticket-independent. New ambiguous formats require explicit
+scope rather than a filename, current-month or Jira-ticket special case.
+
+
 ## Tata Capital SMS DLT — VILPOWER portal
 
 SMS whitelisting registers **content templates**, not messages to recipients. Choose
@@ -81,7 +106,7 @@ silently redirects credentials or submissions to another account.
    Settings, then return to the draft or use **Retry options**; only failed
    option loads refresh on window focus. Draft copy and explicit choices are
    preserved. Select a category before loading its matching sender headers.
-   **Native client brief workbooks:** Alternatively, upload multi-sheet `.xlsx` or `.xls`
+   **Native client briefs:** Alternatively, upload `.csv`, `.xlsx` or `.xls`
    campaign briefs directly under **Import native client brief**. The parser extracts
    only SMS / SMS-retargeting rows across personas, product blocks and language columns;
    skips planner and non-SMS channels; detects script mismatches; and presents each
@@ -662,6 +687,18 @@ provider simulators. They cover capture/pairing/selection/retry/revocation/isola
 success, failure and duplicate reconciliation without creating production templates or sending messages.
 Install the frontend dependencies with `npm ci` in `frontend/` first: the slow capture-switch
 regression runs the actual TypeScript website bridge against the queued MV3 worker.
+
+The upload/whitelisting regression gate is shared by GitHub pull-request/main CI
+and every Docker image build:
+```bash
+sh scripts/check-template-safeguards.sh
+```
+It covers varied workbook names/order/active sheets, regional layouts, channel
+isolation, stable identities, unavailable catalogs and multiple Jira keys/button
+schemas through real loopback HTTP providers. A failing gate prevents the image
+from being built/deployed; the frontend production build also remains mandatory.
+These checks never register production templates. `/api/health` exposes the
+Render-provided commit revision for exact post-deployment verification.
 
 Reliability verification (23 October 2026): the complete default backend suite passed **1,405 tests**
 plus four subtests; three opt-in live checks were deselected. **58 frontend behavioral tests** and the

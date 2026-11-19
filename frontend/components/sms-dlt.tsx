@@ -133,6 +133,7 @@ function SmsDltEditor({ draft, onChange, disabled, onReady, settingsOnly = false
   </div>;
   return <fieldset disabled={disabled} className="rounded-xl border border-gray-200 p-4 space-y-3">
     <legend className="px-1 text-sm font-medium">{settingsOnly ? 'Shared DLT settings' : draft.template_name || 'Unnamed template'}</legend>
+    {!settingsOnly && <p className="break-words text-xs text-gray-500">{[draft.source_file, draft.source_ref, draft.language].filter(Boolean).join(' · ')}</p>}
     {loading && <p role="status" className="text-sm text-gray-500">Loading Tata portal options…</p>}
     {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
       <p className="font-medium">Could not load VILPOWER categories and sender headers.</p>
@@ -229,6 +230,8 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
   const destinationValid = account === 'tata' && channel === 'sms';
   const reviewedCurrent = reviewed?.signature === signature;
   const hasErrors = reviewed?.previews.some((preview) => preview.compliance_warnings?.some((warning) => warning.severity === 'error'));
+  const inventoryUnavailable = reviewed?.previews.some((preview) => preview.inventory_status === 'unverified');
+  const submissionUnavailable = inventoryUnavailable || reviewed?.previews.some((preview) => preview.submission_ready === false);
   const fieldsValid = drafts.length > 0 && drafts.length <= 500 && drafts.every((draft, index) => ready[index]
     && draft.template_type && draft.message_type && draft.template_name.trim() && draft.text.trim()
     && (!draft.text.includes('{#') || draft.sample_message.trim()) && smsBriefReady(draft));
@@ -266,7 +269,7 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
     finally { if (active.current && version === requestVersion.current) setBusy(false); }
   }
   async function submit() {
-    if (!destinationValid || !fieldsValid || !reviewedCurrent || !confirmed || hasErrors || busy || batch) return;
+    if (!destinationValid || !fieldsValid || !reviewedCurrent || !confirmed || hasErrors || submissionUnavailable || busy || batch) return;
     const requested = signature;
     const version = ++requestVersion.current;
     setBusy(true); setError('');
@@ -364,9 +367,15 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
         <div className="max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-5 space-y-4">
         <h3 id="sms-confirmation-title" className="font-medium">3. Confirm SMS whitelisting</h3>
         <p className="text-xs font-medium">Destination: Tata Capital · SMS · VILPOWER</p>
+        {inventoryUnavailable && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <p>VILPOWER inventory could not be verified. Your drafts are retained, but registration is blocked; existing templates are unknown, not missing.</p>
+          <p>{reviewed.previews.find((preview) => preview.inventory_error)?.inventory_error}</p>
+          <a href="/settings" className="underline">Reconnect Tata Capital · SMS in Settings</a>, then return to editing and review again.
+        </div>}
         {drafts.map((draft, index) => <div key={index} className="space-y-2 rounded-lg border border-gray-200 bg-white p-3 text-xs">
           <p className="font-medium">{draft.template_name} · {draft.template_type ? typeLabels[draft.template_type] : ''}</p>
           <p>Header: {draft.header} · Category: {categoryLabels[index]} · Encoding: {draft.message_type === '1' ? 'ASCII' : 'Unicode'}</p>
+          <p className="break-words text-gray-500">{[draft.source_file, draft.source_ref, draft.language].filter(Boolean).join(' · ')}</p>
           <details className="text-gray-500"><summary className="cursor-pointer">Provider IDs</summary><p className="mt-1 break-all">Header ID: {draft.header_id} · Category ID: {draft.category_id}{draft.service_type ? ` · Service type: ${draft.service_type}` : ''}{draft.brand_id ? ` · Brand ID: ${draft.brand_id}` : ''}</p></details>
           {draft.brief && <div className="space-y-1"><p className="font-medium">Sources: {draft.source_file} · {draft.source_ref}</p>{draft.brief.sources.map((source, idx) => <p key={idx}>{source.sheet}!{source.cell} · Campaign: {source.campaign || 'Not specified'} · Segment: {source.segment || 'Not specified'} · Language: {source.language || 'Not specified'}</p>)}{draft.brief.warnings.map((warning, idx) => <p key={idx} className="text-amber-800">{warning}</p>)}</div>}
           <p className="font-medium">Exact body</p><pre className="whitespace-pre-wrap break-words font-mono">{draft.text}</pre>
@@ -374,10 +383,10 @@ export function SmsDltReview({ initialDrafts, storageKey, onClose }: {
           {reviewed.previews[index]?.already_exists_on_waba && <p className="text-amber-800">Already registered; duplicate skipping is enabled.</p>}
           {reviewed.previews[index]?.compliance_warnings?.map((warning, idx) => <p key={idx} role={warning.severity === 'error' ? 'alert' : undefined} className={warning.severity === 'error' ? 'text-red-700' : 'text-amber-800'}>{warning.severity}: {warning.issue}</p>)}
         </div>)}
-        <label className="flex gap-2 text-xs font-medium"><input type="checkbox" checked={confirmed} disabled={busy || hasErrors} onChange={(e) => setConfirmed(e.target.checked)} />I reviewed the destination, DLT settings, and every message and filled sample. Register these templates; do not send SMS.</label>
+        <label className="flex gap-2 text-xs font-medium"><input type="checkbox" checked={confirmed} disabled={busy || hasErrors || submissionUnavailable} onChange={(e) => setConfirmed(e.target.checked)} />I reviewed the destination, DLT settings, and every message and filled sample. Register these templates; do not send SMS.</label>
         <div className="flex flex-wrap gap-3">
           <button type="button" disabled={busy} onClick={() => { setReviewed(null); setConfirmed(false); }} className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-medium">Back to editing</button>
-          <button type="button" className={buttonClass} disabled={busy || hasErrors || !confirmed || !fieldsValid} onClick={submit}>Confirm &amp; whitelist</button>
+          <button type="button" className={buttonClass} disabled={busy || hasErrors || submissionUnavailable || !confirmed || !fieldsValid} onClick={submit}>Confirm &amp; whitelist</button>
         </div>
       </div></div>}
     </>}
@@ -411,6 +420,7 @@ export function SmsDltUpload() {
   const [drafts, setDrafts] = useTabState<SmsDltDraft[] | null>('submit_sms_dlt_source', null);
   const [filename, setFilename] = useTabState('submit_sms_dlt_filename', '');
   const [error, setError] = useState('');
+  const [inventoryNotice, setInventoryNotice] = useTabState('submit_sms_dlt_inventory_notice', '');
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useTabState('submit_sms_dlt_revision', 0);
   const [identification, setIdentification] = useTabState<IdentificationReport | null>('submit_sms_dlt_identification', null);
@@ -429,7 +439,7 @@ export function SmsDltUpload() {
     const version = ++requestVersion.current;
     setBusy(true); setError('');
     try {
-      if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error('Choose a native .xlsx or .xls client workbook. Flat DLT files use the separate upload.');
+      if (!/\.(csv|xlsx|xls)$/i.test(file.name)) throw new Error('Choose a native .csv, .xlsx or .xls client brief.');
       if (file.size > 20 * 1024 * 1024) throw new Error('Client workbooks must be no larger than 20 MiB.');
       const result = await parseSmsDltBrief(file, account);
       if (version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms') return;
@@ -445,6 +455,8 @@ export function SmsDltUpload() {
       const previews = await previewFile(file, account, 'sms');
       if (version !== requestVersion.current || scope.current.account !== 'tata' || scope.current.channel !== 'sms') return;
       if (!previews.length || previews.some((preview) => !preview.sms_dlt)) throw new Error('The file did not return DLT drafts. Use the SMS DLT sample columns; no recipient phone numbers are needed.');
+      setInventoryNotice(previews.some((preview) => preview.inventory_status === 'unverified')
+        ? previews.find((preview) => preview.inventory_error)?.inventory_error || 'VILPOWER inventory is unverified.' : '');
       setDrafts(previews.map((preview) => smsDltDraft(preview.sms_dlt!))); setFilename(file.name); setRevision((value) => value + 1);
       setTabState('submit_state', { step: 'previewed', previews });
     } catch (err) { if (version === requestVersion.current) setError(formatError(err)); }
@@ -464,12 +476,12 @@ export function SmsDltUpload() {
   if (account !== 'tata' || channel !== 'sms') return <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">SMS DLT whitelisting is available only for Tata Capital (tata) · SMS. Select it in Whitelisting for. Other accounts are not integrated; Tata credentials cannot be reused.</div>;
   return <div className="workspace-page min-w-0 space-y-6">
     <header className="workspace-toolbar items-start justify-between border-b border-gray-200 pb-6"><div><p className="workspace-eyebrow mb-2">Template library · SMS</p><h1 className="workspace-heading">SMS DLT whitelisting</h1><p className="workspace-description">Tata Capital · VILPOWER. Register exact templates, not messages to recipients.</p></div><a href={getSampleCsvUrl('sms')} download className="workspace-button">Download sample CSV</a></header>
-    <details className="workspace-guide"><summary className="cursor-pointer font-medium text-gray-800">Start with your connection and source file</summary><p className="mt-3">Connect the <a href="/settings" className="text-blue-700 underline">Tata VILPOWER session in Settings</a>. Upload CSV or Excel containing template_name and text, or import an original client brief below. Choose missing DLT fields during review. No phone numbers, automatic grammar corrections or silent placeholder substitutions.</p></details>
+    <details className="workspace-guide"><summary className="cursor-pointer font-medium text-gray-800">Start with your connection and source file</summary><p className="mt-3">Upload CSV or Excel to read drafts without a portal connection. Template Name / SMS columns and regional language matrices are supported. Connect the <a href="/settings" className="text-blue-700 underline">Tata VILPOWER session in Settings</a> to verify duplicates and register. Choose missing DLT fields during review. No phone numbers, automatic grammar corrections or silent placeholder substitutions.</p></details>
     {!drafts && <label className="block rounded-xl border-2 border-dashed border-gray-300 bg-white p-6 sm:p-8 text-sm font-medium">Upload DLT CSV / Excel<input type="file" accept=".csv,.xlsx,.xls" disabled={busy} className="mt-3 block max-w-full text-sm" onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.target.value = ''; }} /></label>}
     {!drafts && <section className="space-y-4 rounded-xl border border-gray-200 bg-white p-5">
       <h2 className="text-sm font-medium">Import native client brief · choose SMS source candidates</h2>
-      <p className="text-xs text-gray-600">Upload the original multi-sheet .xlsx / .xls workbook without reshaping it. Extraction is offline: no portal session, registration or SMS sending. Historical and matching sources stay visible; nothing is selected automatically, and neither current month nor approval is inferred.</p>
-      <label className="block text-xs font-medium">Upload client brief workbook<input type="file" accept=".xlsx,.xls" disabled={busy} className="mt-2 block" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadBrief(file); event.target.value = ''; }} /></label>
+      <p className="text-xs text-gray-600">Upload the original CSV or multi-sheet .xlsx / .xls workbook without reshaping it. Extraction is offline: no portal session, registration or SMS sending. Historical and matching sources stay visible; nothing is selected automatically, and neither current month nor approval is inferred.</p>
+      <label className="block text-xs font-medium">Upload client brief workbook<input type="file" accept=".csv,.xlsx,.xls" disabled={busy} className="mt-2 block" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadBrief(file); event.target.value = ''; }} /></label>
       {brief && <>
         <p className="text-xs font-medium">Workbook: {brief.filename} · {brief.candidates.length} candidates · {selectedSources.length} selected (maximum 500)</p>
         {brief.warnings.map((warning, index) => <p key={index} role="status" className="text-xs text-amber-900">{warning}</p>)}
@@ -514,7 +526,8 @@ export function SmsDltUpload() {
     </section>}
     {busy && <p role="status" className="text-xs">Reading DLT templates…</p>}
     {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
-    {drafts && <><p className="text-xs font-medium">Source file: {filename}</p><SmsDltReview key={revision} initialDrafts={drafts} storageKey={`submit_sms_dlt_${revision}`} onClose={() => { if (!window.confirm('Clear this review? Any queued batch remains available in History.')) return; clearTabState(`submit_sms_dlt_${revision}`); setDrafts(null); setTabState('submit_state', { step: 'idle' }); }} /></>}
+    {drafts && inventoryNotice && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"><p>At upload, VILPOWER inventory could not be verified; existing templates were unknown, not missing. Drafts remain editable. Registration requires a successful review.</p><p className="mt-1">{inventoryNotice}</p><a href="/settings" className="underline">Reconnect Tata Capital · SMS in Settings</a>, then review the retained drafts again.</div>}
+    {drafts && <><p className="text-xs font-medium">Source file: {filename}</p><SmsDltReview key={revision} initialDrafts={drafts} storageKey={`submit_sms_dlt_${revision}`} onClose={() => { if (!window.confirm('Clear this review? Any queued batch remains available in History.')) return; clearTabState(`submit_sms_dlt_${revision}`); setDrafts(null); setInventoryNotice(''); setTabState('submit_state', { step: 'idle' }); }} /></>}
     <details className="rounded-xl border border-gray-200 bg-white p-4 text-xs">
       <summary className="cursor-pointer font-medium">Identify templates against Tata VILPOWER inventory</summary>
       <p className="mt-3 text-gray-600">Read-only comparison of exact SMS text and typed variables. This does not register or send messages.</p>

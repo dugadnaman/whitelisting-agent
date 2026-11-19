@@ -389,6 +389,7 @@ export default function SubmitPage() {
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
   const executeSubmit = useCallback(async (fixGrammar: boolean) => {
     if (!file || !currentPreviews || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
+    if (currentPreviews.some((preview) => preview.inventory_status === 'unverified' || preview.submission_ready === false)) return;
     if (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId)) {
       setState({
         step: 'error',
@@ -431,7 +432,7 @@ export default function SubmitPage() {
   }, [file, account, channel, user, currentPreviews, review, autoSkipDuplicates, activeRcs.botId, setupJobStream]);
 
   const handleInitiateSubmit = useCallback(() => {
-    if (!file || !currentPreviews) return;
+    if (!file || !currentPreviews || currentPreviews.some((preview) => preview.inventory_status === 'unverified' || preview.submission_ready === false)) return;
     const blocked = channel === 'rcs' ? currentPreviews.filter(
       p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))
     ) : [];
@@ -867,6 +868,12 @@ export default function SubmitPage() {
                   Reviewed destination: <strong>{reviewedLabel}</strong>
                   {review?.channel === 'rcs' && <> (Bot ID: <code>{review.botId || 'Not configured'}</code>)</>}. Review before final submission.
                 </p>
+                {state.previews.some((preview) => preview.inventory_status === 'unverified') && <div role="alert" className="mt-2 space-y-1 text-xs text-amber-900">
+                  <p>Templates were read, but Karix inventory could not be verified. Existing templates are unknown, not missing; submission is blocked.</p>
+                  <p>{state.previews.find((preview) => preview.inventory_error)?.inventory_error}</p>
+                  <a href="/settings" className="underline">Reconnect this destination in Settings</a>
+                  <button type="button" className="ml-3 underline" onClick={() => { if (file) void handleFile(file); }}>Retry validation</button>
+                </div>}
                 {channel === 'rcs' && !activeRcs.botId && (
                   <p role="alert" className="mt-1 text-xs font-medium text-amber-800">
                     RCS submission is unavailable: this account has no verified Karix bot. Refresh account settings.
@@ -882,7 +889,7 @@ export default function SubmitPage() {
                 </button>
                 <button
                   onClick={handleInitiateSubmit}
-                  disabled={!review || review.account !== account || review.channel !== channel || account === 'all' || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
+                  disabled={!review || review.account !== account || review.channel !== channel || account === 'all' || state.previews.some((preview) => preview.inventory_status === 'unverified' || preview.submission_ready === false) || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
                   className="px-4 py-2 rounded-lg text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                 >
                   {(() => {
@@ -914,6 +921,10 @@ export default function SubmitPage() {
               </div>
             </div>
           <p className="px-5 py-3 text-xs text-blue-900 bg-blue-50/30 border-b border-blue-100">{WHITELIST_NAME_HINT} Preview shows the names returned for submission.</p>
+          {state.previews[0]?.import_notes?.length ? <details className="border-b border-gray-200 px-5 py-3 text-xs text-amber-900">
+            <summary className="cursor-pointer font-medium">Workbook scope and excluded sections</summary>
+            <ul className="mt-2 list-disc space-y-1 pl-4">{state.previews[0].import_notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
+          </details> : null}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead>
@@ -950,6 +961,7 @@ export default function SubmitPage() {
                           </span>
                         )}
                       </div>
+                      {p.source_ref && <p className="mt-1 break-all font-sans text-xs font-normal text-gray-500">{p.source_ref}</p>}
                     </td>
                     {channel === 'whatsapp' ? (
                       <>
@@ -979,6 +991,11 @@ export default function SubmitPage() {
                                   );
                                 })}
                               </div>
+                              <details className="max-w-lg">
+                                <summary className="cursor-pointer font-medium text-blue-700">Review message and buttons</summary>
+                                {p.components.filter((component) => component.text).map((component, index) => <pre key={index} className="mt-2 whitespace-pre-wrap break-words font-sans">{component.text}</pre>)}
+                                {p.components.filter((component) => component.type === 'BUTTONS').map((component, index) => <pre key={index} className="mt-2 whitespace-pre-wrap break-all">{JSON.stringify(component.buttons, null, 2)}</pre>)}
+                              </details>
 
                               {p.grammar_warnings && p.grammar_warnings.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mt-1">

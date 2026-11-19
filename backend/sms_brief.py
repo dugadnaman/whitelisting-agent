@@ -1,5 +1,6 @@
 """Pure, source-preserving SMS brief extraction and untrusted review validation."""
 
+import csv
 import hashlib
 import re
 import unicodedata
@@ -111,13 +112,22 @@ def _column(index):
 
 def _read_sheets(path, filename):
     suffix = Path(filename).suffix.lower()
-    if suffix not in {".xlsx", ".xls"}:
-        raise ValueError("Upload an .xlsx or .xls client brief workbook")
+    if suffix not in {".xlsx", ".xls", ".csv"}:
+        raise ValueError("Upload an .xlsx or .xls client brief workbook, or a .csv SMS table")
     sheets = []
     total = 0
     try:
         if Path(path).stat().st_size > 20 * 1024 * 1024:
             raise ValueError("Client brief exceeds the 20 MiB upload limit")
+        if suffix == ".csv":
+            rows = []
+            with open(path, encoding="utf-8-sig", newline="") as stream:
+                for row in csv.reader(stream):
+                    total += len(row)
+                    if total > MAX_CELLS:
+                        raise ValueError("CSV exceeds the safe cell extraction limit")
+                    rows.append(row)
+            return [(Path(filename).stem, rows)]
         if suffix == ".xlsx":
             import openpyxl
 
@@ -168,8 +178,12 @@ def parse_brief(path: str, filename: str) -> dict:
     result = {"filename": filename, "sheets": [], "warnings": [], "candidates": []}
     seen = set()
 
-    def add(sheet, row, col, text, campaign="", segment="", language="", scope="SMS", kind="channel_rows"):
-        if not _copy(text) or (sheet, row, col) in seen:
+    def add(sheet, row, col, text, campaign="", segment="", language="", scope="SMS", kind="channel_rows",
+            template_name="", draft_fields=None):
+        explicit = draft_fields is not None
+        valid_text = (isinstance(text, str) and bool(text.strip()) and len(text) <= MAX_TEXT
+                      and not text.startswith("=")) if explicit else _copy(text)
+        if not valid_text or (sheet, row, col) in seen:
             return
         if len(result["candidates"]) >= MAX_CANDIDATES:
             raise ValueError("Workbook contains too many SMS candidates; split the brief into smaller files")
@@ -186,10 +200,12 @@ def parse_brief(path: str, filename: str) -> dict:
             "id": f"sms_{digest}", "sheet": sheet, "cell": cell, "text": text,
             "campaign": campaign, "segment": segment or sheet, "language": language,
             "scope": scope, "source_kind": kind,
-            "suggested_template_name": f"sms_{safe[:43]}_{digest}",
+            "suggested_template_name": template_name or f"sms_{safe[:43]}_{digest}",
             "suggested_template_type": "3" if "implicit" in _norm(scope) else "",
             "warnings": warnings, "variables": _TOKEN.findall(text),
         })
+        if explicit:
+            result["candidates"][-1]["draft_fields"] = draft_fields
 
     for name, rows in _read_sheets(path, filename):
         before = len(result["candidates"])
@@ -199,12 +215,13 @@ def parse_brief(path: str, filename: str) -> dict:
         elif rows:
             width = max(map(len, rows), default=0)
             rows = [row + [None] * (width - len(row)) for row in rows]
-            campaign_cols = sorted({c for row in rows if not any(_norm(v) == "channel" for v in row)
-                                    for c, value in enumerate(row) if _norm(value) == "campaign name"})
-            if campaign_cols:
-                _campaign_blocks(name, rows, campaign_cols, add)
-            else:
-                _channel_blocks(name, rows, add)
+            if not _template_table(name, rows, add, result["warnings"]):
+                campaign_cols = sorted({c for row in rows if not any(_norm(v) == "channel" for v in row)
+                                        for c, value in enumerate(row) if _norm(value) == "campaign name"})
+                if campaign_cols:
+                    _campaign_blocks(name, rows, campaign_cols, add)
+                else:
+                    _channel_blocks(name, rows, add)
             if len(result["candidates"]) == before:
                 if "regional" in normalized:
                     result["warnings"].append(f"{name}: ambiguous regional source has no explicit SMS channel for its message matrix; skipped rather than assuming SMS approval.")
@@ -214,6 +231,43 @@ def parse_brief(path: str, filename: str) -> dict:
                 result["warnings"].append(f"{name}: unlabelled language-row sections outside an explicit SMS block are skipped as ambiguous/non-SMS.")
         result["sheets"].append({"name": name, "candidate_count": len(result["candidates"]) - before})
     return result
+
+
+def _template_table(name, rows, add, warnings):
+    """Explicit named SMS tables and language columns with SMS-number row labels."""
+    header_row = next((ri for ri, row in enumerate(rows) if any(_norm(v) for v in row)), None)
+    if header_row is None:
+        return False
+    headers = [re.sub(r"\s+", "_", _norm(value)) for value in rows[header_row]]
+    body_col = next((c for c, header in enumerate(headers)
+                     if header in {"text", "body", "message", "template_message"} or re.fullmatch(r"sms(?:_\d+)?", header)), None)
+    if "template_name" in headers and body_col is not None:
+        name_col = headers.index("template_name")
+        for ri in range(header_row + 1, len(rows)):
+            row = rows[ri]
+            fields = dict(zip(headers, row, strict=False))
+            if fields.get("channel") and _channel(fields["channel"]) != "sms":
+                warnings.append(f"{name}!{_column(body_col + 1)}{ri + 1}: non-SMS/unrecognized channel row excluded.")
+                continue
+            template_name = str(row[name_col] or "").strip()
+            language = _language(fields.get("language")) or str(fields.get("language") or "")
+            if not language:
+                codes = {"eng": "English", "mar": "Marathi", "kan": "Kannada", "hin": "Hindi",
+                         "tam": "Tamil", "tel": "Telugu", "ben": "Bengali", "guj": "Gujarati"}
+                language = next((codes[token] for token in re.split(r"[^a-z]+", template_name.lower()) if token in codes), "")
+            add(name, ri, body_col, row[body_col], language=language, kind="template_table",
+                template_name=template_name, draft_fields=fields)
+        return True
+    languages = {c: _language(value) for c, value in enumerate(rows[header_row]) if _language(value)}
+    if headers[0] not in {"sr_no", "sr_no.", "sr._no.", "sr._no"} or not languages:
+        return False
+    for ri in range(header_row + 1, len(rows)):
+        row = rows[ri]
+        if not re.fullmatch(r"sms\s*\d+", _norm(row[0])):
+            continue
+        for c, language in languages.items():
+            add(name, ri, c, row[c], campaign=str(row[0]), language=language, kind="sms_language_matrix")
+    return True
 
 
 def _campaign_blocks(name, rows, anchors, add):

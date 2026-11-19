@@ -63,6 +63,12 @@ COPY --from=frontend-builder /app/frontend /app/frontend
 COPY --from=frontend-builder /app/whatsapp-gateway /app/whatsapp-gateway
 COPY docker-entrypoint.py /app/docker-entrypoint.py
 
+# The same offline regressions gate CI and every production image build.
+COPY scripts/check-template-safeguards.sh /tmp/check-template-safeguards.sh
+RUN pip install --no-cache-dir --target /tmp/template-test-deps pytest && \
+    PYTHONPATH=/tmp/template-test-deps:$PYTHONPATH sh /tmp/check-template-safeguards.sh && \
+    rm -rf /tmp/template-test-deps .pytest_cache
+
 # Only Next.js binds publicly, on the platform's PORT (3000 by default).
 RUN mkdir -p /var/log/supervisor /etc/supervisor/conf.d
 RUN echo '[supervisord]\n\

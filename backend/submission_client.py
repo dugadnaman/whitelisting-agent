@@ -788,7 +788,21 @@ def _template_components(payload: TemplateSubmission) -> list[dict]:
         if comp_d.get("text") is not None:
             d["text"] = comp_d["text"]
         if comp_d.get("buttons"):
-            d["buttons"] = comp_d["buttons"]
+            fields = {
+                "URL": ("url", "example"),
+                "PHONE_NUMBER": ("phone_number",),
+                "QUICK_REPLY": (),
+            }
+            d["buttons"] = []
+            for button in comp_d["buttons"]:
+                if not isinstance(button, dict):
+                    raise ValueError("WhatsApp buttons must be objects.")
+                kind = str(button.get("type") or "").upper().strip()
+                if kind not in fields:
+                    raise ValueError(f"Unsupported WhatsApp button type: {kind or '(missing)'}.")
+                outgoing = {key: button[key] for key in fields[kind] if button.get(key) is not None}
+                outgoing.update(type=kind, text=button.get("text") or button.get("label"))
+                d["buttons"].append(outgoing)
         if comp_d.get("example"):
             d["example"] = comp_d["example"]
         if comp_d.get("media_file"):
@@ -1211,6 +1225,42 @@ def check_portal_credentials(
         return False, str(exc)
 
 
+def _inventory_templates(data: object, waba_id: str, esmeaddr: str | None = None) -> list[dict]:
+    """Accept only an explicit, account-matched inventory, including verified empty lists."""
+    envelopes = [data]
+    no_records = isinstance(data, dict) and data.get("Failed") == "No Records Found"
+    if isinstance(data, dict):
+        failure_data = {key: value for key, value in data.items() if key != "Failed"} if no_records else data
+        if _provider_failure(failure_data):
+            raise ValueError("Karix rejected the inventory request.")
+        envelopes.extend(data.get(key) for key in ("Success", "response"))
+    inventories = []
+    identities = []
+    for envelope in envelopes:
+        if isinstance(envelope, list):
+            inventories.append(envelope)
+        elif isinstance(envelope, dict):
+            identities.append(envelope)
+            if "templates" in envelope:
+                if not isinstance(envelope["templates"], list):
+                    raise ValueError("Karix returned malformed template inventory.")
+                inventories.append(envelope["templates"])
+    if not inventories and not no_records:
+        raise ValueError("Karix did not return a template inventory.")
+    rows = inventories[0] if inventories else []
+    if any(inventory != rows for inventory in inventories[1:]):
+        raise ValueError("Karix returned conflicting template inventories.")
+    if not all(isinstance(row, dict) for row in rows):
+        raise ValueError("Karix returned malformed template inventory.")
+    for identity in [*identities, *rows]:
+        for key in ("wabaId", "waba_id"):
+            if identity.get(key) is not None and str(identity[key]) != str(waba_id):
+                raise ValueError("Karix returned another account's WABA inventory.")
+        if esmeaddr is not None and identity.get("esmeaddr") is not None and str(identity["esmeaddr"]) not in ("0", str(esmeaddr)):
+            raise ValueError("Karix returned another account's ESME inventory.")
+    return rows
+
+
 def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
     """
     Fetch the full template list for a client's WABA (supports Portal API and Official API).
@@ -1226,23 +1276,9 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
         headers["Content-Type"] = "application/json"
         url = f"{KARIX_BASE_URL}/getAllTemplates"
         body = {"wabaId": str(waba_id), "esmeaddr": str(esmeaddr), "start": 0, "limit": 2500}
-        resp = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
+        resp = get_http_session().post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT, allow_redirects=False)
         if resp.ok:
-            data = _parse_karix_json(resp)
-            if isinstance(data, list):
-                return data, None
-            if isinstance(data, dict):
-                if data.get("Failed") == "No Records Found":
-                    return [], None
-                templates = (
-                    data.get("Success", {}).get("templates")
-                    or data.get("response", {}).get("templates")
-                    or data.get("templates")
-                    or []
-                )
-                if templates or "Success" in data or "response" in data:
-                    return templates, None
-            errors.append("Portal API returned an unrecognized response")
+            return _inventory_templates(_parse_karix_json(resp), waba_id, esmeaddr), None
         else:
             errors.append(f"Portal API returned HTTP {resp.status_code}")
     except Exception as exc:
@@ -1257,15 +1293,10 @@ def fetch_template_list(client: str = "bajaj") -> tuple[list[dict], str | None]:
             url,
             headers=get_official_auth_headers(c),
             timeout=REQUEST_TIMEOUT,
+            allow_redirects=False,
         )
         if response.ok:
-            data = _parse_karix_json(response)
-            if isinstance(data, list):
-                return data, None
-            if isinstance(data, dict):
-                templates = data.get("response", {}).get("templates") or data.get("templates") or []
-                return templates, None
-            errors.append("Official API returned an unrecognized response")
+            return _inventory_templates(_parse_karix_json(response), waba_id), None
         else:
             errors.append(f"Official API returned HTTP {response.status_code}")
     except Exception as exc:

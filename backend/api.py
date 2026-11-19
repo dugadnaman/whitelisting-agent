@@ -215,7 +215,10 @@ def health_check():
                 SCHEDULER_STATE.task = loop.create_task(run_scheduler_loop())
     except Exception:
         pass
-    return {"status": "ok", "service": "karix-whitelisting-api", "version": "2.1.0"}
+    return {
+        "status": "ok", "service": "karix-whitelisting-api", "version": "2.1.0",
+        "revision": os.environ.get("RENDER_GIT_COMMIT"),
+    }
 
 
 MEDIA_CACHE_DIR = Path("media_cache")
@@ -577,7 +580,12 @@ def _fetch_whatsapp_inventory(client: str) -> tuple[list[dict], str | None]:
 
 def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
     """Fetch live templates directly from Karix WhatsApp API (Portal & Official)."""
-    templates, _ = _fetch_whatsapp_inventory(client.lower().strip())
+    templates, error = _fetch_whatsapp_inventory(client.lower().strip())
+    if error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Karix WhatsApp inventory unavailable: {error}. Reconnect this account in Settings and retry.",
+        )
     return templates
 
 
@@ -1386,16 +1394,34 @@ def _inspect_template_quality_and_warnings(
     acc = account.lower().strip()
     account_detection = detect_spreadsheet_account(submissions, current_account=acc)
 
-    live_templates = fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else _fetch_rcs_inventory(acc)
+    inventory_error = None
+    try:
+        live_templates = fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else _fetch_rcs_inventory(acc)
+    except HTTPException as exc:
+        if channel != "whatsapp" or exc.status_code != 503:
+            raise
+        live_templates = []
+        inventory_error = str(exc.detail)
     live_names = {
         (lt.get("template_name") or lt.get("viTemplate", {}).get("name") or "").strip().lower()
         for lt in live_templates
         if lt.get("template_name") or lt.get("viTemplate", {}).get("name")
     }
-    return [
+    previews = [
         _json_safe(_inspect_single_submission(s, live_names, account_detection, account, channel, use_ai=use_ai))
         for s in submissions
     ]
+    if channel == "whatsapp":
+        for preview in previews:
+            preview.update(
+                inventory_status="unverified" if inventory_error else "verified",
+                inventory_error=inventory_error,
+                submission_ready=not bool(inventory_error),
+            )
+            if inventory_error:
+                preview["already_exists_on_waba"] = None
+                preview["exists_on_waba"] = None
+    return previews
 
 
 def _whatsapp_input_diagnostic(filename: str) -> str:
@@ -1423,7 +1449,7 @@ def _validate_upload_destination(path: str, suffix: str, account: str, channel: 
     channel_aliases = {"wa": "whatsapp", "whatsapp": "whatsapp", "rcs": "rcs", "sms": "sms"}
     import csv
 
-    def validate(rows, client_brief=False):
+    def validate(rows, client_brief=False, native_brief=False):
         expected_waba = None
         expected_bot = None
         for index, raw in enumerate(rows, 2):
@@ -1435,7 +1461,7 @@ def _validate_upload_destination(path: str, suffix: str, account: str, channel: 
             for field in ("client", "account"):
                 if row.get(field) and row[field].lower() != account:
                     raise HTTPException(status_code=400, detail=f"Row {index}: account does not match the selected destination.")
-            if row.get("channel") and row["channel"].lower() != channel:
+            if not native_brief and row.get("channel") and row["channel"].lower() != channel:
                 raise HTTPException(status_code=400, detail=f"Row {index}: channel does not match the selected destination.")
             if channel == "whatsapp" and row.get("waba_id"):
                 if expected_waba is None:
@@ -1461,6 +1487,27 @@ def _validate_upload_destination(path: str, suffix: str, account: str, channel: 
             return
     if channel == "sms":
         # DLT's loader validates every row's ownership, including legacy XLS files.
+        return
+    if channel == "whatsapp" and suffix == ".xlsx":
+        import openpyxl
+        from loader import _has_whatsapp_table_headers
+
+        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            for sheet in workbook:
+                rows = list(sheet.iter_rows(values_only=True))
+                first = next((index for index, row in enumerate(rows) if any(value is not None for value in row)), None)
+                if first is None:
+                    continue
+                headers = rows[first]
+                native = not _has_whatsapp_table_headers(headers)
+                validate((dict(zip(headers, row)) for row in rows[first + 1:]), native_brief=native)
+                if native:
+                    for row in rows:
+                        if len(row) >= 2 and str(row[0] or "").strip().lower() in {"client", "account", "waba_id"}:
+                            validate([{row[0]: row[1]}], native_brief=True)
+        finally:
+            workbook.close()
         return
 
     if suffix in (".xlsx", ".xls"):
@@ -1502,7 +1549,7 @@ async def preview_file(
         await asyncio.to_thread(_validate_upload_destination, tmp_path, suffix, account, chan)
         if chan == "sms":
             from sms_dlt import load_drafts, preview_drafts
-            drafts = await asyncio.to_thread(load_drafts, tmp_path, account)
+            drafts = await asyncio.to_thread(load_drafts, tmp_path, account, source_filename=file.filename)
             return await asyncio.to_thread(preview_drafts, drafts, account)
         elif chan == "rcs":
             if suffix in (".xlsx", ".xls"):
@@ -1535,11 +1582,14 @@ async def preview_file(
             )
             return _inspect_template_quality_and_warnings(submissions, channel="rcs", account=account)
 
+        import_notes: list[str] = []
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
-            submissions = await asyncio.to_thread(load_from_excel, tmp_path, client=account)
+            submissions = await asyncio.to_thread(
+                load_from_excel, tmp_path, client=account, source_name=file.filename, import_notes=import_notes,
+            )
         else:
-            submissions = await asyncio.to_thread(load_from_csv, tmp_path, client=account)
+            submissions = await asyncio.to_thread(load_from_csv, tmp_path, client=account, source_name=file.filename)
 
         if not submissions:
             log_activity(
@@ -1566,7 +1616,10 @@ async def preview_file(
             },
             status="success",
         )
-        return _inspect_template_quality_and_warnings(submissions, channel="whatsapp", account=account, use_ai=use_ai)
+        previews = _inspect_template_quality_and_warnings(submissions, channel="whatsapp", account=account, use_ai=use_ai)
+        if import_notes and previews:
+            previews[0]["import_notes"] = import_notes
+        return previews
     except HTTPException:
         raise
     except Exception as exc:
@@ -1760,9 +1813,9 @@ async def _submit_wa_batch(
     current_user: dict,
 ) -> dict:
     subs = (
-        await asyncio.to_thread(load_from_excel, tmp_path, client=acc)
+        await asyncio.to_thread(load_from_excel, tmp_path, client=acc, source_name=filename)
         if suffix in (".xlsx", ".xls")
-        else await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
+        else await asyncio.to_thread(load_from_csv, tmp_path, client=acc, source_name=filename)
     )
     if not subs:
         raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(filename))
@@ -1969,7 +2022,7 @@ async def submit_file(
         if chan == "sms":
             from sms_dlt import load_drafts
             from sms_dlt_api import enqueue
-            drafts = await asyncio.to_thread(load_drafts, tmp_path, acc)
+            drafts = await asyncio.to_thread(load_drafts, tmp_path, acc, source_filename=file.filename)
             return await enqueue(drafts, acc, current_user["name"], file.filename or "upload.csv", skip_duplicates)
         elif chan == "rcs":
             return await _submit_rcs_batch(
@@ -2335,9 +2388,9 @@ async def delete_templates_from_file(
 
     try:
         if suffix in (".xlsx", ".xls"):
-            subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc)
+            subs = await asyncio.to_thread(load_from_excel, tmp_path, client=acc, source_name=file.filename)
         else:
-            subs = await asyncio.to_thread(load_from_csv, tmp_path, client=acc)
+            subs = await asyncio.to_thread(load_from_csv, tmp_path, client=acc, source_name=file.filename)
 
         if not subs:
             raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(file.filename or "uploaded file"))
@@ -2405,11 +2458,11 @@ async def identify_templates_endpoint(
     try:
         if channel == "sms":
             from sms_dlt import identify_drafts, load_drafts
-            rows = json.loads(Path(tmp_path).read_text(encoding="utf-8")) if suffix == ".json" else await asyncio.to_thread(load_drafts, tmp_path, acc)
+            rows = json.loads(Path(tmp_path).read_text(encoding="utf-8")) if suffix == ".json" else await asyncio.to_thread(load_drafts, tmp_path, acc, source_filename=file.filename)
             return await asyncio.to_thread(identify_drafts, rows, acc)
         from template_identifier import identify_from_file
 
-        report = await asyncio.to_thread(identify_from_file, tmp_path, client=acc)
+        report = await asyncio.to_thread(identify_from_file, tmp_path, client=acc, source_name=file.filename)
         log_activity(
             action="TEMPLATE_IDENTIFICATION",
             account=acc,

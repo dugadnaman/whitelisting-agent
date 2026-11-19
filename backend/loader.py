@@ -7,10 +7,10 @@ single-cell marketing briefs with automatic media extraction.
 """
 
 import csv
+import hashlib
 import json
 import logging
 import re
-import zipfile
 from pathlib import Path
 
 from config import get_waba_id
@@ -100,6 +100,17 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
     clean_lines = []
 
     for line in lines:
+        explicit_cta = re.match(r"^CTA\s*(?:Button)?\s*[:\-–]?\s*(.+)$", line, re.IGNORECASE)
+        if explicit_cta:
+            label = re.sub(
+                r"\s*(?:<\s*(?:link|url)\s*>|\{\{?\s*(?:link|url)\s*\}\}?|\[(?:link|url)\])\s*$",
+                "", explicit_cta.group(1), flags=re.IGNORECASE,
+            ).strip(" {}<>[]")
+            if label:
+                button_text = label
+            continue
+        if re.match(r"^T\s*&\s*Cs?\b|^Terms\b", line, re.IGNORECASE):
+            line = re.sub(r"<(?:link|url)>|\{\{?(?:link|url)\}\}?", "", line, flags=re.IGNORECASE).strip()
         is_cta = False
         # 1. Match CTA Button <Text> or CTA button<Text> or CTA<Text>
         m_cta = re.search(
@@ -200,40 +211,8 @@ def _detect_media_kind(filename: str, raw_bytes: bytes) -> tuple[str, str]:
     return "IMAGE", "image/png"
 
 
-def _extract_media_from_xlsx(path: str) -> list[dict]:
-    """
-    Extract all embedded media (images, videos, documents) from an Excel (.xlsx) file in order.
-    Returns list of dicts: {"filename": str, "bytes": bytes, "kind": str, "mime_type": str}
-    """
-    media_items = []
-    try:
-        with zipfile.ZipFile(path, "r") as z:
-            media_names = [f for f in z.namelist() if f.startswith(("xl/media/", "xl/embeddings/"))]
-
-            def natural_key(name):
-                return [int(c) if c.isdigit() else c for c in re.split(r"(\d+)", name)]
-
-            media_names.sort(key=natural_key)
-            for name in media_names:
-                filename = name.split("/")[-1]
-                raw_data = z.read(name)
-                kind, mime_type = _detect_media_kind(filename, raw_data)
-                media_items.append(
-                    {
-                        "filename": filename,
-                        "bytes": raw_data,
-                        "kind": kind,
-                        "mime_type": mime_type,
-                    }
-                )
-    except Exception as e:
-        logger.warning("Could not extract embedded media from xlsx: %s", e)
-    return media_items
 
 
-def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
-    """Legacy image extractor helper."""
-    return [(m["filename"], m["bytes"]) for m in _extract_media_from_xlsx(path) if m["kind"] == "IMAGE"]
 
 def normalize_whatsapp_template_name(name: str) -> str:
     """Canonical new WhatsApp name: att_ plus Meta-safe lowercase characters."""
@@ -521,7 +500,11 @@ def _dynamic_template_name(row: dict[str, str], source_name: str, row_number: in
         stem = Path(source_name).stem
         candidate = f"{stem}_{row_number}"
     clean = re.sub(r"[^a-zA-Z0-9]+", "_", candidate).strip("_").lower()
-    return normalize_campaign_name(clean or f"template_{row_number}")[:60]
+    prefix = normalize_campaign_name(clean or f"template_{row_number}")
+    if raw_name:
+        return prefix[:60]
+    digest = hashlib.sha256(f"{source_name}\0{row_number}\0{_dynamic_body_value(row)}".encode()).hexdigest()[:12]
+    return f"{prefix[:47].rstrip('_')}_{digest}"
 
 
 def _dynamic_row_to_submission(
@@ -603,7 +586,9 @@ def _resolve_row_waba(row_client: str, cache: dict[str, str]) -> str:
     return cache[c]
 
 
-def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
+def load_from_csv(
+    path: str, client: str = "bajaj", source_name: str | None = None, import_notes: list[str] | None = None,
+) -> list[TemplateSubmission]:
     """Load standard or dynamically structured WhatsApp rows from CSV."""
     p = Path(path)
     if not p.exists() and (Path("samples") / path).exists():
@@ -611,10 +596,21 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
     waba_cache: dict[str, str] = {}
     rows = []
     dynamic_submissions: list[TemplateSubmission] = []
-    source_name = p.name
-    with open(p, newline="", encoding="utf-8") as f:
-        for row_number, raw_row in enumerate(csv.DictReader(f), 2):
-            clean_row = {k.strip(): (v.strip() if v else "") for k, v in raw_row.items() if k}
+    skipped_channels = set()
+    source_name = Path(source_name or p.name).name
+    with open(p, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        _reject_other_channel_columns(reader.fieldnames or [])
+        for row_number, raw_row in enumerate(reader, 2):
+            clean_row = {
+                k.strip(): (v.strip() if v else "") for k, v in raw_row.items()
+                if k and _whatsapp_import_channel(k) not in {"sms", "rcs", "pn", "email"}
+            }
+            channel_label = _canonicalize_dynamic_row(clean_row).get("channel", "")
+            row_channel = _whatsapp_import_channel(channel_label)
+            if channel_label and row_channel != "whatsapp":
+                skipped_channels.add(channel_label.upper())
+                continue
             has_standard_components = bool(clean_row.get("components"))
             has_standard_body = bool(clean_row.get("body") or clean_row.get("body_text"))
             has_standard_name = bool(clean_row.get("template_name") or clean_row.get("name"))
@@ -647,165 +643,295 @@ def load_from_csv(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
             rows.append(clean_row)
 
     submissions = [_row_to_submission(row, client=client) for row in rows]
-    return [s for s in [*submissions, *dynamic_submissions] if s.components]
+    result = [s for s in [*submissions, *dynamic_submissions] if s.components]
+    if skipped_channels and import_notes is not None:
+        import_notes.append(f"Excluded non-WhatsApp/unrecognized channel rows: {', '.join(sorted(skipped_channels))}.")
+    if not result and skipped_channels:
+        raise ValueError(f"No WhatsApp copy found; this CSV contains {', '.join(sorted(skipped_channels))} rows. Select the matching channel.")
+    return result
+
+
+def _whatsapp_import_channel(value) -> str:
+    """Recognize short channel labels, never channel words inside customer copy."""
+    label = str(value or "").strip().lower()
+    if len(label) > 85 or "\n" in label:
+        return ""
+    match = re.fullmatch(
+        r"(whatsapp|wa|sms|rcs|pn|push notification|email)"
+        r"(?:[\s_]+(?:retargeting|retaregting|retargetting|retarget|text|body|content|copy|"
+        r"title|desp\.?|description|implicit|explicit|promotional|transactional|utility|service|c?\d+))*",
+        label,
+    )
+    if not match:
+        return ""
+    channel = match.group(1)
+    return {"wa": "whatsapp", "push notification": "pn"}.get(channel, channel)
+
+
+def _has_whatsapp_table_headers(headers) -> bool:
+    """Flat/semantic tables have a copy field, unlike native Channel/language grids."""
+    fields = [_DYNAMIC_FIELD_ALIASES.get(_dynamic_key(header), _dynamic_key(header)) for header in headers]
+    if fields and fields[0] == "channel" and not any(field in {"template_name", "components"} for field in fields):
+        return False
+    return any(
+        field in {"body", "body_text", "components"} for field in fields
+    )
+
+
+def _reject_other_channel_columns(headers):
+    channels = {_whatsapp_import_channel(header) for header in headers} - {""}
+    if channels and "whatsapp" not in channels:
+        labels = ", ".join(sorted(channel.upper() for channel in channels))
+        raise ValueError(f"This file contains explicitly {labels} columns, not WhatsApp copy. Select the matching channel.")
+
+
+def _native_whatsapp_cells(rows, sheet_name):
+    """Keep channel state local to each label column and retain original cell coordinates."""
+    from sms_brief import _copy, _language, _metadata, _norm
+
+    width = max(map(len, rows), default=0)
+    rows = [list(row) + [None] * (width - len(row)) for row in rows]
+    if not width:
+        return []
+    cells = {}
+
+    def add(ri, ci, language="", scope=""):
+        if _copy(rows[ri][ci]):
+            cells[ri, ci] = (ri + 1, ci + 1, rows[ri][ci], language, scope)
+
+    # Language | SMS | WA | PN (also native Template Name | SMS 2 | WA).
+    matrix_headers = {
+        ri for ri, row in enumerate(rows)
+        if _norm(row[0]) in {"language", "lang", "template name", "template_name"}
+        and any(_whatsapp_import_channel(value) for value in row[1:])
+    }
+    if matrix_headers:
+        columns = {}
+        language_matrix = False
+        for ri, row in enumerate(rows):
+            if ri in matrix_headers:
+                columns = {ci: str(value) for ci, value in enumerate(row) if _whatsapp_import_channel(value) == "whatsapp"}
+                language_matrix = _norm(row[0]) in {"language", "lang"}
+            elif any(row):
+                if language_matrix and not _language(row[0]):
+                    columns = {}
+                    continue
+                for ci, scope in columns.items():
+                    add(ri, ci, _language(row[0]), scope)
+        return list(cells.values())
+
+    anchors = sorted({
+        ci for row in rows for ci, value in enumerate(row)
+        if _norm(value) == "channel"
+        or (_whatsapp_import_channel(value) and ci + 1 < width and any(_copy(r[ci + 1]) for r in rows))
+    })
+    if not anchors and _whatsapp_import_channel(sheet_name) == "whatsapp" and any(
+        _metadata(row[0]) or _norm(row[0]) in {"campaign name", "campaign_name"} for row in rows
+    ):
+        anchors = [0]
+    if not anchors:
+        if _whatsapp_import_channel(sheet_name) == "whatsapp":
+            for ri, row in enumerate(rows):
+                for ci in range(width):
+                    add(ri, ci, _language(row[0]), sheet_name)
+        return list(cells.values())
+
+    for index, anchor in enumerate(anchors):
+        end = anchors[index + 1] if index + 1 < len(anchors) else width
+        columns = {anchor + 1: ""} if anchor + 1 < end else {}
+        scope = sheet_name if _whatsapp_import_channel(sheet_name) == "whatsapp" else ""
+        active = bool(scope)
+        for ri, row in enumerate(rows):
+            value = row[anchor]
+            label = _norm(value)
+            channel = _whatsapp_import_channel(value)
+            header = label in {"channel", "regional"} or (
+                channel and not any(_copy(row[ci]) for ci in range(anchor + 1, end))
+                and any(
+                    _language(row[ci]) or re.fullmatch(r"[a-z]|\d+\s*-\s*\d+|generic", _norm(row[ci]))
+                    or _has_whatsapp_table_headers([row[ci]]) or "content" in _norm(row[ci])
+                    for ci in range(anchor + 1, end) if row[ci] is not None
+                )
+            )
+            if header:
+                columns = {
+                    ci: _language(row[ci]) for ci in range(anchor + 1, end)
+                    if row[ci] is not None and not _metadata(row[ci])
+                    and (_language(row[ci]) or re.fullmatch(r"[a-z]|\d+\s*-\s*\d+|generic", _norm(row[ci]))
+                         or _has_whatsapp_table_headers([row[ci]]) or "content" in _norm(row[ci]))
+                } or ({anchor + 1: ""} if anchor + 1 < end else {})
+                scope = str(value) if channel == "whatsapp" else ""
+                active = bool(scope)
+                continue
+            if channel:
+                scope = str(value) if channel == "whatsapp" else ""
+                active = bool(scope)
+            elif label in {"campaign name", "campaign_name"}:
+                active = bool(scope)
+                continue
+            elif _metadata(value):
+                active = False
+                continue
+            elif label and not _language(value) and not re.fullmatch(r"c\d+|[a-z]", label):
+                active = False
+                continue
+            if active:
+                for ci, language in columns.items():
+                    add(ri, ci, language or _language(value), scope)
+    return list(cells.values())
+
+
+def _sheet_anchored_media(sheet, positions, import_notes=None):
+    """Bind only exact-column or sole-copy same-row drawings; ambiguity means no creative."""
+    from sms_brief import _column
+    result = {}
+    by_row = {}
+    for row, col in positions:
+        by_row.setdefault(row, []).append(col)
+    for image in sheet._images:
+        anchor = getattr(image.anchor, "_from", None)
+        if anchor is None:
+            continue
+        row, col = anchor.row + 1, anchor.col + 1
+        candidates = by_row.get(row, [])
+        target = (row, col) if col in candidates else ((row, candidates[0]) if len(candidates) == 1 else None)
+        if target:
+            result.setdefault(target, []).append(image)
+        elif import_notes is not None:
+            import_notes.append(f"{sheet.title}!{_column(col)}{row}: embedded creative has no unambiguous copy-cell anchor; not assigned.")
+    media = {}
+    for target, images in result.items():
+        if len(images) == 1:
+            image = images[0]
+            raw = image._data()
+            kind, mime_type = _detect_media_kind(f"creative.{image.format}", raw)
+            media[target] = {"kind": kind, "mime_type": mime_type, "bytes": raw}
+        elif import_notes is not None:
+            row, col = target
+            import_notes.append(f"{sheet.title}!{_column(col)}{row}: multiple embedded creatives share this copy-cell anchor; not assigned.")
+    return media
 
 
 def _build_single_cell_card_submission(
-    idx: int, block: str, client: str, clean_name: str, extracted_media: list, waba_cache: dict
+    block, client, source_name, source_ref, language, scope, media, waba_cache,
 ) -> TemplateSubmission:
+    from briefing_parser import detect_category, detect_language
+
     parsed = parse_single_cell_whatsapp_block(block, client=client)
-    t_name = normalize_whatsapp_template_name(f"{client.lower()}_{clean_name}_card_{idx}")[:30]
-
+    digest = hashlib.sha256(f"{client}\0{source_ref}\0{block}".encode()).hexdigest()[:12]
+    prefix = normalize_whatsapp_template_name(f"{client}_{Path(source_name).stem}")
+    name = f"{prefix[:47].rstrip('_')}_{digest}"
     components = []
-    if (idx - 1) < len(extracted_media):
-        m = extracted_media[idx - 1]
-        components.append(
-            {
-                "type": "HEADER",
-                "format": m["kind"],
-                "image_bytes": m["bytes"],
-                "file_type": m["mime_type"],
-            }
-        )
+    if media:
+        components.append({
+            "type": "HEADER", "format": media["kind"], "image_bytes": media["bytes"], "file_type": media["mime_type"],
+        })
     elif parsed.get("header"):
-        components.append(
-            {
-                "type": "HEADER",
-                "format": "TEXT",
-                "text": parsed["header"],
-            }
-        )
-    body_with_tc = parsed["body"].strip()
-    if "t&c" not in body_with_tc.lower() and "terms" not in body_with_tc.lower():
-        body_with_tc = f"{body_with_tc}\n\nT&Cs apply"
-    components.append({"type": "BODY", "text": body_with_tc})
-    components.append(
-        {
-            "type": "BUTTONS",
-            "buttons": [
-                {
-                    "type": "URL",
-                    "text": parsed["button_text"],
-                    "url": parsed["button_url"],
-                    "example": [parsed["button_example"]],
-                }
-            ],
-        }
-    )
-
+        components.append({"type": "HEADER", "format": "TEXT", "text": parsed["header"]})
+    components.append({"type": "BODY", "text": parsed["body"].strip()})
+    components.append({
+        "type": "BUTTONS", "buttons": [{
+            "type": "URL", "text": parsed["button_text"], "url": parsed["button_url"], "example": [parsed["button_example"]],
+        }],
+    })
     return TemplateSubmission(
-        client=client.lower(),
-        channel="whatsapp",
-        template_name=t_name,
-        language="en",
-        category="MARKETING",
+        client=client.lower(), channel="whatsapp", template_name=name,
+        language=detect_language("", column_name=language) if language else detect_language(block),
+        category=detect_category(scope, block),
         waba_id=_resolve_row_waba(client, waba_cache),
-        components=_normalize_whatsapp_buttons(components, client),
-        source_ref=t_name,
+        components=[TemplateComponent(**component) for component in _normalize_whatsapp_buttons(components, client)],
+        source_ref=source_ref,
     )
 
 
-def _parse_single_cell_excel_blocks(
-    all_raw_rows: list, path: str, client: str, extracted_media: list, waba_cache: dict
-) -> list[TemplateSubmission] | None:
-    block_row_cells = None
-    for r in all_raw_rows:
-        text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
-        if len(text_blocks) >= 2:
-            block_row_cells = text_blocks
-            break
-    if not block_row_cells:
-        return None
-
-    base_name = Path(path).stem
-    clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name).strip("_").lower()
-
-    return [
-        _build_single_cell_card_submission(idx, block, client, clean_name, extracted_media, waba_cache)
-        for idx, block in enumerate(block_row_cells, 1)
-    ]
-
-
-def load_from_excel(path: str, client: str = "bajaj") -> list[TemplateSubmission]:
-    """
-    Load standard or dynamically structured WhatsApp rows from Excel.
-    Supports embedded images/videos/documents and arbitrary copy column labels.
-    """
+def load_from_excel(
+    path: str, client: str = "bajaj", source_name: str | None = None, import_notes: list[str] | None = None,
+) -> list[TemplateSubmission]:
+    """Read every sheet without month filtering; native briefs require explicit WhatsApp scope."""
     import openpyxl
+    from briefing_parser import split_multi_campaign_cell
+    from sms_brief import _copy, _metadata, _norm
 
-    waba_cache: dict[str, str] = {}
-    extracted_media = _extract_media_from_xlsx(path)
-    videos = [m for m in extracted_media if m["kind"] == "VIDEO"]
-    images = [m for m in extracted_media if m["kind"] == "IMAGE"]
-    docs = [m for m in extracted_media if m["kind"] == "DOCUMENT"]
-    wb = openpyxl.load_workbook(path, data_only=True)
-    sheet = wb.active
-    all_raw_rows = list(sheet.iter_rows(values_only=True))
-    first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
-    has_standard_headers = any(
-        _DYNAMIC_FIELD_ALIASES.get(_dynamic_key(h), _dynamic_key(h))
-        in ("template_name", "name", "body", "body_text", "components", "category", "language")
-        for h in first_row
-    )
-    block_subs = (
-        _parse_single_cell_excel_blocks(all_raw_rows, path, client, extracted_media, waba_cache)
-        if not has_standard_headers
-        else None
-    )
-    if block_subs is not None:
-        wb.close()
-        return block_subs
-
-    headers = [str(cell.value or "").strip() for cell in sheet[1]] if all_raw_rows else []
-    rows = []
-    dynamic_submissions: list[TemplateSubmission] = []
-    source_name = Path(path).name
-    v_idx = 0
-    img_idx = 0
-    doc_idx = 0
-
-    for row_number, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
-        if not any(row):
-            continue
-
-        raw_row = {h: str(val).strip() if val is not None else "" for h, val in zip(headers, row, strict=False) if h}
-        has_standard_components = bool(raw_row.get("components"))
-        has_standard_body = bool(raw_row.get("body") or raw_row.get("body_text"))
-        has_standard_name = bool(raw_row.get("template_name") or raw_row.get("name"))
-
-        if not has_standard_components and not (has_standard_name and has_standard_body):
-            dynamic = _dynamic_row_to_submission(raw_row, source_name, row_number, client, waba_cache)
-            if dynamic:
-                dynamic_submissions.append(dynamic)
+    source_name = Path(source_name or path).name
+    notes = import_notes if import_notes is not None else []
+    notes.append("All worksheets and months are considered; no current-month filter is applied. Only explicitly WhatsApp-scoped native brief copy is imported.")
+    waba_cache = {}
+    submissions = []
+    workbook = openpyxl.load_workbook(path, data_only=True)
+    try:
+        sheets = [(sheet, list(sheet.iter_rows(values_only=True))) for sheet in workbook]
+        for sheet, rows in sheets:
+            if not rows:
                 continue
-
-        if not has_standard_name:
-            continue
-
-        if raw_row.get("components"):
-            try:
-                raw_row["components"] = json.loads(raw_row["components"])
-            except json.JSONDecodeError:
-                raw_row["components"] = _flat_row_to_components(raw_row)
-        else:
-            raw_row["components"] = _flat_row_to_components(raw_row)
-
-        v_idx, img_idx, doc_idx = _bind_embedded_media_to_row(
-            raw_row, videos, images, docs, extracted_media, v_idx, img_idx, doc_idx
-        )
-        raw_row["client"] = raw_row.get("client") or client
-        if not raw_row.get("waba_id"):
-            raw_row["waba_id"] = _resolve_row_waba(raw_row["client"], waba_cache)
-        if not raw_row.get("language"):
-            raw_row["language"] = "en"
-        if not raw_row.get("category"):
-            raw_row["category"] = "MARKETING"
-
-        rows.append(raw_row)
-
-    wb.close()
-    submissions = [_row_to_submission(row, client=client) for row in rows]
-    return [s for s in [*submissions, *dynamic_submissions] if s.components]
+            if re.search(r"planner|calendar", sheet.title, re.IGNORECASE):
+                notes.append(f"{sheet.title}: planner/calendar worksheet excluded.")
+                continue
+            sheet_channel = _whatsapp_import_channel(sheet.title)
+            if sheet_channel and sheet_channel != "whatsapp":
+                notes.append(f"{sheet.title}: explicitly {sheet_channel.upper()} worksheet excluded, regardless of copied labels.")
+                continue
+            headers = [str(value or "").strip() for value in rows[0]]
+            if _has_whatsapp_table_headers(headers):
+                positions = [(ri, ci + 1) for ri, row in enumerate(rows[1:], 2) for ci, value in enumerate(row)
+                             if ci < len(headers) and _has_whatsapp_table_headers([headers[ci]]) and value]
+                media = _sheet_anchored_media(sheet, positions, notes)
+                for ri, row in enumerate(rows[1:], 2):
+                    raw = {header: str(value).strip() if value is not None else "" for header, value in zip(headers, row, strict=False) if header}
+                    canonical = _canonicalize_dynamic_row(raw)
+                    channel_label = canonical.get("channel", "")
+                    if channel_label and _whatsapp_import_channel(channel_label) != "whatsapp":
+                        notes.append(f"{sheet.title}!A{ri}: non-WhatsApp/unrecognized channel row excluded.")
+                        continue
+                    standard = bool(raw.get("components") or ((raw.get("template_name") or raw.get("name")) and (raw.get("body") or raw.get("body_text"))))
+                    if standard:
+                        try:
+                            raw["components"] = json.loads(raw["components"]) if raw.get("components") else _flat_row_to_components(raw)
+                        except json.JSONDecodeError:
+                            raw["components"] = _flat_row_to_components(raw)
+                        for component in raw["components"]:
+                            if component.get("type") == "HEADER" and component.get("format") in {"IMAGE", "VIDEO", "DOCUMENT"} and not (component.get("media_url") or component.get("media_file")):
+                                matches = [item for (row_num, _), item in media.items() if row_num == ri and item["kind"] == component["format"]]
+                                if len(matches) == 1:
+                                    component.update(image_bytes=matches[0]["bytes"], file_type=matches[0]["mime_type"])
+                        raw["client"] = raw.get("client") or client
+                        raw["waba_id"] = raw.get("waba_id") or _resolve_row_waba(raw["client"], waba_cache)
+                        raw["language"] = raw.get("language") or "en"
+                        raw["category"] = raw.get("category") or "MARKETING"
+                        submission = _row_to_submission(raw, client)
+                    else:
+                        submission = _dynamic_row_to_submission(raw, f"{source_name}:{sheet.title}", ri, client, waba_cache)
+                    if submission and submission.components:
+                        submission.source_ref = canonical.get("source_ref") or f"{source_name}:{sheet.title}!{openpyxl.utils.get_column_letter(next((ci for ci, h in enumerate(headers, 1) if _has_whatsapp_table_headers([h])), 1))}{ri}"
+                        submissions.append(submission)
+                continue
+            cells = _native_whatsapp_cells(rows, sheet.title)
+            media = _sheet_anchored_media(sheet, [
+                (ri, ci) for ri, row in enumerate(rows, 1) for ci, value in enumerate(row, 1) if _copy(value)
+            ], notes)
+            for row, col, text, language, scope in cells:
+                source_ref = f"{source_name}:{sheet.title}!{openpyxl.utils.get_column_letter(col)}{row}"
+                variants = split_multi_campaign_cell(text)
+                for index, block in enumerate(variants, 1):
+                    ref = f"{source_ref}#{index}" if len(variants) > 1 else source_ref
+                    submissions.append(_build_single_cell_card_submission(
+                        block, client, source_name, ref, language, scope, media.get((row, col)), waba_cache,
+                    ))
+            selected = {(row, col) for row, col, *_ in cells}
+            excluded = [
+                (ri, ci) for ri, row in enumerate(rows, 1) for ci, value in enumerate(row, 1)
+                if _copy(value) and (ri, ci) not in selected
+                and not (ci > 1 and (_metadata(row[0]) or _norm(row[0]) in {"campaign name", "campaign_name"}))
+            ]
+            if excluded:
+                refs = ", ".join(f"{sheet.title}!{openpyxl.utils.get_column_letter(col)}{row}" for row, col in excluded)
+                note = f"Excluded {len(excluded)} non-WhatsApp/unscoped copy cells (confirm channel before import): {refs}."
+                notes.append(note)
+                logger.warning(note)
+    finally:
+        workbook.close()
+    if not submissions:
+        raise ValueError("No explicitly WhatsApp-scoped copy found; this workbook contains SMS/RCS/PN or ambiguous content. Select the matching channel or label the WhatsApp section.")
+    return submissions
 
 
 def load_from_json(path: str) -> list[TemplateSubmission]:
@@ -817,50 +943,6 @@ def load_from_list(rows: list[dict], client: str = "bajaj") -> list[TemplateSubm
     return [_row_to_submission(row, client=client) for row in rows]
 
 
-def _bind_embedded_media_to_row(
-    raw_row: dict,
-    videos: list,
-    images: list,
-    docs: list,
-    extracted_media: list,
-    v_idx: int,
-    img_idx: int,
-    doc_idx: int,
-) -> tuple[int, int, int]:
-    for comp in raw_row.get("components", []):
-        if not isinstance(comp, dict) or comp.get("type") != "HEADER":
-            continue
-        cformat = str(comp.get("format", "")).upper()
-        if comp.get("media_url") or comp.get("media_file"):
-            continue
-        if cformat == "VIDEO":
-            if v_idx < len(videos):
-                comp["image_bytes"] = videos[v_idx]["bytes"]
-                comp["file_type"] = videos[v_idx]["mime_type"]
-                v_idx += 1
-            elif v_idx < len(extracted_media):
-                comp["image_bytes"] = extracted_media[v_idx]["bytes"]
-                comp["file_type"] = "video/mp4"
-                v_idx += 1
-        elif cformat == "IMAGE":
-            if img_idx < len(images):
-                comp["image_bytes"] = images[img_idx]["bytes"]
-                comp["file_type"] = images[img_idx]["mime_type"]
-                img_idx += 1
-            elif img_idx < len(extracted_media):
-                comp["image_bytes"] = extracted_media[img_idx]["bytes"]
-                comp["file_type"] = "image/png"
-                img_idx += 1
-        elif cformat == "DOCUMENT":
-            if doc_idx < len(docs):
-                comp["image_bytes"] = docs[doc_idx]["bytes"]
-                comp["file_type"] = docs[doc_idx]["mime_type"]
-                doc_idx += 1
-            elif doc_idx < len(extracted_media):
-                comp["image_bytes"] = extracted_media[doc_idx]["bytes"]
-                comp["file_type"] = "application/pdf"
-                doc_idx += 1
-    return v_idx, img_idx, doc_idx
 
 
 def _score_single_row_routing(
