@@ -1,0 +1,1610 @@
+{
+  "info": {
+    "_postman_id": "1eb51429-e53c-4eb9-80b5-9f132425299f",
+    "name": "Vi DLT APIs",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "58236078",
+    "_collection_link": "https://go.postman.co/collection/58236078-1eb51429-e53c-4eb9-80b5-9f132425299f?source=collection_link"
+    ,"description": "Repository-only repair: select the supplied Vi DLT Testing environment. The base host comes from the saved token example, not an independently verified provider contract. Generate Token saves access_token and refresh_token; Refresh Access Token updates access_token and preserves refresh_token unless the server rotates it. Credentials remain blank: the former Postman vault references did not contain portable credentials. Provider mutations require allow_mutations=true after explicit review. Register Content Template remains an incomplete negative example (no documented content-text field); do not infer successful whitelisting from it. Saved HTTP 200 examples include business failures. Callback requests are simulations, not provider status reads. No live provider verification was performed."
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const name = pm.info.requestName;",
+          "const auth = name === 'Generate Token' || name === 'Refresh Access Token';",
+          "const provider = auth || ['Register Header', 'Register Content Template', 'Link Header', 'De-link Header'].includes(name);",
+          "const requireValue = key => { const value = pm.variables.get(key); if (typeof value !== 'string' || !value.trim() || /\\{\\{|redacted/i.test(value)) throw new Error('Set a real local value for ' + key); return value; };",
+          "if (name === 'Generate Token') { pm.environment.unset('access_token'); pm.environment.unset('refresh_token'); }",
+          "if (name === 'Refresh Access Token') pm.environment.unset('access_token');",
+          "try {",
+          "  const destination = requireValue(provider ? 'base_url' : 'callback_url');",
+          "  if (!/^https:\\/\\/[^\\s/?#]+(?:\\/[^\\s?#]*)?$/.test(destination)) throw new Error('Use an explicit HTTPS destination without query or fragment');",
+          "  if (name === 'Generate Token') { requireValue('username'); requireValue('password'); }",
+          "  else if (name === 'Refresh Access Token') requireValue('refresh_token');",
+          "  else {",
+          "    if (pm.variables.get('allow_mutations') !== 'true') throw new Error('Review this mutation or callback simulation, then explicitly set allow_mutations=true');",
+          "    if (provider) { requireValue('access_token'); requireValue('entity_id'); }",
+          "    if (name === 'Link Header' || name === 'De-link Header') { requireValue('header_id'); requireValue('template_id'); }",
+          "  }",
+          "} catch (error) { pm.execution.skipRequest(); throw error; }"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const name = pm.info.requestName;",
+          "const auth = name === 'Generate Token' || name === 'Refresh Access Token';",
+          "let body; let parseError;",
+          "try { body = pm.response.json(); } catch (error) { parseError = error; }",
+          "const token = value => typeof value === 'string' && value.trim().length > 0 && !/\\{\\{|redacted/i.test(value);",
+          "const httpOK = pm.response.code >= 200 && pm.response.code < 300;",
+          "const object = !parseError && body !== null && typeof body === 'object' && !Array.isArray(body);",
+          "const status = object ? body.status : undefined;",
+          "const businessOK = status === undefined || (Number.isFinite(Number(status)) && Number(status) >= 200 && Number(status) < 300);",
+          "const accepted = httpOK && object && businessOK && !body.error && !body.error_text && !body.detail;",
+          "pm.test('HTTP and JSON business response indicate success', () => { pm.expect(accepted).to.eql(true); });",
+          "if (auth) {",
+          "  const valid = accepted && token(body.access) && (name !== 'Generate Token' || token(body.refresh)) && (body.refresh === undefined || token(body.refresh));",
+          "  pm.test('Authentication returned usable token fields', () => { pm.expect(valid).to.eql(true); });",
+          "  if (valid) {",
+          "    pm.environment.set('access_token', body.access);",
+          "    if (body.refresh !== undefined) pm.environment.set('refresh_token', body.refresh);",
+          "  } else { pm.environment.unset('access_token'); pm.environment.unset('refresh_token'); }",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Authentication",
+      "item": [
+        {
+          "name": "Generate Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"username\": \"{{username}}\",\r\n  \"password\": \"{{password}}\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                ""
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 - Token Generated Successfully",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"username\": \"{{username}}\",\r\n  \"password\": \"{{password}}\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "https://connect.vilpower.in/api/token/",
+                  "protocol": "https",
+                  "host": [
+                    "connect",
+                    "vilpower",
+                    "in"
+                  ],
+                  "path": [
+                    "api",
+                    "token",
+                    ""
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "server",
+                  "value": "nginx"
+                },
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:20:01 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "537"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "allow",
+                  "value": "POST, OPTIONS, GET, POST, HEAD"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "DENY, SAMEORIGIN"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=63072000; includeSubdomains; preload"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "1; mode=block"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"refresh\": \"<redacted-refresh-token>\",\n  \"access\": \"<redacted-access-token>\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Refresh Access Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"refresh\": \"{{refresh_token}}\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/token/refresh",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "token",
+                "refresh"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 - Token Generated Successfully",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"refresh\": \"{{json_web_token_15n7}}\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/token/refresh",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "token",
+                    "refresh"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "server",
+                  "value": "nginx"
+                },
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:26:10 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "268"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "allow",
+                  "value": "POST, OPTIONS, GET, POST, HEAD"
+                },
+                {
+                  "key": "x-frame-options",
+                  "value": "DENY, SAMEORIGIN"
+                },
+                {
+                  "key": "x-content-type-options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "referrer-policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=63072000; includeSubdomains; preload"
+                },
+                {
+                  "key": "x-xss-protection",
+                  "value": "1; mode=block"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"access\": \"<redacted-access-token>\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Enterprise Registration",
+      "item": [
+        {
+          "name": "Register Header",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"eid\": \"{{entity_id}}\",\r\n  \"htype\": \"O\",\r\n  \"hctgy\": 1,\r\n  \"hdr\": \"BMRKTS\",\r\n  \"hdesc\": \"Existing header duplicate validation\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/header",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "header"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "412 - Header Already Registered",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "acces",
+                    "value": "",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"eid\": \"{{username}}\",\r\n  \"htype\": \"O\",\r\n  \"hctgy\": 1,\r\n  \"hdr\": \"BMRKTS\",\r\n  \"hdesc\": \"Existing header duplicate validation\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/header",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "header"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": "Server",
+                  "value": "nginx"
+                },
+                {
+                  "key": "Date",
+                  "value": "Thu, 17 Sep 2026 06:57:20 GMT"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "52"
+                },
+                {
+                  "key": "Connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "Allow",
+                  "value": "OPTIONS, POST"
+                },
+                {
+                  "key": "Allow",
+                  "value": "GET, POST, HEAD"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "DENY"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "X-Content-Type-Options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "Referrer-Policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "Strict-Transport-Security",
+                  "value": "max-age=63072000; includeSubdomains; preload"
+                },
+                {
+                  "key": "X-XSS-Protection",
+                  "value": "1; mode=block"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": 412,\n    \"message\": \"header already registered\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Register Content Template",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"eid\": \"{{entity_id}}\",\r\n  \"ttype\": \"SI\",\r\n  \"ctgy\": 1,\r\n  \"hdrs\": [\"BMRKTS\"],\r\n  \"msgtype\": 1,\r\n  \"tname\": \"API Validation Test\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/content_template",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "content_template"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "404 - Mandatory Template Parameters Missing",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": " application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"eid\": \"{{username}}\",\r\n  \"ttype\": \"SI\",\r\n  \"ctgy\": 1,\r\n  \"hdrs\": [\"BMRKTS\"],\r\n  \"msgtype\": 1,\r\n  \"tname\": \"API Validation Test\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/content_template",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "content_template"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": "Server",
+                  "value": "nginx"
+                },
+                {
+                  "key": "Date",
+                  "value": "Wed, 16 Sep 2026 12:42:58 GMT"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "47"
+                },
+                {
+                  "key": "Connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "Allow",
+                  "value": "OPTIONS, POST"
+                },
+                {
+                  "key": "Allow",
+                  "value": "GET, POST, HEAD"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "DENY"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "X-Content-Type-Options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "Referrer-Policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "Strict-Transport-Security",
+                  "value": "max-age=63072000; includeSubdomains; preload"
+                },
+                {
+                  "key": "X-XSS-Protection",
+                  "value": "1; mode=block"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": 404,\n    \"message\": \"Parameter is missing\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Link Header",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"eid\": \"{{entity_id}}\",\r\n  \"ctid\": \"{{template_id}}\",\r\n  \"type\": 1,\r\n  \"hid\": \"{{header_id}}\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/addremove_template_headers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "addremove_template_headers"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Link Header",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": " application/json",
+                    "type": "text"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"eid\": \"{{username}}\",\r\n  \"ctid\": \"{{template_id}}\",\r\n  \"type\": 1,\r\n  \"hid\": \"{{header_id}}\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{base_url}}/api/addremove_template_headers",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "api",
+                    "addremove_template_headers"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": null,
+              "header": [
+                {
+                  "key": "Server",
+                  "value": "nginx"
+                },
+                {
+                  "key": "Date",
+                  "value": "Thu, 17 Sep 2026 06:58:01 GMT"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "Content-Length",
+                  "value": "97"
+                },
+                {
+                  "key": "Connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "Allow",
+                  "value": "OPTIONS, POST"
+                },
+                {
+                  "key": "Allow",
+                  "value": "GET, POST, HEAD"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "DENY"
+                },
+                {
+                  "key": "X-Frame-Options",
+                  "value": "SAMEORIGIN"
+                },
+                {
+                  "key": "X-Content-Type-Options",
+                  "value": "nosniff"
+                },
+                {
+                  "key": "Referrer-Policy",
+                  "value": "same-origin"
+                },
+                {
+                  "key": "Strict-Transport-Security",
+                  "value": "max-age=63072000; includeSubdomains; preload"
+                },
+                {
+                  "key": "X-XSS-Protection",
+                  "value": "1; mode=block"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n    \"status\": 424,\n    \"msg\": \"Link and Delink of headers for content template is currently not available\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "De-link Header",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"eid\": \"{{entity_id}}\",\r\n  \"ctid\": \"{{template_id}}\",\r\n  \"type\": 2,\r\n  \"hid\": \"{{header_id}}\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/addremove_template_headers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "addremove_template_headers"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "03 Registration Callback Simulations",
+      "item": [
+        {
+          "name": "Callback - Content Template Approved",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Approved\",\r\n  \"comments\": \"\",\r\n  \"reqts\": \"15-09-2026 17:00:00\",\r\n  \"actts\": \"15-09-2026 17:05:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Callback - Content Template Approved",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Approved\",\r\n  \"comments\": \"\",\r\n  \"reqts\": \"15-09-2026 17:00:00\",\r\n  \"actts\": \"15-09-2026 17:05:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:04:59 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=1vYCgVJ9BnbjxMdmX5EC59CfgxZB7iWB7CWcJmUUV5w-1789473898.9584918-1.0.1.1-cyr44pyEb9tiZ5MfN1p9BT983jhsinOcRKp4PXJfrEEHo6GHIatOlphJJO0DKQ6MY_VG4PUZlwdN_H1yDq1T39wHuZaZDX0.tSm.YW1NPytofOSPTDXBZwNbrV_aU6JY; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:34:59 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b77f3c7e58ac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Callback - Header Approved",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"H\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Approved\",\r\n  \"comments\": \"\",\r\n  \"reqts\": \"15-09-2026 16:45:00\",\r\n  \"actts\": \"15-09-2026 16:46:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Callback - Header Approved",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"H\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Approved\",\r\n  \"comments\": \"\",\r\n  \"reqts\": \"15-09-2026 16:45:00\",\r\n  \"actts\": \"15-09-2026 16:46:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:04:00 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=Ty0yY5_Z85vUHcc4QpT09mRHyESamArOqnK83ZryTFw-1789473840.5967078-1.0.1.1-C.rl74387TkQQTcSYQHCEyfRiPEesQaWQ1C5w5G3dD8iXe27Iz_eTSMiZJMr8MkV3iDsd4vXv.fTpTA3a0cHVsdM79V2pX57JaC7qa9uwPuO7cN5pFh3SKcQj8PD5zw0; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:34:00 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b77dcfbcb9ac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Callback - Consent Template Rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"CST\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Rejected\",\r\n  \"comments\": \"Not valid template, please resubmit correctly\",\r\n  \"reqts\": \"15-09-2026 17:30:00\",\r\n  \"actts\": \"15-09-2026 17:35:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Callback - Consent Template Rejected",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"CST\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Rejected\",\r\n  \"comments\": \"Not valid template, please resubmit correctly\",\r\n  \"reqts\": \"15-09-2026 17:30:00\",\r\n  \"actts\": \"15-09-2026 17:35:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:06:43 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=jywFn14pvY3thzOIOlWHXPN4sou4CxeQCPlfoqrvaDA-1789474002.9215136-1.0.1.1-ofo5TKHdJlWg7iicNNwrdyNJddmKfj2FwKC7eGQxOMPc_ajRXcOhzomNjNAhU3OSRH_1Jr0hKqdnkuc5UkhYwpG5ot29fXcUQ8fZaxNDa9bK8DYnBfNT.j4sRSWHepmX; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:36:43 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b781c63822ac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Callback - Content Template Rejected",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Rejected\",\r\n  \"comments\": \"Template is not valid, please resubmit\",\r\n  \"reqts\": \"15-09-2026 17:10:00\",\r\n  \"actts\": \"15-09-2026 17:15:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Callback - Content Template Rejected",
+              "originalRequest": {
+                "method": "POST",
+                "header": [],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Rejected\",\r\n  \"comments\": \"Template is not valid, please resubmit\",\r\n  \"reqts\": \"15-09-2026 17:10:00\",\r\n  \"actts\": \"15-09-2026 17:15:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:05:06 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=1c.J0UYc84nfrhBeoDlBe_W_sMV4.j.1qy6R2S7rUYc-1789473905.7921224-1.0.1.1-u6TouqHkaO8aFTYhTU45GkamjLho_FThJzld84reEKLThLQcg1RxQ3TNXa4X8Ky_KvtpAFQZOTsyiqQYEzjsWmznQj.6vDWUA9m5FrGWcqY921pOXjt53kNhX2nvHTFi; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:35:06 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b77f672f5dac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Callback - Consent Template Approved",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"CST\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Approved\",\r\n  \"comments\": \"\",\r\n  \"reqts\": \"15-09-2026 17:20:00\",\r\n  \"actts\": \"15-09-2026 17:25:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Callback - Consent Template Approved",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"CST\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"status\": \"Approved\",\r\n  \"comments\": \"\",\r\n  \"reqts\": \"15-09-2026 17:20:00\",\r\n  \"actts\": \"15-09-2026 17:25:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:02:49 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=5xWIzZLeBe6FOjOGRp9vhfdBdyZvJJYVd5e0ytILOwg-1789473768.929743-1.0.1.1-BJ7omlscnSu7AlW_Xa87NRAS4Qv_.gdlLw_dsGrGsaZUnMQFhYwMxXI.TmwL7dmTVGmQwmZJ45jfZ_2jY5qTnCje.BT9mEZVOhC4mDhjrS8Ro_sfEyxXPkK_zfdVTfXr; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:32:49 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b77c0fca60ac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Real-Time Status Simulations",
+      "item": [
+        {
+          "name": "Real-Time Status - Header SV",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"H\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"PXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"SV\",\r\n  \"actts\": \"15-09-2026 17:40:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Real-Time Status - Header SV",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"H\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"PXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"SV\",\r\n  \"actts\": \"15-09-2026 17:40:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:06:50 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=jx6_dGv4E6BXJwrFrOyinQ_TfUruEhN7hYfyV0DW4sA-1789474009.9853833-1.0.1.1-XJM28WPizvUhu5pIKxPbaM3JESSE5FCaePWIMqrXLfBkbt5eg_O4DKIdVCIHBmq21dfORMyIaTL4r_6f.pj90t75SSPUa2V0xBzUU8O.7YhxAA3H6BiozekMOmrG8JeE; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:36:50 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b781f26c9eac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Real-Time Status - Header Blacklisted",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"H\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"PXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"B\",\r\n  \"actts\": \"15-09-2026 17:50:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Real-Time Status - Header Blacklisted",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"H\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"PXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"B\",\r\n  \"actts\": \"15-09-2026 17:50:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:06:57 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=KfWU.CKcyWGlgNGtN2JcCi8LO.8QiZOf8NEMJqMTrjw-1789474016.75181-1.0.1.1-aJvHjyaRh6qtdTvakiJUcZ35ZUsU_AHXJ3C_2CX2elk1L7xoYe9ufkLuHoBxEGDRGBmmRGCR4iOswWM.34yPPL2nB7EfF.0dQCfIyBxMBgInFgRbavsWPmbII45qRkZu; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:36:57 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b7821caf1dac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Real-Time Status - Content Template SV",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"TEMPXXXXXXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"SV\",\r\n  \"actts\": \"15-09-2026 18:00:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Real-Time Status - Content Template SV",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"TEMPXXXXXXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"SV\",\r\n  \"actts\": \"15-09-2026 18:00:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:07:06 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=qouDHulQtNHG1_1yoOnhaUO9lP7ZvrkqPMaKlcwg2kU-1789474026.121596-1.0.1.1-S7ZoHQmnLy9m58l6qwXIPSRBeZHqLAgHef1xnlhrI7CJpA.opfugwmgL1OTFMOQwHpiD_8r64xzLLVEFTIupftisT8A3LbS59QT9mFXkcvq7ScSHd1ePGpfOF2LZBxO4; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:37:06 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b782573cc9ac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Real-Time Status - Content Template Blacklisted",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"TEMPXXXXXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"B\",\r\n  \"actts\": \"15-09-2026 18:10:00\"\r\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{callback_url}}",
+              "host": [
+                "{{callback_url}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "Real-Time Status - Content Template Blacklisted",
+              "originalRequest": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\r\n  \"type\": \"CT\",\r\n  \"eid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uid\": \"1XNNNNNNNNNNNNNNNNN\",\r\n  \"uname\": \"TEMPXXXXXXXXX\",\r\n  \"rtelco\": \"VIL\",\r\n  \"utelco\": \"BSNL\",\r\n  \"status\": \"B\",\r\n  \"actts\": \"15-09-2026 18:10:00\"\r\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{callback_url}}",
+                  "host": [
+                    "{{callback_url}}"
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": "date",
+                  "value": "Tue, 15 Sep 2026 12:03:38 GMT"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "content-length",
+                  "value": "24"
+                },
+                {
+                  "key": "connection",
+                  "value": "keep-alive"
+                },
+                {
+                  "key": "set-cookie",
+                  "value": "__cf_bm=0cugqncxUkaoy2Bmzl62MajSvha8DpG7flIhrxraqcM-1789473817.1957235-1.0.1.1-67vpaSPodKGH5hoSvHMLWdBLSqi_ROj473WLWNpcN.i3WO6nAGa7us4RCsoGqG_PlV.fJf5GcXgUDVek4QvHkQiKYZfhWX9Tb2sZ5c_5kH1BFsCCegKgvriuuOdZSmdx; HttpOnly; SameSite=None; Secure; Path=/; Domain=pstmn.io; Expires=Tue, 15 Sep 2026 12:33:38 GMT"
+                },
+                {
+                  "key": "cf-cache-status",
+                  "value": "DYNAMIC"
+                },
+                {
+                  "key": "server",
+                  "value": "cloudflare"
+                },
+                {
+                  "key": "cf-ray",
+                  "value": "a3b77d3d7f67ac91-HYD"
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"received\": true\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
