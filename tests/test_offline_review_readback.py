@@ -138,3 +138,98 @@ def test_offline_and_verified_preview_keep_the_same_review_identity(monkeypatch,
         assert offline.get(field) == verified.get(field), field
     assert offline["submission_ready"] is False
     assert verified["submission_ready"] is True
+
+
+@pytest.fixture
+def unconfigured_whatsapp(no_provider, monkeypatch):
+    import portal_sessions
+
+    monkeypatch.delenv("TATA_WABA_ID", raising=False)
+    monkeypatch.setattr(config, "DEFAULT_WABA_IDS", {})
+    monkeypatch.setattr(portal_sessions, "load_settings", lambda *args: {})
+
+
+@pytest.mark.parametrize("declared_waba", ["", "file-declared-waba"])
+def test_offline_whatsapp_preview_without_configured_waba(
+    unconfigured_whatsapp, provision_user, declared_waba,
+):
+    _, headers = provision_user("tata")
+    response = TestClient(api.app, headers=headers).post(
+        "/api/preview?account=tata&channel=whatsapp&verify_inventory=false",
+        files={"file": ("review.csv", (
+            "template_name,body_text,waba_id\n"
+            f"reviewed_offer,Exact customer copy.,{declared_waba}\n"
+        ).encode())},
+    )
+    assert response.status_code == 200, response.text
+    row, = response.json()
+    assert row["waba_id"] == declared_waba
+    assert row["components"][0]["text"] == "Exact customer copy."
+    assert row["inventory_status"] == "unverified"
+    assert row["submission_ready"] is False
+
+
+@pytest.mark.parametrize("declared_waba", ["", "file-declared-waba"])
+def test_whatsapp_submission_still_requires_configured_waba(
+    unconfigured_whatsapp, provision_user, declared_waba,
+):
+    _, headers = provision_user("tata")
+    response = TestClient(api.app, headers=headers).post(
+        "/api/submit?account=tata&channel=whatsapp&expected_account=tata"
+        "&expected_channel=whatsapp&skip_duplicates=false",
+        files={"file": ("review.csv", (
+            "template_name,body_text,waba_id\n"
+            f"reviewed_offer,Exact customer copy.,{declared_waba}\n"
+        ).encode())},
+    )
+    assert response.status_code == 400, response.text
+    assert "Missing WABA ID for tata" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("endpoint", ["preview", "submit"])
+def test_declared_whatsapp_waba_must_match_known_account(
+    unconfigured_whatsapp, provision_user, monkeypatch, endpoint,
+):
+    monkeypatch.setenv("TATA_WABA_ID", "selected-account-waba")
+    _, headers = provision_user("tata")
+    response = TestClient(api.app, headers=headers).post(
+        f"/api/{endpoint}?account=tata&channel=whatsapp&verify_inventory=false"
+        "&expected_account=tata&expected_channel=whatsapp&skip_duplicates=false",
+        files={"file": ("review.csv", (
+            b"template_name,body_text,waba_id\n"
+            b"reviewed_offer,Exact customer copy.,another-account-waba\n"
+        ))},
+    )
+    assert response.status_code == 400, response.text
+    assert "WABA does not match the selected account" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("client,channel,waba_id", [
+    ("bajaj", "whatsapp", "selected-account-waba"),
+    ("tata", "rcs", "selected-account-waba"),
+    ("tata", "whatsapp", "another-account-waba"),
+])
+def test_preview_parsed_identity_checks_remain_strict(
+    unconfigured_whatsapp, monkeypatch, client, channel, waba_id,
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("TATA_WABA_ID", "selected-account-waba")
+    submission = SimpleNamespace(client=client, channel=channel, waba_id=waba_id)
+    with pytest.raises(api.HTTPException) as error:
+        api._validate_parsed_destination([submission], "tata", "whatsapp", require_waba=False)
+    assert error.value.status_code == 400
+
+
+def test_only_preview_accepts_parsed_row_without_waba(
+    unconfigured_whatsapp, monkeypatch,
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("TATA_WABA_ID", "selected-account-waba")
+    submission = SimpleNamespace(client="tata", channel="whatsapp", waba_id="")
+    api._validate_parsed_destination([submission], "tata", "whatsapp", require_waba=False)
+    with pytest.raises(api.HTTPException) as error:
+        api._validate_parsed_destination([submission], "tata", "whatsapp")
+    assert error.value.status_code == 400
+    assert "WABA does not belong to the selected account" in error.value.detail

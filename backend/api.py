@@ -1371,6 +1371,12 @@ def _inspect_single_submission(
             ),
         }
     item["account_detection"] = account_detection
+    if channel == "whatsapp":
+        item["language_review_required"] = not str(item.get("language") or "").strip()
+        item["language_review_message"] = (
+            "Language could not be determined reliably. Select a supported WhatsApp language before submission."
+            if item["language_review_required"] else None
+        )
 
     aspect_warnings = []
     grammar_warnings = []
@@ -1495,7 +1501,7 @@ def _inspect_template_quality_and_warnings(
             preview.update(
                 inventory_status="unverified" if inventory_error or not verify_inventory else "verified",
                 inventory_error=inventory_error,
-                submission_ready=verify_inventory and not bool(inventory_error),
+                submission_ready=verify_inventory and not bool(inventory_error) and not preview.get("language_review_required", False),
             )
             if inventory_error or not verify_inventory:
                 preview["already_exists_on_waba"] = None
@@ -1522,11 +1528,63 @@ def _explicit_submission_destination(account: str, channel: str, current_user: d
         raise HTTPException(status_code=400, detail="Unknown submission account.")
     return acc, chan
 
+_WHATSAPP_LANGUAGE_CODES = frozenset({"en", "hi", "mr", "gu", "pa", "bn", "ta", "te", "kn", "ml", "ur", "or", "as"})
 
-def _validate_upload_destination(path: str, suffix: str, account: str, channel: str) -> None:
+
+def _parse_language_overrides(value: str | None, channel: str) -> dict[str, str]:
+    if value is None:
+        return {}
+    try:
+        overrides = json.loads(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="language_overrides must be a JSON object of source_ref to language code.") from exc
+    if not isinstance(overrides, dict) or any(
+        not isinstance(source_ref, str) or not source_ref
+        or not isinstance(language, str) or language not in _WHATSAPP_LANGUAGE_CODES
+        for source_ref, language in overrides.items()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="language_overrides must map exact source_ref values to supported language codes: en, hi, mr, gu, pa, bn, ta, te, kn, ml, ur, or, as.",
+        )
+    if overrides and channel != "whatsapp":
+        raise HTTPException(status_code=400, detail="language_overrides are only supported for WhatsApp.")
+    return overrides
+
+
+def _apply_language_overrides(submissions: list, overrides: dict[str, str]) -> None:
+    source_refs = {submission.source_ref for submission in submissions}
+    unknown = overrides.keys() - source_refs
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"language_overrides contains unknown source_ref values: {', '.join(sorted(unknown))}",
+        )
+    for submission in submissions:
+        if submission.source_ref in overrides:
+            submission.language = overrides[submission.source_ref]
+
+
+def _destination_waba_id(account: str, required: bool) -> str | None:
+    """Local review may lack configured identity; submission must resolve it."""
+    try:
+        return str(get_waba_id(account) or "")
+    except OSError:
+        if required:
+            raise
+        return None
+
+
+def _validate_upload_destination(
+    path: str, suffix: str, account: str, channel: str, *, require_waba: bool = True,
+) -> None:
     """Reject explicit spreadsheet routing fields, including ones a channel loader ignores."""
     channel_aliases = {"wa": "whatsapp", "whatsapp": "whatsapp", "rcs": "rcs", "sms": "sms"}
     import csv
+    from loader import _has_whatsapp_table_headers, _whatsapp_import_channel
+    from rcs_loader import _has_rcs_table_headers
+
+    has_table_headers = _has_whatsapp_table_headers if channel == "whatsapp" else _has_rcs_table_headers
 
     def validate(rows, client_brief=False, native_brief=False):
         expected_waba = None
@@ -1537,6 +1595,8 @@ def _validate_upload_destination(path: str, suffix: str, account: str, channel: 
             if client_brief:
                 index = row.get("excel_row") or index
                 row["channel"] = channel_aliases.get(row.get("channel", "").lower(), row.get("channel", ""))
+            if native_brief and row.get("channel") and _whatsapp_import_channel(row["channel"]) != channel:
+                continue
             for field in ("client", "account"):
                 if row.get(field) and row[field].lower() != account:
                     raise HTTPException(status_code=400, detail=f"Row {index}: account does not match the selected destination.")
@@ -1544,10 +1604,10 @@ def _validate_upload_destination(path: str, suffix: str, account: str, channel: 
                 raise HTTPException(status_code=400, detail=f"Row {index}: channel does not match the selected destination.")
             if channel == "whatsapp" and row.get("waba_id"):
                 if expected_waba is None:
-                    expected_waba = str(get_waba_id(account) or "")
-                if row["waba_id"] != expected_waba:
+                    expected_waba = _destination_waba_id(account, require_waba)
+                if expected_waba is not None and row["waba_id"] != expected_waba:
                     raise HTTPException(status_code=400, detail=f"Row {index}: WABA does not match the selected account.")
-            if client_brief and channel == "rcs" and row.get("bot_id"):
+            if channel == "rcs" and row.get("bot_id"):
                 if expected_bot is None:
                     expected_bot = str(get_rcs_bot_id(account) or "")
                 if row["bot_id"] != expected_bot:
@@ -1567,40 +1627,27 @@ def _validate_upload_destination(path: str, suffix: str, account: str, channel: 
     if channel == "sms":
         # DLT's loader validates every row's ownership, including legacy XLS files.
         return
-    if channel == "whatsapp" and suffix == ".xlsx":
-        import openpyxl
-        from loader import _has_whatsapp_table_headers
-
-        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        try:
-            for sheet in workbook:
-                rows = list(sheet.iter_rows(values_only=True))
-                first = next((index for index, row in enumerate(rows) if any(value is not None for value in row)), None)
-                if first is None:
-                    continue
-                headers = rows[first]
-                native = not _has_whatsapp_table_headers(headers)
-                validate((dict(zip(headers, row)) for row in rows[first + 1:]), native_brief=native)
-                if native:
-                    for row in rows:
-                        if len(row) >= 2 and str(row[0] or "").strip().lower() in {"client", "account", "waba_id"}:
-                            validate([{row[0]: row[1]}], native_brief=True)
-        finally:
-            workbook.close()
-        return
-
     if suffix in (".xlsx", ".xls"):
-        import openpyxl
-        workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
-        try:
-            rows = workbook.active.iter_rows(values_only=True)
-            headers = next(rows, ())
-            validate(dict(zip(headers, row)) for row in rows)
-        finally:
-            workbook.close()
+        from sms_brief import _read_sheets
+
+        for sheet_name, rows in _read_sheets(path, f"upload{suffix}"):
+            first = next((index for index, row in enumerate(rows) if any(value is not None and value != "" for value in row)), None)
+            if first is None:
+                continue
+            headers = rows[first]
+            native = not has_table_headers(headers)
+            sheet_channel = _whatsapp_import_channel(sheet_name)
+            if native and sheet_channel and sheet_channel != channel:
+                continue
+            validate((dict(zip(headers, row)) for row in rows[first + 1:]), native_brief=native)
+            if native:
+                for row in rows:
+                    if len(row) >= 2 and str(row[0] or "").strip().lower() in {"client", "account", "waba_id", "bot_id"}:
+                        validate([{row[0]: row[1]}], native_brief=True)
     else:
         with open(path, newline="", encoding="utf-8-sig") as source:
-            validate(csv.DictReader(source))
+            reader = csv.DictReader(source)
+            validate(reader, native_brief=not has_table_headers(reader.fieldnames or []))
 
 
 @app.post("/api/preview")
@@ -1612,8 +1659,10 @@ async def preview_file(
     use_ai: bool = Query(False),
     verify_inventory: bool = Query(True),
     current_user: dict = Depends(get_current_user),
+    language_overrides: str | None = Form(None),
 ):
     account, channel = _explicit_submission_destination(account, channel, current_user)
+    overrides = _parse_language_overrides(language_overrides, channel)
     acc = account
     if acc == "apparel":
         raise HTTPException(
@@ -1626,16 +1675,25 @@ async def preview_file(
         tmp.write(await file.read())
         tmp_path = tmp.name
     try:
-        await asyncio.to_thread(_validate_upload_destination, tmp_path, suffix, account, chan)
+        await asyncio.to_thread(
+            _validate_upload_destination, tmp_path, suffix, account, chan, require_waba=False,
+        )
+        import_notes: list[str] = []
         if chan == "sms":
             from sms_dlt import load_drafts, preview_drafts
             drafts = await asyncio.to_thread(load_drafts, tmp_path, account, source_filename=file.filename)
             return await asyncio.to_thread(preview_drafts, drafts, account, verify_inventory=verify_inventory)
         elif chan == "rcs":
             if suffix in (".xlsx", ".xls"):
-                submissions = await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=account, upload_media=False)
+                submissions = await asyncio.to_thread(
+                    load_rcs_from_excel, tmp_path, client=account, upload_media=False,
+                    source_name=file.filename, import_notes=import_notes,
+                )
             else:
-                submissions = await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=account)
+                submissions = await asyncio.to_thread(
+                    load_rcs_from_csv, tmp_path, client=account,
+                    source_name=file.filename, import_notes=import_notes,
+                )
             if not submissions:
                 log_activity(
                     user=user,
@@ -1649,6 +1707,7 @@ async def preview_file(
                     status_code=400,
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}'. Please make sure the file contains RCS template definitions.",
                 )
+            _validate_parsed_destination(submissions, account, "rcs")
             log_activity(
                 user=user,
                 action="TEMPLATE_PREVIEW",
@@ -1665,16 +1724,19 @@ async def preview_file(
             )
             for preview in previews:
                 preview["source_file"] = file.filename or "upload.csv"
+            if import_notes and previews:
+                previews[0]["import_notes"] = import_notes
             return previews
 
-        import_notes: list[str] = []
         # WhatsApp
         if suffix in (".xlsx", ".xls"):
             submissions = await asyncio.to_thread(
                 load_from_excel, tmp_path, client=account, source_name=file.filename, import_notes=import_notes,
             )
         else:
-            submissions = await asyncio.to_thread(load_from_csv, tmp_path, client=account, source_name=file.filename)
+            submissions = await asyncio.to_thread(
+                load_from_csv, tmp_path, client=account, source_name=file.filename, import_notes=import_notes,
+            )
 
         if not submissions:
             log_activity(
@@ -1689,6 +1751,8 @@ async def preview_file(
                 status_code=400,
                 detail=_whatsapp_input_diagnostic(file.filename or "uploaded file"),
             )
+        _validate_parsed_destination(submissions, account, "whatsapp", require_waba=False)
+        _apply_language_overrides(submissions, overrides)
 
         log_activity(
             user=user,
@@ -1732,13 +1796,18 @@ async def preview_file(
         os.unlink(tmp_path)
 
 
-def _validate_parsed_destination(submissions: list, account: str, channel: str) -> None:
-    expected_waba = str(get_waba_id(account) or "") if channel == "whatsapp" else None
+def _validate_parsed_destination(
+    submissions: list, account: str, channel: str, *, require_waba: bool = True,
+) -> None:
+    expected_waba = _destination_waba_id(account, require_waba) if channel == "whatsapp" else None
+    expected_bot = str(get_rcs_bot_id(account) or "") if channel == "rcs" else None
     for submission in submissions:
         if str(submission.client or "").strip().lower() != account or submission.channel != channel:
             raise HTTPException(status_code=400, detail="Template row does not belong to the selected account/channel.")
-        if expected_waba is not None and str(submission.waba_id or "") != expected_waba:
+        if expected_waba is not None and (require_waba or submission.waba_id) and str(submission.waba_id or "") != expected_waba:
             raise HTTPException(status_code=400, detail="Template row WABA does not belong to the selected account.")
+        if expected_bot is not None and submission.bot_id and str(submission.bot_id) != expected_bot:
+            raise HTTPException(status_code=400, detail="Template row RCS bot does not belong to the selected account.")
 
 
 async def _submit_rcs_batch(
@@ -1755,10 +1824,16 @@ async def _submit_rcs_batch(
     require_tenant_access(acc, current_user)
     QUEUE_MANAGER.bind_event_loop()
     bot_id = get_rcs_bot_id(acc)
+    import_notes: list[str] = []
     subs = (
-        await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=acc, upload_media=False)
+        await asyncio.to_thread(
+            load_rcs_from_excel, tmp_path, client=acc, upload_media=False,
+            source_name=filename, import_notes=import_notes,
+        )
         if suffix in (".xlsx", ".xls")
-        else await asyncio.to_thread(load_rcs_from_csv, tmp_path, client=acc)
+        else await asyncio.to_thread(
+            load_rcs_from_csv, tmp_path, client=acc, source_name=filename, import_notes=import_notes,
+        )
     )
     if not subs:
         raise HTTPException(status_code=400, detail=f"No valid RCS templates found in '{filename}' to submit.")
@@ -1889,6 +1964,7 @@ async def _submit_rcs_batch(
         "total": len(subs), "submitted": submitted, "skipped_duplicates": duplicates,
         "blocked_aspect_ratio": sum(entry["status"] == "blocked_aspect_ratio" for entry in results),
         "results": [_json_safe(entry) for entry in results],
+        "import_notes": import_notes,
     }
 
 
@@ -1901,15 +1977,28 @@ async def _submit_wa_batch(
     fix_grammar: bool,
     filename: str,
     current_user: dict,
+    language_overrides: dict[str, str] | None = None,
 ) -> dict:
+    import_notes: list[str] = []
     subs = (
-        await asyncio.to_thread(load_from_excel, tmp_path, client=acc, source_name=filename)
+        await asyncio.to_thread(
+            load_from_excel, tmp_path, client=acc, source_name=filename, import_notes=import_notes,
+        )
         if suffix in (".xlsx", ".xls")
-        else await asyncio.to_thread(load_from_csv, tmp_path, client=acc, source_name=filename)
+        else await asyncio.to_thread(
+            load_from_csv, tmp_path, client=acc, source_name=filename, import_notes=import_notes,
+        )
     )
     if not subs:
         raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(filename))
     _validate_parsed_destination(subs, acc, "whatsapp")
+    _apply_language_overrides(subs, language_overrides or {})
+    unresolved = [submission.source_ref for submission in subs if not str(submission.language or "").strip()]
+    if unresolved:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Language review required before submission for: {', '.join(unresolved)}",
+        )
 
 
     to_submit = []
@@ -2075,6 +2164,7 @@ async def _submit_wa_batch(
         "skipped_duplicates": len(duplicate_entries),
         "blocked_aspect_ratio": blocked_count,
         "results": [_json_safe(e) for e in cleaned_entries],
+        "import_notes": import_notes,
     }
 
 
@@ -2092,8 +2182,10 @@ async def submit_file(
     skip_duplicates: bool = Query(True),
     expected_rcs_bot_id: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
+    language_overrides: str | None = Form(None),
 ):
     acc, chan = _explicit_submission_destination(account, channel, current_user)
+    overrides = _parse_language_overrides(language_overrides, chan)
     if (expected_account, expected_channel) != (acc, chan):
         raise HTTPException(status_code=409, detail="Destination changed since review. Preview again before submitting.")
     if acc == "apparel":
@@ -2133,6 +2225,7 @@ async def submit_file(
             fix_grammar,
             file.filename or "upload.csv",
             current_user,
+            language_overrides=overrides,
         )
     except HTTPException as http_exc:
         log_error(

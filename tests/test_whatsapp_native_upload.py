@@ -241,14 +241,19 @@ def test_channel_copy_lookalikes_and_sheet_order_do_not_change_native_identity(t
     assert results[0] == results[1]
 
 
-@pytest.mark.parametrize("sheet_name", ["Overview", "Translations requested"])
-def test_unlabelled_native_workbooks_are_disclosed_not_assumed_whatsapp(tmp_path, sheet_name):
+@pytest.mark.parametrize("sheet_name, imported", [("Overview", False), ("Translations requested", True)])
+def test_plain_message_grids_use_selected_channel_but_overview_sheets_do_not(tmp_path, sheet_name, imported):
     book = openpyxl.Workbook()
     book.active.title = sheet_name
     book.active.append(["An unlabelled customer offer requires channel confirmation."])
     path = tmp_path / "arbitrary_customer_file.xlsx"
     book.save(path)
     notes = []
-    with pytest.raises(ValueError, match="(?i)explicitly WhatsApp.*ambiguous"):
-        load_from_excel(str(path), client="tcl_promo", import_notes=notes)
-    assert any(f"{sheet_name}!A1" in note and "unscoped" in note for note in notes)
+    if imported:
+        submissions = load_from_excel(str(path), client="tcl_promo", import_notes=notes)
+        assert [_body(submission) for submission in submissions] == ["An unlabelled customer offer requires channel confirmation."]
+        assert submissions[0].source_ref == f"arbitrary_customer_file.xlsx:{sheet_name}!A1"
+    else:
+        with pytest.raises(ValueError, match="(?i)No WhatsApp copy"):
+            load_from_excel(str(path), client="tcl_promo", import_notes=notes)
+        assert any(f"{sheet_name}!A1" in note and "unscoped" in note for note in notes)

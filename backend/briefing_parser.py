@@ -104,6 +104,10 @@ class SmsTemplateDraft:
     raw_source: str = ""
     source_origin: str = "jira"
     language: str = "en"
+    message_type: str = "1"
+
+    def __post_init__(self):
+        self.message_type = "1" if self.text.isascii() else "2"
 
 
 @dataclass
@@ -299,48 +303,33 @@ def normalize_placeholders(raw_text: str) -> tuple[str, list[str]]:
 
 
 def detect_language(text: str, column_name: str = "") -> str:
-    """Detect language code (e.g. 'en', 'gu', 'hi', 'pa', 'mr', 'bn', 'ta', 'te', 'kn', 'ml') from column or script."""
+    """Preserve declared language hints; script alone cannot identify ambiguous languages."""
     c_low = column_name.lower().strip()
-    if any(k in c_low for k in ["gujarati", "gujrati", "guj"]):
-        return "gu"
-    if any(k in c_low for k in ["punjabi", "pun"]):
-        return "pa"
-    if any(k in c_low for k in ["hindi", "hin"]):
-        return "hi"
-    if any(k in c_low for k in ["marathi", "mar"]):
-        return "mr"
-    if any(k in c_low for k in ["bengali", "bangla", "ben"]):
-        return "bn"
-    if any(k in c_low for k in ["tamil", "tam"]):
-        return "ta"
-    if any(k in c_low for k in ["telugu", "tel"]):
-        return "te"
-    if any(k in c_low for k in ["kannada", "kan"]):
-        return "kn"
-    if any(k in c_low for k in ["malayalam", "mal"]):
-        return "ml"
-
-    for ch in text:
-        code = ord(ch)
-        if 0x0A80 <= code <= 0x0AFF:
-            return "gu"  # Gujarati
-        if 0x0A00 <= code <= 0x0A7F:
-            return "pa"  # Gurmukhi (Punjabi)
-        if 0x0900 <= code <= 0x097F:
-            return "hi"  # Devanagari (Hindi)
-        if 0x0980 <= code <= 0x09FF:
-            return "bn"  # Bengali
-        if 0x0B80 <= code <= 0x0BFF:
-            return "ta"  # Tamil
-        if 0x0C00 <= code <= 0x0C7F:
-            return "te"  # Telugu
-        if 0x0C80 <= code <= 0x0CFF:
-            return "kn"  # Kannada
-        if 0x0D00 <= code <= 0x0D7F:
-            return "ml"  # Malayalam
-
-    return "en"
-
+    hints = {
+        "gu": ("gujarati", "gujrati", "guj"), "pa": ("punjabi", "pun"),
+        "hi": ("hindi", "hin"), "mr": ("marathi", "mar"),
+        "bn": ("bengali", "bangla", "ben"), "ta": ("tamil", "tam"),
+        "te": ("telugu", "tel"), "kn": ("kannada", "kan"),
+        "ml": ("malayalam", "mal"), "ur": ("urdu",),
+        "or": ("odia", "oriya"), "as": ("assamese",), "en": ("english",),
+    }
+    for code, names in hints.items():
+        if c_low == code or any(re.search(rf"\b{word}\b", c_low) for word in names):
+            return code
+    ranges = [
+        (0x0900, 0x097F, "und"), (0x0980, 0x09FF, "und"),
+        (0x0A00, 0x0A7F, "pa"), (0x0A80, 0x0AFF, "gu"),
+        (0x0B00, 0x0B7F, "or"), (0x0B80, 0x0BFF, "ta"),
+        (0x0C00, 0x0C7F, "te"), (0x0C80, 0x0CFF, "kn"),
+        (0x0D00, 0x0D7F, "ml"), (0x0600, 0x06FF, "und"),
+        (0x0750, 0x077F, "und"), (0x08A0, 0x08FF, "und"),
+    ]
+    scripts = {code for start, end, code in ranges
+               if any(start <= ord(char) <= end and char.isalpha() for char in text)}
+    if scripts:
+        return next(iter(scripts)) if len(scripts) == 1 else "und"
+    # Typography and emoji do not change the script; unknown letters need review.
+    return "und" if any(char.isalpha() and not char.isascii() for char in text) else "en"
 
 def detect_category(summary: str, text: str = "", sheet_name: str = "") -> str:
     """Determine WhatsApp template category (UTILITY, AUTHENTICATION, MARKETING)."""
@@ -2192,7 +2181,13 @@ def _parse_raw_sheet_rows(
 
             # Determine specific channel for this column if applicable
             col_hdr = header_row[c_idx] if c_idx < len(header_row) else ""
-            item_chan = _normalize_channel_tag(col_hdr) or active_chan or ("WA" if _normalize_channel_tag(sname) is None else _normalize_channel_tag(sname))
+            header_channel = _normalize_channel_tag(col_hdr)
+            channel_body_column = bool(re.search(r"\b(?:text|content|body|message|copy)\b", col_hdr, re.I))
+            multi_channel_columns = sum(_normalize_channel_tag(header) is not None for header in header_row) > 1
+            item_chan = (
+                header_channel if header_channel and (channel_body_column or multi_channel_columns)
+                else active_chan or header_channel or sheet_chan or "WA"
+            )
 
             base_variant = "General"
             if row and row[0] and row[0].lower().startswith("c") and len(row[0]) < 10:
@@ -2980,6 +2975,7 @@ def extract_templates_from_excel_file(
     explicit_sheet_refs: list[str] | None = None,
     sheet_images_map: dict[str, list[str]] | None = None,
     use_ai: bool = False,
+    selected_channel: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Inspect and extract template items from any client spreadsheet (.xlsx, .csv, .xls) across all sheets.
@@ -2991,14 +2987,56 @@ def extract_templates_from_excel_file(
         logger.info("Skipping inventory dump file in Excel extractor: %s", filepath.name)
         return []
 
+    sms_context = selected_channel == "SMS" or (
+        selected_channel is None and re.search(r"(?:^|[\s_-])sms(?:$|[\s_-])", filepath.stem, re.I)
+    )
+    sms_items = []
+    if filepath.suffix.lower() in {".xlsx", ".xls", ".csv"}:
+        from sms_brief import parse_brief
+
+        report = parse_brief(str(filepath), filepath.name, allow_loose=bool(sms_context))
+        sms_items = [{
+            "channel": "SMS", "text": (
+                item["text"] if item["source_kind"] == "loose_cells"
+                else re.sub(r"^\s*\d+[.)]\s*", "", item["text"])
+            ), "raw_text": item["text"], "raw_source": item["text"],
+            "template_name": item["suggested_template_name"],
+            "language": detect_language(item["text"], item["language"]),
+            "message_type": item["message_type"], "variant": item["segment"],
+            "source": f"{filepath.name}!{item['sheet']}!{item['cell']}",
+            "sheet": item["sheet"], "cell": item["cell"],
+        } for item in report["candidates"]]
+        if sms_context:
+            return sms_items
     sheets = _load_spreadsheet_sheets(filepath)
     if not sheets:
         return []
 
+    # Plain cells in a known WhatsApp source are copy, not English campaign prose.
+    from loader import _loose_template_cells, _native_template_cells, _template_channel_context
+
+    wa_cells = []
+    wa_cell_sheets = set()
+    channel_context = selected_channel != "WA" or _template_channel_context(list(sheets.items()))
+    for sheet_name, rows in sheets.items():
+        cells = _loose_template_cells(rows, sheet_name, channel_context)
+        if cells:
+            wa_cell_sheets.add(sheet_name)
+        for row, col, text, language, _ in cells:
+            from openpyxl.utils import get_column_letter
+
+            cell = f"{get_column_letter(col)}{row}"
+            wa_cells.append({
+                "channel": "WA", "text": text, "raw_source": text,
+                "language": detect_language(text, language), "variant": "General",
+                "source": f"{filepath.name}!{sheet_name}!{cell}",
+                "sheet": sheet_name, "cell": cell, "source_cell_copy": True,
+            })
+
     if sheet_images_map is None and filepath.suffix.lower() == ".xlsx":
         sheet_images_map = _extract_images_from_xlsx(filepath)
 
-    all_items: list[dict[str, Any]] = []
+    all_items: list[dict[str, Any]] = [*sms_items, *wa_cells]
     seen_texts: set[str] = set()
 
     if not target_month:
@@ -3011,6 +3049,8 @@ def extract_templates_from_excel_file(
     has_month_partitioned_sheets = any(detect_sheet_month(s) is not None for s in sheets.keys())
 
     for sname, raw_rows in sheets.items():
+        if sname in wa_cell_sheets:
+            continue
         s_clean = re.sub(r"[\s_\-]+", " ", sname.lower()).strip()
         is_explicit_ref = bool(
             explicit_sheet_refs and any(
@@ -3035,6 +3075,32 @@ def extract_templates_from_excel_file(
             sheet_items = _parse_dlt_sms_sheet(raw_rows, sname, filename=filepath.name)
         else:
             sheet_items = _parse_raw_sheet_rows(raw_rows, sname, sheet_images=sheet_imgs, use_ai=use_ai)
+            from sms_brief import _language, _norm
+
+            explicit_message_columns = any(
+                any(_norm(value) in {"channel", "regional"} for value in row)
+                and any(_language(value) for value in row)
+                for row in raw_rows
+            )
+            native_cells = _native_template_cells(raw_rows, sname) if explicit_message_columns else []
+            for row, col, text, language, _ in native_cells:
+                source = f"excel_{sname}_r{row}_c{col}"
+                if any(
+                    str(item.get("source", "")).startswith(source + "_")
+                    or item.get("source") == source
+                    or re.sub(r"\s+", " ", item.get("raw_text") or item.get("text", "")).strip()
+                    == re.sub(r"\s+", " ", text).strip()
+                    for item in sheet_items
+                ):
+                    continue
+                from openpyxl.utils import get_column_letter
+
+                cell = f"{get_column_letter(col)}{row}"
+                sheet_items.append({
+                    "channel": "WA", "text": text, "raw_text": text, "raw_source": text,
+                    "language": detect_language(text, language), "variant": "General",
+                    "source": f"{filepath.name}!{sname}!{cell}", "source_cell_copy": True,
+                })
         is_carousel_sheet = "carousal" in sname.lower() or "carousel" in sname.lower()
         if is_carousel_sheet and len(sheet_items) >= 2:
             c_cards = []
@@ -3083,8 +3149,11 @@ def extract_templates_from_excel_file(
             all_items.append(carousel_item)
         else:
             for item in sheet_items:
+                if item.get("channel", "").upper() == "SMS" and filepath.suffix.lower() in {".xlsx", ".xls", ".csv"}:
+                    # SMS cells already came through the exact-copy, script-neutral parser.
+                    continue
                 raw_t = item.get("raw_text") or item.get("text", "")
-                if not is_valid_template_copy(raw_t):
+                if not item.get("source_cell_copy") and not is_valid_template_copy(raw_t):
                     continue
                 norm_key = re.sub(r"\s+", " ", raw_t).strip().lower()
                 if norm_key and norm_key not in seen_texts:
@@ -3743,6 +3812,17 @@ def parse_jira_brief(
             explicit_sheet_refs=explicit_sheet_refs,
             sheet_images_map=excel_images.get(excel_path),
             use_ai=use_ai,
+            selected_channel=next((
+                channel for channel, pattern in (
+                    ("SMS", r"\bsms\b"), ("WA", r"\b(?:wa|whatsapp)\b"),
+                )
+                if re.search(pattern, summary + " " + desc_text, re.I)
+                and not re.search(
+                    r"\b(?:rcs|email|push|pn)\b" + (
+                        r"|\b(?:wa|whatsapp)\b" if channel == "SMS" else r"|\bsms\b"
+                    ), summary + " " + desc_text, re.I,
+                )
+            ), None),
         )
         if items:
             extracted_items.extend(items)
@@ -4005,18 +4085,21 @@ def parse_jira_brief(
         if title and is_internal_identifier(title, summary=summary):
             title = ""
         source_origin = item.get("source", "jira")
-        norm_text, norm_samples = (clean_content, []) if chan == "SMS" else normalize_placeholders(clean_content)
+        norm_text, norm_samples = (clean_content, []) if chan == "SMS" or item.get("source_cell_copy") else normalize_placeholders(clean_content)
         var_tags = re.findall(r"\{#(num|alp|urg|uro|cbn|eml)#\}", norm_text) if chan == "SMS" else re.findall(r"\{\{(\d+)\}\}", norm_text)
         resolved_vars = item.get("variables") or var_tags
         resolved_samples = item.get("sample_values") or norm_samples
 
         if chan in ("WA", "WHATSAPP"):
             img = wa_creatives[(wa_counter - 1) % len(wa_creatives)] if wa_creatives and not item.get("media_pairing_ambiguous") else None
-            clean_body, cta_btn_text, cta_btn_url, cta_footer = extract_and_strip_cta(
-                norm_text,
-                existing_btn_text=item.get("button_text"),
-                existing_btn_url=item.get("button_url"),
-                existing_footer=item.get("footer"),
+            clean_body, cta_btn_text, cta_btn_url, cta_footer = (
+                (norm_text, None, None, None) if item.get("source_cell_copy")
+                else extract_and_strip_cta(
+                    norm_text,
+                    existing_btn_text=item.get("button_text"),
+                    existing_btn_url=item.get("button_url"),
+                    existing_footer=item.get("footer"),
+                )
             )
 
             # Strict 25-word validation for WhatsApp campaign drafts:
@@ -4033,7 +4116,7 @@ def parse_jira_brief(
             has_action_offer = bool(re.search(r"\b(apply|get|enjoy|switch|transfer|repay|check)\b", clean_body.lower())) and bool(
                 re.search(r"\b(loan|loans|emi|emis|fund|funds|interest|offer|offers)\b", clean_body.lower())
             )
-            if len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_brand_offer or has_action_offer or is_valid_template_copy(clean_body)):
+            if not item.get("source_cell_copy") and len(words) < 25 and not (has_greeting or has_placeholder or has_link or has_brand_offer or has_action_offer or is_valid_template_copy(clean_body)):
                 continue
             # Apply ticket intent instructions (e.g. No CTA, Utility category)
             if ticket_intent.get("no_cta"):
@@ -4150,7 +4233,7 @@ def parse_jira_brief(
             rcs_counter += 1
 
         elif chan == "SMS":
-            norm_key = norm_text
+            norm_key = f"{source_origin}\0{norm_text}" if item.get("cell") else norm_text
             if norm_key in seen_sms_texts:
                 prev_idx = seen_sms_texts[norm_key]
                 if item.get("template_name") and not item["template_name"].startswith("swcm_"):
@@ -4169,6 +4252,7 @@ def parse_jira_brief(
                     sample_values=resolved_samples,
                     raw_source=clean_content,
                     source_origin=source_origin,
+                    message_type="1" if norm_text.isascii() else "2",
                 )
             )
             sms_counter += 1

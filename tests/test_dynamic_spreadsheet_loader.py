@@ -170,3 +170,24 @@ def test_bare_host_cta_keeps_the_hostname_static():
         "type": "URL", "text": "View", "url": "https://example.test/{{1}}",
         "example": ["https://example.test/sample"],
     }]
+
+
+@pytest.mark.parametrize("extension", ["csv", "xlsx"])
+@pytest.mark.parametrize("text,language", [("வா!", "ta"), ("या!", "")])
+def test_structured_copy_without_language_never_forces_regional_text_to_english(tmp_path, extension, text, language):
+    path = tmp_path / f"regional.{extension}"
+    if extension == "csv":
+        with path.open("w", newline="", encoding="utf-8") as stream:
+            csv.writer(stream).writerows([["template_name", "body"], ["regional_copy", text]])
+        submissions = load_from_csv(str(path), client="tcl_promo")
+    else:
+        workbook = openpyxl.Workbook()
+        workbook.active.append(["template_name", "body"])
+        workbook.active.append(["regional_copy", text])
+        workbook.save(path)
+        workbook.close()
+        submissions = load_from_excel(str(path), client="tcl_promo")
+
+    assert len(submissions) == 1
+    assert _component(submissions[0], "BODY").text == text
+    assert submissions[0].language == language

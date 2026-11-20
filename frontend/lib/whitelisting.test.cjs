@@ -63,3 +63,24 @@ test('submission no longer sends an aspect-ratio option and retains the other op
     assert.equal(submittedUrl.searchParams.get('expected_rcs_bot_id'), channel === 'rcs' ? 'bot-123' : null);
   }
 });
+
+test('file preview and submission carry exact source-keyed language overrides with unchanged bytes', async () => {
+  const calls = [];
+  const api = apiFor(async (url, options) => {
+    calls.push({ url: new URL(url), form: options.body });
+    return json(url.includes('/api/preview') ? [] : { account: 'tata', channel: 'whatsapp', submitted: 1, results: [] });
+  });
+  const original = new Blob(['मूळ संदेश\r\n'], { type: 'text/csv' });
+  const languageOverrides = { 'Workbook.xlsx!Offers!D17': 'mr', 'CSV row 3': 'gu' };
+  await api.previewFile(original, 'tata', 'whatsapp', { verifyInventory: false, languageOverrides });
+  await api.previewFile(original, 'tata', 'whatsapp', { verifyInventory: true, languageOverrides });
+  await api.submitFile(original, 'tata', 'whatsapp', 'Operator', false, true,
+    { account: 'tata', channel: 'whatsapp' }, undefined, languageOverrides);
+  assert.equal(calls[0].url.searchParams.get('verify_inventory'), 'false');
+  assert.equal(calls[1].url.searchParams.has('verify_inventory'), false);
+  for (const { form } of calls) {
+    assert.equal(form.get('language_overrides'), JSON.stringify(languageOverrides));
+    assert.deepEqual([...new Uint8Array(await form.get('file').arrayBuffer())],
+      [...new Uint8Array(await original.arrayBuffer())]);
+  }
+});

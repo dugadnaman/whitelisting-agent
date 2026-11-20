@@ -342,3 +342,22 @@ def test_generated_rcs_names_fit_provider_limit_without_renaming_explicit_names(
     assert len(carousel_draft["carousel_cards"]) == 2
     chosen = next(draft for draft in brief.rcs_templates if draft["template_name"] == explicit_name)
     assert any(w["component"] == "Template name" for w in _inspect_rcs_compliance(chosen))
+
+
+def test_explicit_jira_message_columns_keep_short_regional_copy(tmp_path):
+    from briefing_parser import parse_jira_brief
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Translations"
+    sheet.append(["Channel", "English", "Tamil", "Urdu"])
+    messages = ["Thanks!", "வணக்கம்", "نیا پیغام"]
+    sheet.append(["WhatsApp", *messages])
+    path = tmp_path / "regional-messages.xlsx"
+    workbook.save(path)
+    brief = parse_jira_brief({
+        "key": "SOURCE-42", "summary": "WhatsApp translations",
+        "attachments": [{"id": "1", "filename": path.name, "local_path": str(path)}],
+    }, download_creatives=False)
+    assert [draft["body"] for draft in brief.whatsapp_templates] == messages
+    assert [draft["language"] for draft in brief.whatsapp_templates] == ["en", "ta", "ur"]

@@ -61,7 +61,7 @@ def jira_page(jira_modules):
                     variables: [], raw_source: 'Original source paragraph ' + index, template_type: 'text',
                     ...(index === 0 ? {source_file: 'campaign-copy.xlsx', source_sheet: 'Approved copy', source_cell: 'D7'} : {}),
                     media_file: '/reviewed/creative-' + index + '.png', media_filename: 'reviewed-' + index + '.png',
-                    char_count: 19, variant: 'Reviewed'});
+                    char_count: 19, variant: 'Reviewed', ...(options.draftOverrides || {})});
                 const drafts = [draft(0), draft(1)];
                 const brief = {issue_key: 'TCN-407', summary: 'Review fixture', account,
                     assignee: 'Operator', reporter: 'Reporter', status: 'Open', attachments_mapped: [],
@@ -707,3 +707,20 @@ def test_jira_unknown_registration_is_not_reported_as_rejection_or_approval(jira
     expect(outcome).not_to_contain_text("Rejected")
     assert page.evaluate("() => window.calls.posts") == []
     assert page.evaluate("() => window.calls.loads") == 0
+
+
+def test_regional_jira_language_can_be_reviewed_without_changing_copy(jira_page):
+    page = jira_page
+    page.evaluate("""() => { window.mountOptions = {draftOverrides: {
+        language: 'und', body: 'نیا پیغام', raw_source: 'نیا پیغام'
+    }}; }""")
+    mount(page, "whatsapp")
+    expect(page.get_by_text("Language review required · Edit to choose", exact=True)).to_have_count(2)
+    page.get_by_role("button", name="Edit", exact=True).first.click()
+    language = page.get_by_role("combobox", name="Template language", exact=True)
+    expect(language).to_have_value("und")
+    language.select_option("ur")
+    body = page.get_by_role("textbox", name="Message body for WhatsApp template 1", exact=True)
+    expect(body).to_have_value("نیا پیغام")
+    expect(language).to_have_value("ur")
+    assert page.evaluate("() => window.calls.posts") == []

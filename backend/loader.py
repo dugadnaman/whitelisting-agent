@@ -260,11 +260,16 @@ def _row_to_submission(row: dict, client: str = "bajaj") -> TemplateSubmission:
     source_ref = str(row.get("source_ref") or raw_name)
     channel = str(row.get("channel", "whatsapp")).lower().strip()
     template_name = normalize_whatsapp_template_name(raw_name) if channel == "whatsapp" else raw_name
+    body = next((
+        component.get("text") or "" if isinstance(component, dict) else component.text or ""
+        for component in components
+        if (component.get("type") if isinstance(component, dict) else component.type) == "BODY"
+    ), "")
     return TemplateSubmission(
         client=c_client,
         channel=row.get("channel", "whatsapp"),
         template_name=template_name,
-        language=row.get("language", "en"),
+        language=row.get("language") or _template_cell_language(body),
         category=row.get("category", "MARKETING"),
         waba_id=row.get("waba_id") or _resolve_row_waba(c_client, {}),
         components=_normalize_whatsapp_buttons(components, c_client) if channel == "whatsapp" else components,
@@ -554,13 +559,13 @@ def _dynamic_row_to_submission(
         components.append({"type": "BUTTONS", "buttons": [button]})
 
     try:
-        from briefing_parser import detect_category, detect_language
+        from briefing_parser import detect_category
 
         category = row.get("category", "").strip().upper() or detect_category("", clean_body)
-        language = row.get("language", "").strip().lower() or detect_language(clean_body)
+        language = row.get("language", "").strip().lower() or _template_cell_language(clean_body)
     except Exception:
         category = row.get("category", "").strip().upper() or "MARKETING"
-        language = row.get("language", "").strip().lower() or "en"
+        language = row.get("language", "").strip().lower() or ""
 
     template_name = _dynamic_template_name(row, source_name, row_number)
     return TemplateSubmission(
@@ -599,9 +604,35 @@ def load_from_csv(
     skipped_channels = set()
     source_name = Path(source_name or p.name).name
     with open(p, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        _reject_other_channel_columns(reader.fieldnames or [])
-        for row_number, raw_row in enumerate(reader, 2):
+        grid = list(csv.reader(f))
+        headers = grid[0] if grid else []
+        _reject_other_channel_columns(headers)
+        if not _has_whatsapp_table_headers(headers):
+            sheet_name = Path(source_name).stem
+            loose = _loose_template_cells(grid, sheet_name, _template_channel_context([(sheet_name, grid)]))
+            native = _native_template_cells(grid, sheet_name)
+            if loose or native:
+                from briefing_parser import split_multi_campaign_cell
+                from sms_brief import _column
+
+                result = []
+                for row, col, text, language, scope in loose or native:
+                    source_ref = f"{source_name}:{sheet_name}!{_column(col)}{row}"
+                    if loose:
+                        result.append(_build_loose_whatsapp_submission(
+                            text, client, source_name, source_ref, None, waba_cache, import_notes, language=language,
+                        ))
+                    else:
+                        variants = split_multi_campaign_cell(text)
+                        for index, block in enumerate(variants, 1):
+                            ref = f"{source_ref}#{index}" if len(variants) > 1 else source_ref
+                            result.append(_build_single_cell_card_submission(
+                                block, client, source_name, ref, language, scope, None, waba_cache,
+                            ))
+                return result
+            return []
+        for row_number, values in enumerate(grid[1:], 2):
+            raw_row = dict(zip(headers, values))
             clean_row = {
                 k.strip(): (v.strip() if v else "") for k, v in raw_row.items()
                 if k and _whatsapp_import_channel(k) not in {"sms", "rcs", "pn", "email"}
@@ -635,8 +666,6 @@ def load_from_csv(
             clean_row["client"] = clean_row.get("client") or client
             if not clean_row.get("waba_id"):
                 clean_row["waba_id"] = _resolve_row_waba(clean_row["client"], waba_cache)
-            if not clean_row.get("language"):
-                clean_row["language"] = "en"
             if not clean_row.get("category"):
                 clean_row["category"] = "MARKETING"
 
@@ -659,7 +688,8 @@ def _whatsapp_import_channel(value) -> str:
     match = re.fullmatch(
         r"(whatsapp|wa|sms|rcs|pn|push notification|email)"
         r"(?:[\s_]+(?:retargeting|retaregting|retargetting|retarget|text|body|content|copy|"
-        r"title|desp\.?|description|implicit|explicit|promotional|transactional|utility|service|c?\d+))*",
+        r"title|desp\.?|description|implicit|explicit|promotional|transactional|utility|service|"
+        r"carousel|carousal|card|cards|richcard|c?\d+))*",
         label,
     )
     if not match:
@@ -685,9 +715,141 @@ def _reject_other_channel_columns(headers):
         raise ValueError(f"This file contains explicitly {labels} columns, not WhatsApp copy. Select the matching channel.")
 
 
-def _native_whatsapp_cells(rows, sheet_name):
-    """Keep channel state local to each label column and retain original cell coordinates."""
-    from sms_brief import _copy, _language, _metadata, _norm
+def _load_template_workbook(path):
+    """Keep the existing XLS reader and XLSX media/merged-cell support in one place."""
+    import openpyxl
+
+    if Path(path).suffix.lower() != ".xls":
+        return openpyxl.load_workbook(path, data_only=False)
+    from sms_brief import _read_sheets
+
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+    for title, rows in _read_sheets(path, Path(path).name):
+        sheet = workbook.create_sheet(title)
+        for row in rows:
+            sheet.append(row)
+    return workbook
+
+
+def _template_context_label(value):
+    """Exact structural labels only: 'Link your account' is customer copy, not metadata."""
+    from sms_brief import _norm
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+", str(value or "").strip()):
+        return True
+
+    label = _norm(value).rstrip(":").replace("_", " ")
+    return label in {
+        "channel", "regional", "language", "lang", "template name", "campaign name",
+        "name", "address", "phone", "mobile", "email", "id", "date", "status",
+        "client", "account", "waba id", "bot id", "entity id", "sender id", "esme addr",
+        "cta", "link", "url", "time of", "testing", "test mobile", "database",
+        "product", "sub product", "campaign tag", "note", "notes", "instruction",
+        "instructions", "character", "characters", "character count", "char count",
+        "use case", "remark", "remarks", "base", "mentioned in base", "generic",
+        "mentioned in database", "as per planner",
+    } or label.replace(" ", "_") in _DYNAMIC_METADATA_FIELDS or _has_whatsapp_table_headers([value])
+
+
+def _template_cell_copy(value):
+    """Accept letters in every script without imposing an English or length heuristic."""
+    from sms_brief import _LANGUAGES
+
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    return bool(
+        text and not text.startswith("=") and any(char.isalpha() for char in text)
+        and not re.fullmatch(r"(?:(?:https?://|www\.)\S+\s*)+", text, re.IGNORECASE)
+        and not _template_context_label(text) and not _whatsapp_import_channel(text)
+        and text.lower() not in {*_LANGUAGES, "hinglish", "highlish"}
+    )
+
+
+def _template_channel_context(sheets, selected_channel="whatsapp"):
+    """Unlabelled sheets cannot inherit a destination from a mixed-channel workbook."""
+    return any(
+        (_whatsapp_import_channel(title) not in {"", selected_channel})
+        or any(_whatsapp_import_channel(value) not in {"", selected_channel}
+               or str(value or "").strip().lower() == "channel"
+               for row in rows for value in row)
+        for title, rows in sheets
+    )
+
+
+def _loose_template_cells(rows, sheet_name, has_channel_context=False, selected_channel="whatsapp"):
+    """Only plain message/language grids inherit the operator's selected destination."""
+    from sms_brief import _LANGUAGES, _norm
+
+    if re.search(r"planner|calendar", sheet_name, re.IGNORECASE) or sheet_name.strip().lower() in {
+        "overview", "summary", "notes", "instructions", "metadata", "readme", "read me",
+    }:
+        return []
+    if has_channel_context and _whatsapp_import_channel(sheet_name) != selected_channel:
+        return []
+    first = next((row for row in rows if any(value is not None and str(value).strip() for value in row)), [])
+    column_languages = {
+        ci: _LANGUAGES[_norm(value)] for ci, value in enumerate(first, 1) if _norm(value) in _LANGUAGES
+    }
+    if any(_norm(value) not in {*_LANGUAGES, "language", "lang", "regional", "generic", ""}
+           for value in first):
+        column_languages = {}
+    row_languages = not column_languages and any(row and _norm(row[0]) in _LANGUAGES for row in rows)
+    language_grid = bool(column_languages or row_languages)
+    if any(
+        (_template_context_label(value) and not (language_grid and _norm(value) in {"language", "lang", "regional", "generic", "control"}))
+        or _whatsapp_import_channel(value)
+        for row in rows for value in row if value is not None
+    ):
+        return []
+    cells = []
+    for ri, row in enumerate(rows, 1):
+        label = _norm(row[0]) if row else ""
+        if row_languages and label not in {*_LANGUAGES, "generic", "control"}:
+            continue
+        for ci, value in enumerate(row, 1):
+            if column_languages and ci not in column_languages:
+                continue
+            if row_languages and ci == 1:
+                continue
+            if _template_cell_copy(value):
+                cells.append((ri, ci, value, column_languages.get(ci, "") or _LANGUAGES.get(label, ""), ""))
+    return cells
+
+
+def _template_cell_language(text, declared="", source_ref="", import_notes=None):
+    from briefing_parser import detect_language
+
+    language = detect_language(text, column_name=declared)
+    if language == "und":
+        if import_notes is not None:
+            import_notes.append(f"{source_ref}: Language review required; source script does not identify a unique supported language. Copy is unchanged.")
+        return ""
+    return language
+
+
+def _build_loose_whatsapp_submission(text, client, source_name, source_ref, media, waba_cache, import_notes, language=""):
+    from briefing_parser import detect_category
+
+    digest = hashlib.sha256(f"{client}\0{source_ref}\0{text}".encode()).hexdigest()[:12]
+    prefix = normalize_whatsapp_template_name(f"{client}_{Path(source_name).stem}")
+    components = []
+    if media:
+        components.append(TemplateComponent(
+            type="HEADER", format=media["kind"], image_bytes=media["bytes"], file_type=media["mime_type"],
+        ))
+    components.append(TemplateComponent(type="BODY", text=text))
+    return TemplateSubmission(
+        client=client.lower(), channel="whatsapp", template_name=f"{prefix[:47].rstrip('_')}_{digest}",
+        language=_template_cell_language(text, declared=language, source_ref=source_ref, import_notes=import_notes),
+        category=detect_category("", text), waba_id=_resolve_row_waba(client, waba_cache),
+        components=components, source_ref=source_ref,
+    )
+
+
+def _native_template_cells(rows, sheet_name, selected_channel="whatsapp"):
+    """Keep explicit channel state local to each label column and retain cell coordinates."""
+    from sms_brief import _language, _metadata, _norm
 
     width = max(map(len, rows), default=0)
     rows = [list(row) + [None] * (width - len(row)) for row in rows]
@@ -696,21 +858,22 @@ def _native_whatsapp_cells(rows, sheet_name):
     cells = {}
 
     def add(ri, ci, language="", scope=""):
-        if _copy(rows[ri][ci]):
+        if _template_cell_copy(rows[ri][ci]):
             cells[ri, ci] = (ri + 1, ci + 1, rows[ri][ci], language, scope)
 
     # Language | SMS | WA | PN (also native Template Name | SMS 2 | WA).
     matrix_headers = {
         ri for ri, row in enumerate(rows)
-        if _norm(row[0]) in {"language", "lang", "template name", "template_name"}
-        and any(_whatsapp_import_channel(value) for value in row[1:])
+        if (_norm(row[0]) in {"language", "lang", "template name", "template_name"}
+            and any(_whatsapp_import_channel(value) for value in row[1:]))
+        or (any(row) and all(not value or _whatsapp_import_channel(value) for value in row))
     }
     if matrix_headers:
         columns = {}
         language_matrix = False
         for ri, row in enumerate(rows):
             if ri in matrix_headers:
-                columns = {ci: str(value) for ci, value in enumerate(row) if _whatsapp_import_channel(value) == "whatsapp"}
+                columns = {ci: str(value) for ci, value in enumerate(row) if _whatsapp_import_channel(value) == selected_channel}
                 language_matrix = _norm(row[0]) in {"language", "lang"}
             elif any(row):
                 if language_matrix and not _language(row[0]):
@@ -723,14 +886,20 @@ def _native_whatsapp_cells(rows, sheet_name):
     anchors = sorted({
         ci for row in rows for ci, value in enumerate(row)
         if _norm(value) == "channel"
-        or (_whatsapp_import_channel(value) and ci + 1 < width and any(_copy(r[ci + 1]) for r in rows))
+        or (_whatsapp_import_channel(value) and ci + 1 < width and any(_template_cell_copy(r[ci + 1]) for r in rows))
     })
-    if not anchors and _whatsapp_import_channel(sheet_name) == "whatsapp" and any(
+    if not anchors and _whatsapp_import_channel(sheet_name) == selected_channel and any(_language(row[0]) for row in rows):
+        for ri, row in enumerate(rows):
+            if _language(row[0]) or _norm(row[0]) in {"generic", "control"}:
+                for ci in range(1, width):
+                    add(ri, ci, _language(row[0]), sheet_name)
+        return list(cells.values())
+    if not anchors and _whatsapp_import_channel(sheet_name) == selected_channel and any(
         _metadata(row[0]) or _norm(row[0]) in {"campaign name", "campaign_name"} for row in rows
     ):
         anchors = [0]
     if not anchors:
-        if _whatsapp_import_channel(sheet_name) == "whatsapp":
+        if _whatsapp_import_channel(sheet_name) == selected_channel:
             for ri, row in enumerate(rows):
                 for ci in range(width):
                     add(ri, ci, _language(row[0]), sheet_name)
@@ -739,14 +908,14 @@ def _native_whatsapp_cells(rows, sheet_name):
     for index, anchor in enumerate(anchors):
         end = anchors[index + 1] if index + 1 < len(anchors) else width
         columns = {anchor + 1: ""} if anchor + 1 < end else {}
-        scope = sheet_name if _whatsapp_import_channel(sheet_name) == "whatsapp" else ""
+        scope = sheet_name if _whatsapp_import_channel(sheet_name) == selected_channel else ""
         active = bool(scope)
         for ri, row in enumerate(rows):
             value = row[anchor]
             label = _norm(value)
             channel = _whatsapp_import_channel(value)
             header = label in {"channel", "regional"} or (
-                channel and not any(_copy(row[ci]) for ci in range(anchor + 1, end))
+                channel and not any(_template_cell_copy(row[ci]) for ci in range(anchor + 1, end))
                 and any(
                     _language(row[ci]) or re.fullmatch(r"[a-z]|\d+\s*-\s*\d+|generic", _norm(row[ci]))
                     or _has_whatsapp_table_headers([row[ci]]) or "content" in _norm(row[ci])
@@ -760,11 +929,11 @@ def _native_whatsapp_cells(rows, sheet_name):
                     and (_language(row[ci]) or re.fullmatch(r"[a-z]|\d+\s*-\s*\d+|generic", _norm(row[ci]))
                          or _has_whatsapp_table_headers([row[ci]]) or "content" in _norm(row[ci]))
                 } or ({anchor + 1: ""} if anchor + 1 < end else {})
-                scope = str(value) if channel == "whatsapp" else ""
+                scope = str(value) if channel == selected_channel else ""
                 active = bool(scope)
                 continue
             if channel:
-                scope = str(value) if channel == "whatsapp" else ""
+                scope = str(value) if channel == selected_channel else ""
                 active = bool(scope)
             elif label in {"campaign name", "campaign_name"}:
                 active = bool(scope)
@@ -815,7 +984,7 @@ def _sheet_anchored_media(sheet, positions, import_notes=None):
 def _build_single_cell_card_submission(
     block, client, source_name, source_ref, language, scope, media, waba_cache,
 ) -> TemplateSubmission:
-    from briefing_parser import detect_category, detect_language
+    from briefing_parser import detect_category
 
     parsed = parse_single_cell_whatsapp_block(block, client=client)
     digest = hashlib.sha256(f"{client}\0{source_ref}\0{block}".encode()).hexdigest()[:12]
@@ -836,7 +1005,7 @@ def _build_single_cell_card_submission(
     })
     return TemplateSubmission(
         client=client.lower(), channel="whatsapp", template_name=name,
-        language=detect_language("", column_name=language) if language else detect_language(block),
+        language=_template_cell_language(block, declared=language, source_ref=source_ref),
         category=detect_category(scope, block),
         waba_id=_resolve_row_waba(client, waba_cache),
         components=[TemplateComponent(**component) for component in _normalize_whatsapp_buttons(components, client)],
@@ -847,19 +1016,20 @@ def _build_single_cell_card_submission(
 def load_from_excel(
     path: str, client: str = "bajaj", source_name: str | None = None, import_notes: list[str] | None = None,
 ) -> list[TemplateSubmission]:
-    """Read every sheet without month filtering; native briefs require explicit WhatsApp scope."""
+    """Read all worksheets; only plain unlabelled grids inherit the selected WhatsApp channel."""
     import openpyxl
     from briefing_parser import split_multi_campaign_cell
     from sms_brief import _copy, _metadata, _norm
 
     source_name = Path(source_name or path).name
     notes = import_notes if import_notes is not None else []
-    notes.append("All worksheets and months are considered; no current-month filter is applied. Only explicitly WhatsApp-scoped native brief copy is imported.")
+    notes.append("All worksheets and months are considered; plain message grids use the selected WhatsApp channel, while labelled briefs retain explicit routing.")
     waba_cache = {}
     submissions = []
-    workbook = openpyxl.load_workbook(path, data_only=True)
+    workbook = _load_template_workbook(path)
     try:
         sheets = [(sheet, list(sheet.iter_rows(values_only=True))) for sheet in workbook]
+        has_channel_context = _template_channel_context([(sheet.title, rows) for sheet, rows in sheets])
         for sheet, rows in sheets:
             if not rows:
                 continue
@@ -895,7 +1065,6 @@ def load_from_excel(
                                     component.update(image_bytes=matches[0]["bytes"], file_type=matches[0]["mime_type"])
                         raw["client"] = raw.get("client") or client
                         raw["waba_id"] = raw.get("waba_id") or _resolve_row_waba(raw["client"], waba_cache)
-                        raw["language"] = raw.get("language") or "en"
                         raw["category"] = raw.get("category") or "MARKETING"
                         submission = _row_to_submission(raw, client)
                     else:
@@ -904,12 +1073,18 @@ def load_from_excel(
                         submission.source_ref = canonical.get("source_ref") or f"{source_name}:{sheet.title}!{openpyxl.utils.get_column_letter(next((ci for ci, h in enumerate(headers, 1) if _has_whatsapp_table_headers([h])), 1))}{ri}"
                         submissions.append(submission)
                 continue
-            cells = _native_whatsapp_cells(rows, sheet.title)
+            loose = _loose_template_cells(rows, sheet.title, has_channel_context)
+            cells = loose or _native_template_cells(rows, sheet.title)
             media = _sheet_anchored_media(sheet, [
-                (ri, ci) for ri, row in enumerate(rows, 1) for ci, value in enumerate(row, 1) if _copy(value)
+                (ri, ci) for ri, row in enumerate(rows, 1) for ci, value in enumerate(row, 1) if _template_cell_copy(value)
             ], notes)
             for row, col, text, language, scope in cells:
                 source_ref = f"{source_name}:{sheet.title}!{openpyxl.utils.get_column_letter(col)}{row}"
+                if loose:
+                    submissions.append(_build_loose_whatsapp_submission(
+                        text, client, source_name, source_ref, media.get((row, col)), waba_cache, notes, language=language,
+                    ))
+                    continue
                 variants = split_multi_campaign_cell(text)
                 for index, block in enumerate(variants, 1):
                     ref = f"{source_ref}#{index}" if len(variants) > 1 else source_ref
@@ -930,7 +1105,7 @@ def load_from_excel(
     finally:
         workbook.close()
     if not submissions:
-        raise ValueError("No explicitly WhatsApp-scoped copy found; this workbook contains SMS/RCS/PN or ambiguous content. Select the matching channel or label the WhatsApp section.")
+        raise ValueError("No WhatsApp copy found; this workbook contains explicitly SMS/RCS/PN, planner, metadata or ambiguous content. Select the matching channel or label the WhatsApp section.")
     return submissions
 
 

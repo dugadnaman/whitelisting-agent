@@ -212,6 +212,8 @@ export type TemplatePreview = DraftWarnings & {
   import_notes?: string[];
   category?: string;
   language?: string;
+  language_review_required?: boolean;
+  language_review_message?: string | null;
   client?: string;
   channel?: string;
   waba_id?: string;
@@ -443,11 +445,12 @@ export async function previewFile(
   file: File,
   account: Account,
   channel: Channel,
-  options?: { verifyInventory?: boolean }
+  options?: { verifyInventory?: boolean; languageOverrides?: Record<string, string> }
 ): Promise<TemplatePreview[]> {
   if (!account || account === "all") throw new Error("Select an account before previewing.");
   const form = new FormData();
   form.append("file", file);
+  if (options?.languageOverrides) form.append("language_overrides", JSON.stringify(options.languageOverrides));
   const qs = new URLSearchParams({ account, channel, ...(options?.verifyInventory === false ? { verify_inventory: "false" } : {}) }).toString();
   const res = await fetchWithRetry(
     getApiUrl(`/api/preview?${qs}`),
@@ -471,13 +474,15 @@ export async function submitFile(
   fixGrammar: boolean = true,
   skipDuplicates: boolean = true,
   reviewedDestination: { account: Account; channel: Channel },
-  expectedRcsBotId?: string
+  expectedRcsBotId?: string,
+  languageOverrides?: Record<string, string>
 ): Promise<{ account: Account; channel: Channel; submitted: number; skipped_duplicates?: number; results: Template[]; job_id?: string; status?: string }> {
   if (!account || account === "all" || reviewedDestination.account !== account || reviewedDestination.channel !== channel) {
     throw new Error("Destination changed since review. Preview again before submitting.");
   }
   const form = new FormData();
   form.append("file", file);
+  if (languageOverrides) form.append("language_overrides", JSON.stringify(languageOverrides));
   const qs = new URLSearchParams({
     account,
     channel,

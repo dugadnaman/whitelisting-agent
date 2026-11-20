@@ -24,13 +24,16 @@ _LANGUAGES = {
     "kannada": "Kannada", "gujarati": "Gujarati", "gujrati": "Gujarati",
     "tamil": "Tamil", "telugu": "Telugu", "bengali": "Bengali",
     "punjabi": "Punjabi", "malayalam": "Malayalam",
+    "urdu": "Urdu", "odia": "Odia", "oriya": "Odia", "assamese": "Assamese",
 }
 _SCRIPTS = {
     "Hindi": (0x0900, 0x097F), "Marathi": (0x0900, 0x097F),
     "Bengali": (0x0980, 0x09FF), "Punjabi": (0x0A00, 0x0A7F),
+    "Assamese": (0x0980, 0x09FF),
     "Gujarati": (0x0A80, 0x0AFF), "Tamil": (0x0B80, 0x0BFF),
     "Telugu": (0x0C00, 0x0C7F), "Kannada": (0x0C80, 0x0CFF),
     "Malayalam": (0x0D00, 0x0D7F),
+    "Urdu": (0x0600, 0x06FF), "Odia": (0x0B00, 0x0B7F),
 }
 
 
@@ -38,14 +41,16 @@ def _norm(value):
     return re.sub(r"\s+", " ", str(value or "")).strip().lower()
 
 
-def _channel(value):
+def _channel(value, *, canonical=False):
     label = _norm(value)
     if len(label) > 85 or "\n" in str(value or ""):
         return ""
     if re.match(r"sms(?:\b|_)", label):
         return "sms"
-    if re.match(r"(?:wa|whatsapp|rcs|pn|push notification|email)(?:\b|_)", label):
-        return "other"
+    match = re.match(r"(wa|whatsapp|rcs|pn|push notification|email)(?:\b|_)", label)
+    if match:
+        kind = match.group(1)
+        return {"wa": "whatsapp", "push notification": "pn"}.get(kind, kind) if canonical else "other"
     return ""
 
 
@@ -57,11 +62,12 @@ def _metadata(value):
         r"character(?:s| count)?\b|char count\b|use\s*case\b|remark\b|base\b)", label))
 
 
-def _copy(value):
+def _body(value):
+    """Validate source text without interpreting a declared body as a header."""
     if not isinstance(value, str):
         return False
     stripped = value.strip()
-    if not 20 <= len(stripped) <= MAX_TEXT or _metadata(stripped):
+    if not 1 <= len(stripped) <= MAX_TEXT:
         return False
     if stripped.startswith("="):
         return False
@@ -69,9 +75,30 @@ def _copy(value):
         return False
     if re.fullmatch(r"https?://\S+", stripped, re.I):
         return False
+    return bool(re.search(r"[^\W\d_]", stripped, re.UNICODE))
+
+
+def _copy(value):
+    """Recognize unlabelled copy without promoting structural labels."""
+    if not _body(value):
+        return False
+    stripped = value.strip()
     if _norm(stripped) in {"mentioned in base", "mentioned in database", "as per planner"}:
         return False
-    return bool(re.search(r"[^\W\d_]", stripped, re.UNICODE))
+    label = _norm(stripped)
+    if _channel(stripped) or label in _LANGUAGES or re.fullmatch(
+        r"(?:normal\s+)?english|(?:hinglish|highlish)(?:\s*\+\s*witty)?", label,
+    ) or label in {
+        "channel", "regional", "lang", "language", "campaign", "campaign name",
+        "template name", "template_name", "text", "body", "message", "content",
+        "segment", "generic", "sr no", "sr no.", "template id", "header",
+        "cta", "cta / link", "cta url", "link", "date", "time", "time of execution", "date & time of execution",
+        "testing", "test mobile", "testing mob no", "database", "product", "sub product",
+        "campaign tag", "note", "notes", "instruction", "instructions", "characters",
+        "character count", "char count", "use case", "remark", "base",
+    }:
+        return False
+    return True
 
 
 def _language(value):
@@ -173,16 +200,15 @@ def _read_sheets(path, filename):
     return sheets
 
 
-def parse_brief(path: str, filename: str) -> dict:
-    """Extract candidates only from explicit SMS contexts, retaining every source cell."""
+def parse_brief(path: str, filename: str, *, allow_loose: bool = True) -> dict:
+    """Extract SMS-scoped structures or plain message-only grids in the SMS upload context."""
     result = {"filename": filename, "sheets": [], "warnings": [], "candidates": []}
     seen = set()
 
     def add(sheet, row, col, text, campaign="", segment="", language="", scope="SMS", kind="channel_rows",
             template_name="", draft_fields=None):
         explicit = draft_fields is not None
-        valid_text = (isinstance(text, str) and bool(text.strip()) and len(text) <= MAX_TEXT
-                      and not text.startswith("=")) if explicit else _copy(text)
+        valid_text = _copy(text) if kind == "loose_cells" else _body(text)
         if not valid_text or (sheet, row, col) in seen:
             return
         if len(result["candidates"]) >= MAX_CANDIDATES:
@@ -192,27 +218,46 @@ def parse_brief(path: str, filename: str) -> dict:
         digest = hashlib.sha256(f"{filename}\0{sheet}\0{cell}\0{campaign}\0{text}".encode()).hexdigest()[:12]
         label = "_".join(filter(None, [campaign or sheet, segment, language, cell]))
         ascii_label = unicodedata.normalize("NFKD", label).encode("ascii", "ignore").decode()
+        from briefing_parser import detect_language
+
+        detected = detect_language(text, language)
+        language = language or {
+            "en": "English", "hi": "Hindi", "mr": "Marathi", "gu": "Gujarati",
+            "pa": "Punjabi", "bn": "Bengali", "ta": "Tamil", "te": "Telugu",
+            "kn": "Kannada", "ml": "Malayalam", "ur": "Urdu", "or": "Odia", "as": "Assamese",
+        }.get(detected, "Regional")
         safe = re.sub(r"[^A-Za-z0-9_]+", "_", ascii_label).strip("_").lower() or "sms"
         warnings = _language_warnings(text, language)
         if _TOKEN.search(text):
             warnings.append("Review every bracketed phrase, placeholder or pre-approved occurrence as literal text or a typed variable; no values have been invented.")
         result["candidates"].append({
-            "id": f"sms_{digest}", "sheet": sheet, "cell": cell, "text": text,
+            "id": f"sms_{digest}", "filename": filename, "sheet": sheet, "cell": cell, "text": text,
             "campaign": campaign, "segment": segment or sheet, "language": language,
             "scope": scope, "source_kind": kind,
             "suggested_template_name": template_name or f"sms_{safe[:43]}_{digest}",
             "suggested_template_type": "3" if "implicit" in _norm(scope) else "",
             "warnings": warnings, "variables": _TOKEN.findall(text),
+            "message_type": "1" if text.isascii() else "2",
         })
         if explicit:
             result["candidates"][-1]["draft_fields"] = draft_fields
 
-    for name, rows in _read_sheets(path, filename):
+    sheets = _read_sheets(path, filename)
+    mixed_channels = any(_channel(name) == "other" or any(
+        _channel(value) == "other" for row in rows for value in row
+    ) for name, rows in sheets)
+    for name, rows in sheets:
         before = len(result["candidates"])
         normalized = _norm(name)
-        if "planner" in normalized or "calendar" in normalized or _channel(name) == "other":
-            result["warnings"].append(f"{name}: skipped non-SMS or planner worksheet.")
-        elif rows:
+        if ("planner" in normalized or "calendar" in normalized or _channel(name) == "other" or _metadata(name)
+                or re.fullmatch(r"cover(?:[\s_-]+(?:page|sheet))?|admin(?:istration)?|read[\s_-]*me|metadata", normalized)):
+            result["warnings"].append(f"{name}: skipped non-SMS, administrative or planner worksheet.")
+        elif rows and (allow_loose or _channel(name) == "sms" or any(
+            _channel(value) == "sms" for row in rows for value in row
+        ) or any(
+            {"template id", "template message"} <= {_norm(value) for value in row}
+            for row in rows
+        )):
             width = max(map(len, rows), default=0)
             rows = [row + [None] * (width - len(row)) for row in rows]
             if not _template_table(name, rows, add, result["warnings"]):
@@ -221,6 +266,10 @@ def parse_brief(path: str, filename: str) -> dict:
                 if campaign_cols:
                     _campaign_blocks(name, rows, campaign_cols, add)
                 else:
+                    if (allow_loose or _channel(name) == "sms") and (not mixed_channels or _channel(name) == "sms") and _loose_grid(rows):
+                        for ri, row in enumerate(rows):
+                            for ci, value in enumerate(row):
+                                add(name, ri, ci, value, kind="loose_cells")
                     _channel_blocks(name, rows, add)
             if len(result["candidates"]) == before:
                 if "regional" in normalized:
@@ -233,6 +282,12 @@ def parse_brief(path: str, filename: str) -> dict:
     return result
 
 
+def _loose_grid(rows):
+    """Only message-only grids qualify; structural labels keep their existing routing."""
+    values = [value for row in rows for value in row if value is not None and str(value).strip()]
+    return bool(values) and all(_copy(value) for value in values)
+
+
 def _template_table(name, rows, add, warnings):
     """Explicit named SMS tables and language columns with SMS-number row labels."""
     header_row = next((ri for ri, row in enumerate(rows) if any(_norm(v) for v in row)), None)
@@ -241,15 +296,17 @@ def _template_table(name, rows, add, warnings):
     headers = [re.sub(r"\s+", "_", _norm(value)) for value in rows[header_row]]
     body_col = next((c for c, header in enumerate(headers)
                      if header in {"text", "body", "message", "template_message"} or re.fullmatch(r"sms(?:_\d+)?", header)), None)
-    if "template_name" in headers and body_col is not None:
-        name_col = headers.index("template_name")
+    if body_col is not None and ("template_name" in headers or (
+        "template_id" in headers and headers[body_col] == "template_message"
+    )):
+        name_col = headers.index("template_name") if "template_name" in headers else None
         for ri in range(header_row + 1, len(rows)):
             row = rows[ri]
             fields = dict(zip(headers, row, strict=False))
             if fields.get("channel") and _channel(fields["channel"]) != "sms":
                 warnings.append(f"{name}!{_column(body_col + 1)}{ri + 1}: non-SMS/unrecognized channel row excluded.")
                 continue
-            template_name = str(row[name_col] or "").strip()
+            template_name = str(row[name_col] or "").strip() if name_col is not None else ""
             language = _language(fields.get("language")) or str(fields.get("language") or "")
             if not language:
                 codes = {"eng": "English", "mar": "Marathi", "kan": "Kannada", "hin": "Hindi",
@@ -314,6 +371,17 @@ def _campaign_blocks(name, rows, anchors, add):
 
 def _channel_blocks(name, rows, add):
     width = len(rows[0])
+    # Explicit per-channel body columns may coexist with a generic Channel column.
+    for header_row, row in enumerate(rows):
+        if not any(_norm(value) in {"channel", "template name", "campaign name", "language", "lang"} for value in row):
+            continue
+        sms_columns = [c for c, value in enumerate(row) if _channel(value) == "sms"
+                       and re.search(r"\b(?:text|content|body|message)\b", _norm(value))]
+        if sms_columns:
+            for ri in range(header_row + 1, len(rows)):
+                for c in sms_columns:
+                    add(name, ri, c, rows[ri][c], kind="channel_columns")
+            break
     # Language rows with channel columns (Lang | SMS | WA | PN).
     matrix_header = next((ri for ri, row in enumerate(rows)
                           if _norm(row[0]) in {"lang", "language"} and any(_channel(v) == "sms" for v in row[1:])), None)
@@ -331,9 +399,21 @@ def _channel_blocks(name, rows, add):
                 channels = {}
         return
 
-    # Label columns are discovered independently; content/notes cannot switch a neighbour.
-    anchors = sorted({c for row in rows for c, value in enumerate(row)
-                      if _norm(value) == "channel" or (_channel(value) and c + 1 < width and any(_copy(r[c + 1]) for r in rows))})
+    # Channel headers declare columns; their body headings are never row-label anchors.
+    anchors = {c for row in rows for c, value in enumerate(row) if _norm(value) == "channel"}
+    for row in rows:
+        if any(_norm(value) == "channel" for value in row):
+            continue
+        anchors.update(c for c, value in enumerate(row) if (
+            _norm(value) == "content" and c + 1 < width and _channel(row[c + 1])
+        ) or (_channel(value) and c + 1 < width and any(_copy(r[c + 1]) for r in rows)))
+    anchors = sorted(anchors)
+    # One neighbour may be independent; multiple agreeing labels establish a shared row.
+    shared_scopes = []
+    for row in rows:
+        peers = [str(row[c]) for c in anchors if _norm(row[c])]
+        shared_scopes.append(peers[0] if len(peers) >= 2 and _channel(peers[0])
+                             and len({_channel(value, canonical=True) for value in peers}) == 1 else "")
     for index, anchor in enumerate(anchors):
         end = anchors[index + 1] if index + 1 < len(anchors) else width
         content_columns = {anchor + 1: ""} if anchor + 1 < end else {}
@@ -344,6 +424,10 @@ def _channel_blocks(name, rows, add):
         segment = ""
         for ri, row in enumerate(rows):
             label = _norm(row[anchor])
+            if label == "content" and anchor + 1 < end and _channel(row[anchor + 1]):
+                scope = str(row[anchor + 1]) if _channel(row[anchor + 1]) == "sms" else ""
+                content_columns = {anchor + 1: ""}
+                continue
             # Repeated language/variant headers replace, rather than merge, the old map.
             is_header = label in {"channel", "regional"} and any(row[c] is not None for c in range(anchor + 1, end))
             if is_header:
@@ -358,16 +442,20 @@ def _channel_blocks(name, rows, add):
                         campaign_column = c
                     if header in {"segment", "usecase", "use case"}:
                         segment_column = c
-                    if re.fullmatch(r"[a-z]", header):
+                    is_variant = bool(re.fullmatch(r"[a-z]", header) or re.match(
+                        r"(?:scenario|variant)\s*(?:\d+|[a-z])\b", header,
+                    ))
+                    if is_variant:
                         variants[c] = str(row[c])
-                    if language or (header and ("content" in header or header in {"text", "body", "message", "sms text"} or re.fullmatch(r"[a-z]", header))):
+                    if language or header in {"content", "copy", "text", "body", "message", "sms text", "sms content"} or is_variant:
                         content_columns[c] = language
                 scope = ""
                 continue
-            channel = _channel(row[anchor])
+            row_scope = row[anchor] if label else shared_scopes[ri]
+            channel = _channel(row_scope)
             if channel:
-                scope = str(row[anchor]) if channel == "sms" else ""
-            elif label:
+                scope = str(row_scope) if channel == "sms" else ""
+            elif label and not re.fullmatch(r"c\d+", label):
                 # Unknown row labels, including language labels after PN, end the block.
                 scope = ""
                 if len(label) < 60 and not _metadata(row[anchor]):

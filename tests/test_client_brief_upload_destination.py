@@ -136,3 +136,65 @@ def test_unrecognized_sms_workbook_retains_dlt_validation(tmp_path):
     book.save(path)
     book.close()
     api._validate_upload_destination(str(path), ".xlsx", "tata", "sms")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("account", "another-account"), ("channel", "whatsapp"), ("bot_id", "another-bot"),
+])
+def test_rcs_destination_checks_every_worksheet(tmp_path, field, value):
+    book = openpyxl.Workbook()
+    book.active.title = "Instructions"
+    book.active.append(["Campaign instructions"])
+    sheet = book.create_sheet("Templates")
+    sheet.append(["template_name", "text_message", field])
+    sheet.append(["original", "Original customer copy.", value])
+    path = tmp_path / "all-sheets.xlsx"
+    book.save(path)
+    book.close()
+    with pytest.raises(HTTPException) as error:
+        api._validate_upload_destination(str(path), ".xlsx", "tata", "rcs")
+    assert error.value.status_code == 400
+    assert "does not match the selected" in error.value.detail
+
+
+@pytest.mark.parametrize("channel", ["whatsapp", "rcs"])
+def test_legacy_xls_destination_uses_shared_sheet_reader(tmp_path, monkeypatch, channel):
+    import sms_brief
+    seen = []
+
+    def read_sheets(path, filename):
+        seen.append((path, filename))
+        return [
+            ("Instructions", [["Campaign instructions"]]),
+            ("Templates", [["template_name", "body_text", "account"], ["original", "Original copy.", "another-account"]]),
+        ]
+
+    monkeypatch.setattr(sms_brief, "_read_sheets", read_sheets)
+    path = tmp_path / "legacy.xls"
+    path.write_bytes(b"Legacy workbook is read by the shared XLS reader")
+    with pytest.raises(HTTPException) as error:
+        api._validate_upload_destination(str(path), ".xls", "tata", channel)
+    assert error.value.status_code == 400
+    assert "account does not match" in error.value.detail
+    assert seen == [(str(path), "upload.xls")]
+
+
+@pytest.mark.parametrize("channel", ["whatsapp", "rcs"])
+@pytest.mark.parametrize("selected_account", ["tata", "another-account"])
+def test_native_csv_filters_other_channels_without_relaxing_selected_ownership(
+    tmp_path, channel, selected_account,
+):
+    other_channel = "RCS" if channel == "whatsapp" else "WhatsApp"
+    path = tmp_path / "mixed.csv"
+    path.write_text(
+        f"Channel,Content,account\n{channel},Selected customer copy.,{selected_account}\n"
+        f"{other_channel},Other channel copy.,unrelated-account\n",
+        encoding="utf-8",
+    )
+    if selected_account == "tata":
+        api._validate_upload_destination(str(path), ".csv", "tata", channel)
+    else:
+        with pytest.raises(HTTPException) as error:
+            api._validate_upload_destination(str(path), ".csv", "tata", channel)
+        assert error.value.status_code == 400
+        assert "account does not match" in error.value.detail

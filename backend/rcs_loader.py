@@ -147,6 +147,11 @@ def _normalize_row_keys(row: dict) -> dict:
         "cardtitle": "card_title",
         "carddescription": "card_description",
         "textmessage": "text_message",
+        "bodytext": "body",
+        "messagecopy": "body",
+        "messagetext": "body",
+        "content": "body",
+        "text": "body",
         "templatemessage": "template_message",
         "entityid": "entity_id",
         "sourceref": "source_ref",
@@ -344,18 +349,81 @@ def _row_to_rcs_submission(row: dict, client: str = "tata", fallback_idx: int = 
     )
 
 
-def load_rcs_from_csv(path: str, client: str = "tata") -> list[RcsTemplateSubmission]:
-    """Load RCS templates from a CSV file."""
+def _has_rcs_table_headers(headers):
+    fields = set(_normalize_row_keys({str(header or "").strip().lower(): "" for header in headers}))
+    if "channel" in fields and not fields.intersection({"template_name", "name", "template_type", "type", "card_title", "header_type"}):
+        return False
+    return bool(fields.intersection({
+        "body", "body_text", "text_message", "message", "message_copy", "card_description",
+        "template_message", "description", "carousel_cards", "card_title",
+    }))
+
+
+def _rcs_grid_submissions(grid, sheet_name, source_name, client, has_channel_context=False, import_notes=None):
+    import hashlib
+    from loader import _loose_template_cells, _native_template_cells, _whatsapp_import_channel
+    from sms_brief import _column
+
+    if re.search(r"planner|calendar", sheet_name, re.IGNORECASE):
+        return []
+    channel = _whatsapp_import_channel(sheet_name)
+    if channel and channel != "rcs":
+        return []
+    first = next((index for index, row in enumerate(grid) if any(value is not None and str(value).strip() for value in row)), None)
+    if first is None:
+        return []
+    headers = [str(value or "").strip().lower() for value in grid[first]]
+    result = []
+    if _has_rcs_table_headers(headers):
+        for ri, values in enumerate(grid[first + 1:], first + 2):
+            raw = _normalize_row_keys(dict(zip(headers, values)))
+            if not any(raw.values()):
+                continue
+            channel_label = str(raw.get("channel") or "").strip()
+            if channel_label and _whatsapp_import_channel(channel_label) != "rcs":
+                continue
+            body_col = next((ci for ci, header in enumerate(headers, 1) if _has_rcs_table_headers([header])), 1)
+            ref = f"{source_name}:{sheet_name}!{_column(body_col)}{ri}"
+            raw["source_ref"] = raw.get("source_ref") or ref
+            if not any(raw.get(key) for key in ("template_name", "name", "template", "campaign_name", "campaign")):
+                digest = hashlib.sha256(f"{client}\0{ref}".encode()).hexdigest()[:16]
+                raw["template_name"] = f"rcs_{digest}"
+            sub = _row_to_rcs_submission(raw, client=client, fallback_idx=ri)
+            sub._excel_row = ri
+            sub._excel_sheet = sheet_name
+            result.append(sub)
+        return result
+    loose = _loose_template_cells(grid, sheet_name, has_channel_context, "rcs")
+    for row, col, text, _language, _scope in loose or _native_template_cells(grid, sheet_name, "rcs"):
+        ref = f"{source_name}:{sheet_name}!{_column(col)}{row}"
+        digest = hashlib.sha256(f"{client}\0{ref}\0{text}".encode()).hexdigest()[:16]
+        sub = _row_to_rcs_submission({
+            "template_name": f"rcs_{digest}", "body": text, "source_ref": ref, "template_type": "text",
+        }, client=client)
+        # Loose cells are source text, not card/button/carousel instructions.
+        sub.text_message = text
+        sub._excel_row = row
+        sub._excel_sheet = sheet_name
+        result.append(sub)
+    return result
+
+
+def load_rcs_from_csv(
+    path: str, client: str = "tata", source_name: str | None = None, import_notes: list[str] | None = None,
+) -> list[RcsTemplateSubmission]:
+    """Load structured rows or independent loose cells, retaining the first CSV row."""
+    from loader import _template_channel_context
+
     p = Path(path)
     if not p.exists() and (Path("samples") / path).exists():
         p = Path("samples") / path
-    rows = []
-    with open(p, newline="", encoding="utf-8") as f:
-        for idx, raw_row in enumerate(csv.DictReader(f), 1):
-            if not any(raw_row.values()):
-                continue
-            rows.append(_row_to_rcs_submission(raw_row, client=client, fallback_idx=idx))
-    return rows
+    source_name = Path(source_name or p.name).name
+    with open(p, newline="", encoding="utf-8-sig") as f:
+        grid = list(csv.reader(f))
+    title = Path(source_name).stem
+    return _rcs_grid_submissions(
+        grid, title, source_name, client, _template_channel_context([(title, grid)], "rcs"), import_notes,
+    )
 
 
 def check_rcs_image_aspect_ratio(
@@ -457,25 +525,6 @@ def _extract_images_spatially(path: str, workbook=None, sheet_name: str | None =
     return sorted_map
 
 
-def _extract_images_from_xlsx(path: str) -> list[tuple[str, bytes]]:
-    """Extract embedded media (images/videos) from an Excel (.xlsx) file in order, preserving original bytes."""
-    media = []
-    try:
-        import zipfile
-
-        with zipfile.ZipFile(path, "r") as z:
-            media_names = [f for f in z.namelist() if f.startswith("xl/media/")]
-
-            def natural_key(name):
-                return [int(c) if c.isdigit() else c for c in re.split(r"(\d+)", name)]
-
-            media_names.sort(key=natural_key)
-            for name in media_names:
-                filename = name.split("/")[-1]
-                media.append((filename, z.read(name)))
-    except Exception as e:
-        logger.warning("Could not extract embedded media from xlsx: %s", e)
-    return media
 
 
 def _upload_and_bind_rcs_images(
@@ -727,111 +776,33 @@ def load_rcs_from_excel(
     path: str,
     client: str = "tata",
     upload_media: bool = True,
+    source_name: str | None = None,
+    import_notes: list[str] | None = None,
 ) -> list[RcsTemplateSubmission]:
-    """Load RCS templates from an Excel (.xlsx) file with auto-extracted embedded images."""
-    import openpyxl
+    """Load all worksheets, keeping plain cells independent and explicit routes intact."""
+    from loader import _load_template_workbook, _template_channel_context
 
-    brief_rows = read_client_brief_rows(path)
-    if brief_rows is not None:
-        return _load_rcs_client_brief(path, brief_rows, client, upload_media)
-
-    wb = openpyxl.load_workbook(path, data_only=True)
+    if Path(path).suffix.lower() != ".xls":
+        brief_rows = read_client_brief_rows(path)
+        if brief_rows is not None:
+            return _load_rcs_client_brief(path, brief_rows, client, upload_media)
+    source_name = Path(source_name or path).name
+    workbook = _load_template_workbook(path)
+    submissions = []
     try:
-        spatial_images = _extract_images_spatially(path, workbook=wb)
-        all_raw_rows = list(wb.active.iter_rows(values_only=True))
+        sheets = [(sheet, list(sheet.iter_rows(values_only=True))) for sheet in workbook]
+        has_channel_context = _template_channel_context([(sheet.title, grid) for sheet, grid in sheets], "rcs")
+        for sheet, grid in sheets:
+            rows = _rcs_grid_submissions(
+                grid, sheet.title, source_name, client, has_channel_context, import_notes,
+            )
+            if any(sub.template_type in {"richcard", "carousel"} for sub in rows):
+                spatial_images = _extract_images_spatially(path, workbook=workbook, sheet_name=sheet.title)
+                _upload_and_bind_rcs_images([], rows, client, spatial_images=spatial_images, upload_now=upload_media)
+            submissions.extend(rows)
     finally:
-        wb.close()
-    raw_media = [] if spatial_images else _extract_images_from_xlsx(path)
-
-    first_row = [str(c or "").strip().lower() for c in all_raw_rows[0]] if all_raw_rows else []
-    has_standard_headers = any(
-        h
-        in (
-            "template_name",
-            "templatename",
-            "name",
-            "body",
-            "body_text",
-            "components",
-            "category",
-            "language",
-            "card_title",
-            "card_description",
-            "media_url",
-            "header_type",
-        )
-        for h in first_row
-    )
-
-    # Check if there is a row that contains multiple rich single-cell card blocks (only when no standard column headers exist)
-    block_row_cards = None
-    if not has_standard_headers:
-        for r in all_raw_rows:
-            text_blocks = [str(c).strip() for c in r if c is not None and len(str(c).strip()) > 35]
-            if len(text_blocks) >= 2:
-                block_row_cards = text_blocks
-                break
-        if block_row_cards:
-            c_cards = []
-            for _c_idx, block in enumerate(block_row_cards):
-                card_dict = parse_single_cell_card_block(block)
-
-                card_dict["suggestions"] = _build_suggestions_from_row(card_dict, client)
-                if any(suggestion.get("suggestionType") == "url_action" for suggestion in card_dict["suggestions"]):
-                    card_dict["button_url"] = card_dict["suggestions"][0]["url"]
-                c_cards.append(card_dict)
-
-            base_name = Path(path).stem
-            clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", base_name).strip("_")
-            source_ref = f"{client.lower()}_{clean_name}_carousel"[:25].rstrip("_")
-            t_name = normalize_campaign_name(source_ref)[:25].rstrip("_")
-
-            sub = RcsTemplateSubmission(
-                template_name=t_name,
-                bot_id=get_rcs_bot_id(client),
-                template_type="carousel",
-                carousel_cards=c_cards,
-                template_category="TRANSACTIONAL",
-                entity_id=get_rcs_entity_id(client),
-                client=client.lower(),
-                channel="rcs",
-                source_ref=source_ref,
-            )
-            sub._excel_row = 1
-            _upload_and_bind_rcs_images(
-                raw_media,
-                [sub],
-                client,
-                spatial_images={1: [image for images in spatial_images.values() for image in images]} if spatial_images else None,
-                upload_now=upload_media,
-            )
-            return [sub]
-    headers = [str(c or "").strip() for c in all_raw_rows[0]] if all_raw_rows else []
-    rows = []
-    for idx, row in enumerate(all_raw_rows[1:], 2):
-        if not any(row):
-            continue
-
-        raw_row = {}
-        for h, val in zip(headers, row, strict=False):
-            if h:
-                raw_row[h] = str(val).strip() if val is not None else ""
-
-        if not any(raw_row.values()):
-            continue
-
-        sub = _row_to_rcs_submission(raw_row, client=client, fallback_idx=idx - 1)
-        sub._excel_row = idx
-        rows.append(sub)
-
-    _upload_and_bind_rcs_images(
-        raw_media,
-        rows,
-        client,
-        spatial_images=spatial_images,
-        upload_now=upload_media,
-    )
-    return rows
+        workbook.close()
+    return submissions
 
 
 def load_rcs_from_list(rows: list[dict], client: str = "tata") -> list[RcsTemplateSubmission]:

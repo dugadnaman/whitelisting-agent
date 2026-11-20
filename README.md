@@ -43,13 +43,20 @@ and identifiers remain unchanged. No generated artwork or story video is used.
 
 - Native WhatsApp workbooks are read across worksheets and months, using explicit
   channel scope and language/variant headers—not the active sheet or first long row.
+  Headerless message grids use the selected channel: each populated message cell
+  becomes a separate draft, vertically or horizontally. Mixed-channel planners
+  retain explicit routing; unscoped sections are not guessed into another channel.
   Preview retains filename/sheet/cell provenance, shows body/buttons, and discloses
-  excluded or ambiguous sections. Unscoped native copy is not guessed into WhatsApp.
+  excluded or ambiguous sections.
 - Generated names reserve a stable source/content suffix, so temporary upload paths
   and truncation cannot collapse different messages into one name.
 - SMS named tables such as `Template Name, SMS 2` retain supplied names and exact
   copy. Numbered SMS rows with language columns expand into separate drafts.
   CSV/XLS/XLSX extraction does not require a live portal session.
+- Regional copy does not need English keywords or a minimum English-sized message.
+  Unicode text, combining marks, placeholders and line breaks remain intact.
+  Ambiguous WhatsApp language codes require an explicit preview choice before
+  submission; the original message is never translated to resolve the language.
 - Every WhatsApp writer serializes only verified URL, reply and phone button fields.
   Legacy `label` becomes `text`; existing reviewed `text` wins. UI/source metadata
   never reaches Meta. Unsupported action types fail before provider side effects.

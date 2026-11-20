@@ -2483,10 +2483,12 @@ export default function JiraBriefsPage() {
                                         <option value="AUTHENTICATION">AUTHENTICATION</option>
                                       </select>
                                       <select
-                                        value={wa.language || 'en'}
+                                        aria-label="Template language"
+                                        value={wa.language || 'und'}
                                         onChange={(e) => updateWaField(idx, 'language', e.target.value)}
                                         className="text-sm font-medium border border-gray-300 rounded-lg px-1.5 py-1 bg-white font-mono cursor-pointer"
                                       >
+                                        <option value="und" disabled>Choose language</option>
                                         <option value="en">en (English)</option>
                                         <option value="hi">hi (Hindi)</option>
                                         <option value="gu">gu (Gujarati)</option>
@@ -2497,6 +2499,9 @@ export default function JiraBriefsPage() {
                                         <option value="te">te (Telugu)</option>
                                         <option value="kn">kn (Kannada)</option>
                                         <option value="ml">ml (Malayalam)</option>
+                                        <option value="ur">ur (Urdu)</option>
+                                        <option value="or">or (Odia)</option>
+                                        <option value="as">as (Assamese)</option>
                                       </select>
                                     </div>
                                   ) : (
@@ -2512,7 +2517,7 @@ export default function JiraBriefsPage() {
                                         {wa.category}
                                       </span>
                                       <span className="text-xs px-1.5 py-1 rounded-lg bg-gray-100 text-gray-700 font-mono font-medium normal-case">
-                                        {(wa.language || 'en').toUpperCase()}
+                                        {!wa.language || wa.language === 'und' ? 'Language review required · Edit to choose' : wa.language.toUpperCase()}
                                       </span>
                                     </div>
                                   )}

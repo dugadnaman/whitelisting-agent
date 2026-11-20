@@ -50,6 +50,8 @@ def upload_page(upload_modules):
             components: [{type: 'BODY', text: 'Exact reviewed copy'}]}];
         window.inventoryRequests = [];
         window.smsReviewRequests = [];
+        window.languageOverrideObjects = [];
+        window.reviewFileObjects = [];
         window.smsDraft = {template_name: 'reviewed_sms', text: 'Exact SMS copy', sample_message: '',
             template_type: '1', message_type: '1', category_id: 'finance', header_id: 'header', header: 'TATAXX'};
         const fileDetails = async file => ({name: file.name, type: file.type, lastModified: file.lastModified,
@@ -57,8 +59,16 @@ def upload_page(upload_modules):
         const api = {
             getSampleCsvUrl: () => '#sample',
             previewFile: async (file, account, channel, options) => {
-                window.calls.previews.push({...await fileDetails(file), account, channel, verifyInventory: options?.verifyInventory});
+                window.languageOverrideObjects.push(options?.languageOverrides);
+                window.reviewFileObjects.push(file);
+                window.calls.previews.push({...await fileDetails(file), account, channel,
+                    verifyInventory: options?.verifyInventory, languageOverrides: options?.languageOverrides});
                 const result = structuredClone(window.previews);
+                for (const preview of result) {
+                    const language = options?.languageOverrides?.[preview.source_ref];
+                    if (language) Object.assign(preview, {language, language_review_required: false,
+                        language_review_message: null, submission_ready: true});
+                }
                 if (options?.verifyInventory === true && window.holdInventory) {
                     const deferred = Promise.withResolvers();
                     window.inventoryRequests.push({...deferred, result});
@@ -67,8 +77,10 @@ def upload_page(upload_modules):
                 if (options?.verifyInventory === true && window.inventoryFailure) throw new Error(window.inventoryFailure);
                 return result;
             },
-            submitFile: async (file, account, channel) => {
-                window.calls.posts.push(await fileDetails(file));
+            submitFile: async (file, account, channel, _user, _fixGrammar, _skipDuplicates, _review, _botId, languageOverrides) => {
+                window.languageOverrideObjects.push(languageOverrides);
+                window.reviewFileObjects.push(file);
+                window.calls.posts.push({...await fileDetails(file), languageOverrides});
                 if (window.failPost) throw new Error('Submission response lost');
                 return {account, channel, submitted: 1, results: [], status: 'COMPLETED'};
             },
@@ -564,6 +576,106 @@ def test_inventory_mismatch_never_overwrites_copy_or_enables_submission(upload_p
     expected_copy = "Operator retained exact copy" if change == "operator-copy" else "Exact reviewed copy"
     expect(page.get_by_text(expected_copy, exact=True)).to_be_visible()
     assert page.evaluate("calls.posts.length") == 0
+
+
+@pytest.mark.parametrize("detected_language,language,body", [
+    ("", "mr", "आपल्या खात्यासाठी खास ऑफर.\nमूळ संदेश जसाच्या तसा ठेवा."),
+    ("", "ur", "آپ کے اکاؤنٹ کے لیے خصوصی پیشکش۔\nاصل پیغام بغیر تبدیلی کے محفوظ رکھیں۔"),
+    ("en", "hi", "Aapke khate ke liye khaas offer.\nAsli sandesh bilkul waise hi rakhein."),
+])
+def test_whatsapp_language_review_rechecks_exact_source_and_bytes_before_submit(upload_page, detected_language, language, body):
+    page = upload_page
+    page.evaluate("""([body, detectedLanguage]) => {
+        holdInventory = true;
+        Object.assign(previews[0], {language: detectedLanguage, language_review_required: !detectedLanguage,
+            language_review_message: 'Choose the language of the original message.',
+            source_ref: 'Offers!D17', source_file: 'Regional.xlsx', source_sheet: 'Offers', source_cell: 'D17',
+            components: [{type: 'BODY', text: body}]});
+        mountUpload();
+    }""", [body, detected_language])
+    source = (body + "\r\nunchanged workbook bytes").encode()
+    page.locator('input[type="file"]').first.set_input_files({
+        "name": "Regional.xlsx", "mimeType": "application/octet-stream", "buffer": source,
+    })
+    page.wait_for_function("inventoryRequests.length === 1")
+    selector = page.get_by_role("combobox", name="Language for att_exact_draft (Offers!D17)", exact=True)
+    expect(selector).to_have_value(detected_language)
+    if not detected_language:
+        expect(page.get_by_text("Needs review: language", exact=True)).to_be_visible()
+    assert selector.locator("option").all_text_contents() == [
+        "Choose language", "English (en)", "Hindi (hi)", "Marathi (mr)", "Gujarati (gu)", "Punjabi (pa)",
+        "Bengali (bn)", "Tamil (ta)", "Telugu (te)", "Kannada (kn)", "Malayalam (ml)",
+        "Urdu (ur)", "Odia (or)", "Assamese (as)",
+    ]
+    submit = page.get_by_role("button", name="Submit 1 template to", exact=False)
+    expect(submit).to_be_disabled()
+    selector.select_option(language)
+    page.evaluate("inventoryRequests[0].resolve(inventoryRequests[0].result)")
+    expect(submit).to_be_disabled()
+    expect(selector).to_have_value(language)
+    row = page.get_by_role("row").filter(has_text="att_exact_draft")
+    expect(row.locator("pre").first).to_have_text(body)
+    expect(row).to_contain_text("Regional.xlsx")
+    expect(row).to_contain_text("Offers!D17")
+    assert page.evaluate("tabState.getTabState('submit_state', null).previews[0].language") == detected_language
+    page.get_by_role("button", name="Reconnect this destination", exact=True).click()
+    page.evaluate("unmount(); mountUpload()")
+    expect(page.get_by_text("Regional.xlsx", exact=True)).to_be_visible()
+    expect(selector).to_have_value(language)
+    expect(row.locator("pre").first).to_have_text(body)
+    expect(submit).to_be_disabled()
+    assert page.evaluate("calls.previews.length") == 2
+    assert page.evaluate("calls.reconnects") == 1
+    assert page.evaluate("calls.posts.length") == 0
+    page.get_by_role("button", name="Recheck language & inventory", exact=True).click()
+    page.wait_for_function("inventoryRequests.length === 2")
+    expect(submit).to_be_disabled()
+    page.evaluate("inventoryRequests[1].resolve(inventoryRequests[1].result)")
+    expect(submit).to_be_enabled()
+    expect(selector).to_have_value(language)
+    assert page.evaluate("calls.previews.slice(2).map(call => call.languageOverrides)") == [
+        {"Offers!D17": language}, {"Offers!D17": language},
+    ]
+    assert page.evaluate("calls.previews.every(call => call.name === 'Regional.xlsx')") is True
+    assert page.evaluate("calls.previews.map(call => call.bytes)") == [list(source)] * 4
+    submit.click()
+    page.wait_for_function("calls.posts.length === 1")
+    assert page.evaluate("calls.posts[0].languageOverrides") == {"Offers!D17": language}
+    assert page.evaluate("calls.posts[0].bytes") == list(source)
+    assert page.evaluate("languageOverrideObjects[2] === languageOverrideObjects[3] && languageOverrideObjects[3] === languageOverrideObjects[4]") is True
+    assert page.evaluate("reviewFileObjects[2] === reviewFileObjects[3] && reviewFileObjects[3] === reviewFileObjects[4]") is True
+
+
+def test_language_override_persists_with_review_and_resets_with_file_and_destination(upload_page):
+    page = upload_page
+    page.evaluate("""() => {
+        Object.assign(previews[0], {language: '', language_review_required: true, source_ref: 'CSV row 7'});
+        mountUpload();
+    }""")
+    page.locator('input[type="file"]').first.set_input_files({
+        "name": "regional.csv", "mimeType": "text/csv", "buffer": b'exact original bytes',
+    })
+    selector = page.get_by_role("combobox", name="Language for att_exact_draft (CSV row 7)", exact=True)
+    selector.select_option("ur")
+    page.wait_for_function("""async () => {
+        const selected = tabState.getTabState('submit_upload', null);
+        const stored = await uploadDrafts.loadUploadDraft(selected.scope, selected.id);
+        return stored.review?.languageOverrides?.['CSV row 7'] === 'ur';
+    }""")
+    page.reload()
+    page.evaluate("mountUpload()")
+    expect(selector).to_have_value("ur")
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
+    assert page.evaluate("calls.previews.length") == 0
+    page.locator('input[type="file"]').first.set_input_files({
+        "name": "replacement.csv", "mimeType": "text/csv", "buffer": b'new original bytes',
+    })
+    page.wait_for_function("calls.previews.length === 2")
+    assert page.evaluate("calls.previews[0].languageOverrides") == {}
+    assert page.evaluate("tabState.getTabState('submit_language_overrides', null)") == {}
+    page.evaluate("app.account = 'tcl_trans'; mountUpload()")
+    expect(page.get_by_text("replacement.csv", exact=True)).to_have_count(0)
+    assert page.evaluate("tabState.getTabState('submit_language_overrides', null)") == {}
 
 
 def test_sms_offline_import_and_body_editing_do_not_wait_for_portal_options(upload_page):

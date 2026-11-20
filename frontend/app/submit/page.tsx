@@ -84,7 +84,7 @@ type State =
 
 
 type UploadSelection = { scope: string; id: string; botId?: string; persisted?: boolean };
-type SavedReview = { state: State; botId?: string };
+type SavedReview = { state: State; botId?: string; languageOverrides?: Record<string, string> };
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -92,6 +92,11 @@ function formatBytes(bytes: number): string {
 }
 
 const ACCEPTED_EXTENSIONS = ['.csv', '.xlsx', '.xls'];
+const WHATSAPP_LANGUAGES = [
+  ['en', 'English'], ['hi', 'Hindi'], ['mr', 'Marathi'], ['gu', 'Gujarati'], ['pa', 'Punjabi'],
+  ['bn', 'Bengali'], ['ta', 'Tamil'], ['te', 'Telugu'], ['kn', 'Kannada'], ['ml', 'Malayalam'],
+  ['ur', 'Urdu'], ['or', 'Odia'], ['as', 'Assamese'],
+];
 
 function isAcceptedFile(file: File): boolean {
   const name = file.name.toLowerCase();
@@ -108,6 +113,7 @@ export default function SubmitPage() {
   const [review, setReview] = useState<{ account: string; channel: Channel; botId?: string; file: File } | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [uploadSelection, setUploadSelection] = useTabState<UploadSelection | null>('submit_upload', null);
+  const [languageOverrides, setLanguageOverrides] = useTabState<Record<string, string>>('submit_language_overrides', {});
   const [storageNotice, setStorageNotice] = useState('');
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [inventoryCheck, setInventoryCheck] = useState<{ uploadId: string; checking: boolean; error?: string } | null>(null);
@@ -181,7 +187,7 @@ export default function SubmitPage() {
       return [
         t.template_name || '',
         t.category || 'MARKETING',
-        t.language || 'en',
+        t.language || '',
         bodyComp?.text || '',
         headerComp?.text || '',
         firstBtn?.text || '',
@@ -278,6 +284,7 @@ export default function SubmitPage() {
     setIdentifyFile(null);
     setIdentifying(false);
     setReview(null);
+    setLanguageOverrides({});
     setShowBlockedModal(false);
     setCheckingConnection(false);
     setStorageNotice('');
@@ -316,6 +323,9 @@ export default function SubmitPage() {
       setFile(restored.file);
       setUploadSelection({ ...saved, persisted: true });
       const restoredState = cached.step === 'idle' ? restored.review?.state || cached : cached;
+      setLanguageOverrides(cached.step === 'idle'
+        ? restored.review?.languageOverrides || {}
+        : getTabState('submit_language_overrides', restored.review?.languageOverrides || {}));
       if ((restoredState.step === 'previewed' || restoredState.step === 'error' || restoredState.step === 'submitting') && restoredState.uploadId === saved.id) {
         setReview({ account, channel, botId: restored.review?.botId ?? saved.botId, file: restored.file });
         setState(restoredState.step === 'submitting'
@@ -334,14 +344,14 @@ export default function SubmitPage() {
     if (state.step !== 'previewed' && state.step !== 'error') return;
     if (state.uploadId !== uploadSelection.id) return;
     const version = selectionVersionRef.current;
-    void saveUploadReview(uploadScope, uploadSelection.id, { state, botId: review.botId }).catch((error) => {
+    void saveUploadReview(uploadScope, uploadSelection.id, { state, botId: review.botId, languageOverrides }).catch((error) => {
       if (mountedRef.current && version === selectionVersionRef.current && scopeRef.current.uploadScope === uploadScope) {
         setStorageNotice(`The file review could not be saved. Keep this page open. ${formatError(error)}`);
       }
     });
-  }, [state, uploadSelection, uploadScope, review, file]);
+  }, [state, uploadSelection, uploadScope, review, file, languageOverrides]);
 
-  const verifyInventory = useCallback(async (selected: File, uploadId: string, baseline: TemplatePreview[]) => {
+  const verifyInventory = useCallback(async (selected: File, uploadId: string, baseline: TemplatePreview[], overrides: Record<string, string>) => {
     const version = ++inventoryVersionRef.current;
     const selectionVersion = selectionVersionRef.current;
     const requestedScope = uploadScope;
@@ -349,7 +359,7 @@ export default function SubmitPage() {
       && selectionVersion === selectionVersionRef.current && scopeRef.current.uploadScope === requestedScope;
     setInventoryCheck({ uploadId, checking: true });
     try {
-      const verified = await previewFile(selected, account, channel, { verifyInventory: true });
+      const verified = await previewFile(selected, account, channel, { verifyInventory: true, languageOverrides: overrides });
       if (!current()) return;
       if (verified.length !== baseline.length || verified.some((preview, index) => previewIdentity(preview) !== previewIdentity(baseline[index]))) {
         throw new Error('Inventory returned a different set of messages. Your original preview is retained; retry the inventory check.');
@@ -389,6 +399,8 @@ export default function SubmitPage() {
         return;
       }
       const sameFile = file === selected;
+      const overrides = sameFile ? languageOverrides : {};
+      if (!sameFile) setLanguageOverrides(overrides);
       setFile(selected);
       setStorageNotice('');
       if (!sameFile) { setReview(null); setState({ step: 'idle' }); }
@@ -409,12 +421,12 @@ export default function SubmitPage() {
       if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.uploadScope !== uploadScope) return;
       setState({ step: 'previewing' });
       try {
-        const parsed = await previewFile(selected, account, channel, { verifyInventory: false });
+        const parsed = await previewFile(selected, account, channel, { verifyInventory: false, languageOverrides: overrides });
         const previews = parsed.map((preview) => ({ ...preview, inventory_status: 'unverified' as const, submission_ready: false }));
         if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
         setReview({ ...requestedScope, botId: activeRcs.botId || undefined, file: selected });
         setState({ step: 'previewed', previews, uploadId });
-        void verifyInventory(selected, uploadId, previews);
+        void verifyInventory(selected, uploadId, previews, overrides);
       } catch (err) {
         if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
         setState({
@@ -425,7 +437,7 @@ export default function SubmitPage() {
         });
       }
     },
-    [account, channel, activeRcs.botId, uploadScope, file, uploadSelection, verifyInventory]
+    [account, channel, activeRcs.botId, uploadScope, file, uploadSelection, verifyInventory, languageOverrides]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -469,15 +481,32 @@ export default function SubmitPage() {
     setStorageNotice('');
     setCheckingConnection(false);
     setReview(null);
+    setLanguageOverrides({});
     setRefreshingJob(false);
     setFile(null);
     setState({ step: 'idle' });
     if (inputRef.current) inputRef.current.value = '';
   }, [setUploadSelection]);
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
+  const languageReviewPending = channel === 'whatsapp' && !!currentPreviews?.some((preview) =>
+    !preview.language || preview.language_review_required || (!!preview.source_ref && languageOverrides[preview.source_ref] !== undefined
+      && languageOverrides[preview.source_ref] !== preview.language));
+  const handleLanguageChange = (sourceRef: string, language: string) => {
+    if (state.step !== 'previewed' || state.submissionUncertain) return;
+    selectionVersionRef.current++;
+    inventoryVersionRef.current++;
+    setInventoryCheck(null);
+    setCheckingConnection(false);
+    setShowBlockedModal(false);
+    setLanguageOverrides({ ...languageOverrides, [sourceRef]: language });
+    setState({ ...state, previews: state.previews.map((preview) => ({
+      ...preview, inventory_status: 'unverified', submission_ready: false,
+      already_exists_on_waba: null, exists_on_waba: null, duplicate_warning: undefined,
+    })) });
+  };
   const executeSubmit = useCallback(async (fixGrammar: boolean) => {
     if (!file || !currentPreviews?.length || state.step !== 'previewed' || state.submissionUncertain || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
-    if (inventoryCheck?.checking || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
+    if (languageReviewPending || inventoryCheck?.checking || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
     if (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId)) {
       setState({
         step: 'error',
@@ -497,7 +526,7 @@ export default function SubmitPage() {
     const submitting: State = { step: 'submitting', previews: currentPreviews, uploadId: uploadSelection?.id };
     setState(submitting);
     if (uploadSelection) {
-      try { await saveUploadReview(uploadScope, uploadSelection.id, { state: submitting, botId: review.botId }); }
+      try { await saveUploadReview(uploadScope, uploadSelection.id, { state: submitting, botId: review.botId, languageOverrides }); }
       catch (error) {
         if (mountedRef.current && version === selectionVersionRef.current && scopeRef.current.uploadScope === uploadScope) setStorageNotice(`The submission status could not be saved in browser storage. Check History if this page closes. ${formatError(error)}`);
       }
@@ -506,7 +535,7 @@ export default function SubmitPage() {
     try {
       const res = await submitFile(
         file, account, channel, user, fixGrammar, autoSkipDuplicates,
-        review, channel === 'rcs' ? review.botId : undefined
+        review, channel === 'rcs' ? review.botId : undefined, languageOverrides
       );
       if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
       const isComplete = !res.job_id || ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(res.status || '');
@@ -530,10 +559,10 @@ export default function SubmitPage() {
         submissionUncertain: true,
       });
     }
-  }, [file, account, channel, user, currentPreviews, state, review, autoSkipDuplicates, activeRcs.botId, ensureConnected, uploadScope, uploadSelection, inventoryCheck]);
+  }, [file, account, channel, user, currentPreviews, state, review, autoSkipDuplicates, activeRcs.botId, ensureConnected, uploadScope, uploadSelection, inventoryCheck, languageOverrides, languageReviewPending]);
 
   const handleInitiateSubmit = useCallback(async () => {
-    if (checkingConnection || inventoryCheck?.checking || state.step !== 'previewed' || state.submissionUncertain || !file || !currentPreviews?.length || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
+    if (languageReviewPending || checkingConnection || inventoryCheck?.checking || state.step !== 'previewed' || state.submissionUncertain || !file || !currentPreviews?.length || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
     const version = selectionVersionRef.current;
     setCheckingConnection(true);
     const connected = await ensureConnected();
@@ -554,7 +583,7 @@ export default function SubmitPage() {
       return;
     }
     executeSubmit(autoFixGrammar);
-  }, [file, currentPreviews, state, channel, autoFixGrammar, executeSubmit, ensureConnected, uploadScope, checkingConnection, inventoryCheck]);
+  }, [file, currentPreviews, state, channel, autoFixGrammar, executeSubmit, ensureConnected, uploadScope, checkingConnection, inventoryCheck, languageReviewPending]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -982,11 +1011,11 @@ export default function SubmitPage() {
                   {review?.channel === 'rcs' && <> (Bot ID: <code>{review.botId || 'Not configured'}</code>)</>}. Review before final submission.
                 </p>
                 {state.submissionUncertain && <p role="alert" className="mt-2 text-xs text-amber-900">Submission outcome unknown. This upload cannot be submitted again here. <a href="/" className="underline">Check History</a>; reconnecting does not replay it.</p>}
-                {state.previews.some((preview) => preview.inventory_status !== 'verified') && <div role={inventoryCheck?.checking ? 'status' : 'alert'} className="mt-2 space-y-1 text-xs text-amber-900">
-                  <p>{inventoryCheck?.checking ? 'Checking live inventory in the background. Your messages and sources are available now; submission waits for verification.' : 'Inventory is not verified. Existing templates are unknown, not missing; submission is blocked. Your file and review are retained.'}</p>
+                {(languageReviewPending || state.previews.some((preview) => preview.inventory_status !== 'verified')) && <div role={inventoryCheck?.checking ? 'status' : 'alert'} className="mt-2 space-y-1 text-xs text-amber-900">
+                  <p>{languageReviewPending ? 'Choose a language for each flagged message, then recheck the retained file. Submission stays blocked until the chosen languages and inventory are verified.' : inventoryCheck?.checking ? 'Checking live inventory in the background. Your messages and sources are available now; submission waits for verification.' : 'Inventory is not verified. Existing templates are unknown, not missing; submission is blocked. Your file and review are retained.'}</p>
                   <p>{inventoryCheck?.error || state.previews.find((preview) => preview.inventory_error)?.inventory_error}</p>
                   <button type="button" onClick={reconnect} className="underline">Reconnect this destination</button>
-                  <button type="button" disabled={!file || inventoryCheck?.checking} className="ml-3 underline disabled:opacity-50" onClick={() => { if (file && state.uploadId) void verifyInventory(file, state.uploadId, state.previews); }}>Retry inventory check</button>
+                  <button type="button" disabled={!file || inventoryCheck?.checking || checkingConnection || state.submissionUncertain} className="ml-3 underline disabled:opacity-50" onClick={() => { if (file && state.uploadId) { if (languageReviewPending) void handleFile(file); else void verifyInventory(file, state.uploadId, state.previews, languageOverrides); } }}>{languageReviewPending ? 'Recheck language & inventory' : 'Retry inventory check'}</button>
                 </div>}
                 {channel === 'rcs' && !activeRcs.botId && (
                   <p role="alert" className="mt-1 text-xs font-medium text-amber-800">
@@ -1003,7 +1032,7 @@ export default function SubmitPage() {
                 </button>
                 <button
                   onClick={handleInitiateSubmit}
-                  disabled={checkingConnection || inventoryCheck?.checking || state.submissionUncertain || !state.previews.length || !review || review.account !== account || review.channel !== channel || account === 'all' || state.previews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false) || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
+                  disabled={languageReviewPending || checkingConnection || inventoryCheck?.checking || state.submissionUncertain || !state.previews.length || !review || review.account !== account || review.channel !== channel || account === 'all' || state.previews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false) || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
                   className="px-4 py-2 rounded-lg text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                 >
                   {(() => {
@@ -1079,7 +1108,23 @@ export default function SubmitPage() {
                     {channel === 'whatsapp' ? (
                       <>
                         <td className="px-5 py-3 text-gray-700">{p.category || 'MARKETING'}</td>
-                        <td className="px-5 py-3 text-gray-700">{p.language || 'en'}</td>
+                        <td className="px-5 py-3 text-gray-700">
+                            <label className="block space-y-1 text-xs">
+                              <span>{!p.language || p.language_review_required ? 'Needs review: language' : 'Review language'}</span>
+                              <select
+                                aria-label={`Language for ${p.template_name} (${p.source_ref || 'source unavailable'})`}
+                                value={(p.source_ref ? languageOverrides[p.source_ref] : undefined) ?? p.language ?? ''}
+                                disabled={!p.source_ref || checkingConnection || state.submissionUncertain}
+                                onChange={(event) => { if (p.source_ref) handleLanguageChange(p.source_ref, event.target.value); }}
+                                className="block rounded-md border border-gray-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
+                              >
+                                <option value="" disabled>Choose language</option>
+                                {WHATSAPP_LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label} ({code})</option>)}
+                              </select>
+                              {p.language_review_message && <span className="block text-amber-900">{p.language_review_message}</span>}
+                              {!p.source_ref && <span className="block text-amber-900">Language correction unavailable: source identity missing.</span>}
+                            </label>
+                        </td>
                         <td className="px-5 py-3 text-gray-600">
                           {p.components?.length ? (
                             <div className="space-y-1">

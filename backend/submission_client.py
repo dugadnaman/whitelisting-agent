@@ -1083,6 +1083,8 @@ def submit_template(
     If official WABA static token exists, uses Official API.
     """
     c = (client or getattr(payload, "client", None) or "bajaj").lower()
+    if not payload.language or payload.language == "und":
+        return _failed_submission(payload, c, "Choose the template language in the preview before whitelisting. Source text has not been changed.")
     payload.template_name = normalize_whatsapp_template_name(payload.template_name)
 
     # Optional TypeSafe AI Pre-Flight Gate
