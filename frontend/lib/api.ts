@@ -1,4 +1,5 @@
 import { requireCampaignName } from './campaign-name';
+import { invalidateConnectionChecks } from './connection-check';
 
 export type Account = string;
 export type Channel = "whatsapp" | "rcs" | "sms";
@@ -306,6 +307,7 @@ export function getAuthToken(): string | null {
 }
 
 export function setAuthToken(token: string): void {
+  invalidateConnectionChecks();
   if (typeof window !== "undefined") {
     localStorage.setItem("karix_jwt_token", token);
     profileRequest = null;
@@ -314,6 +316,7 @@ export function setAuthToken(token: string): void {
 }
 
 export function clearAuthToken(): void {
+  invalidateConnectionChecks();
   if (typeof window !== "undefined") {
     localStorage.removeItem("karix_jwt_token");
     localStorage.removeItem("karix_user_profile");

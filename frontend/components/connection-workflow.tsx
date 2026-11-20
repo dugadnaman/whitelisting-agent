@@ -2,10 +2,11 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { canAccessAccount, checkConnection } from '@/lib/api';
+import { canAccessAccount, checkConnection, getAuthToken } from '@/lib/api';
 import type { Channel } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import { destinationLabel } from '@/lib/destination';
+import { invalidateConnectionChecks, verifyScopedConnection } from '@/lib/connection-check';
 import KarixAuthSync from '@/components/KarixAuthSync';
 
 type Connection = {
@@ -13,7 +14,7 @@ type Connection = {
   ensureConnected: () => Promise<boolean>;
   reconnect: () => void;
 };
-type Check = { state: 'checking' | 'connected' | 'unverified' | 'check_failed'; message: string };
+type Check = { state: 'checking' | 'connected' | 'unverified' | 'check_failed'; message: string; reused?: boolean };
 const Context = createContext<Connection | null>(null);
 
 export function useWhitelistingConnection(): Connection {
@@ -31,48 +32,53 @@ export default function ConnectionWorkflow({ enabled, children }: { enabled: boo
   const [recovering, setRecovering] = useState(false);
   const [popupBlocked, setPopupBlocked] = useState(false);
   const active = useRef(true);
-  const flight = useRef<Promise<boolean> | null>(null);
   const popup = useRef<Window | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const validDestination = Boolean(account && account !== 'all');
+  const token = getAuthToken();
+  const scopeKey = currentUser && token && validDestination && canAccessAccount(currentUser, account)
+    ? JSON.stringify([currentUser.id, currentUser.tenant_id, currentUser.role, token, account, channel]) : null;
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
   const setupUrl = `/settings?${new URLSearchParams({ connect: '1', account, channel })}`;
 
-  const verify = useCallback((): Promise<boolean> => {
-    if (flight.current) return flight.current;
-    if (!account || account === 'all' || !active.current) return Promise.resolve(false);
+  const verify = useCallback(async (fresh: boolean): Promise<boolean | null> => {
+    if (!active.current) return null;
+    if (!scopeKey || getAuthToken() !== token) {
+      invalidateConnectionChecks();
+      setCheck({ state: 'unverified', message: 'Sign in to verify this authorized destination.' });
+      return false;
+    }
     setCheck({ state: 'checking', message: 'Verifying your saved session for this destination. Template inventory is checked separately.' });
-    const request = (async () => {
-      try {
-        const result = await checkConnection(account, channel);
-        if (!active.current) return false;
-        if (typeof result?.ok !== 'boolean' || typeof result?.message !== 'string') throw new Error('The connection check returned an unexpected response. Retry the check.');
-        if (!result.ok) {
-          setCheck({ state: 'unverified', message: result.message });
-          return false;
-        }
-        setCheck({ state: 'connected', message: result.message });
-        enteredRef.current = true;
-        setEntered(true);
-        setRecovering(false);
-        setPopupBlocked(false);
-        popup.current?.close();
-        popup.current = null;
-        return true;
-      } catch (error) {
-        if (active.current) setCheck({ state: 'check_failed', message: error instanceof Error ? error.message : 'Could not check the connection. Retry without discarding your draft.' });
+    try {
+      const checked = await verifyScopedConnection(scopeKey, () => checkConnection(account, channel), fresh);
+      if (!checked || !active.current || currentScope.current !== scopeKey || getAuthToken() !== token) return null;
+      const { result, reused } = checked;
+      if (!result.ok) {
+        setCheck({ state: 'unverified', message: result.message });
         return false;
-      } finally {
-        flight.current = null;
       }
-    })();
-    flight.current = request;
-    return request;
-  }, [account, channel]);
+      setCheck({ state: 'connected', reused, message: reused
+        ? 'The last successful connection check was reused for page entry. Review and submission always verify again.'
+        : result.message });
+      enteredRef.current = true;
+      setEntered(true);
+      setRecovering(false);
+      setPopupBlocked(false);
+      popup.current?.close();
+      popup.current = null;
+      return true;
+    } catch (error) {
+      if (!active.current || currentScope.current !== scopeKey || getAuthToken() !== token) return null;
+      setCheck({ state: 'check_failed', message: error instanceof Error ? error.message : 'Could not check the connection. Retry without discarding your draft.' });
+      return false;
+    }
+  }, [account, channel, scopeKey, token]);
 
   const ensureConnected = useCallback(async () => {
-    const ready = await verify();
-    if (!ready && active.current && enteredRef.current) setRecovering(true);
-    return ready;
+    const ready = await verify(true);
+    if (ready === false && active.current && enteredRef.current) setRecovering(true);
+    return ready === true;
   }, [verify]);
 
   useEffect(() => {
@@ -83,10 +89,14 @@ export default function ConnectionWorkflow({ enabled, children }: { enabled: boo
       popup.current = null;
     };
   }, []);
-  useEffect(() => { if (enabled) void verify(); }, [enabled, verify]);
+  useEffect(() => { if (enabled) void verify(false); }, [enabled, verify]);
   useEffect(() => {
     if (!enabled) return;
-    const onFocus = () => { void ensureConnected(); };
+    const onFocus = () => {
+      void verify(false).then((ready) => {
+        if (ready === false && active.current && enteredRef.current) setRecovering(true);
+      });
+    };
     const onMessage = (event: MessageEvent) => {
       if (event.origin === window.location.origin && event.source === popup.current &&
           event.data?.type === 'KARIX_CONNECTION_UPDATED' && event.data.account === account && event.data.channel === channel) {
@@ -103,18 +113,22 @@ export default function ConnectionWorkflow({ enabled, children }: { enabled: boo
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('message', onMessage);
     };
-  }, [enabled, account, channel, ensureConnected]);
+  }, [enabled, account, channel, ensureConnected, verify]);
   useEffect(() => {
     if (recovering && !dialog.current?.open) dialog.current?.showModal();
     if (!recovering && dialog.current?.open) dialog.current.close();
   }, [recovering]);
 
   const openSetup = () => {
+    invalidateConnectionChecks();
     popup.current = window.open(setupUrl, `karix-connect-${currentUser?.id}-${currentUser?.tenant_id}-${account}-${channel}`, 'popup,width=660,height=780');
     setPopupBlocked(!popup.current);
     popup.current?.focus();
   };
-  const reconnect = useCallback(() => setRecovering(true), []);
+  const reconnect = useCallback(() => {
+    invalidateConnectionChecks();
+    setRecovering(true);
+  }, []);
   const actions = <div className="connection-actions">
     <button type="button" className="connection-primary" onClick={openSetup}>Connect this account</button>
     <button type="button" className="connection-retry" disabled={check.state === 'checking'} onClick={() => { void ensureConnected(); }}>{check.state === 'checking' ? 'Checking connection…' : 'Retry connection check'}</button>
@@ -122,7 +136,7 @@ export default function ConnectionWorkflow({ enabled, children }: { enabled: boo
   </div>;
   const destination = <p className="connection-destination"><span>Destination</span><strong>{label}</strong></p>;
   const status = <div role={check.state === 'check_failed' ? 'alert' : 'status'} className="connection-status" data-state={check.state}>
-    <p className="connection-kicker">{check.state === 'checking' ? 'Checking connection' : check.state === 'check_failed' ? 'Connection check failed' : check.state === 'connected' ? 'Connection verified' : 'Connection required'}</p>
+    <p className="connection-kicker">{check.state === 'checking' ? 'Checking connection' : check.state === 'check_failed' ? 'Connection check failed' : check.state === 'connected' ? check.reused ? 'Previous connection check passed' : 'Connection verified' : 'Connection required'}</p>
     <p>{check.message}</p>
   </div>;
   const initialGate = enabled && validDestination && !entered;
@@ -164,7 +178,7 @@ export default function ConnectionWorkflow({ enabled, children }: { enabled: boo
         </figure>
       </div>
     </section> : <section aria-label="Provider connection" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs">
-      <p><strong>{label}</strong> · {check.state === 'connected' ? 'Connection verified' : check.state === 'checking' ? 'Checking connection…' : 'Connection needs verification'}</p>
+      <p><strong>{label}</strong> · {check.state === 'connected' ? check.reused ? 'Previous connection check passed · rechecked before review and submission' : 'Connection verified' : check.state === 'checking' ? 'Checking connection…' : 'Connection needs verification'}</p>
       <button type="button" className="workspace-button" onClick={reconnect}>Manage connection</button>
     </section>)}
     <div hidden={initialGate}>{children}</div>
@@ -192,6 +206,7 @@ export function FocusedConnectionSetup({ account, channel }: { account: string; 
   const verify = useCallback(async () => {
     if (!authorized || busy.current) return;
     busy.current = true;
+    invalidateConnectionChecks();
     try {
       const result = await checkConnection(account, channel);
       if (!active.current) return;

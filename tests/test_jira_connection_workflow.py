@@ -83,8 +83,12 @@ def jira_page(jira_modules):
                     draftSignature: JSON.stringify(drafts[1]), provider_ref_id: 'provider-407-1',
                     source_ref: 'TCN-407_att_review_1', status: 'submitted', approval_status: 'pending',
                 }];
+                if ('selectedKey' in options) cache.briefs_selected_key = options.selectedKey;
+                if (options.cachedBrief === false) delete cache.briefs_data;
+                if (options.urlKey) history.replaceState({}, '', '/briefs?key=' + encodeURIComponent(options.urlKey));
                 Object.entries(cache).forEach(([key, value]) => sessionStorage.setItem('karix_tab:' + key, JSON.stringify(value)));
-                window.calls = {loads: 0, loadKeys: [], checks: 0, posts: [], reconnects: 0, statusReads: []};
+                window.calls = {loads: 0, loadKeys: [], briefScopes: [], issueQueries: [],
+                    checks: 0, posts: [], reconnects: 0, statusReads: []};
                 window.statusRows = [{source_ref: 'TCN-407_att_review_1', template_name: 'att_review_1',
                     provider_ref_id: 'provider-407-1', status: 'submitted', approval_status: 'pending'}];
                 window.holdStatus = Boolean(options.holdStatus);
@@ -99,15 +103,23 @@ def jira_page(jira_modules):
                 };
                 window.connectionResult = true;
                 window.holdCheck = false;
-                window.holdBrief = false;
+                window.holdBrief = Boolean(options.holdBrief);
+                window.pendingBriefs = [];
+                window.holdIssues = Boolean(options.holdIssues);
+                window.pendingIssues = [];
+                window.issueRows = ['TCN-407', 'TCN-408'].map(key => ({
+                    key, summary: key === brief.issue_key ? brief.summary : 'Other fixture',
+                    assignee: 'Operator', status: 'Open', attachment_count: 0,
+                }));
                 window.app = {account, channel, user: 'Operator', accounts: [],
                     getAccountLabel: value => value, setDestination: () => false};
                 const api = {
                     fetchJiraProjects: async () => [],
-                    fetchJiraIssues: async () => ['TCN-407', 'TCN-408'].map(key => ({
-                        key, summary: key === brief.issue_key ? brief.summary : 'Other fixture',
-                        assignee: 'Operator', status: 'Open', attachment_count: 0,
-                    })),
+                    fetchJiraIssues: async params => {
+                        window.calls.issueQueries.push(params);
+                        return window.holdIssues ? await new Promise(resolve => window.pendingIssues.push(resolve))
+                            : structuredClone(window.issueRows);
+                    },
                     fetchMoEngageDraftWorkspaces: async () => ({workspaces: []}),
                     fetchTemplates: async params => {
                         window.calls.statusReads.push(params);
@@ -115,13 +127,16 @@ def jira_page(jira_modules):
                         return window.holdStatus ? await new Promise(resolve => window.pendingStatuses.push(resolve))
                             : structuredClone(window.statusRows);
                     },
-                    fetchJiraBrief: async key => {
+                    fetchJiraBrief: async (key, requestedAccount) => {
                         window.calls.loads++;
                         window.calls.loadKeys.push(key);
+                        window.calls.briefScopes.push({key, account: requestedAccount});
                         const data = {...structuredClone(brief), issue_key: key,
                             summary: key === brief.issue_key ? brief.summary : 'Other fixture'};
-                        return window.holdBrief
-                            ? await new Promise(resolve => { window.resolveBrief = () => resolve(data); }) : data;
+                        return window.holdBrief ? await new Promise(resolve => {
+                            window.resolveBrief = () => resolve(data);
+                            window.pendingBriefs.push({key, resolve: window.resolveBrief});
+                        }) : data;
                     },
                     previewJiraDrafts: async payload => ({whatsapp_templates: payload.whatsapp_templates.map(() => ({})),
                         rcs_templates: payload.rcs_templates.map(() => ({}))}),
@@ -195,6 +210,93 @@ def mount(page, channel):
         expect(page.get_by_role("button", name="Review & whitelist (1)", exact=True)).to_be_enabled()
 
 
+@pytest.mark.parametrize("source", ["url", "persisted"])
+@pytest.mark.parametrize("cached", [False, True])
+def test_known_sms_ticket_is_usable_before_slow_issues_finish(jira_page, source, cached):
+    page = jira_page
+    page.evaluate("""({source, cached}) => {
+        window.mountOptions = {holdIssues: true, cachedBrief: cached,
+            selectedKey: source === 'url' ? 'TCN-408' : 'TCN-407',
+            ...(source === 'url' ? {urlKey: ' tcn-407 '} : {})};
+        window.mountJira('sms');
+    }""", {"source": source, "cached": cached})
+    expect(page.get_by_role("heading", name="Review fixture", exact=True)).to_be_visible()
+    page.wait_for_function("window.pendingIssues.length === 1")
+    expect(page.get_by_role("button", name="Refreshing…", exact=True)).to_be_disabled()
+    selected = page.get_by_role("checkbox", name="Select source message 2: att_review_1 for SMS DLT whitelisting", exact=True)
+    if not cached:
+        selected.check()
+    expect(selected).to_be_checked()
+    expect(page.get_by_role("button", name="Review selected SMS (1)", exact=True)).to_be_enabled()
+    assert page.evaluate("() => window.calls.briefScopes") == (
+        [] if cached else [{"key": "TCN-407", "account": "tata"}]
+    )
+    before = page.evaluate("() => ({...sessionStorage})")
+    page.evaluate("""async () => {
+        window.pendingIssues[0]([window.issueRows[1]]);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }""")
+    expect(page.get_by_role("button", name="Refresh tickets", exact=True)).to_be_enabled()
+    expect(page.get_by_role("heading", name="Review fixture", exact=True)).to_be_visible()
+    expect(selected).to_be_checked()
+    assert page.evaluate("() => ({...sessionStorage})") == before
+    assert page.evaluate("() => window.calls.loadKeys") == ([] if cached else ["TCN-407"])
+    assert page.evaluate("() => window.calls.checks") == 0
+    assert page.evaluate("() => window.calls.posts") == []
+
+
+def test_url_ticket_never_loads_or_displays_stale_cached_source(jira_page):
+    page = jira_page
+    page.evaluate("""() => {
+        window.mountOptions = {urlKey: 'TCN-408', holdIssues: true, holdBrief: true};
+        window.mountJira('sms');
+    }""")
+    page.wait_for_function("window.pendingBriefs.length === 1")
+    expect(page.get_by_role("heading", name="Review fixture", exact=True)).to_have_count(0)
+    expect(page.get_by_role("status").filter(has_text="Loading brief…")).to_be_visible()
+    page.evaluate("() => window.pendingBriefs[0].resolve()")
+    expect(page.get_by_role("heading", name="Other fixture", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Edit", exact=True).nth(1).click()
+    body = page.get_by_role("textbox", name="Message body for source message 2", exact=True)
+    body.fill("Deliberately edited while the Jira queue is pending")
+    page.get_by_role("checkbox", name="Select source message 2: att_review_1 for SMS DLT whitelisting", exact=True).check()
+    page.wait_for_function("window.pendingIssues.length === 1")
+    before = page.evaluate("() => ({...sessionStorage})")
+    page.evaluate("""async () => {
+        window.pendingIssues[0]([window.issueRows[0]]);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }""")
+    expect(page.get_by_role("heading", name="Other fixture", exact=True)).to_be_visible()
+    expect(body).to_have_value("Deliberately edited while the Jira queue is pending")
+    assert page.evaluate("() => ({...sessionStorage})") == before
+    assert page.evaluate("() => window.calls.briefScopes") == [{"key": "TCN-408", "account": "tata"}]
+    assert page.evaluate("() => window.calls.posts") == []
+
+
+def test_without_selected_ticket_only_current_queue_can_choose_default(jira_page):
+    page = jira_page
+    page.evaluate("""() => {
+        window.mountOptions = {selectedKey: '', cachedBrief: false, holdIssues: true};
+        window.mountJira('sms');
+    }""")
+    page.wait_for_function("window.pendingIssues.length === 1")
+    assert page.evaluate("() => window.calls.loads") == 0
+    page.get_by_role("combobox", name="Jira project", exact=True).select_option("SWCM")
+    page.wait_for_function("window.pendingIssues.length === 2")
+    page.evaluate("""async () => {
+        window.pendingIssues[0](window.issueRows);
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }""")
+    assert page.evaluate("() => window.calls.loads") == 0
+    expect(page.get_by_role("button", name="Refreshing…", exact=True)).to_be_disabled()
+    page.evaluate("""() => window.pendingIssues[1]([{
+        ...window.issueRows[0], key: 'SWCM-255', summary: 'Current queue source',
+    }])""")
+    expect(page.get_by_role("heading", name="Other fixture", exact=True)).to_be_visible()
+    assert page.evaluate("() => window.calls.briefScopes") == [{"key": "SWCM-255", "account": "tata"}]
+    assert page.evaluate("() => window.calls.posts") == []
+
+
 @pytest.mark.parametrize("channel", ["whatsapp", "rcs", "sms"])
 def test_restored_channel_drafts_survive_return_and_explicit_reload_cancel(jira_page, channel):
     page = jira_page
@@ -216,7 +318,7 @@ def test_restored_channel_drafts_survive_return_and_explicit_reload_cancel(jira_
     ))[0][channel === 'sms' ? 'text' : 'body'] === 'Original Jira copy'""", arg=channel)
 
 
-@pytest.mark.parametrize("channel", ["rcs", "sms"])
+@pytest.mark.parametrize("channel", ["whatsapp", "rcs", "sms"])
 def test_return_to_cached_ticket_cancels_loading_without_replacing_edits(jira_page, channel):
     page = jira_page
     mount(page, channel)

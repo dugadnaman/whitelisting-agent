@@ -196,6 +196,7 @@ export default function JiraBriefsPage() {
   }, []);
   const [issues, setIssues] = useState<JiraIssueItem[]>([]);
   const [loadingIssues, setLoadingIssues] = useState(true);
+  const issuesRequestRef = useRef(0);
   const [showTicketPicker, setShowTicketPicker] = useState(false);
   const [projectsList, setProjectsList] = useState<JiraProjectItem[]>([
     { key: 'ALL', name: 'All Tata Projects Combined' },
@@ -208,6 +209,7 @@ export default function JiraBriefsPage() {
   ]);
   const [project, setProject] = useTabState<string>('briefs_project', 'ALL');
   const [selectedKey, setSelectedKey] = useTabState<string>('briefs_selected_key', '');
+  const [sourceReady, setSourceReady] = useState(false);
   const [brief, setBrief] = useTabState<JiraBriefData | null>('briefs_data', null);
   const [loadingBrief, setLoadingBrief] = useState(false);
   const [campaignTypeFilter, setCampaignTypeFilter] = useTabState<'all' | 'messaging' | 'email'>('briefs_campaign_type', 'all');
@@ -529,6 +531,7 @@ export default function JiraBriefsPage() {
   };
 
   const loadIssues = useCallback(async (queryParam?: string, bStatusParam?: string) => {
+    const request = ++issuesRequestRef.current;
     try {
       setLoadingIssues(true);
       const activeBStatus = bStatusParam !== undefined ? bStatusParam : briefStatusFilter;
@@ -538,6 +541,7 @@ export default function JiraBriefsPage() {
         brief_status: activeBStatus !== 'all' ? activeBStatus : undefined,
         limit: 50,
       });
+      if (!mountedRef.current || request !== issuesRequestRef.current) return;
       setIssues(list);
       if (list.length > 0) {
         setSelectedKey((prev) => {
@@ -547,9 +551,9 @@ export default function JiraBriefsPage() {
         });
       }
     } catch (err) {
-      setFeedback({ message: formatError(err), type: 'error' });
+      if (mountedRef.current && request === issuesRequestRef.current) setFeedback({ message: formatError(err), type: 'error' });
     } finally {
-      setLoadingIssues(false);
+      if (mountedRef.current && request === issuesRequestRef.current) setLoadingIssues(false);
     }
   }, [project, briefStatusFilter]);
 
@@ -562,12 +566,11 @@ export default function JiraBriefsPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      const urlKey = params.get('key');
+      const urlKey = params.get('key')?.trim().toUpperCase();
       const urlProj = params.get('project');
       if (urlKey) {
-        const cleanK = urlKey.toUpperCase().trim();
-        setSelectedKey(cleanK);
-        const prefix = cleanK.split('-')[0];
+        setSelectedKey(urlKey);
+        const prefix = urlKey.split('-')[0];
         if (prefix && ['TCN', 'SWCM', 'TM', 'TAT', 'MON', 'COL'].includes(prefix)) {
           setProject(prefix);
         }
@@ -578,15 +581,20 @@ export default function JiraBriefsPage() {
         if (saved) setProject(saved);
       }
     }
+    setSourceReady(true);
   }, []);
 
   // Server-side debounced search for tickets
   useEffect(() => {
+    if (!sourceReady) return;
     const timer = setTimeout(() => {
       loadIssues(searchQuery, briefStatusFilter);
     }, 350);
-    return () => clearTimeout(timer);
-  }, [searchQuery, briefStatusFilter, loadIssues]);
+    return () => {
+      clearTimeout(timer);
+      issuesRequestRef.current++;
+    };
+  }, [sourceReady, searchQuery, briefStatusFilter, loadIssues]);
 
   const handleSelectIssue = (key: string) => {
     const cleanKey = key.trim().toUpperCase();
@@ -686,13 +694,19 @@ export default function JiraBriefsPage() {
   }, [account, channel, setActiveTab]);
 
   useEffect(() => {
+    // Resolve URL precedence before restoring or fetching a source; the queue loads independently.
+    if (!sourceReady) return;
     if (selectedKey) {
-      loadBrief(selectedKey);
+      void loadBrief(selectedKey);
+    } else {
+      activeRequestKey.current = '';
+      setLoadingBrief(false);
     }
-  }, [selectedKey, loadBrief]);
+    return () => { briefRequestRef.current++; };
+  }, [sourceReady, selectedKey, loadBrief]);
 
   useEffect(() => {
-    if (!destinationAvailable || !brief || loadingBrief || selectedKey !== brief.issue_key) return;
+    if (!sourceReady || !destinationAvailable || !brief || loadingBrief || selectedKey !== brief.issue_key) return;
     const controller = new AbortController();
     let disposed = false;
     setValidation({ signature: previewSignature, status: 'pending' });
@@ -714,7 +728,7 @@ export default function JiraBriefsPage() {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [destinationAvailable, brief?.issue_key, loadingBrief, selectedKey, previewPayload, previewSignature, previewAttempt]);
+  }, [sourceReady, destinationAvailable, brief?.issue_key, loadingBrief, selectedKey, previewPayload, previewSignature, previewAttempt]);
 
   // Read only durable submission records. A reconnect never re-parses this ticket.
   useEffect(() => {
@@ -726,7 +740,7 @@ export default function JiraBriefsPage() {
   useEffect(() => {
     let disposed = false;
     let reading = false;
-    if (!brief || loadingBrief || selectedKey !== brief.issue_key || !account || account === 'all'
+    if (!sourceReady || !brief || loadingBrief || selectedKey !== brief.issue_key || !account || account === 'all'
         || (channel !== 'whatsapp' && channel !== 'rcs')) return;
     const scope = statusScope;
     const issueKey = brief.issue_key;
@@ -776,7 +790,7 @@ export default function JiraBriefsPage() {
       window.clearInterval(timer);
       window.removeEventListener('focus', onFocus);
     };
-  }, [account, channel, selectedKey, brief?.issue_key, loadingBrief, statusScope, statusAttempt]);
+  }, [sourceReady, account, channel, selectedKey, brief?.issue_key, loadingBrief, statusScope, statusAttempt]);
 
 
   useEffect(() => {
@@ -1751,7 +1765,7 @@ export default function JiraBriefsPage() {
   const hasValidationErrors = rcsTemplates.some((_, index) => isAspectBlocked(getRcsWarnings(index)))
     || [...waTemplates.map((_, index) => getWaWarnings(index)), ...rcsTemplates.map((_, index) => getRcsWarnings(index))]
       .some((draft) => draft.compliance_warnings?.some((warning) => warning.severity === 'error'));
-  const loadedCurrentBrief = Boolean(brief && selectedKey === brief.issue_key && !loadingBrief);
+  const loadedCurrentBrief = Boolean(sourceReady && brief && selectedKey === brief.issue_key && !loadingBrief);
   const workflowStep = !loadedCurrentBrief ? 1 : confirmationMode ? 3 : 2;
   const ticketFiltersActive = Boolean(searchQuery || project !== 'ALL' || campaignTypeFilter !== 'all' || briefStatusFilter !== 'all');
   const resetTicketFilters = () => {
@@ -1972,12 +1986,12 @@ export default function JiraBriefsPage() {
 
         {/* Right Column: Interactive Brief Inspector */}
         <div className="min-w-0 space-y-4 lg:col-span-8 xl:col-span-9">
-          {loadingBrief ? (
+          {!sourceReady || loadingBrief ? (
             <div className="bg-white rounded-xl border border-gray-200/80  p-16 text-center text-xs text-gray-400 space-y-2">
               <p role="status" className="text-sm text-gray-500">Loading brief…</p>
               <p>Parsing Jira brief and downloading creative attachments...</p>
             </div>
-          ) : !brief ? (
+          ) : !brief || selectedKey !== brief.issue_key ? (
             <div className="bg-white rounded-xl border border-gray-200/80  p-16 text-center text-xs text-gray-400">
               Select a Jira ticket from the left panel to inspect its campaign brief.
             </div>
