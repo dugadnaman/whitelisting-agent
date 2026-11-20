@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { canAccessAccount, testCredentials } from '@/lib/api';
+import { canAccessAccount, checkConnection } from '@/lib/api';
 import type { Channel } from '@/lib/api';
 import { useApp } from '@/lib/context';
 import { destinationLabel } from '@/lib/destination';
@@ -40,10 +40,10 @@ export default function ConnectionWorkflow({ enabled, children }: { enabled: boo
   const verify = useCallback((): Promise<boolean> => {
     if (flight.current) return flight.current;
     if (!account || account === 'all' || !active.current) return Promise.resolve(false);
-    setCheck({ state: 'checking', message: 'Verifying this account’s live template inventory…' });
+    setCheck({ state: 'checking', message: 'Verifying your saved session for this destination. Template inventory is checked separately.' });
     const request = (async () => {
       try {
-        const result = await testCredentials(account, channel);
+        const result = await checkConnection(account, channel);
         if (!active.current) return false;
         if (typeof result?.ok !== 'boolean' || typeof result?.message !== 'string') throw new Error('The connection check returned an unexpected response. Retry the check.');
         if (!result.ok) {
@@ -193,7 +193,7 @@ export function FocusedConnectionSetup({ account, channel }: { account: string; 
     if (!authorized || busy.current) return;
     busy.current = true;
     try {
-      const result = await testCredentials(account, channel);
+      const result = await checkConnection(account, channel);
       if (!active.current) return;
       setMessage(result.message);
       if (result.ok === true) {

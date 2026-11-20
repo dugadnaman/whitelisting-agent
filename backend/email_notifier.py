@@ -1440,8 +1440,17 @@ async def run_scheduler_loop() -> None:
     - 04:00 PM IST (EOD)
     """
     logger.info("Starting Daily SLA Email Alert Scheduler loop (checking 10:00, 13:00, 16:00 IST slots)...")
+    last_approval_refresh = None
     while True:
         try:
+            now = asyncio.get_running_loop().time()
+            if last_approval_refresh is None or now - last_approval_refresh >= 60:
+                last_approval_refresh = now
+                try:
+                    from api import refresh_pending_approvals
+                    await asyncio.to_thread(refresh_pending_approvals)
+                except Exception:
+                    logger.exception("Automatic approval refresh deferred")
             if SCHEDULER_STATE.enabled:
                 now_ist = get_current_ist_time()
                 today_str = now_ist.date().isoformat()

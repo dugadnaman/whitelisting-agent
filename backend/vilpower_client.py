@@ -335,6 +335,15 @@ def validate_session(cookie: str, entity_id: str, client="tata") -> dict[str, st
         portal.close()
 
 
+def check_connection(client="tata") -> None:
+    """Verify the saved live principal without loading forms, options or inventory."""
+    portal = _Portal(_credentials(client, None))
+    try:
+        portal.identity()
+    finally:
+        portal.close()
+
+
 def fetch_sms_templates(client="tata", *, credentials=None, search="", from_date=None) -> list[dict]:
     portal = _Portal(_credentials(client, credentials))
     try:

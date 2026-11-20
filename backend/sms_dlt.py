@@ -22,6 +22,7 @@ DRAFT_FIELDS = (
 
 _inventory_flights: dict[tuple[str, str, date | None], Future] = {}
 _inventory_lock = threading.Lock()
+_inventory_read_lock = threading.Lock()
 
 
 def _inventory(account: str, search: str = "", from_date: date | None = None) -> list[dict]:
@@ -41,7 +42,8 @@ def _inventory(account: str, search: str = "", from_date: date | None = None) ->
         kwargs = {"client": account, "search": search}
         if from_date is not None:
             kwargs["from_date"] = from_date
-        rows = fetch_sms_templates(**kwargs)
+        with _inventory_read_lock:
+            rows = fetch_sms_templates(**kwargs)
         flight.set_result(rows)
         return rows
     except BaseException as exc:
@@ -112,14 +114,14 @@ def load_drafts(path: str, account: str = "tata", source_filename: str | None = 
     return drafts
 
 
-def preview_drafts(rows: list[dict], account: str = "tata") -> list[dict]:
+def preview_drafts(rows: list[dict], account: str = "tata", *, verify_inventory: bool = True) -> list[dict]:
     from vilpower_client import VilpowerUnavailable, validate_sms_template
 
     require_tata(account)
     drafts = [draft_from_row(row, account) for row in rows]
     inventory_error = None
     try:
-        inventory = _inventory(account, commonprefix([draft["template_name"].casefold() for draft in drafts]))
+        inventory = _inventory(account, commonprefix([draft["template_name"].casefold() for draft in drafts])) if verify_inventory else []
     except (VilpowerUnavailable, OSError) as exc:
         inventory = []
         inventory_error = str(exc)
@@ -138,14 +140,16 @@ def preview_drafts(rows: list[dict], account: str = "tata") -> list[dict]:
         seen[key] = fields
         previews.append({
             "template_name": draft["template_name"], "client": account, "channel": "sms",
+            "source_ref": draft.get("source_ref"), "source_file": draft.get("source_file"),
             "category": {"1": "PROMOTIONAL", "2": "TRANSACTIONAL", "3": "SERVICE"}.get(draft["template_type"], "UNKNOWN"),
             "language": draft.get("language") or ("en" if draft["message_type"] == "1" else "regional"),
             "components": [{"type": "BODY", "text": draft["text"]}],
             "sms_dlt": draft, "provider": "vilpower",
-            "status": "INVALID" if errors else ("UNVERIFIED" if inventory_error is not None else "VALID"),
-            "inventory_status": "unverified" if inventory_error is not None else "verified",
-            "inventory_error": inventory_error, "submission_ready": not errors and inventory_error is None,
-            "already_exists_on_waba": bool(existing) if inventory_error is None else None, "exists_on_waba": False,
+            "status": "INVALID" if errors else ("UNVERIFIED" if inventory_error is not None or not verify_inventory else "VALID"),
+            "inventory_status": "unverified" if inventory_error is not None or not verify_inventory else "verified",
+            "inventory_error": inventory_error, "submission_ready": verify_inventory and not errors and inventory_error is None,
+            "already_exists_on_waba": bool(existing) if inventory_error is None and verify_inventory else None,
+            "exists_on_waba": bool(existing) if inventory_error is None and verify_inventory else None,
             "existing_templates": existing,
             "compliance_warnings": [{"severity": "error", "issue": error, "recommendation": "Correct the DLT draft before submitting."} for error in errors],
             "aspect_ratio_warnings": [], "grammar_warnings": [],

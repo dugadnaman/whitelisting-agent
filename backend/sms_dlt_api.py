@@ -118,11 +118,11 @@ def options(account: str = Query(...), template_type: str = Query("1"), category
 
 
 @router.post("/preview")
-def preview(body: DraftBatch, current_user: dict = Depends(get_current_user)):
+def preview(body: DraftBatch, verify_inventory: bool = Query(True), current_user: dict = Depends(get_current_user)):
     _authorize(body.account, current_user)
     from vilpower_client import VilpowerUnavailable
     try:
-        return preview_drafts(body.templates, body.account)
+        return preview_drafts(body.templates, body.account, verify_inventory=verify_inventory)
     except (ValueError, VilpowerUnavailable) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
 

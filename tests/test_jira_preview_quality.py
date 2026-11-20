@@ -175,7 +175,6 @@ def test_jira_submission_rechecks_media_and_preserves_valid_siblings(preview_cas
         patch("config.get_waba_id", return_value="local-test-waba"),
         patch("submission_client.fetch_template_list", return_value=([], None)),
         patch("submission_client.submit_template", side_effect=submit),
-        patch("tracker.log_result"),
     ):
         preview = client.post("/api/jira/preview", json={
             "account": "tcl_promo", "whatsapp_templates": [valid], "rcs_templates": [],
@@ -220,7 +219,6 @@ def test_jira_submission_accepts_portrait_or_placeholder_despite_stale_ratio_fla
         patch("config.get_waba_id", return_value="local-test-waba"),
         patch("submission_client.fetch_template_list", return_value=([], None)),
         patch("submission_client.submit_template", side_effect=submit),
-        patch("tracker.log_result"),
     ):
         preview = client.post("/api/jira/preview", json={
             "account": "tcl_promo", "whatsapp_templates": [draft], "rcs_templates": [],

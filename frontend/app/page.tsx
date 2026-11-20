@@ -18,40 +18,35 @@ import type { Stats, Template, ActivityLog, ActivityStats, RcsSyncWorkspace } fr
 import { useApp } from '@/lib/context';
 import { formatChannel, formatDate, formatError, relativeTime, truncate } from '@/lib/format';
 import { normalizeRcsSyncCtas } from '@/lib/cta';
+import { templateOutcome } from '@/lib/template-status';
+import { useWhitelistingConnection } from '@/components/connection-workflow';
 
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: 'bg-amber-100 text-amber-800 border border-amber-200',
-    approved: 'bg-green-100 text-green-800 border border-green-200',
-    rejected: 'bg-red-100 text-red-800 border border-red-200',
-    failed: 'bg-red-100 text-red-800 border border-red-200',
-    submitted: 'bg-sky-50 text-sky-800 border border-sky-200',
-    duplicate: 'bg-sky-50 text-sky-800 border border-sky-200',
-    unknown: 'bg-gray-100 text-gray-800 border border-gray-200',
+function StatusBadge({ template }: { template: Parameters<typeof templateOutcome>[0] }) {
+  const outcome = templateOutcome(template);
+  const colors = {
+    success: 'bg-green-100 text-green-800 border border-green-200',
+    warning: 'bg-amber-100 text-amber-800 border border-amber-200',
+    error: 'bg-red-100 text-red-800 border border-red-200',
+    neutral: 'bg-gray-100 text-gray-800 border border-gray-200',
   };
-  const s = (status || 'unknown').toLowerCase();
-  return (
-    <span className={`inline-flex px-2 py-0.5 rounded-md text-xs font-medium ${colors[s] || colors.unknown}`}>
-      {status || 'unknown'}
-    </span>
-  );
+  return <span className={`inline-flex px-2 py-0.5 rounded-md text-xs font-medium ${colors[outcome.tone]}`}>{outcome.label}</span>;
 }
 
 function LiveBadge({ live, existsOnWaba, channel }: { live?: boolean; existsOnWaba?: boolean; channel?: string }) {
   if (channel === 'sms' && (live || existsOnWaba)) return <span className="rounded bg-sky-50 px-1.5 py-0.5 text-xs font-medium text-sky-800 border border-sky-200" title="Found in the VILPOWER DLT inventory; see approval status separately">On DLT portal</span>;
   if (live) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200" title="Synced live from the Karix WABA">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-800 border border-sky-200" title="Seen in the last successful provider inventory read; approval is shown separately">
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-        Live on WABA
+        Seen on WABA
       </span>
     );
   }
   if (existsOnWaba) {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-800 border border-sky-200" title="Found on Karix WABA">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-800 border border-sky-200" title="Recorded in a previous provider inventory read; approval is shown separately">
         <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
-        On WABA
+        Seen on WABA
       </span>
     );
   }
@@ -82,6 +77,7 @@ function ActivityIcon({ action }: { action: string }) {
 
 export default function DashboardPage() {
   const { account, channel, user, mounted, getAccountLabel } = useApp();
+  const { reconnect } = useWhitelistingConnection();
   const jiraWhitelisting = ['tata', 'tcl_promo', 'tcl_trans', 'tchfl', 'wealth', 'moneyfy'].includes(account);
   const [stats, setStats] = useState<Stats | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -104,6 +100,17 @@ export default function DashboardPage() {
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const requestVersionRef = useRef(0);
+  const statsFlightsRef = useRef(new Set<number>());
+  const templatesFlightsRef = useRef(new Set<string>());
+  const templatesQueryRef = useRef('');
+  templatesQueryRef.current = JSON.stringify([account, channel, debouncedSearch]);
+  const dataScopeRef = useRef(`${account}:${channel}`);
+  if (dataScopeRef.current !== `${account}:${channel}`) {
+    dataScopeRef.current = `${account}:${channel}`;
+    requestVersionRef.current += 1;
+  }
+  useEffect(() => () => { requestVersionRef.current += 1; }, []);
+  const [lastInventoryRead, setLastInventoryRead] = useState<string | null>(null);
   const [selectedTemplates, setSelectedTemplates] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -313,13 +320,15 @@ export default function DashboardPage() {
 
   // Reset filters when switching account or channel
   useEffect(() => {
-    requestVersionRef.current += 1;
+    setStatsLoading(true);
+    setTemplatesLoading(true);
     setStats(null);
     setTemplates([]);
     setError(null);
     setStatsError(null);
     setTemplatesError(null);
     setLastSynced(null);
+    setLastInventoryRead(null);
     setStatusFilter('');
     setOperatorFilter('all');
     setSearch('');
@@ -328,45 +337,73 @@ export default function DashboardPage() {
     setDeleteFeedback(null);
   }, [account, channel]);
 
-  const loadStats = useCallback(async () => {
+  const loadStats = useCallback(async (live = true) => {
     if (!mounted) return;
     const requestVersion = requestVersionRef.current;
+    if (statsFlightsRef.current.has(requestVersion)) return;
+    statsFlightsRef.current.add(requestVersion);
     try {
-      setStatsLoading(true);
-      const data = await fetchStats(account, channel);
+      if (live) setStatsLoading(true);
+      const data = await fetchStats(account, channel, { live });
       if (requestVersion !== requestVersionRef.current) return;
-      setStats(data);
-      setLastSynced(data.error ? null : new Date().toISOString());
-      setStatsError(data.error ? `${channel === 'sms' ? 'VILPOWER' : 'Karix'} sync degraded: ${formatError(data.error)}` : null);
+      if (data.error) {
+        setStats((previous) => previous || data);
+        setStatsError(`${channel === 'sms' ? 'VILPOWER' : 'Karix'} inventory unavailable: ${formatError(data.error)}`);
+      } else {
+        setStats(data);
+        if (live) setLastSynced(new Date().toISOString());
+        setStatsError(null);
+      }
     } catch (err) {
       if (requestVersion === requestVersionRef.current) {
-        setStatsError(err instanceof Error ? err.message : 'Failed to fetch stats');
+        setStatsError(formatError(err));
       }
     } finally {
+      statsFlightsRef.current.delete(requestVersion);
       if (requestVersion === requestVersionRef.current) setStatsLoading(false);
     }
   }, [account, channel, mounted]);
 
-  const loadTemplates = useCallback(async () => {
+  const loadTemplates = useCallback(async (live = true) => {
     if (!mounted) return;
     const requestVersion = requestVersionRef.current;
+    const query = templatesQueryRef.current;
+    const flight = `${requestVersion}:${query}`;
+    if (templatesFlightsRef.current.has(flight)) return;
+    templatesFlightsRef.current.add(flight);
     try {
-      setTemplatesLoading(true);
+      if (live) setTemplatesLoading(true);
       const params: { status?: string; search?: string } = {};
-      if (statusFilter) params.status = statusFilter;
       if (debouncedSearch) params.search = debouncedSearch;
-      const data = await fetchTemplates({ account, channel, ...params });
-      if (requestVersion !== requestVersionRef.current) return;
-      setTemplates(data);
+      const data = await fetchTemplates({ account, channel, ...params, live });
+      if (requestVersion !== requestVersionRef.current || query !== templatesQueryRef.current) return;
+      setTemplates((previous) => {
+        if (live) return data;
+        const remaining = new Set(data);
+        const merged = previous.map((row) => {
+          const update = data.find((item) =>
+            item.source_ref && item.source_ref === row.source_ref
+            || item.provider_ref_id && item.provider_ref_id === row.provider_ref_id
+            || item.template_id && item.template_id === row.template_id
+            || item.template_name === row.template_name
+              && [...(item.sender_ids || [])].sort().join(',') === [...(row.sender_ids || [])].sort().join(','));
+          if (!update) return row;
+          remaining.delete(update);
+          return { ...row, ...update, live: row.live, exists_on_waba: row.exists_on_waba };
+        });
+        return [...merged, ...remaining];
+      });
+      setLastInventoryRead(new Date().toISOString());
       setTemplatesError(null);
     } catch (err) {
-      if (requestVersion === requestVersionRef.current) {
-        setTemplatesError(err instanceof Error ? err.message : 'Failed to fetch templates');
+      if (requestVersion === requestVersionRef.current && query === templatesQueryRef.current) {
+        setTemplatesError(formatError(err));
       }
     } finally {
-      if (requestVersion === requestVersionRef.current) setTemplatesLoading(false);
+      templatesFlightsRef.current.delete(flight);
+      if (requestVersion === requestVersionRef.current && query === templatesQueryRef.current) setTemplatesLoading(false);
     }
-  }, [account, channel, statusFilter, debouncedSearch, mounted]);
+  }, [account, channel, debouncedSearch, mounted]);
 
   const loadActivity = useCallback(async () => {
     if (!mounted) return;
@@ -407,8 +444,8 @@ export default function DashboardPage() {
       const intervalSec = stats?.sla_insights?.next_recommended_poll_sec || 30;
       const intervalMs = Math.max(15, Math.min(120, intervalSec)) * 1000;
       intervalRef.current = setInterval(() => {
-        loadStats();
-        loadTemplates();
+        void loadStats(false);
+        void loadTemplates(false);
         loadActivity();
       }, intervalMs);
     }
@@ -418,12 +455,14 @@ export default function DashboardPage() {
   }, [autoRefresh, loadStats, loadTemplates, loadActivity, mounted, stats?.sla_insights?.next_recommended_poll_sec]);
 
   const handlePoll = async () => {
+    const requestVersion = requestVersionRef.current;
     try {
       setPolling(true);
       await pollPending(account, channel, user);
-      await Promise.all([loadStats(), loadTemplates()]);
+      if (requestVersion !== requestVersionRef.current) return;
+      await Promise.all([loadStats(false), loadTemplates(false)]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to poll pending');
+      if (requestVersion === requestVersionRef.current) setError(formatError(err));
     } finally {
       setPolling(false);
     }
@@ -521,9 +560,9 @@ export default function DashboardPage() {
   const operators = Array.from(
     new Set(templates.map(t => t.submitted_by).filter(Boolean) as string[])
   ).sort();
-  const visibleTemplates = operatorFilter === 'all'
-    ? templates
-    : templates.filter(t => (t.submitted_by || '—') === operatorFilter);
+  const visibleTemplates = templates.filter((template) =>
+    (operatorFilter === 'all' || (template.submitted_by || '—') === operatorFilter)
+    && (!statusFilter || template.approval_status === statusFilter || template.status === statusFilter));
   const hasFilters = Boolean(search || statusFilter || operatorFilter !== 'all');
   const resetFilters = () => {
     setSearch('');
@@ -588,11 +627,13 @@ export default function DashboardPage() {
             ) : stats ? (
               <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                {channel === 'sms' ? 'VILPOWER' : 'Karix'} Synced{lastSynced ? ` · ${relativeTime(lastSynced)}` : ''}
+                Stored approval updates{lastInventoryRead ? ` · ${relativeTime(lastInventoryRead)}` : ''}
               </span>
             ) : (
-              <span className="text-sm text-gray-500">Checking {channel === 'sms' ? 'VILPOWER' : 'Karix'} connection…</span>
+              <span className="text-sm text-gray-500">Loading inventory…</span>
             )}
+            {lastSynced && <span className="text-xs text-gray-500">Last live inventory read: {formatDate(lastSynced)}</span>}
+            {lastInventoryRead && <span className="text-xs text-gray-500">Last known status read: {formatDate(lastInventoryRead)}</span>}
             {stats?.karix_health && (
               <span
                 className={`rounded-md border px-2 py-1 text-xs font-medium ${
@@ -626,6 +667,7 @@ export default function DashboardPage() {
             <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-600">
               <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
               Auto-refresh
+              <span className="sr-only">Read stored approval updates without re-submitting or fetching the full provider inventory</span>
             </label>
           </div>
         </div>
@@ -711,7 +753,15 @@ export default function DashboardPage() {
           <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
           </svg>
-          <div className="flex-1">{formatError(statsError || templatesError || error || '')}</div>
+          <div className="flex-1 space-y-2">
+            <p>{formatError(statsError || templatesError || error || '')}</p>
+            <p>Latest known data is retained for {accountLabel} / {channelLabel}. Retry inventory for a provider outage or timeout; reconnect only if this destination’s session has expired. Neither action submits templates.</p>
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={reconnect} className="font-medium underline">Reconnect {channel === 'sms' ? 'VILPOWER' : 'Karix'}</button>
+              <button type="button" disabled={statsLoading || templatesLoading} onClick={() => { void loadStats(); void loadTemplates(); }} className="font-medium underline disabled:opacity-50">Retry inventory</button>
+              <button type="button" onClick={() => { setStatsError(null); setTemplatesError(null); setError(null); }} className="font-medium underline">Clear message</button>
+            </div>
+          </div>
           <button onClick={() => { setStatsError(null); setTemplatesError(null); setError(null); }} className="text-red-400 hover:text-red-600" aria-label="Dismiss error">&times;</button>
         </div>
       )}
@@ -826,7 +876,7 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 id="inventory-heading" className="text-base font-medium text-gray-900">Template inventory</h2>
             <span className="text-sm text-gray-500" aria-live="polite">
-              {templatesLoading ? 'Refreshing inventory…' : templatesError ? 'Inventory unavailable' : `${visibleTemplates.length.toLocaleString()} shown${operatorFilter !== 'all' ? ` of ${templates.length.toLocaleString()} fetched` : ''}`}
+              {templatesLoading ? 'Refreshing inventory…' : templatesError ? `${visibleTemplates.length.toLocaleString()} retained · inventory unavailable` : `${visibleTemplates.length.toLocaleString()} shown${operatorFilter !== 'all' ? ` of ${templates.length.toLocaleString()} fetched` : ''}`}
             </span>
           </div>
           <div className="workspace-panel space-y-4 p-4">
@@ -1025,7 +1075,7 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 text-sm text-gray-800">
-                  {templatesLoading ? (
+                  {templatesLoading && templates.length === 0 ? (
                     <tr>
                       <td colSpan={channel === 'whatsapp' ? 9 : channel === 'rcs' ? 8 : 7} className="px-6 py-12 text-center text-gray-500">
                         <div className="flex items-center justify-center gap-2">
@@ -1134,11 +1184,11 @@ export default function DashboardPage() {
                             )}
 
                             <td className="px-4 py-3">
-                              <StatusBadge status={t.status} />
+                              <StatusBadge template={{ ...t, approval_status: undefined }} />
                             </td>
 
                             <td className="px-4 py-3">
-                              <StatusBadge status={t.approval_status || 'unknown'} />
+                              <StatusBadge template={t} />
                               {rejectionReason && (
                                 <div className="text-xs text-red-600 mt-1 max-w-[180px] truncate" title={rejectionReason}>
                                   {truncate(rejectionReason, 60)}

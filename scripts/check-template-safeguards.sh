@@ -2,6 +2,10 @@
 set -eu
 
 python -m pytest -q \
+  tests/test_connection_check.py \
+  tests/test_offline_review_readback.py \
+  tests/test_approval_refresh.py \
+  tests/test_jira_approval_results.py \
   tests/test_connection_workflow.py \
   tests/test_upload_draft_storage.py \
   tests/test_jira_connection_workflow.py \
@@ -20,4 +24,4 @@ python -m pytest -q \
   tests/test_portal_credential_validation.py \
   tests/test_inventory_contract.py
 
-node --test frontend/lib/tab-state.test.cjs
+node --test frontend/lib/tab-state.test.cjs frontend/lib/template-status.test.cjs

@@ -567,15 +567,33 @@ def _json_safe(obj):
     return str(obj)
 
 
+_wa_inventory_inflight: dict[str, Future] = {}
+_wa_inventory_lock = threading.Lock()
+
+
 def _fetch_whatsapp_inventory(client: str) -> tuple[list[dict], str | None]:
     """Keep Karix's empty-inventory response distinct from a failed fetch."""
+    client = client.lower().strip()
+    with _wa_inventory_lock:
+        flight = _wa_inventory_inflight.get(client)
+        leader = flight is None
+        if leader:
+            flight = Future()
+            _wa_inventory_inflight[client] = flight
+    if not leader:
+        return flight.result()
     try:
         from submission_client import fetch_template_list
-
-        return fetch_template_list(client=client)
-    except Exception as exc:
-        logger.warning("Could not fetch live WhatsApp templates for %s: %s", client, exc)
-        return [], str(exc)
+        try:
+            result = fetch_template_list(client=client)
+        except Exception as exc:
+            logger.warning("Could not fetch live WhatsApp templates for %s: %s", client, exc)
+            result = ([], str(exc))
+        flight.set_result(result)
+        return result
+    finally:
+        with _wa_inventory_lock:
+            _wa_inventory_inflight.pop(client, None)
 
 
 def fetch_whatsapp_templates(client: str = "bajaj") -> list[dict]:
@@ -764,12 +782,34 @@ def invite_team_member(body: TeamInviteRequest, current_user: dict = Depends(get
 def get_stats(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
+    live: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
     acc = account.lower()
     chan = channel.lower()
+    if not live:
+        acc, chan = _explicit_submission_destination(account, channel, current_user)
     try:
+        if not live:
+            entries = _durable_template_history(acc, chan)
+            pending = sum(e.get("approval_status") == "pending" for e in entries)
+            return {
+                "total": len(entries),
+                "submitted": sum(e.get("status") == "submitted" for e in entries),
+                "failed": sum(e.get("status") in ("failed", "blocked_aspect_ratio") for e in entries),
+                "duplicate": sum(e.get("status") == "duplicate" for e in entries),
+                "pending": pending,
+                "approved": sum(e.get("approval_status") == "approved" for e in entries),
+                "rejected": sum(e.get("approval_status") == "rejected" for e in entries),
+                "unknown": sum(e.get("approval_status") == "unknown" for e in entries),
+                "error": None,
+                "inventory_status": "not_requested",
+                "source": "stored",
+                "provider_synced": False,
+                "sla_insights": {"pending_count": pending, "due_for_poll_count": pending,
+                                 "categories": {}, "next_recommended_poll_sec": 60},
+            }
         if chan == "sms":
             from sms_dlt import merged_inventory
             entries = merged_inventory(acc)
@@ -860,6 +900,10 @@ def get_stats(
         }
     except Exception as exc:
         logger.exception("Error in get_stats for %s (%s): %s", acc, chan, exc)
+        if not live:
+            if isinstance(exc, HTTPException):
+                raise
+            raise HTTPException(status_code=503, detail="Stored template counts are temporarily unavailable.") from exc
         return {
             "total": 0,
             "submitted": 0,
@@ -911,13 +955,15 @@ def _rcs_approval_status(status) -> str:
 
 _rcs_inventory_inflight: dict[tuple[str, str], Future] = {}
 _rcs_inventory_lock = threading.Lock()
+_rcs_inventory_read_locks: dict[str, threading.Lock] = {}
 
 
-def _fetch_rcs_inventory(client: str) -> list[dict]:
-    """Share concurrent account/bot fetches, never cache success or hide an outage."""
+def _fetch_rcs_inventory(client: str, *, bot_id: str | None = None) -> list[dict]:
+    """Share concurrent scope fetches and serialize different bot reads per account."""
     client = str(client or "").lower().strip()
-    key = (client, get_rcs_bot_id(client))
+    key = (client, bot_id or ("*" if client == "apparel" else get_rcs_bot_id(client)))
     with _rcs_inventory_lock:
+        read_lock = _rcs_inventory_read_locks.setdefault(client, threading.Lock())
         flight = _rcs_inventory_inflight.get(key)
         leader = flight is None
         if leader:
@@ -927,7 +973,8 @@ def _fetch_rcs_inventory(client: str) -> list[dict]:
         return flight.result()
     try:
         try:
-            templates = fetch_rcs_templates(client=client)
+            with read_lock:
+                templates = fetch_rcs_templates(client=client, bot_id=bot_id) if bot_id else fetch_rcs_templates(client=client)
         except RcsInventoryUnavailable as exc:
             raise HTTPException(status_code=503, detail=f"RCS inventory unavailable for {client}: {exc}") from exc
         flight.set_result(templates)
@@ -1099,25 +1146,56 @@ def _merge_sms_templates(acc: str, status: str | None, search: str | None) -> li
     return _filter_and_sort_templates(merged_inventory(acc), status, search)
 
 
+def _durable_template_history(account: str, channel: str) -> list[dict]:
+    """Read exact-scope durable outcomes without contacting a provider."""
+    if channel == "sms":
+        if account != "tata":
+            raise HTTPException(status_code=400, detail="SMS DLT history belongs only to Tata Capital.")
+        from sms_dlt import load_history
+        entries = load_history(account)
+    elif channel == "rcs":
+        entries = load_rcs_log(RCS_LOG_PATH, client=account)
+    elif channel == "whatsapp":
+        from db import get_db
+        from tracker import _row_to_entry_dict
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM job_tasks WHERE tenant_id = ? AND channel = 'whatsapp' ORDER BY created_at ASC",
+                (account,),
+            ).fetchall()
+        entries = [_row_to_entry_dict(dict(row)) for row in rows]
+    else:
+        raise HTTPException(status_code=400, detail="Select a real template channel.")
+    return [{**entry, "source": "stored", "inventory_status": "not_requested",
+             "provider_synced": False} for entry in entries]
+
+
 @app.get("/api/templates")
 def get_templates(
     account: str = Query("bajaj"),
     channel: str = Query("whatsapp"),
     status: str | None = Query(None),
     search: str | None = Query(None),
+    live: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
     require_tenant_access(account, current_user)
     acc = account.lower()
-    chan = "rcs" if acc == "apparel" else channel.lower()
+    chan = channel.lower() if not live else ("rcs" if acc == "apparel" else channel.lower())
+    if not live:
+        acc, chan = _explicit_submission_destination(account, channel, current_user)
     try:
-        if chan == "sms":
+        if not live:
+            entries = _filter_and_sort_templates(_durable_template_history(acc, chan), status, search)
+        elif chan == "sms":
             entries = _merge_sms_templates(acc, status, search)
         elif chan == "rcs":
             entries = _merge_rcs_templates(acc, status, search)
         else:
             entries = _merge_wa_templates(acc, status, search)
         return [_json_safe(e) for e in entries]
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Error in get_templates for %s (%s): %s", acc, chan, exc)
         raise HTTPException(status_code=503, detail="Template history is temporarily unavailable.") from exc
@@ -1383,7 +1461,8 @@ def _inspect_single_submission(
 
 
 def _inspect_template_quality_and_warnings(
-    submissions: list, channel: str = "whatsapp", account: str = "bajaj", use_ai: bool = False
+    submissions: list, channel: str = "whatsapp", account: str = "bajaj", use_ai: bool = False,
+    verify_inventory: bool = True,
 ) -> list[dict]:
     """
     Inspect image dimensions, text grammar/spelling, and cross-reference with live WABA list.
@@ -1396,9 +1475,9 @@ def _inspect_template_quality_and_warnings(
 
     inventory_error = None
     try:
-        live_templates = fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else _fetch_rcs_inventory(acc)
+        live_templates = (fetch_whatsapp_templates(client=acc) if channel == "whatsapp" else _fetch_rcs_inventory(acc)) if verify_inventory else []
     except HTTPException as exc:
-        if channel != "whatsapp" or exc.status_code != 503:
+        if exc.status_code != 503:
             raise
         live_templates = []
         inventory_error = str(exc.detail)
@@ -1411,14 +1490,14 @@ def _inspect_template_quality_and_warnings(
         _json_safe(_inspect_single_submission(s, live_names, account_detection, account, channel, use_ai=use_ai))
         for s in submissions
     ]
-    if channel == "whatsapp":
+    if channel in ("whatsapp", "rcs"):
         for preview in previews:
             preview.update(
-                inventory_status="unverified" if inventory_error else "verified",
+                inventory_status="unverified" if inventory_error or not verify_inventory else "verified",
                 inventory_error=inventory_error,
-                submission_ready=not bool(inventory_error),
+                submission_ready=verify_inventory and not bool(inventory_error),
             )
-            if inventory_error:
+            if inventory_error or not verify_inventory:
                 preview["already_exists_on_waba"] = None
                 preview["exists_on_waba"] = None
     return previews
@@ -1531,6 +1610,7 @@ async def preview_file(
     channel: str = Query(...),
     user: str = Query("Anonymous Operator"),
     use_ai: bool = Query(False),
+    verify_inventory: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
     account, channel = _explicit_submission_destination(account, channel, current_user)
@@ -1550,7 +1630,7 @@ async def preview_file(
         if chan == "sms":
             from sms_dlt import load_drafts, preview_drafts
             drafts = await asyncio.to_thread(load_drafts, tmp_path, account, source_filename=file.filename)
-            return await asyncio.to_thread(preview_drafts, drafts, account)
+            return await asyncio.to_thread(preview_drafts, drafts, account, verify_inventory=verify_inventory)
         elif chan == "rcs":
             if suffix in (".xlsx", ".xls"):
                 submissions = await asyncio.to_thread(load_rcs_from_excel, tmp_path, client=account, upload_media=False)
@@ -1580,7 +1660,12 @@ async def preview_file(
                 },
                 status="success",
             )
-            return _inspect_template_quality_and_warnings(submissions, channel="rcs", account=account)
+            previews = _inspect_template_quality_and_warnings(
+                submissions, channel="rcs", account=account, verify_inventory=verify_inventory,
+            )
+            for preview in previews:
+                preview["source_file"] = file.filename or "upload.csv"
+            return previews
 
         import_notes: list[str] = []
         # WhatsApp
@@ -1616,7 +1701,12 @@ async def preview_file(
             },
             status="success",
         )
-        previews = _inspect_template_quality_and_warnings(submissions, channel="whatsapp", account=account, use_ai=use_ai)
+        previews = _inspect_template_quality_and_warnings(
+            submissions, channel="whatsapp", account=account,
+            use_ai=use_ai and verify_inventory, verify_inventory=verify_inventory,
+        )
+        for preview in previews:
+            preview["source_file"] = file.filename or "upload.csv"
         if import_notes and previews:
             previews[0]["import_notes"] = import_notes
         return previews
@@ -2221,6 +2311,42 @@ async def karix_webhook_endpoint(
     }
 
 
+_approval_poll_locks: dict[tuple[str, str], threading.Lock] = {}
+_approval_poll_lock = threading.Lock()
+_approval_refresh_lock = threading.Lock()
+
+
+def refresh_pending_approvals() -> dict:
+    """Scheduler read-only reconciliation: one sequential fetch per pending scope."""
+    from db import get_db
+    if not _approval_refresh_lock.acquire(blocking=False):
+        return {"checked_scopes": 0, "skipped": "already_running"}
+    try:
+        with get_db() as conn:
+            scopes = conn.execute(
+                """SELECT DISTINCT tenant_id, channel FROM job_tasks
+                WHERE approval_status IN ('pending', 'unknown')
+                    AND (status IN ('SUBMITTED', 'DUPLICATE')
+                         OR (channel = 'sms' AND tenant_id = 'tata' AND status = 'FAILED'))
+                    AND channel IN ('whatsapp', 'rcs', 'sms')
+                ORDER BY tenant_id, channel"""
+            ).fetchall()
+        results = {}
+        for row in scopes:
+            account, channel = row["tenant_id"], row["channel"]
+            if account in ("all", "unassigned") or (channel == "sms" and account != "tata"):
+                continue
+            try:
+                results[f"{account}:{channel}"] = _poll_scoped_approvals(account, channel, "Approval Scheduler")
+            except Exception:
+                # Preserve pending/unknown outcomes on outage, never submit or replay.
+                logger.exception("Approval refresh deferred for %s/%s", account, channel)
+                results[f"{account}:{channel}"] = {"error": "provider_unavailable"}
+        return {"checked_scopes": len(results), "results": results}
+    finally:
+        _approval_refresh_lock.release()
+
+
 @app.post("/api/poll")
 def poll(
     account: str = Query("bajaj"),
@@ -2231,34 +2357,49 @@ def poll(
     require_tenant_access(account, current_user)
     acc = account.lower()
     chan = channel.lower()
+    return _poll_scoped_approvals(acc, chan, user)
+
+
+def _poll_scoped_approvals(acc: str, chan: str, user: str) -> dict:
+    with _approval_poll_lock:
+        lock = _approval_poll_locks.setdefault((acc, chan), threading.Lock())
+    if not lock.acquire(blocking=False):
+        return {"checked": 0, "updated": 0, "skipped": "already_running"}
     try:
         if chan == "sms":
             from sms_dlt import poll_approvals
             return poll_approvals(acc)
         if chan == "rcs":
-            bot_id = get_rcs_bot_id(acc)
+            configured_bots = set(get_rcs_bot_ids(acc))
             pending = [entry for entry in load_rcs_log(RCS_LOG_PATH, client=acc, pending_only=True)
-                       if entry.get("bot_id") == bot_id]
+                       if entry.get("bot_id") in configured_bots]
             if not pending:
                 return {"checked": 0, "updated": 0}
             inventory = {}
-            for template in _fetch_rcs_inventory(acc):
-                if not isinstance(template, dict):
-                    continue
-                vi = template.get("viTemplate") if isinstance(template.get("viTemplate"), dict) else {}
-                live_bot = str(template.get("botId") or vi.get("botId") or "")
-                if live_bot and live_bot != bot_id:
-                    continue
-                ref = str(template.get("templateId") or template.get("id") or "")
-                if ref:
-                    inventory[ref] = template
+            for bot_id in sorted({entry["bot_id"] for entry in pending}):
+                for template in _fetch_rcs_inventory(acc, bot_id=bot_id):
+                    if not isinstance(template, dict):
+                        continue
+                    vi = template.get("viTemplate") if isinstance(template.get("viTemplate"), dict) else {}
+                    live_bot = str(template.get("botId") or vi.get("botId") or bot_id)
+                    live_esme = template.get("esmeaddr")
+                    if live_bot != bot_id or (live_esme is not None and str(live_esme) != str(get_rcs_esmeaddr(acc))):
+                        continue
+                    ref = str(template.get("templateId") or template.get("id") or "")
+                    if ref:
+                        inventory.setdefault((bot_id, ref), []).append(template)
             updates = {}
             for entry in pending:
-                live = inventory.get(str(entry["provider_ref_id"]))
-                if live is None:
+                matches = inventory.get((entry["bot_id"], str(entry["provider_ref_id"])), [])
+                if len(matches) != 1:
+                    continue
+                live = matches[0]
+                vi = live.get("viTemplate") if isinstance(live.get("viTemplate"), dict) else {}
+                live_name = live.get("templateName") or live.get("template_name") or vi.get("name")
+                if live_name and live_name != entry["template_name"]:
                     continue
                 approval = _rcs_approval_status(live.get("status"))
-                if approval == "unknown" or approval == entry["approval_status"]:
+                if approval == "unknown":
                     continue
                 updates[entry["task_id"]] = {
                     "approval_status": approval,
@@ -2271,9 +2412,8 @@ def poll(
             return {"checked": len(pending), "updated": updated}
         if chan != "whatsapp":
             return {"checked": 0, "updated": 0}
-        all_pending = pending_entries(LOG_PATH)
-        matching = [e for e in all_pending if (e.get("client", "bajaj") or "bajaj").lower() == acc]
-        poll_res = poll_pending(LOG_PATH, client=acc)
+        matching = pending_entries(LOG_PATH, client=acc)
+        poll_res = poll_pending(LOG_PATH, client=acc, inventory_fetch=_fetch_whatsapp_inventory)
         log_activity(
             user=user,
             action="STATUS_POLL",
@@ -2295,6 +2435,8 @@ def poll(
             status_code=400,
             detail=f"Poll failed for {acc}: {exc!s}",
         ) from exc
+    finally:
+        lock.release()
 
 
 class DeleteTemplatesRequest(BaseModel):
@@ -3062,6 +3204,85 @@ def _test_sms_channel(acc: str, acc_name: str, creds: CredentialUpdate | None) -
         "message": conn_info["message"],
         "details": conn_info,
     }
+
+
+def _connection_failure(message: str, *, auth_expired: bool | None = None) -> dict:
+    if auth_expired is None:
+        auth_expired = bool(re.search(
+            r"HTTP (?:401|403)\b|session (?:expired|refused)|rejected the credentials|"
+            r"missing required|no usable saved|not configured|reconnect this account",
+            message, re.IGNORECASE,
+        ))
+    return {"ok": False, "message": message, "inventory_verified": False,
+            "error_code": "auth_expired" if auth_expired else "provider_unavailable"}
+
+
+def _check_saved_connection(acc: str, chan: str) -> dict:
+    acc_name = get_account_name(acc)
+    if chan == "sms":
+        from vilpower_client import VilpowerAuthExpired, VilpowerUnavailable, check_connection
+        try:
+            check_connection(acc)
+            return {"ok": True, "message": "Live Tata Capital VILPOWER identity verified; inventory has not been loaded.",
+                    "inventory_verified": False}
+        except VilpowerAuthExpired as exc:
+            return _connection_failure(str(exc), auth_expired=True)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (VilpowerUnavailable, OSError) as exc:
+            return _connection_failure(str(exc), auth_expired=False)
+    if chan == "rcs":
+        try:
+            # Explicit selected bot avoids the multi-bot aggregate's partial-result fallback.
+            templates = _fetch_rcs_inventory(acc, bot_id=get_rcs_bot_id(acc))
+            expected_bot, expected_esme = get_rcs_bot_id(acc), get_rcs_esmeaddr(acc)
+            for template in templates:
+                vi = template.get("viTemplate") if isinstance(template.get("viTemplate"), dict) else {}
+                bot = template.get("botId") or vi.get("botId")
+                if (bot is not None and str(bot) != str(expected_bot)) or (
+                    template.get("esmeaddr") is not None and str(template["esmeaddr"]) != str(expected_esme)
+                ):
+                    return _connection_failure("The provider returned another RCS account's inventory.", auth_expired=False)
+            return {"ok": True, "message": f"Live RCS inventory verified for {acc_name}.",
+                    "inventory_verified": True}
+        except (HTTPException, RcsInventoryUnavailable, ValueError, OSError) as exc:
+            cause = exc.__cause__
+            message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+            return _connection_failure(
+                f"RCS connection could not be verified. Retry, or reconnect if the provider refused authentication. {message}",
+                auth_expired=True if any(isinstance(error, OSError) and not isinstance(error, http_client.RequestException)
+                                         for error in (exc, cause, getattr(cause, "__cause__", None))) else None,
+            )
+    from config import get_portal_auth_headers
+    try:
+        get_portal_auth_headers(acc)
+        portal_available = True
+    except OSError:
+        portal_available = False
+    if portal_available:
+        ok, message = check_portal_credentials(acc)
+        if not ok:
+            return _connection_failure(message)
+        return {"ok": True, "message": f"Live WhatsApp connection verified for {acc_name}; full inventory has not been loaded.",
+                "inventory_verified": False}
+    prefix = _account_prefix(acc)
+    result = _test_whatsapp_channel(acc, acc_name, prefix, acc == "tata", acc == "bajaj", None, "", "")
+    if not result["ok"]:
+        return _connection_failure(result["message"])
+    return {**result, "inventory_verified": True}
+
+
+@app.post("/api/connection-check")
+async def connection_check(
+    request: Request,
+    account: str = Query(...),
+    channel: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    acc, chan = _explicit_submission_destination(account, channel, current_user)
+    if await request.body():
+        raise HTTPException(status_code=400, detail="Connection checks use saved credentials only; do not send a body.")
+    return await asyncio.to_thread(_check_saved_connection, acc, chan)
 
 
 @app.post("/api/test-credentials")
@@ -4180,6 +4401,20 @@ def post_jira_validation_comment_endpoint(
 
 
 
+def _jira_submission_result(entry: dict) -> dict:
+    """Return the persisted row identity and provider evidence for safe readback."""
+    result = {key: entry.get(key) for key in (
+        "template_name", "status", "approval_status", "approval_reason", "error",
+        "source_ref", "provider_ref_id", "template_id", "provider_response", "updated_at",
+    )}
+    result["updated_at"] = entry.get("updated_at") or entry.get("submitted_at")
+    response = entry.get("provider_response")
+    result["registration_outcome"] = (
+        response.get("outcome") if isinstance(response, dict) else None
+    ) or ("unknown" if entry.get("outcome_uncertain") else None)
+    return result
+
+
 @app.post("/api/jira/submit/{issue_key}")
 async def submit_jira_brief_endpoint(
     issue_key: str,
@@ -4246,11 +4481,7 @@ async def submit_jira_brief_endpoint(
                     client=acc, channel="whatsapp",
                     submitted_by=user_name, source_file=f"Jira: {issue_key}",
                 )
-                log_result(res, LOG_PATH)
-                submitted_wa.append({
-                    "template_name": res.template_name, "status": res.status.value,
-                    "approval_status": res.approval_status.value, "error": res.error,
-                })
+                submitted_wa.append(_jira_submission_result(log_result(res, LOG_PATH)))
                 continue
             comps = [TemplateComponent(**component) for component in actual["components"]]
             from config import get_waba_id
@@ -4268,27 +4499,18 @@ async def submit_jira_brief_endpoint(
 
             try:
                 res = await asyncio.to_thread(submit_template, submission, client=acc)
-                res.submitted_by = user_name
-                res.source_file = f"Jira: {issue_key}"
-                log_result(res, LOG_PATH)
-                submitted_wa.append(
-                    {
-                        "template_name": res.template_name,
-                        "status": res.status.value,
-                        "approval_status": res.approval_status.value,
-                        "error": res.error,
-                    }
-                )
             except Exception as wa_exc:
-                logger.exception("Failed to submit WhatsApp template %s: %s", wa["template_name"], wa_exc)
-                submitted_wa.append(
-                    {
-                        "template_name": wa["template_name"],
-                        "status": "failed",
-                        "approval_status": "rejected",
-                        "error": str(wa_exc),
-                    }
+                logger.exception("WhatsApp provider outcome unknown for %s: %s", wa["template_name"], wa_exc)
+                res = SubmissionResult(
+                    source_ref=submission.source_ref, template_name=submission.template_name,
+                    status=SubmissionStatus.FAILED, approval_status=ApprovalStatus.UNKNOWN,
+                    error="Provider outcome unknown after an interrupted submission. Check the provider inventory before retrying.",
+                    provider_response={"outcome": "unknown", "retry_safe": False},
+                    client=acc, channel="whatsapp",
                 )
+            res.submitted_by = user_name
+            res.source_file = f"Jira: {issue_key}"
+            submitted_wa.append(_jira_submission_result(log_result(res, LOG_PATH)))
 
     # 2. Submit RCS templates
     if "rcs" in req.channels:
@@ -4306,11 +4528,7 @@ async def submit_jira_brief_endpoint(
                     client=acc, channel="rcs", bot_id=get_rcs_bot_id(acc),
                     submitted_by=user_name, source_file=f"Jira: {issue_key}",
                 )
-                log_rcs_result(rcs_res, RCS_LOG_PATH)
-                submitted_rcs.append({
-                    "template_name": rcs_res.template_name, "status": rcs_res.status.value,
-                    "template_id": None, "error": rcs_res.error,
-                })
+                submitted_rcs.append(_jira_submission_result(log_rcs_result(rcs_res, RCS_LOG_PATH)))
                 continue
             suggestions = actual["suggestions"]
 
@@ -4363,27 +4581,18 @@ async def submit_jira_brief_endpoint(
             )
             try:
                 rcs_res = await asyncio.to_thread(submit_rcs_template, rcs_sub, client=acc)
-                rcs_res.submitted_by = user_name
-                rcs_res.source_file = f"Jira: {issue_key}"
-                log_rcs_result(rcs_res, RCS_LOG_PATH)
-                submitted_rcs.append(
-                    {
-                        "template_name": rcs_res.template_name,
-                        "status": rcs_res.status.value,
-                        "template_id": rcs_res.template_id,
-                        "error": rcs_res.error,
-                    }
-                )
             except Exception as rcs_exc:
-                logger.exception("Failed to submit RCS template %s: %s", rcs["template_name"], rcs_exc)
-                submitted_rcs.append(
-                    {
-                        "template_name": rcs["template_name"],
-                        "status": "failed",
-                        "template_id": None,
-                        "error": str(rcs_exc),
-                    }
+                logger.exception("RCS provider outcome unknown for %s: %s", rcs["template_name"], rcs_exc)
+                rcs_res = RcsSubmissionResult(
+                    source_ref=rcs_sub.source_ref, template_name=rcs_sub.template_name,
+                    status=RcsSubmissionStatus.FAILED, approval_status="unknown",
+                    error="Provider outcome unknown after an interrupted submission. Check the provider inventory before retrying.",
+                    provider_response={"outcome": "unknown", "retry_safe": False},
+                    client=acc, channel="rcs", bot_id=get_rcs_bot_id(acc), outcome_uncertain=True,
                 )
+            rcs_res.submitted_by = user_name
+            rcs_res.source_file = f"Jira: {issue_key}"
+            submitted_rcs.append(_jira_submission_result(log_rcs_result(rcs_res, RCS_LOG_PATH)))
     # Submission never posts a Jira comment; error reports require separate human approval.
     jira_comment_res = {"ok": True, "skipped": True, "message": "No comment posted; validation reports require human confirmation."}
     log_activity(

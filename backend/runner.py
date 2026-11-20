@@ -25,7 +25,6 @@ from loader import load_from_list
 from models import ApprovalStatus, SubmissionResult, SubmissionStatus
 from submission_client import (
     _STATUS_MAP,
-    _match_template,
     fetch_template_list,
     submit_template,
 )
@@ -102,7 +101,7 @@ def get_pending_templates_sla_insights(log_path: str = "submission_log.jsonl", c
     Returns SLA countdowns, due-for-poll items, and recommended next poll time.
     """
     c = client.lower()
-    pending = [e for e in pending_entries(log_path) if (e.get("client", "bajaj") or "bajaj").lower() == c]
+    pending = pending_entries(log_path, client=c)
     if not pending:
         return {
             "pending_count": 0,
@@ -240,7 +239,7 @@ def run(
     return results
 
 
-def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") -> dict:
+def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj", *, inventory_fetch=None) -> dict:
     """
     Phase 2, step 2: check approval status for everything still pending.
 
@@ -248,7 +247,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
     pending. Returns a summary dictionary including procedural SLA insights.
     """
     c = client.lower()
-    to_check = [e for e in pending_entries(log_path) if (e.get("client", "bajaj") or "bajaj").lower() == c]
+    to_check = pending_entries(log_path, client=c)
     if not to_check:
         print(f"Nothing pending for {client}.")
         return {
@@ -260,7 +259,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
 
     print(f"Checking {len(to_check)} pending template(s) for {client}...")
 
-    templates, err = fetch_template_list(c)
+    templates, err = (inventory_fetch or fetch_template_list)(c)
     if err is not None:
         # Do NOT write anything: a later poll will retry every entry.
         print(f"  Poll deferred for {client}: {err}")
@@ -275,10 +274,18 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
     now = datetime.now(UTC).isoformat()
     updates: dict[str, dict] = {}
     for entry in to_check:
-        ref = entry["source_ref"]
-        matched = _match_template(templates, entry.get("provider_ref_id", "")) or _match_template(
-            templates, entry.get("template_name", "")
-        )
+        ref = entry.get("task_id") or entry["source_ref"]
+        provider_ref = str(entry.get("provider_ref_id") or "")
+        name = str(entry.get("template_name") or "")
+        has_provider_id = provider_ref and provider_ref.lower() != name.lower()
+        matches = [
+            template for template in templates
+            if str(template.get("template_name") or "").lower() == name.lower()
+            and (not has_provider_id or provider_ref in (
+                str(template.get("fb_template_id") or ""), str(template.get("sno") or ""),
+            ))
+        ]
+        matched = matches[0] if len(matches) == 1 else None
         if matched is None:
             print(f"  {entry['template_name']}: not on WABA yet (stays pending)")
             continue
@@ -286,7 +293,7 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
         raw_status = str(matched.get("template_create_status", "")).upper()
         status = _STATUS_MAP.get(raw_status, ApprovalStatus.UNKNOWN)
 
-        if status in _TERMINAL_STATUSES:
+        if status in _TERMINAL_STATUSES or status == ApprovalStatus.PENDING:
             update_payload = {
                 "approval_status": status.value,
                 "approval_reason": matched.get("template_status_reason"),
@@ -306,13 +313,13 @@ def poll_pending(log_path: str = "submission_log.jsonl", client: str = "bajaj") 
 
     updated = 0
     if updates:
-        updated = update_results(updates, log_path)
+        updated = update_results(updates, log_path, client=c)
         print(f"Applied {updated} status update(s).")
 
     return {
         "checked": len(to_check),
         "updated": updated,
-        "pending": len(to_check) - updated,
+        "pending": len(pending_entries(log_path, client=c)),
         "insights": get_pending_templates_sla_insights(log_path, client=c),
     }
 

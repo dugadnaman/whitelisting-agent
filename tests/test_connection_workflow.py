@@ -50,7 +50,7 @@ def flow(workflow_source):
                 if (name === '@/lib/destination') return {destinationLabel: (account, channel) => `${account} · ${channel}`};
                 if (name === '@/lib/api') return {
                     canAccessAccount: (_user, account) => account.startsWith('tcl_'),
-                    testCredentials: async (account, channel) => {
+                    checkConnection: async (account, channel) => {
                         window.checks.push({account, channel});
                         if (window.defer) return new Promise(resolve => { window.resolveCheck = resolve; });
                         if (window.checkError) throw new Error(window.checkError);

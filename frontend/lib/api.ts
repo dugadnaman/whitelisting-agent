@@ -100,6 +100,7 @@ export type Template = {
   exists_on_waba?: boolean;
   updated_at?: string | null;
   provider_response?: Record<string, unknown> | null;
+  registration_outcome?: "unknown" | "verified" | "failed";
   client?: string;
   channel?: string;
   template_id?: string;
@@ -214,6 +215,9 @@ export type TemplatePreview = DraftWarnings & {
   channel?: string;
   waba_id?: string;
   source_ref?: string;
+  source_file?: string;
+  source_sheet?: string;
+  source_cell?: string;
   already_exists_on_waba?: boolean | null;
   exists_on_waba?: boolean | null;
   account_detection?: AccountDetection;
@@ -404,9 +408,10 @@ export async function getErrorMessage(res: Response): Promise<string> {
 
 export async function fetchStats(
   account: Account = "bajaj",
-  channel: Channel = "whatsapp"
+  channel: Channel = "whatsapp",
+  options?: { live?: boolean }
 ): Promise<Stats> {
-  const qs = new URLSearchParams({ account, channel }).toString();
+  const qs = new URLSearchParams({ account, channel, ...(options?.live === false ? { live: "false" } : {}) }).toString();
   const res = await fetchWithRetry(getApiUrl(`/api/stats?${qs}`), undefined, channel === 'sms' ? 0 : 2, 800, channel === 'sms' ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
@@ -417,12 +422,14 @@ export async function fetchTemplates(params?: {
   channel?: Channel;
   status?: string;
   search?: string;
+  live?: boolean;
 }): Promise<Template[]> {
   const qs = new URLSearchParams();
   qs.set("account", params?.account || "bajaj");
   qs.set("channel", params?.channel || "whatsapp");
   if (params?.status) qs.set("status", params.status);
   if (params?.search) qs.set("search", params.search);
+  if (params?.live === false) qs.set("live", "false");
 
   const res = await fetchWithRetry(getApiUrl(`/api/templates?${qs.toString()}`), undefined, params?.channel === 'sms' ? 0 : 2, 800, params?.channel === 'sms' ? 180000 : 60000);
   if (!res.ok) throw new Error(await getErrorMessage(res));
@@ -432,12 +439,13 @@ export async function fetchTemplates(params?: {
 export async function previewFile(
   file: File,
   account: Account,
-  channel: Channel
+  channel: Channel,
+  options?: { verifyInventory?: boolean }
 ): Promise<TemplatePreview[]> {
   if (!account || account === "all") throw new Error("Select an account before previewing.");
   const form = new FormData();
   form.append("file", file);
-  const qs = new URLSearchParams({ account, channel }).toString();
+  const qs = new URLSearchParams({ account, channel, ...(options?.verifyInventory === false ? { verify_inventory: "false" } : {}) }).toString();
   const res = await fetchWithRetry(
     getApiUrl(`/api/preview?${qs}`),
     {
@@ -716,6 +724,18 @@ export async function testCredentials(
   });
   if (!res.ok) throw new Error(await getErrorMessage(res));
   return res.json();
+}
+
+/** Verify the live scoped session separately from duplicate/catalog verification. */
+export async function checkConnection(account: Account, channel: Channel): Promise<{
+  ok: boolean; message: string; inventory_verified: boolean; error_code?: string;
+}> {
+  const qs = new URLSearchParams({ account, channel });
+  const response = await fetchWithRetry(getApiUrl(`/api/connection-check?${qs}`), {
+    method: "POST", cache: "no-store",
+  }, 0, 800, 20000);
+  if (!response.ok) throw new Error(await getErrorMessage(response));
+  return response.json();
 }
 
 export async function sendSms(payload: {
@@ -1213,6 +1233,10 @@ export type JiraIssueItem = {
 };
 
 export type JiraWhatsAppDraft = DraftWarnings & {
+  source_ref?: string;
+  source_file?: string;
+  source_sheet?: string;
+  source_cell?: string;
   template_name: string;
   category: string;
   body: string;
@@ -1238,6 +1262,10 @@ export type JiraWhatsAppDraft = DraftWarnings & {
 };
 
 export type JiraRcsDraft = DraftWarnings & {
+  source_ref?: string;
+  source_file?: string;
+  source_sheet?: string;
+  source_cell?: string;
   template_name: string;
   card_title: string;
   body: string;
@@ -1263,6 +1291,10 @@ export type JiraRcsDraft = DraftWarnings & {
 };
 
 export type JiraSmsDraft = {
+  source_ref?: string;
+  source_file?: string;
+  source_sheet?: string;
+  source_cell?: string;
   template_name: string;
   text: string;
   char_count: number;
@@ -1443,6 +1475,19 @@ export async function reportJiraValidation(
   return data;
 }
 
+export type JiraSubmissionOutcome = {
+  template_name: string;
+  status: string;
+  approval_status?: string;
+  error?: string | null;
+  source_ref?: string;
+  provider_ref_id?: string | null;
+  template_id?: string | null;
+  provider_response?: Record<string, unknown> | null;
+  registration_outcome?: "unknown" | "verified" | "failed";
+  updated_at?: string | null;
+};
+
 export async function submitJiraBrief(
   issueKey: string,
   channels: Channel[],
@@ -1456,8 +1501,8 @@ export async function submitJiraBrief(
   issue_key: string;
   account: string;
   channels: Channel[];
-  whatsapp_submitted: Array<{ template_name: string; status: string; approval_status: string; error?: string }>;
-  rcs_submitted: Array<{ template_name: string; status: string; template_id?: string; error?: string }>;
+  whatsapp_submitted: JiraSubmissionOutcome[];
+  rcs_submitted: JiraSubmissionOutcome[];
 }> {
   if (!account || account === "all" || !channels.length || channels.some((channel) => channel !== "whatsapp" && channel !== "rcs")) {
     throw new Error("Choose an explicit account and channel before submitting.");

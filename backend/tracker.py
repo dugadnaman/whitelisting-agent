@@ -187,7 +187,7 @@ def update_result(source_ref: str, updates: dict, log_path: str = "submission_lo
     return update_results({source_ref: updates}, log_path) == 1
 
 
-def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl") -> int:
+def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl", *, client: str | None = None) -> int:
     """
     Apply updates directly in the database (single source of truth).
     """
@@ -206,7 +206,9 @@ def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl")
                         pass
             f_updated = 0
             for entry in file_entries:
-                r = entry.get("source_ref") or entry.get("template_name")
+                if client is not None and entry.get("client") != client:
+                    continue
+                r = entry.get("task_id") or entry.get("source_ref") or entry.get("template_name")
                 if r in updates_by_ref:
                     entry.update(updates_by_ref[r])
                     f_updated += 1
@@ -237,6 +239,18 @@ def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl")
                 prov_id = upd.get("provider_ref_id")
                 app_reason = upd.get("approval_reason")
 
+                if client is not None:
+                    cur = conn.execute(
+                        """UPDATE job_tasks SET approval_status = COALESCE(?, approval_status),
+                            approval_reason = ?, provider_ref_id = COALESCE(?, provider_ref_id),
+                            updated_at = ?
+                        WHERE id = ? AND tenant_id = ? AND channel = 'whatsapp'
+                            AND LOWER(status) IN ('submitted', 'duplicate')
+                            AND LOWER(approval_status) NOT IN ('approved', 'rejected')""",
+                        (app_val, app_reason, prov_id, now, ref, client),
+                    )
+                    updated += cur.rowcount
+                    continue
                 cur = conn.execute(
                     """
                     UPDATE job_tasks SET
@@ -258,13 +272,14 @@ def update_results(updates_by_ref: dict, log_path: str = "submission_log.jsonl")
     return updated
 
 
-def pending_entries(log_path: str = "submission_log.jsonl") -> list[dict]:
+def pending_entries(log_path: str = "submission_log.jsonl", *, client: str | None = None) -> list[dict]:
     """Entries still awaiting a final approval outcome, read from database."""
     if log_path != "submission_log.jsonl" and not log_path.endswith("submission_log.jsonl"):
         return [
             e
             for e in load_log(log_path)
-            if e.get("status") in ("submitted", "duplicate") and e.get("approval_status") == "pending"
+            if e.get("status") in ("submitted", "duplicate") and e.get("approval_status") in ("pending", "unknown")
+            and (client is None or e.get("client") == client)
         ]
 
     db.init_database()
@@ -276,9 +291,10 @@ def pending_entries(log_path: str = "submission_log.jsonl") -> list[dict]:
                 SELECT * FROM job_tasks
                 WHERE channel = 'whatsapp'
                   AND LOWER(status) IN ('submitted', 'duplicate')
-                  AND LOWER(approval_status) = 'pending'
+                  AND LOWER(approval_status) IN ('pending', 'unknown')
+                  AND (? IS NULL OR tenant_id = ?)
                 ORDER BY created_at ASC
-            """
+            """, (client, client)
             )
             for r in cur.fetchall():
                 entries.append(_row_to_entry_dict(dict(r)))

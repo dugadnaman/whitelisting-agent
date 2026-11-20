@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTabState, getTabState, clearTabState } from '@/lib/tab-state';
 import { loadUploadDraft, saveUploadDraft, saveUploadReview, uploadDraftScope } from '@/lib/upload-draft';
 import { useWhitelistingConnection } from '@/components/connection-workflow';
-import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates, streamJobEvents } from '@/lib/api';
+import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates } from '@/lib/api';
 import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
 import { useApp, getRcsDetails } from '@/lib/context';
 import { formatChannel, formatError } from '@/lib/format';
@@ -12,26 +12,29 @@ import { destinationLabel } from '@/lib/destination';
 import type { Channel } from '@/lib/api';
 import { SmsDltUpload } from '@/components/sms-dlt';
 import { WHITELIST_NAME_HINT } from '@/lib/jira-template-name';
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: 'bg-amber-100 text-amber-800 border border-amber-200',
-    approved: 'bg-green-100 text-green-800 border border-green-200',
-    rejected: 'bg-red-100 text-red-800 border border-red-200',
-    failed: 'bg-red-100 text-red-800 border border-red-200',
-    submitted: 'bg-sky-50 text-sky-800 border border-sky-200',
-    duplicate: 'bg-sky-50 text-sky-800 border border-sky-200',
-    blocked_aspect_ratio: 'bg-rose-100 text-rose-900 border border-rose-300',
-    blocked: 'bg-rose-100 text-rose-900 border border-rose-300',
-    unknown: 'bg-gray-100 text-gray-800 border border-gray-200',
+import { templateOutcome, type TemplateOutcomeInput } from '@/lib/template-status';
+
+function StatusBadge({ item }: { item: TemplateOutcomeInput }) {
+  const outcome = templateOutcome(item);
+  const colors = {
+    success: 'bg-green-100 text-green-800 border-green-200',
+    warning: 'bg-amber-100 text-amber-800 border-amber-200',
+    error: 'bg-red-100 text-red-800 border-red-200',
+    neutral: 'bg-gray-100 text-gray-800 border-gray-200',
   };
-  const s = (status || 'unknown').toLowerCase();
-  const isBlocked = s === 'blocked_aspect_ratio' || s === 'blocked';
-  const label = isBlocked ? 'Blocked (aspect ratio)' : status;
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${colors[s] || colors.unknown}`}>
-      {label}
-    </span>
-  );
+  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${colors[outcome.tone]}`}>{outcome.label}</span>;
+}
+
+function previewIdentity(preview: TemplatePreview): string {
+  return JSON.stringify([preview.source_file, preview.source_ref, preview.source_sheet, preview.source_cell,
+    preview.template_name, preview.language, preview.components, preview.text_message,
+    preview.template_message, preview.card_title, preview.card_description, preview.carousel_cards]);
+}
+
+function PreviewSource({ preview }: { preview: TemplatePreview }) {
+  const location = [preview.source_sheet, preview.source_cell].filter(Boolean).join('!');
+  const source = [preview.source_file, location, preview.source_ref !== location ? preview.source_ref : null].filter(Boolean).join(' · ');
+  return source ? <p className="break-words text-xs text-gray-500">Source: {source}</p> : null;
 }
 
 function mergeJobResults(results: Template[], tasks: JobTask[]): Template[] {
@@ -51,6 +54,8 @@ function mergeJobResults(results: Template[], tasks: JobTask[]): Template[] {
       status: task.status.toLowerCase() as Template['status'],
       approval_status: task.approval_status.toLowerCase() as Template['approval_status'],
       provider_ref_id: task.provider_ref_id ?? result?.provider_ref_id,
+      registration_outcome: task.registration_outcome ?? result?.registration_outcome,
+      provider_response: { ...result?.provider_response, outcome: task.registration_outcome ?? result?.provider_response?.outcome },
       error: task.error ?? null, approval_reason: task.approval_reason ?? null,
       retry_count: task.retry_count, submitted_at: result?.submitted_at || task.created_at,
       client: task.tenant_id, channel: task.channel,
@@ -62,7 +67,7 @@ function mergeJobResults(results: Template[], tasks: JobTask[]): Template[] {
 type State =
   | { step: 'idle' }
   | { step: 'previewing' }
-  | { step: 'previewed'; previews: TemplatePreview[]; uploadId?: string }
+  | { step: 'previewed'; previews: TemplatePreview[]; uploadId?: string; submissionUncertain?: boolean }
   | { step: 'submitting'; previews: TemplatePreview[]; uploadId?: string }
   | {
       step: 'submitted';
@@ -75,7 +80,7 @@ type State =
       authPaused?: boolean;
       authPausedMessage?: string;
     }
-  | { step: 'error'; message: string; previews: TemplatePreview[] | null; uploadId?: string };
+  | { step: 'error'; message: string; previews: TemplatePreview[] | null; uploadId?: string; submissionUncertain?: boolean };
 
 
 type UploadSelection = { scope: string; id: string; botId?: string; persisted?: boolean };
@@ -105,13 +110,17 @@ export default function SubmitPage() {
   const [uploadSelection, setUploadSelection] = useTabState<UploadSelection | null>('submit_upload', null);
   const [storageNotice, setStorageNotice] = useState('');
   const [checkingConnection, setCheckingConnection] = useState(false);
+  const [inventoryCheck, setInventoryCheck] = useState<{ uploadId: string; checking: boolean; error?: string } | null>(null);
+  const [jobRefresh, setJobRefresh] = useState(0);
+  const [jobError, setJobError] = useState('');
+  const [refreshingJob, setRefreshingJob] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [autoFixGrammar, setAutoFixGrammar] = useTabState<boolean>('submit_auto_fix_grammar', true);
   const [autoSkipDuplicates, setAutoSkipDuplicates] = useTabState<boolean>('submit_auto_skip_duplicates', true);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const streamControllerRef = useRef<AbortController | null>(null);
-  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const inventoryVersionRef = useRef(0);
+  const jobRequestRef = useRef(false);
   const selectionVersionRef = useRef(0);
   const identifyVersionRef = useRef(0);
   const scopeRef = useRef({ account, channel, uploadScope });
@@ -204,107 +213,59 @@ export default function SubmitPage() {
     link.click();
     document.body.removeChild(link);
   };
-  const pollJobFallback = useCallback((jobId: string) => {
+  const submittedJobId = state.step === 'submitted' && state.account === account && state.channel === channel ? state.jobId : undefined;
+  useEffect(() => {
+    if (!submittedJobId || channel === 'sms') return;
     const requestedScope = scopeRef.current;
-    clearInterval(pollTimerRef.current as NodeJS.Timeout);
-    let inFlight = false;
-    const interval = setInterval(async () => {
-      if (inFlight) return;
-      inFlight = true;
+    let cancelled = false;
+    let timer: NodeJS.Timeout | undefined;
+    let needsRefresh = true;
+    const current = () => !cancelled && mountedRef.current
+      && scopeRef.current.uploadScope === requestedScope.uploadScope;
+    async function refresh() {
+      clearTimeout(timer);
+      if (!current() || document.visibilityState !== 'visible' || !needsRefresh) return;
+      if (jobRequestRef.current) { timer = setTimeout(refresh, 250); return; }
+      jobRequestRef.current = true;
+      setRefreshingJob(true);
       try {
-        const data = await fetchJob(jobId);
-        if (!mountedRef.current || pollTimerRef.current !== interval || scopeRef.current.account !== requestedScope.account || scopeRef.current.channel !== requestedScope.channel) return;
-        const terminal = ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(data.job.status);
-        if (terminal) {
-          clearInterval(interval);
-          pollTimerRef.current = null;
-        }
-        setState((prev) => prev.step === 'submitted' && prev.jobId === jobId ? {
-          ...prev, results: mergeJobResults(prev.results, data.tasks), isStreaming: !terminal,
-          authPaused: data.job.status === 'PAUSED_FOR_AUTH', authPausedMessage: data.job.error_message,
-        } : prev);
-      } catch {
-        if (!mountedRef.current || pollTimerRef.current !== interval || scopeRef.current.account !== requestedScope.account || scopeRef.current.channel !== requestedScope.channel) return;
-        clearInterval(interval);
-        pollTimerRef.current = null;
-        setState((prev) => (prev.step === 'submitted' && prev.jobId === jobId ? { ...prev, isStreaming: false } : prev));
+        const snapshot = await fetchJob(submittedJobId!);
+        if (!current()) return;
+        const terminal = ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(snapshot.job.status);
+        const awaitingApproval = snapshot.tasks.some((task) => !templateOutcome(task).unknown
+          && ['SUBMITTED', 'DUPLICATE'].includes(task.status)
+          && !['approved', 'rejected', 'blocked_aspect_ratio'].includes(task.approval_status));
+        needsRefresh = !terminal || awaitingApproval;
+        setJobError('');
+        setState((previous) => previous.step === 'submitted' && previous.jobId === submittedJobId ? {
+          ...previous, results: mergeJobResults(previous.results, snapshot.tasks), isStreaming: !terminal,
+          authPaused: snapshot.job.status === 'PAUSED_FOR_AUTH', authPausedMessage: snapshot.job.error_message,
+        } : previous);
+        if (needsRefresh && document.visibilityState === 'visible') timer = setTimeout(refresh, terminal ? 10000 : 2500);
+      } catch (error) {
+        if (current()) setJobError(`Could not read stored job status. ${formatError(error)} Your queued batch is unchanged; retry status or open History, not submission.`);
       } finally {
-        inFlight = false;
+        jobRequestRef.current = false;
+        if (current()) setRefreshingJob(false);
       }
-    }, 2500);
-    pollTimerRef.current = interval;
-  }, []);
-
-  const setupJobStream = useCallback((jobId: string) => {
-    streamControllerRef.current?.abort();
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
     }
-    const controller = new AbortController();
-    streamControllerRef.current = controller;
-    void (async () => {
-      try {
-        for await (const message of streamJobEvents(jobId, controller.signal)) {
-          const data = JSON.parse(message.data);
-          if (controller.signal.aborted || !mountedRef.current) return;
-          if (message.event === 'task_update') {
-            setState((prev) => {
-              if (prev.step !== 'submitted' || prev.jobId !== jobId) return prev;
-              const nextResults = prev.results.map((r) => {
-                const matches = r.task_id ? r.task_id === data.id
-                  : r.template_name?.toLowerCase() === data.template_name?.toLowerCase() && r.source_ref === data.source_ref;
-                return matches ? {
-                  ...r,
-                  status: ((data.status || r.status).toLowerCase() as Template['status']),
-                  approval_status: ((data.approval_status || r.approval_status).toLowerCase() as Template['approval_status']),
-                  provider_ref_id: data.provider_ref_id ?? r.provider_ref_id,
-                  error: data.error ?? null,
-                } : r;
-              });
-              return { ...prev, results: nextResults };
-            });
-          } else if (message.event === 'auth_paused') {
-            setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
-              ? { ...prev, authPaused: true, authPausedMessage: data.message } : prev);
-          } else if (message.event === 'auth_resumed') {
-            setState((prev) => prev.step === 'submitted' && prev.jobId === jobId
-              ? { ...prev, authPaused: false, authPausedMessage: undefined } : prev);
-          } else if (message.event === 'job_status') {
-            const snapshot = await fetchJob(jobId);
-            if (controller.signal.aborted) return;
-            const terminal = ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(snapshot.job.status);
-            setState((prev) => prev.step === 'submitted' && prev.jobId === jobId ? {
-              ...prev, results: mergeJobResults(prev.results, snapshot.tasks), isStreaming: !terminal,
-              authPaused: snapshot.job.status === 'PAUSED_FOR_AUTH', authPausedMessage: snapshot.job.error_message,
-            } : prev);
-            if (terminal) return;
-          }
-        }
-        // An EOF before a terminal status is a lost stream, not job completion.
-        if (!controller.signal.aborted) pollJobFallback(jobId);
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          console.debug('Job stream unavailable; using authenticated polling:', err);
-          pollJobFallback(jobId);
-        }
-      } finally {
-        if (streamControllerRef.current === controller) streamControllerRef.current = null;
-      }
-    })();
-  }, [pollJobFallback]);
+    const visibilityChanged = () => {
+      clearTimeout(timer);
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    void refresh();
+    document.addEventListener('visibilitychange', visibilityChanged);
+    return () => { cancelled = true; clearTimeout(timer); document.removeEventListener('visibilitychange', visibilityChanged); };
+  }, [submittedJobId, uploadScope, channel, jobRefresh]);
 
   useEffect(() => {
     mountedRef.current = true;
-    clearInterval(pollTimerRef.current as NodeJS.Timeout);
-    pollTimerRef.current = null;
+    inventoryVersionRef.current++;
     return () => {
       mountedRef.current = false;
       identifyVersionRef.current++;
       selectionVersionRef.current++;
-      streamControllerRef.current?.abort();
-      clearInterval(pollTimerRef.current as NodeJS.Timeout);
-      pollTimerRef.current = null;
+      inventoryVersionRef.current++;
     };
   }, []);
   useEffect(() => {
@@ -320,10 +281,10 @@ export default function SubmitPage() {
     setShowBlockedModal(false);
     setCheckingConnection(false);
     setStorageNotice('');
-    clearInterval(pollTimerRef.current as NodeJS.Timeout);
-    pollTimerRef.current = null;
-    streamControllerRef.current?.abort();
-    streamControllerRef.current = null;
+    inventoryVersionRef.current++;
+    setInventoryCheck(null);
+    setJobError('');
+    setRefreshingJob(false);
     setState({ step: 'idle' });
     setFile(null);
     setUploadSelection(null);
@@ -342,7 +303,7 @@ export default function SubmitPage() {
     const saved = getTabState<UploadSelection | null>('submit_upload', null);
     const cached = getTabState<State>('submit_state', { step: 'idle' });
     if (cached.step === 'submitted') {
-      if (cached.account === account && cached.channel === channel && cached.jobId && cached.isStreaming) setupJobStream(cached.jobId);
+      if (cached.account !== account || cached.channel !== channel) setState({ step: 'idle' });
       return;
     }
     if (!saved || saved.scope !== uploadScope) {
@@ -358,7 +319,7 @@ export default function SubmitPage() {
       if ((restoredState.step === 'previewed' || restoredState.step === 'error' || restoredState.step === 'submitting') && restoredState.uploadId === saved.id) {
         setReview({ account, channel, botId: restored.review?.botId ?? saved.botId, file: restored.file });
         setState(restoredState.step === 'submitting'
-          ? { step: 'error', message: 'The submission response was lost. Check History before submitting again: the queue may already contain this upload.', previews: restoredState.previews, uploadId: restoredState.uploadId }
+          ? { step: 'error', message: 'The submission response was lost. Check History before submitting again: the queue may already contain this upload.', previews: restoredState.previews, uploadId: restoredState.uploadId, submissionUncertain: true }
           : restoredState);
       }
       if (cached.step === 'previewing') setState({ step: 'idle' });
@@ -366,7 +327,7 @@ export default function SubmitPage() {
       if (!cancelled && version === selectionVersionRef.current) setStorageNotice(formatError(error));
     });
     return () => { cancelled = true; };
-  }, [uploadScope, setupJobStream]);
+  }, [uploadScope]);
 
   useEffect(() => {
     if (!uploadSelection || uploadSelection.scope !== uploadScope || !review || review.file !== file) return;
@@ -380,6 +341,38 @@ export default function SubmitPage() {
     });
   }, [state, uploadSelection, uploadScope, review, file]);
 
+  const verifyInventory = useCallback(async (selected: File, uploadId: string, baseline: TemplatePreview[]) => {
+    const version = ++inventoryVersionRef.current;
+    const selectionVersion = selectionVersionRef.current;
+    const requestedScope = uploadScope;
+    const current = () => mountedRef.current && version === inventoryVersionRef.current
+      && selectionVersion === selectionVersionRef.current && scopeRef.current.uploadScope === requestedScope;
+    setInventoryCheck({ uploadId, checking: true });
+    try {
+      const verified = await previewFile(selected, account, channel, { verifyInventory: true });
+      if (!current()) return;
+      if (verified.length !== baseline.length || verified.some((preview, index) => previewIdentity(preview) !== previewIdentity(baseline[index]))) {
+        throw new Error('Inventory returned a different set of messages. Your original preview is retained; retry the inventory check.');
+      }
+      if (verified.some((preview) => preview.inventory_status !== 'verified')) {
+        throw new Error(verified.find((preview) => preview.inventory_error)?.inventory_error || 'Inventory is unavailable. Existing templates are unknown, not missing.');
+      }
+      setState((previous) => {
+        if (previous.step !== 'previewed' || previous.uploadId !== uploadId
+          || previous.previews.length !== baseline.length
+          || previous.previews.some((preview, index) => previewIdentity(preview) !== previewIdentity(baseline[index]))) return previous;
+        return { ...previous, previews: previous.previews.map((preview, index) => ({
+          ...preview, inventory_status: verified[index].inventory_status, inventory_error: verified[index].inventory_error,
+          submission_ready: verified[index].submission_ready, already_exists_on_waba: verified[index].already_exists_on_waba,
+          exists_on_waba: verified[index].exists_on_waba, duplicate_warning: verified[index].duplicate_warning,
+        })) };
+      });
+      setInventoryCheck({ uploadId, checking: false });
+    } catch (error) {
+      if (current()) setInventoryCheck({ uploadId, checking: false, error: formatError(error) });
+    }
+  }, [account, channel, uploadScope]);
+
   const handleFile = useCallback(
     async (selected: File) => {
       if (!uploadScope) return;
@@ -389,9 +382,8 @@ export default function SubmitPage() {
         setState({ step: 'error', message: 'Choose an account in “Whitelisting for” before uploading.', previews: null });
         return;
       }
-      streamControllerRef.current?.abort();
-      clearInterval(pollTimerRef.current as NodeJS.Timeout);
-      pollTimerRef.current = null;
+      inventoryVersionRef.current++;
+      setInventoryCheck(null);
       if (!isAcceptedFile(selected)) {
         setState({ step: 'error', message: 'Please upload a .csv, .xlsx, or .xls file.', previews: null });
         return;
@@ -415,17 +407,14 @@ export default function SubmitPage() {
         }
       }
       if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.uploadScope !== uploadScope) return;
-      setCheckingConnection(true);
-      const connected = await ensureConnected();
-      if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.uploadScope !== uploadScope) return;
-      setCheckingConnection(false);
-      if (!connected) return;
       setState({ step: 'previewing' });
       try {
-        const previews = await previewFile(selected, account, channel);
+        const parsed = await previewFile(selected, account, channel, { verifyInventory: false });
+        const previews = parsed.map((preview) => ({ ...preview, inventory_status: 'unverified' as const, submission_ready: false }));
         if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
         setReview({ ...requestedScope, botId: activeRcs.botId || undefined, file: selected });
         setState({ step: 'previewed', previews, uploadId });
+        void verifyInventory(selected, uploadId, previews);
       } catch (err) {
         if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
         setState({
@@ -436,7 +425,7 @@ export default function SubmitPage() {
         });
       }
     },
-    [account, channel, activeRcs.botId, uploadScope, file, uploadSelection, ensureConnected]
+    [account, channel, activeRcs.botId, uploadScope, file, uploadSelection, verifyInventory]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -472,21 +461,23 @@ export default function SubmitPage() {
 
   const handleClear = useCallback(() => {
     selectionVersionRef.current++;
+    inventoryVersionRef.current++;
+    setInventoryCheck(null);
+    setJobError('');
     clearTabState('submit_upload');
     setUploadSelection(null);
     setStorageNotice('');
     setCheckingConnection(false);
     setReview(null);
-    streamControllerRef.current?.abort();
-    clearInterval(pollTimerRef.current as NodeJS.Timeout);
+    setRefreshingJob(false);
     setFile(null);
     setState({ step: 'idle' });
     if (inputRef.current) inputRef.current.value = '';
   }, [setUploadSelection]);
   const currentPreviews = state.step === 'previewed' ? state.previews : null;
   const executeSubmit = useCallback(async (fixGrammar: boolean) => {
-    if (!file || !currentPreviews || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
-    if (currentPreviews.some((preview) => preview.inventory_status === 'unverified' || preview.submission_ready === false)) return;
+    if (!file || !currentPreviews?.length || state.step !== 'previewed' || state.submissionUncertain || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
+    if (inventoryCheck?.checking || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
     if (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId)) {
       setState({
         step: 'error',
@@ -528,9 +519,6 @@ export default function SubmitPage() {
         jobId: res.job_id,
         isStreaming: !isComplete,
       });
-      if (res.job_id && !isComplete) {
-        setupJobStream(res.job_id);
-      }
     } catch (err) {
       if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
       // Preserve the parsed previews so a transient failure doesn't force a re-upload.
@@ -539,12 +527,13 @@ export default function SubmitPage() {
         message: `${err instanceof Error ? err.message : 'Submission failed.'} Check History before trying again: if the response was lost, this upload may already be queued. Nothing will be retried automatically.`,
         previews: currentPreviews,
         uploadId: uploadSelection?.id,
+        submissionUncertain: true,
       });
     }
-  }, [file, account, channel, user, currentPreviews, review, autoSkipDuplicates, activeRcs.botId, setupJobStream, ensureConnected, uploadScope, uploadSelection]);
+  }, [file, account, channel, user, currentPreviews, state, review, autoSkipDuplicates, activeRcs.botId, ensureConnected, uploadScope, uploadSelection, inventoryCheck]);
 
   const handleInitiateSubmit = useCallback(async () => {
-    if (checkingConnection || !file || !currentPreviews || currentPreviews.some((preview) => preview.inventory_status === 'unverified' || preview.submission_ready === false)) return;
+    if (checkingConnection || inventoryCheck?.checking || state.step !== 'previewed' || state.submissionUncertain || !file || !currentPreviews?.length || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
     const version = selectionVersionRef.current;
     setCheckingConnection(true);
     const connected = await ensureConnected();
@@ -565,7 +554,7 @@ export default function SubmitPage() {
       return;
     }
     executeSubmit(autoFixGrammar);
-  }, [file, currentPreviews, channel, autoFixGrammar, executeSubmit, ensureConnected, uploadScope, checkingConnection]);
+  }, [file, currentPreviews, state, channel, autoFixGrammar, executeSubmit, ensureConnected, uploadScope, checkingConnection, inventoryCheck]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -748,7 +737,7 @@ export default function SubmitPage() {
             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
           </svg>
           <div className="flex-1">
-            <h4 className="font-medium text-red-800">Submission error</h4>
+            <h4 className="font-medium text-red-800">{state.submissionUncertain ? 'Submission outcome unknown' : state.previews ? 'Review needs attention' : 'Could not read this file'}</h4>
             <p className="mt-1 text-xs">{formatError(state.message)}</p>
             {state.previews && state.previews.length > 0 && (
               <p className="mt-2 text-xs text-red-500">
@@ -759,12 +748,14 @@ export default function SubmitPage() {
           <div className="flex items-center gap-2 shrink-0">
             {state.previews && state.previews.length > 0 && (
               <button
-                onClick={() => setState({ step: 'previewed', previews: state.previews as TemplatePreview[], uploadId: state.uploadId })}
+                onClick={() => setState({ step: 'previewed', previews: state.previews as TemplatePreview[], uploadId: state.uploadId, submissionUncertain: state.submissionUncertain })}
                 className="text-xs font-medium text-gray-700 underline"
               >
                 Back to preview
               </button>
             )}
+            {!state.previews && file && <button type="button" onClick={() => void handleFile(file)} className="text-xs font-medium underline">Retry retained file</button>}
+            {state.submissionUncertain && <a href="/" className="text-xs font-medium underline">Check History</a>}
             <button type="button" onClick={reconnect} className="text-xs font-medium underline">Reconnect here</button>
             <button onClick={handleReset} className="text-xs font-medium text-red-700 underline">
               Reset
@@ -990,11 +981,12 @@ export default function SubmitPage() {
                   Reviewed destination: <strong>{reviewedLabel}</strong>
                   {review?.channel === 'rcs' && <> (Bot ID: <code>{review.botId || 'Not configured'}</code>)</>}. Review before final submission.
                 </p>
-                {state.previews.some((preview) => preview.inventory_status === 'unverified') && <div role="alert" className="mt-2 space-y-1 text-xs text-amber-900">
-                  <p>Templates were read, but Karix inventory could not be verified. Existing templates are unknown, not missing; submission is blocked.</p>
-                  <p>{state.previews.find((preview) => preview.inventory_error)?.inventory_error}</p>
+                {state.submissionUncertain && <p role="alert" className="mt-2 text-xs text-amber-900">Submission outcome unknown. This upload cannot be submitted again here. <a href="/" className="underline">Check History</a>; reconnecting does not replay it.</p>}
+                {state.previews.some((preview) => preview.inventory_status !== 'verified') && <div role={inventoryCheck?.checking ? 'status' : 'alert'} className="mt-2 space-y-1 text-xs text-amber-900">
+                  <p>{inventoryCheck?.checking ? 'Checking live inventory in the background. Your messages and sources are available now; submission waits for verification.' : 'Inventory is not verified. Existing templates are unknown, not missing; submission is blocked. Your file and review are retained.'}</p>
+                  <p>{inventoryCheck?.error || state.previews.find((preview) => preview.inventory_error)?.inventory_error}</p>
                   <button type="button" onClick={reconnect} className="underline">Reconnect this destination</button>
-                  <button type="button" className="ml-3 underline" onClick={() => { if (file) void handleFile(file); }}>Retry validation</button>
+                  <button type="button" disabled={!file || inventoryCheck?.checking} className="ml-3 underline disabled:opacity-50" onClick={() => { if (file && state.uploadId) void verifyInventory(file, state.uploadId, state.previews); }}>Retry inventory check</button>
                 </div>}
                 {channel === 'rcs' && !activeRcs.botId && (
                   <p role="alert" className="mt-1 text-xs font-medium text-amber-800">
@@ -1011,7 +1003,7 @@ export default function SubmitPage() {
                 </button>
                 <button
                   onClick={handleInitiateSubmit}
-                  disabled={checkingConnection || !review || review.account !== account || review.channel !== channel || account === 'all' || state.previews.some((preview) => preview.inventory_status === 'unverified' || preview.submission_ready === false) || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
+                  disabled={checkingConnection || inventoryCheck?.checking || state.submissionUncertain || !state.previews.length || !review || review.account !== account || review.channel !== channel || account === 'all' || state.previews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false) || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
                   className="px-4 py-2 rounded-lg text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                 >
                   {(() => {
@@ -1083,7 +1075,6 @@ export default function SubmitPage() {
                           </span>
                         )}
                       </div>
-                      {p.source_ref && <p className="mt-1 break-all font-sans text-xs font-normal text-gray-500">{p.source_ref}</p>}
                     </td>
                     {channel === 'whatsapp' ? (
                       <>
@@ -1113,8 +1104,9 @@ export default function SubmitPage() {
                                   );
                                 })}
                               </div>
-                              <details className="max-w-lg">
+                              <details open className="max-w-lg">
                                 <summary className="cursor-pointer font-medium text-blue-700">Review message and buttons</summary>
+                                <PreviewSource preview={p} />
                                 {p.components.filter((component) => component.text).map((component, index) => <pre key={index} className="mt-2 whitespace-pre-wrap break-words font-sans">{component.text}</pre>)}
                                 {p.components.filter((component) => component.type === 'BUTTONS').map((component, index) => <pre key={index} className="mt-2 whitespace-pre-wrap break-all">{JSON.stringify(component.buttons, null, 2)}</pre>)}
                               </details>
@@ -1169,8 +1161,14 @@ export default function SubmitPage() {
                         <td className="px-5 py-3 font-medium text-gray-800 text-xs">
                           {p.template_type || (p.carousel_cards?.length ? 'carousel' : (p.media_url ? 'richcard' : 'text'))}
                         </td>
-                        <td className="px-5 py-3 text-gray-700 max-w-xs truncate">
-                          {p.card_title || p.text_message || p.template_message || '—'}
+                        <td className="max-w-lg space-y-2 px-5 py-3 text-gray-700">
+                          <PreviewSource preview={p} />
+                          {p.card_title && <p className="font-medium">{p.card_title}</p>}
+                          {[p.text_message, p.template_message, p.card_description].filter((text, index, values) => text && values.indexOf(text) === index).map((text, index) => <pre key={index} className="whitespace-pre-wrap break-words font-sans">{text}</pre>)}
+                          {p.carousel_cards?.map((card, index) => <div key={index} className="space-y-1 border-t border-gray-100 pt-2">
+                            <p className="text-xs font-medium">Card {index + 1}</p>
+                            {['cardTitle', 'card_title', 'title', 'cardDescription', 'card_description', 'description', 'text', 'text_message'].map((field) => typeof card[field] === 'string' && card[field] ? <pre key={field} className="whitespace-pre-wrap break-words font-sans">{String(card[field])}</pre> : null)}
+                          </div>)}
                         </td>
                         <td className="px-5 py-3 text-gray-600 text-xs">
                           {p.carousel_cards?.length
@@ -1207,6 +1205,7 @@ export default function SubmitPage() {
       {state.step === 'submitted' && (
         <div className="space-y-6">
           {/* PAUSED_FOR_AUTH Banner if session expired */}
+          {jobError && <div role="alert" className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><p>{jobError}</p><button type="button" disabled={refreshingJob} onClick={() => setJobRefresh((value) => value + 1)} className="underline">Retry status</button><button type="button" onClick={reconnect} className="ml-3 underline">Reconnect here</button><a href="/" className="ml-3 underline">History</a></div>}
           {state.authPaused && (
             <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1257,13 +1256,14 @@ export default function SubmitPage() {
                   className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md font-medium ${
                     state.isStreaming
                       ? 'bg-gray-100 text-gray-700'
-                      : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio')
-                        ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'
+                      : state.results.some((result) => templateOutcome(result).unknown) ? 'bg-amber-100 text-amber-800'
+                      : state.results.some((result) => templateOutcome(result).tone === 'error')
+                        ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-700'
                   }`}
                 >
                   {state.isStreaming ? (
                     <svg aria-hidden="true" className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-                  ) : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio') ? (
+                  ) : state.results.some((result) => ['error', 'warning'].includes(templateOutcome(result).tone)) ? (
                     <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75"><path strokeLinecap="round" d="M10 6v5m0 3.5h.01" /></svg>
                   ) : (
                     <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75"><path strokeLinecap="round" strokeLinejoin="round" d="M5 10.5l3 3 7-7" /></svg>
@@ -1272,27 +1272,31 @@ export default function SubmitPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-base font-medium text-gray-900">
-                      {state.isStreaming ? 'Processing batch submissions…'
-                        : state.results.some(r => r.status === 'failed' || r.status === 'blocked_aspect_ratio')
-                          ? 'Submission finished with errors' : 'Submission complete'}
+                      {state.isStreaming ? 'Processing registrations…'
+                        : state.results.some((result) => templateOutcome(result).unknown) ? 'Registration outcome unknown — check History'
+                        : state.results.some((result) => templateOutcome(result).tone === 'error') ? 'Registration finished — review results'
+                        : state.results.some((result) => templateOutcome(result).label === 'Awaiting approval') ? 'Registration submitted · Awaiting approval'
+                        : 'Registration results'}
                     </h3>
                     {state.isStreaming && (
                       <span className="inline-flex items-center gap-2 text-xs font-normal text-gray-600">
                         <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-gray-500" />
-                        Live updates connected
+                        Reading stored queue updates
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-gray-500 mt-0.5">
                     Processed {state.results.filter(r => r.status !== 'pending' && r.status !== 'processing').length} of {state.results.length} templates for {destinationLabel(state.account, state.channel, getAccountLabel(state.account))}.
                     {state.jobId && <span className="font-mono text-xs ml-2 text-gray-500">({state.jobId})</span>}
+                    {state.jobId && <> Approval updates refresh automatically while this page is visible. Registration never repeats.</>}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
+                {state.jobId && <button type="button" disabled={refreshingJob} onClick={() => setJobRefresh((value) => value + 1)} className="text-xs underline disabled:opacity-50">{refreshingJob ? 'Reading status…' : 'Refresh status'}</button>}
                 {(() => {
-                  const failed = state.results.filter((r) => r.status === 'failed');
+                  const failed = state.results.filter((r) => r.status === 'failed' && !templateOutcome(r).unknown);
                   if (!failed.length) return null;
                   return (
                     <button
@@ -1363,17 +1367,17 @@ export default function SubmitPage() {
                   {state.results.map((r, idx) => (
                     <tr
                       key={idx}
-                      className={r.status === 'failed' ? 'bg-red-50/40' : 'hover:bg-gray-50/50'}
+                      className={templateOutcome(r).unknown ? 'bg-amber-50/40' : templateOutcome(r).tone === 'error' ? 'bg-red-50/40' : 'hover:bg-gray-50/50'}
                     >
                       <td className="px-5 py-3 text-gray-500 font-mono">{idx + 1}</td>
                       <td className="px-5 py-3 font-medium text-gray-900 font-mono">{r.template_name}</td>
                       {channel === 'whatsapp' ? (
                         <>
                           <td className="px-5 py-3">
-                            <StatusBadge status={r.status} />
+                            <StatusBadge item={{ ...r, approval_status: undefined }} />
                           </td>
                           <td className="px-5 py-3">
-                            <StatusBadge status={r.approval_status || 'unknown'} />
+                            <StatusBadge item={r} />
                           </td>
                           <td className="px-5 py-3 text-gray-500">
                             {r.status === 'duplicate' ? (
@@ -1381,7 +1385,7 @@ export default function SubmitPage() {
                             ) : r.error ? (
                               <span className="text-red-600 font-medium">{formatError(r.error)}</span>
                             ) : (
-                              'Submitted successfully'
+                              templateOutcome(r).label
                             )}
                           </td>
                           <td className="px-5 py-3">
@@ -1401,13 +1405,13 @@ export default function SubmitPage() {
                             {r.template_id || r.provider_ref_id || '—'}
                           </td>
                           <td className="px-5 py-3">
-                            <StatusBadge status={r.status} />
+                            <StatusBadge item={r} />
                           </td>
                           <td className="px-5 py-3 text-gray-600">
                             {r.error ? (
                               <span className="text-red-600 font-medium">{formatError(r.error)}</span>
                             ) : (
-                              <span className="text-emerald-700 font-medium">Template created on Karix Bot Builder</span>
+                              <span className="font-medium">{templateOutcome(r).label}</span>
                             )}
                           </td>
                         </>

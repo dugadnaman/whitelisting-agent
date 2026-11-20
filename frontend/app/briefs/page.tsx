@@ -8,6 +8,7 @@ import {
   fetchJiraIssues,
   fetchJiraBrief,
   submitJiraBrief,
+  fetchTemplates,
   syncRcsTemplateToMoEngage,
   previewJiraDrafts,
   reportJiraValidation,
@@ -42,6 +43,45 @@ import { CAMPAIGN_NAME_HINT, campaignRowName, normalizeCampaignFields, normalize
 import type { SmsDltDraft } from '@/lib/api';
 import { BRIEF_SMS_PAGE_SIZE, BRIEF_SMS_REVIEW_LIMIT, matchingBriefSmsIndices, briefSmsPage, selectBriefSmsIndices, selectedBriefSmsDrafts } from '@/lib/brief-sms';
 import { prepareSmsDltDrafts } from '@/lib/sms-brief';
+import { templateOutcome, type TemplateOutcomeInput } from '@/lib/template-status';
+
+type JiraRegistration = TemplateOutcomeInput & {
+  account: string;
+  channel: string;
+  issueKey: string;
+  template_name: string;
+  draftSignature: string;
+  source_ref?: string;
+  provider_ref_id?: string | null;
+  template_id?: string | null;
+  updated_at?: string | null;
+};
+
+function RegistrationBadge({ result, edited = false }: { result?: TemplateOutcomeInput; edited?: boolean }) {
+  if (!result) return null;
+  const outcome = templateOutcome(result);
+  const colors = { success: 'bg-emerald-50 text-emerald-800', warning: 'bg-amber-50 text-amber-900', error: 'bg-rose-50 text-rose-800', neutral: 'bg-gray-100 text-gray-700' };
+  return <div role="status" aria-label="Registration outcome" className={`rounded-lg px-2 py-1 text-xs ${colors[outcome.tone]}`}>
+    {edited && 'Earlier submitted version: '}{outcome.label}
+    {outcome.unknown && <p>Check History and the provider before submitting again; reconnecting does not retry this request.</p>}
+    {result.error && <p>{formatError(result.error)}</p>}
+  </div>;
+}
+
+function MessageSource({ issueKey, draft }: { issueKey: string; draft: Pick<JiraWhatsAppDraft, 'raw_source' | 'source_ref' | 'source_file' | 'source_sheet' | 'source_cell'> }) {
+  return <aside aria-label={`Source for ${issueKey}`} className="min-w-0 rounded-lg border border-gray-200 bg-slate-50 p-3 text-xs text-gray-700">
+    <p className="font-medium text-gray-900">Original source · {issueKey}</p>
+    <dl className="mt-2 space-y-1 break-words">
+      {draft.source_file && <div><dt className="inline font-medium">Attachment: </dt><dd className="inline">{draft.source_file}</dd></div>}
+      {draft.source_sheet && <div><dt className="inline font-medium">Sheet: </dt><dd className="inline">{draft.source_sheet}</dd></div>}
+      {draft.source_cell && <div><dt className="inline font-medium">Cell: </dt><dd className="inline">{draft.source_cell}</dd></div>}
+      {draft.source_ref && <div><dt className="inline font-medium">Reference: </dt><dd className="inline">{draft.source_ref}</dd></div>}
+    </dl>
+    {draft.raw_source ? <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words font-sans">{draft.raw_source}</pre>
+      : <p className="mt-3 text-gray-500">Original text was not supplied for this message.</p>}
+    {!draft.source_file && !draft.source_sheet && !draft.source_cell && <p className="mt-2 text-gray-500">Attachment, sheet and cell mapping was not supplied.</p>}
+  </aside>;
+}
 
 const UNCHECKED_WARNINGS: DraftWarnings = {
   aspect_ratio_warnings: [],
@@ -175,7 +215,7 @@ export default function JiraBriefsPage() {
   const [activeTab, setActiveTab] = useTabState<'whatsapp' | 'rcs' | 'sms' | 'email' | 'comments' | 'moengage'>('briefs_active_tab', channel);
   const [submitting, setSubmitting] = useState(false);
   const [confirmationMode, setConfirmationMode] = useState<'all' | 'whatsapp' | 'rcs' | null>(null);
-  const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'warning' | 'error' } | null>(null);
   const [searchQuery, setSearchQuery] = useTabState('briefs_search', '');
 
   // Editable template drafts and selection sets
@@ -212,9 +252,22 @@ export default function JiraBriefsPage() {
   const rcsTemplatesRef = useRef(rcsTemplates);
   rcsTemplatesRef.current = rcsTemplates;
   const currentRcs = getRcsDetails(targetAccount, accounts);
-  const activeRequestKey = useRef<string>('');
+  const briefRequestRef = useRef(0);
+  const briefAccountRef = useRef(account);
+  briefAccountRef.current = account;
+  const activeRequestKey = useRef('');
   const [uploadingCreative, setUploadingCreative] = useState<Record<string, boolean>>({});
   const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [registrations, setRegistrations] = useTabState<JiraRegistration[]>('briefs_registrations', []);
+  const registrationsRef = useRef(registrations);
+  registrationsRef.current = registrations;
+  const [statusReadAt, setStatusReadAt] = useState<string | null>(null);
+  const [statusReadError, setStatusReadError] = useState<string | null>(null);
+  const [statusReading, setStatusReading] = useState(false);
+  const [statusAttempt, setStatusAttempt] = useState(0);
+  const statusScope = JSON.stringify([account, channel, selectedKey, brief?.issue_key, loadingBrief]);
+  const statusScopeRef = useRef(statusScope);
+  statusScopeRef.current = statusScope;
   const [validation, setValidation] = useState<{
     signature: JiraPreviewSnapshot | null;
     status: 'pending' | 'ready' | 'error';
@@ -557,6 +610,7 @@ export default function JiraBriefsPage() {
   const loadBrief = useCallback(async (key: string, force = false) => {
     if (!key) return;
     const cleanKey = key.trim().toUpperCase();
+    const request = ++briefRequestRef.current;
     activeRequestKey.current = cleanKey;
     if (!force && briefRef.current?.issue_key === cleanKey) {
       // A loaded brief owns the working drafts, even for RCS/SMS-only or empty selections.
@@ -567,11 +621,7 @@ export default function JiraBriefsPage() {
       setLoadingBrief(true);
       setFeedback(null);
       const data = await fetchJiraBrief(cleanKey, account);
-      if (!mountedRef.current) return;
-      // Discard stale response if user already switched to another ticket
-      if (activeRequestKey.current !== cleanKey && activeRequestKey.current !== (data.issue_key || '')) {
-        return;
-      }
+      if (!mountedRef.current || request !== briefRequestRef.current || briefAccountRef.current !== account) return;
       setBrief(data);
       // If the backend resolved a numeric key (e.g. 524 -> TCN-524), sync selectedKey to the canonical key
       if (data.issue_key && data.issue_key !== cleanKey) {
@@ -625,11 +675,11 @@ export default function JiraBriefsPage() {
         setActiveTab(channel);
       }
     } catch (err) {
-      if (mountedRef.current && activeRequestKey.current === cleanKey) {
+      if (mountedRef.current && request === briefRequestRef.current && briefAccountRef.current === account) {
         setFeedback({ message: `Failed to load brief for ${key}: ${formatError(err)}`, type: 'error' });
       }
     } finally {
-      if (mountedRef.current && activeRequestKey.current === cleanKey) {
+      if (mountedRef.current && request === briefRequestRef.current && briefAccountRef.current === account) {
         setLoadingBrief(false);
       }
     }
@@ -665,6 +715,69 @@ export default function JiraBriefsPage() {
       controller.abort();
     };
   }, [destinationAvailable, brief?.issue_key, loadingBrief, selectedKey, previewPayload, previewSignature, previewAttempt]);
+
+  // Read only durable submission records. A reconnect never re-parses this ticket.
+  useEffect(() => {
+    setStatusReadAt(null);
+    setStatusReadError(null);
+    setStatusReading(false);
+  }, [statusScope]);
+
+  useEffect(() => {
+    let disposed = false;
+    let reading = false;
+    if (!brief || loadingBrief || selectedKey !== brief.issue_key || !account || account === 'all'
+        || (channel !== 'whatsapp' && channel !== 'rcs')) return;
+    const scope = statusScope;
+    const issueKey = brief.issue_key;
+    const readStatuses = async () => {
+      if (reading || disposed) return;
+      const records = registrationsRef.current.filter((item) => item.account === account && item.channel === channel && item.issueKey === issueKey);
+      const waDrafts = waTemplatesRef.current;
+      const rcsDrafts = rcsTemplatesRef.current;
+      const knownWa = channel === 'whatsapp' ? waDrafts.filter((draft) => draft.live_ref_id) : [];
+      if (!records.length && !knownWa.length) return;
+      reading = true;
+      setStatusReading(true);
+      try {
+        const rows = await fetchTemplates({ account, channel, live: false });
+        if (disposed || statusScopeRef.current !== scope || waTemplatesRef.current !== waDrafts || rcsTemplatesRef.current !== rcsDrafts) return;
+        setRegistrations((previous) => {
+          const next = previous.map((record) => {
+            if (record.account !== account || record.channel !== channel || record.issueKey !== issueKey) return record;
+            const row = rows.find((item) => item.template_name === record.template_name && (
+              record.provider_ref_id && item.provider_ref_id === record.provider_ref_id
+              || record.template_id && (item.template_id === record.template_id || item.provider_ref_id === record.template_id)
+              || record.source_ref && item.source_ref === record.source_ref));
+            return row ? { ...record, status: row.status, approval_status: row.approval_status, registration_outcome: undefined, provider_response: row.provider_response, error: row.error, updated_at: row.updated_at } : record;
+          });
+          for (const draft of knownWa) {
+            if (next.some((record) => record.account === account && record.channel === channel && record.issueKey === issueKey && record.template_name === draft.template_name)) continue;
+            const row = rows.find((item) => item.template_name === draft.template_name && item.provider_ref_id === draft.live_ref_id);
+            if (row) next.push({ ...row, account, channel, issueKey, draftSignature: '' });
+          }
+          return next;
+        });
+        setStatusReadAt(new Date().toISOString());
+        setStatusReadError(null);
+      } catch (error) {
+        if (!disposed && statusScopeRef.current === scope) setStatusReadError(formatError(error));
+      } finally {
+        reading = false;
+        if (!disposed && statusScopeRef.current === scope) setStatusReading(false);
+      }
+    };
+    void readStatuses();
+    const timer = window.setInterval(() => { void readStatuses(); }, 15000);
+    const onFocus = () => { void readStatuses(); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [account, channel, selectedKey, brief?.issue_key, loadingBrief, statusScope, statusAttempt]);
+
 
   useEffect(() => {
     setCommentReview((current) => current?.signature === previewSignature && validationReady ? current : null);
@@ -742,12 +855,13 @@ export default function JiraBriefsPage() {
       return;
     }
     if (!validateSelectedTemplateNames()) return;
-    const signature = previewSignature;
     const workflow = workflowSignature;
     if (!validationReady) {
       setFeedback({ message: 'Wait for current creative and copy validation, or retry failed validation, before whitelisting.', type: 'error' });
       return;
     }
+    const submissionScope = statusScope;
+    let attemptedDrafts: Array<JiraWhatsAppDraft | JiraRcsDraft> = [];
     try {
       connectionActionRef.current = true;
       setSubmitting(true);
@@ -781,6 +895,7 @@ export default function JiraBriefsPage() {
 
       if (!await ensureConnected() || !mountedRef.current || workflowSignatureRef.current !== workflow) return;
       setConfirmationMode(null);
+      attemptedDrafts = [...waToSubmit, ...rcsToSubmit];
       const res = await submitJiraBrief(
         brief.issue_key,
         submitChannels,
@@ -790,28 +905,50 @@ export default function JiraBriefsPage() {
         targetAccount,
         rcsToSubmit.length > 0 ? currentRcs.botId : undefined
       );
-      if (!mountedRef.current || previewSignatureRef.current !== signature) return;
-
-      const waResults = res.whatsapp_submitted || [];
-      const rcsResults = res.rcs_submitted || [];
-      const waCount = waResults.filter((result) => result.status === 'submitted').length;
-      const rcsCount = rcsResults.filter((result) => result.status === 'submitted').length;
-      const outcomes = [...waResults, ...rcsResults];
-      const errors = outcomes.filter((result) => result.status !== 'submitted' && result.status !== 'duplicate');
-      const duplicateCount = outcomes.filter((result) => result.status === 'duplicate').length;
+      if (res.account !== targetAccount || !res.channels.includes(channel)) throw new Error('The provider response did not match the reviewed account and channel. Reconcile this request in History before submitting again.');
+      if (!mountedRef.current || statusScopeRef.current !== submissionScope) return;
+      const results = channel === 'whatsapp' ? res.whatsapp_submitted || [] : res.rcs_submitted || [];
+      const outcomes: JiraRegistration[] = attemptedDrafts.map((draft) => {
+        const result = results.find((item) => item.template_name === draft.template_name);
+        return {
+          ...(result || { template_name: draft.template_name, registration_outcome: 'unknown', error: 'Submission outcome unknown. No result was returned for this message.' }),
+          account: targetAccount, channel, issueKey: brief.issue_key, draftSignature: JSON.stringify(draft),
+        };
+      });
+      setRegistrations((previous) => [
+        ...previous.filter((item) => !(item.account === targetAccount && item.channel === channel
+          && item.issueKey === brief.issue_key && outcomes.some((outcome) => outcome.template_name === item.template_name))),
+        ...outcomes,
+      ]);
+      const labels = new Map<string, number>();
+      for (const result of outcomes) {
+        const { label } = templateOutcome(result);
+        labels.set(label, (labels.get(label) || 0) + 1);
+      }
+      const unknown = outcomes.some((result) => templateOutcome(result).unknown);
+      const failed = outcomes.some((result) => templateOutcome(result).tone === 'error');
       setFeedback({
-        message: `Submitted ${waCount + rcsCount} templates to ${destinationLabel(res.account, res.channels[0], getAccountLabel(res.account))} for ${brief.issue_key}.`
-          + (duplicateCount ? ` ${duplicateCount} already registered.` : '')
-          + (errors.length ? ` ${errors.length} blocked or failed: ${errors.map((result) => `${result.template_name}: ${result.error || result.status}`).join('; ')}.` : '')
+        message: `${brief.issue_key} · ${selectedDestinationLabel}: ${Array.from(labels, ([label, count]) => `${count} ${label.toLowerCase()}`).join('; ')}. Registration is not provider approval.`
+          + (unknown ? ' Check History and the provider before submitting again.' : '')
           + ' No Jira comment was posted.',
-        type: errors.length ? 'error' : 'success',
+        type: failed ? 'error' : unknown ? 'warning' : 'success',
       });
-      loadBrief(brief.issue_key);
+      setStatusAttempt((value) => value + 1);
     } catch (err) {
-      if (mountedRef.current && previewSignatureRef.current === signature) setFeedback({
-        message: `Whitelisting could not be confirmed: ${formatError(err)} Check History and the provider before trying again; the request may have been accepted. Reconnecting does not retry it.`,
-        type: 'error',
-      });
+      if (mountedRef.current && statusScopeRef.current === submissionScope) {
+        if (attemptedDrafts.length) setRegistrations((previous) => [
+          ...previous.filter((item) => !(item.account === targetAccount && item.channel === channel && item.issueKey === brief.issue_key
+            && attemptedDrafts.some((draft) => draft.template_name === item.template_name))),
+          ...attemptedDrafts.map((draft) => ({
+            account: targetAccount, channel, issueKey: brief.issue_key, template_name: draft.template_name,
+            draftSignature: JSON.stringify(draft), registration_outcome: 'unknown', error: `Submission outcome unknown. ${formatError(err)}`,
+          })),
+        ]);
+        setFeedback({
+          message: `Whitelisting could not be confirmed: ${formatError(err)} Check History and the provider before trying again; the request may have been accepted. Reconnecting does not retry it.`,
+          type: 'warning',
+        });
+      }
     } finally {
       connectionActionRef.current = false;
       if (mountedRef.current) setSubmitting(false);
@@ -1236,7 +1373,8 @@ export default function JiraBriefsPage() {
           action_label: wa.button_text || 'Check Offer',
           action_url: wa.button_url || TATA_CTA_URL,
           variables: wa.variables || [],
-          raw_source: wa.raw_source || wa.body,
+          raw_source: wa.raw_source,
+          source_ref: wa.source_ref, source_file: wa.source_file, source_sheet: wa.source_sheet, source_cell: wa.source_cell,
           template_type: wa.media_file ? 'richcard' : 'text',
         };
         setRcsTemplates((prev) => {
@@ -1252,7 +1390,8 @@ export default function JiraBriefsPage() {
           char_count: wa.body.length,
           variant: 'Converted from WA',
           variables: wa.variables || [],
-          raw_source: wa.raw_source || wa.body,
+          raw_source: wa.raw_source,
+          source_ref: wa.source_ref, source_file: wa.source_file, source_sheet: wa.source_sheet, source_cell: wa.source_cell,
         };
         setSmsTemplates((prev) => [...prev, newSms]);
         setActiveTab('sms');
@@ -1288,7 +1427,8 @@ export default function JiraBriefsPage() {
           button_url: isUrlCta(rcs.action_type) ? resolveCtaUrl(rcs.action_url, targetAccount) : rcs.action_url,
           variables: rcs.variables || [],
           sample_values: [],
-          raw_source: rcs.raw_source || rcs.body,
+          raw_source: rcs.raw_source,
+          source_ref: rcs.source_ref, source_file: rcs.source_file, source_sheet: rcs.source_sheet, source_cell: rcs.source_cell,
         };
         setWaTemplates((prev) => {
           const next = [...prev, newWa];
@@ -1303,7 +1443,8 @@ export default function JiraBriefsPage() {
           char_count: rcs.body.length,
           variant: 'Converted from RCS',
           variables: rcs.variables || [],
-          raw_source: rcs.raw_source || rcs.body,
+          raw_source: rcs.raw_source,
+          source_ref: rcs.source_ref, source_file: rcs.source_file, source_sheet: rcs.source_sheet, source_cell: rcs.source_cell,
         };
         setSmsTemplates((prev) => [...prev, newSms]);
         setActiveTab('sms');
@@ -1327,7 +1468,8 @@ export default function JiraBriefsPage() {
           button_type: 'NONE',
           variables: sms.variables || [],
           sample_values: [],
-          raw_source: sms.raw_source || sms.text,
+          raw_source: sms.raw_source,
+          source_ref: sms.source_ref, source_file: sms.source_file, source_sheet: sms.source_sheet, source_cell: sms.source_cell,
         };
         setWaTemplates((prev) => {
           const next = [...prev, newWa];
@@ -1347,7 +1489,8 @@ export default function JiraBriefsPage() {
           action_label: 'Check Offer',
           action_url: TATA_CTA_URL,
           variables: sms.variables || [],
-          raw_source: sms.raw_source || sms.text,
+          raw_source: sms.raw_source,
+          source_ref: sms.source_ref, source_file: sms.source_file, source_sheet: sms.source_sheet, source_cell: sms.source_cell,
           template_type: 'text',
         };
         setRcsTemplates((prev) => {
@@ -1669,6 +1812,7 @@ export default function JiraBriefsPage() {
           className={`p-4 rounded-xl border text-xs font-medium flex items-start justify-between ${
             feedback.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : feedback.type === 'warning' ? 'bg-amber-50 text-amber-900 border-amber-200'
               : 'bg-red-50 text-red-800 border-red-200'
           }`}
         >
@@ -1863,6 +2007,18 @@ export default function JiraBriefsPage() {
                     <div className="flex flex-wrap items-center gap-2 pt-2">
                       <span className="text-xs font-medium text-gray-700">Destination: {selectedDestinationLabel}</span>
                     </div>
+                    {(channel === 'whatsapp' || channel === 'rcs') && (
+                      <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+                        <p>Approval updates read saved submission records only. Your edited copy, creatives and selections stay unchanged.</p>
+                        {statusReadAt && <p>Last known status read: {formatDate(statusReadAt)}</p>}
+                        {statusReadError && <p role="alert">Status readback unavailable: {statusReadError}. Last known outcomes are retained. Retry for an inventory outage; reconnect only if this destination’s session expired.</p>}
+                        <div className="flex flex-wrap gap-3">
+                          <button type="button" disabled={statusReading} onClick={() => setStatusAttempt((value) => value + 1)} className="font-medium underline disabled:opacity-50">{statusReading ? 'Reading statuses…' : 'Refresh approval status'}</button>
+                          <button type="button" onClick={reconnect} className="font-medium underline">Reconnect Karix</button>
+                          {statusReadError && <button type="button" onClick={() => setStatusReadError(null)} className="font-medium underline">Clear status message</button>}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Dedicated RCS Destination Card when RCS templates are present */}
                     {channel === 'rcs' && rcsTemplates.length > 0 && (
@@ -1905,6 +2061,7 @@ export default function JiraBriefsPage() {
                           Retry validation
                         </button>
                       )}
+                      {validationError && <p className="mt-2">Retry validation after a temporary failure. If the message says the Karix session expired, <button type="button" onClick={reconnect} className="font-medium underline">reconnect this destination</button>, then retry validation. Your draft stays unchanged.</p>}
                     </div>
                   )}
                   {hasValidationErrors && (
@@ -2349,14 +2506,18 @@ export default function JiraBriefsPage() {
 
                                 <div className="flex items-center gap-2">
                                   {wa.exists_on_waba ? (
-                                    <span className="text-xs px-2 py-0.5 rounded-lg font-medium normal-case bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                      Live on WABA ({wa.live_status})
+                                    <span className="text-xs px-2 py-0.5 rounded-lg font-medium bg-sky-50 text-sky-800 border border-sky-200">
+                                      Found in WABA inventory · approval shown separately
                                     </span>
                                   ) : (
                                     <span className="text-xs px-2 py-0.5 rounded-lg font-medium normal-case bg-amber-50 text-amber-700 border border-amber-200">
                                       {warnings.compliance_warnings?.some((warning) => warning.severity === 'error') ? 'Needs attention' : validationReady ? 'Ready for review' : 'Checking…'}
                                     </span>
                                   )}
+                                  {(() => {
+                                    const result = registrations.find((item) => item.account === account && item.channel === 'whatsapp' && item.issueKey === brief.issue_key && item.template_name === wa.template_name);
+                                    return <RegistrationBadge result={result} edited={Boolean(result && result.draftSignature !== JSON.stringify(effectiveWaTemplates[idx]))} />;
+                                  })()}
 
                                   <button
                                     onClick={() => toggleEditCard(`wa-${idx}`)}
@@ -2456,6 +2617,9 @@ export default function JiraBriefsPage() {
                                 </div>
                               )}
 
+                              <div className="grid gap-3 xl:grid-cols-2">
+                              <MessageSource issueKey={brief.issue_key} draft={wa} />
+                              <div className="min-w-0 space-y-3">
                               {isEditing ? (
                                 <div className="space-y-3">
                                   {/* Header text edit */}
@@ -2478,6 +2642,7 @@ export default function JiraBriefsPage() {
                                     value={wa.body}
                                     onChange={(e) => updateWaField(idx, 'body', e.target.value)}
                                     rows={5}
+                                    aria-label={`Message body for WhatsApp template ${idx + 1}`}
                                     className="w-full p-3 text-sm border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-blue-500"
                                   />
 
@@ -2608,6 +2773,8 @@ export default function JiraBriefsPage() {
                                   )}
                                 </>
                               )}
+                              </div>
+                              </div>
                             </div>
                           );
                         })
@@ -2789,6 +2956,13 @@ export default function JiraBriefsPage() {
                                 )}
                               </div>
 
+                              <div className="grid gap-3 xl:grid-cols-2">
+                              <MessageSource issueKey={brief.issue_key} draft={rcs} />
+                              <div className="min-w-0 space-y-3">
+                              {(() => {
+                                const result = registrations.find((item) => item.account === account && item.channel === 'rcs' && item.issueKey === brief.issue_key && item.template_name === rcs.template_name);
+                                return <RegistrationBadge result={result} edited={Boolean(result && result.draftSignature !== JSON.stringify(effectiveRcsTemplates[idx]))} />;
+                              })()}
                               {isEditing ? (
                                 <div className="space-y-3">
                                   <div>
@@ -2806,6 +2980,7 @@ export default function JiraBriefsPage() {
                                       value={rcs.body}
                                       onChange={(e) => updateRcsField(idx, 'body', e.target.value)}
                                       rows={4}
+                                      aria-label={`Message body for RCS template ${idx + 1}`}
                                       className="w-full p-3 text-sm border border-gray-300 rounded-lg bg-white"
                                     />
                                   </div>
@@ -2892,6 +3067,8 @@ export default function JiraBriefsPage() {
                                   ))}
                                 </div>
                               )}
+                              </div>
+                              </div>
                                   {rcs.carousel_cards && rcs.carousel_cards.length > 0 && (
                                     <div className="pt-3 border-t border-gray-100 space-y-2">
                                       <div className="flex items-center justify-between text-xs font-medium text-gray-700">
@@ -3175,6 +3352,9 @@ export default function JiraBriefsPage() {
                                 </div>
                               </div>
 
+                              <div className="grid gap-3 xl:grid-cols-2">
+                              <MessageSource issueKey={brief.issue_key} draft={sms} />
+                              <div className="min-w-0">
                               {isEditing ? (
                                 <textarea
                                   rows={4}
@@ -3187,6 +3367,8 @@ export default function JiraBriefsPage() {
                                   {sms.text}
                                 </div>
                               )}
+                              </div>
+                              </div>
                             </div>
                           );
                         })
