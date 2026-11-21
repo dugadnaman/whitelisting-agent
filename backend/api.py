@@ -1530,6 +1530,8 @@ def _explicit_submission_destination(account: str, channel: str, current_user: d
 
 _WHATSAPP_LANGUAGE_CODES = frozenset({"en", "hi", "mr", "gu", "pa", "bn", "ta", "te", "kn", "ml", "ur", "or", "as"})
 
+from upload_review import parse_template_overrides, apply_template_overrides
+
 
 def _parse_language_overrides(value: str | None, channel: str) -> dict[str, str]:
     if value is None:
@@ -1660,9 +1662,11 @@ async def preview_file(
     verify_inventory: bool = Query(True),
     current_user: dict = Depends(get_current_user),
     language_overrides: str | None = Form(None),
+    template_overrides: str | None = Form(None),
 ):
     account, channel = _explicit_submission_destination(account, channel, current_user)
     overrides = _parse_language_overrides(language_overrides, channel)
+    edits = parse_template_overrides(template_overrides, channel)
     acc = account
     if acc == "apparel":
         raise HTTPException(
@@ -1708,6 +1712,7 @@ async def preview_file(
                     detail=f"No valid RCS templates found in '{file.filename or 'uploaded file'}'. Please make sure the file contains RCS template definitions.",
                 )
             _validate_parsed_destination(submissions, account, "rcs")
+            apply_template_overrides(submissions, edits, channel, account)
             log_activity(
                 user=user,
                 action="TEMPLATE_PREVIEW",
@@ -1724,6 +1729,8 @@ async def preview_file(
             )
             for preview in previews:
                 preview["source_file"] = file.filename or "upload.csv"
+                preview["review_edits_active"] = bool(edits)
+                preview["grammar_autofix_enabled"] = not bool(edits)
             if import_notes and previews:
                 previews[0]["import_notes"] = import_notes
             return previews
@@ -1753,6 +1760,7 @@ async def preview_file(
             )
         _validate_parsed_destination(submissions, account, "whatsapp", require_waba=False)
         _apply_language_overrides(submissions, overrides)
+        apply_template_overrides(submissions, edits, channel, account)
 
         log_activity(
             user=user,
@@ -1771,6 +1779,8 @@ async def preview_file(
         )
         for preview in previews:
             preview["source_file"] = file.filename or "upload.csv"
+            preview["review_edits_active"] = bool(edits)
+            preview["grammar_autofix_enabled"] = not bool(edits)
         if import_notes and previews:
             previews[0]["import_notes"] = import_notes
         return previews
@@ -1818,6 +1828,7 @@ async def _submit_rcs_batch(
     skip_duplicates: bool,
     filename: str,
     current_user: dict,
+    template_overrides: dict | None = None,
 ) -> dict:
     # RCS credentials/media/bot identity must never be rerouted after parsing.
     acc = acc.lower().strip()
@@ -1838,6 +1849,13 @@ async def _submit_rcs_batch(
     if not subs:
         raise HTTPException(status_code=400, detail=f"No valid RCS templates found in '{filename}' to submit.")
     _validate_parsed_destination(subs, acc, "rcs")
+    apply_template_overrides(subs, template_overrides or {}, "rcs", acc)
+    if template_overrides:
+        for submission in subs:
+            review = _inspect_single_submission(submission, set(), {}, acc, "rcs")
+            errors = [warning.get("issue", "Invalid RCS template") for warning in review["compliance_warnings"] if warning.get("severity") == "error"]
+            if errors:
+                raise HTTPException(status_code=400, detail="Edited RCS template: " + "; ".join(errors))
 
     results_by_index: list[dict | None] = [None] * len(subs)
     preliminary: dict[int, RcsSubmissionResult] = {}
@@ -1978,6 +1996,7 @@ async def _submit_wa_batch(
     filename: str,
     current_user: dict,
     language_overrides: dict[str, str] | None = None,
+    template_overrides: dict | None = None,
 ) -> dict:
     import_notes: list[str] = []
     subs = (
@@ -1993,6 +2012,11 @@ async def _submit_wa_batch(
         raise HTTPException(status_code=400, detail=_whatsapp_input_diagnostic(filename))
     _validate_parsed_destination(subs, acc, "whatsapp")
     _apply_language_overrides(subs, language_overrides or {})
+    apply_template_overrides(subs, template_overrides or {}, "whatsapp", acc)
+    if template_overrides:
+        fix_grammar = False
+        for submission in subs:
+            _inspect_single_submission(submission, set(), {}, acc, "whatsapp")
     unresolved = [submission.source_ref for submission in subs if not str(submission.language or "").strip()]
     if unresolved:
         raise HTTPException(
@@ -2183,9 +2207,11 @@ async def submit_file(
     expected_rcs_bot_id: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
     language_overrides: str | None = Form(None),
+    template_overrides: str | None = Form(None),
 ):
     acc, chan = _explicit_submission_destination(account, channel, current_user)
     overrides = _parse_language_overrides(language_overrides, chan)
+    edits = parse_template_overrides(template_overrides, chan)
     if (expected_account, expected_channel) != (acc, chan):
         raise HTTPException(status_code=409, detail="Destination changed since review. Preview again before submitting.")
     if acc == "apparel":
@@ -2215,6 +2241,7 @@ async def submit_file(
                 skip_duplicates,
                 file.filename or "upload.csv",
                 current_user,
+                template_overrides=edits,
             )
         return await _submit_wa_batch(
             tmp_path,
@@ -2226,6 +2253,7 @@ async def submit_file(
             file.filename or "upload.csv",
             current_user,
             language_overrides=overrides,
+            template_overrides=edits,
         )
     except HTTPException as http_exc:
         log_error(

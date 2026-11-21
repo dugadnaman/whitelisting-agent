@@ -246,6 +246,11 @@ export type TemplatePreview = DraftWarnings & {
   entity_id?: string;
 };
 
+export type UploadTemplatePatch = Partial<Pick<TemplatePreview,
+  'template_name' | 'category' | 'language' | 'components' | 'template_type' |
+  'text_message' | 'card_title' | 'card_description' | 'media_url' | 'suggestions' | 'carousel_cards'>>;
+export type UploadTemplateOverrides = Record<string, UploadTemplatePatch>;
+
 export type ActivityLog = {
   id: string;
   timestamp: string;
@@ -445,12 +450,13 @@ export async function previewFile(
   file: File,
   account: Account,
   channel: Channel,
-  options?: { verifyInventory?: boolean; languageOverrides?: Record<string, string> }
+  options?: { verifyInventory?: boolean; languageOverrides?: Record<string, string>; templateOverrides?: UploadTemplateOverrides }
 ): Promise<TemplatePreview[]> {
   if (!account || account === "all") throw new Error("Select an account before previewing.");
   const form = new FormData();
   form.append("file", file);
   if (options?.languageOverrides) form.append("language_overrides", JSON.stringify(options.languageOverrides));
+  if (options?.templateOverrides) form.append("template_overrides", JSON.stringify(options.templateOverrides));
   const qs = new URLSearchParams({ account, channel, ...(options?.verifyInventory === false ? { verify_inventory: "false" } : {}) }).toString();
   const res = await fetchWithRetry(
     getApiUrl(`/api/preview?${qs}`),
@@ -475,7 +481,8 @@ export async function submitFile(
   skipDuplicates: boolean = true,
   reviewedDestination: { account: Account; channel: Channel },
   expectedRcsBotId?: string,
-  languageOverrides?: Record<string, string>
+  languageOverrides?: Record<string, string>,
+  templateOverrides?: UploadTemplateOverrides
 ): Promise<{ account: Account; channel: Channel; submitted: number; skipped_duplicates?: number; results: Template[]; job_id?: string; status?: string }> {
   if (!account || account === "all" || reviewedDestination.account !== account || reviewedDestination.channel !== channel) {
     throw new Error("Destination changed since review. Preview again before submitting.");
@@ -483,11 +490,12 @@ export async function submitFile(
   const form = new FormData();
   form.append("file", file);
   if (languageOverrides) form.append("language_overrides", JSON.stringify(languageOverrides));
+  if (templateOverrides) form.append("template_overrides", JSON.stringify(templateOverrides));
   const qs = new URLSearchParams({
     account,
     channel,
     user,
-    fix_grammar: String(fixGrammar),
+    fix_grammar: String(templateOverrides && Object.keys(templateOverrides).length ? false : fixGrammar),
     skip_duplicates: String(skipDuplicates),
     expected_account: reviewedDestination.account,
     expected_channel: reviewedDestination.channel,

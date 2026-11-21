@@ -8,6 +8,8 @@ python -m pytest -q \
   tests/test_jira_approval_results.py \
   tests/test_connection_workflow.py \
   tests/test_upload_draft_storage.py \
+  tests/test_upload_template_editor.py \
+  tests/test_upload_review_edits.py \
   tests/test_jira_connection_workflow.py \
   tests/test_whatsapp_native_upload.py \
   tests/test_dynamic_spreadsheet_loader.py \

@@ -257,3 +257,36 @@ def test_plain_message_grids_use_selected_channel_but_overview_sheets_do_not(tmp
         with pytest.raises(ValueError, match="(?i)No WhatsApp copy"):
             load_from_excel(str(path), client="tcl_promo", import_notes=notes)
         assert any(f"{sheet_name}!A1" in note and "unscoped" in note for note in notes)
+
+
+@pytest.mark.parametrize("body,label", [
+    ("તમારી ઑફર તૈયાર છે.", "મારી ઑફર જુઓ"),
+    ("तुमची ऑफर तयार आहे.", "ऑफर पहा"),
+    ("आपका ऑफर तैयार है।", "ऑफर देखें"),
+    ("உங்கள் சலுகை தயார்.", "சலுகையைப் பார்க்கவும்"),
+    ("మీ ఆఫర్ సిద్ధంగా ఉంది.", "ఆఫర్ చూడండి"),
+    ("ನಿಮ್ಮ ಆಫರ್ ಸಿದ್ಧವಾಗಿದೆ.", "ಆಫರ್ ನೋಡಿ"),
+    ("আপনার অফার প্রস্তুত।", "অফার দেখুন"),
+    ("آپ کی پیشکش تیار ہے۔", "پیشکش دیکھیں"),
+])
+def test_inline_regional_cta_becomes_button_not_message_body(tmp_path, body, label):
+    from briefing_parser import extract_and_strip_cta
+
+    source = f"{body} CTA: {label}\nT&Cs apply."
+    workbook = openpyxl.Workbook()
+    workbook.active.append(["Channel", "Content"])
+    workbook.active.append(["WhatsApp", source])
+    path = tmp_path / "regional-cta.xlsx"
+    workbook.save(path)
+    submission, = load_from_excel(str(path), client="tcl_promo")
+    buttons = next(c.buttons for c in submission.components if c.type == "BUTTONS")
+    assert buttons[0]["text"] == label
+    assert "CTA:" not in _body(submission)
+    assert label not in _body(submission)
+    assert body in _body(submission)
+    assert "T&Cs apply." in _body(submission)
+    jira_body, jira_label, _, _ = extract_and_strip_cta(source)
+    assert jira_label == label
+    assert "CTA:" not in jira_body
+    assert body in jira_body
+    assert "T&Cs apply." in jira_body

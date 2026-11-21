@@ -13,6 +13,14 @@ CTA_VARIABLE_PATTERN = re.compile(
 )
 
 
+def separate_inline_cta_instructions(text: str) -> str:
+    """Put explicit inline CTA instructions on their own line, in any script."""
+    return re.sub(
+        r"(?<=\S)[ \t]+(?=CTA(?:[ \t]+Button)?[ \t]*[:\-–][ \t]*\S)",
+        "\n", text, flags=re.IGNORECASE,
+    )
+
+
 def resolve_cta_url(url: str, client: str) -> str:
     """Replace Tata's MoEngage CTAs, preserving explicit real destinations."""
     url = url.strip()

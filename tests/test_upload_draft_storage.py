@@ -18,7 +18,7 @@ def upload_modules():
         ["node", "-e", r"""
         const fs = require('node:fs');
         const ts = require('typescript');
-        const paths = ['app/submit/page.tsx', 'components/sms-dlt.tsx',
+        const paths = ['app/submit/page.tsx', 'components/sms-dlt.tsx', 'components/upload-template-editor.tsx',
             ...fs.readdirSync('lib').filter(name => name.endsWith('.ts')).map(name => 'lib/' + name)];
         process.stdout.write(JSON.stringify(Object.fromEntries(paths.map(path => [
             '@/' + path.replace(/\.tsx?$/, ''),
@@ -45,12 +45,13 @@ def upload_page(upload_modules):
         window.app = {account: 'tcl_promo', channel: 'whatsapp', user: 'Operator',
             currentUser: {id: 'operator-1', tenant_id: 'tata'}, accounts: [],
             getAccountLabel: value => value, setDestination: () => false};
-        window.previews = [{template_name: 'att_exact_draft', category: 'MARKETING', language: 'en',
+        window.previews = [{template_name: 'att_exact_draft', source_ref: 'CSV row 2', category: 'MARKETING', language: 'en',
             inventory_status: 'verified', submission_ready: true,
             components: [{type: 'BODY', text: 'Exact reviewed copy'}]}];
         window.inventoryRequests = [];
         window.smsReviewRequests = [];
         window.languageOverrideObjects = [];
+        window.templateOverrideObjects = [];
         window.reviewFileObjects = [];
         window.smsDraft = {template_name: 'reviewed_sms', text: 'Exact SMS copy', sample_message: '',
             template_type: '1', message_type: '1', category_id: 'finance', header_id: 'header', header: 'TATAXX'};
@@ -60,11 +61,16 @@ def upload_page(upload_modules):
             getSampleCsvUrl: () => '#sample',
             previewFile: async (file, account, channel, options) => {
                 window.languageOverrideObjects.push(options?.languageOverrides);
+                window.templateOverrideObjects.push(options?.templateOverrides);
                 window.reviewFileObjects.push(file);
                 window.calls.previews.push({...await fileDetails(file), account, channel,
-                    verifyInventory: options?.verifyInventory, languageOverrides: options?.languageOverrides});
+                    verifyInventory: options?.verifyInventory, languageOverrides: options?.languageOverrides,
+                    templateOverrides: structuredClone(options?.templateOverrides)});
+                if (window.realPreview) return window.realUploadApi.previewFile(file, account, channel, options);
                 const result = structuredClone(window.previews);
                 for (const preview of result) {
+                    const patch = options?.templateOverrides?.[preview.source_ref];
+                    if (patch) Object.assign(preview, structuredClone(patch), {language_review_required: false});
                     const language = options?.languageOverrides?.[preview.source_ref];
                     if (language) Object.assign(preview, {language, language_review_required: false,
                         language_review_message: null, submission_ready: true});
@@ -77,10 +83,14 @@ def upload_page(upload_modules):
                 if (options?.verifyInventory === true && window.inventoryFailure) throw new Error(window.inventoryFailure);
                 return result;
             },
-            submitFile: async (file, account, channel, _user, _fixGrammar, _skipDuplicates, _review, _botId, languageOverrides) => {
+            submitFile: async (file, account, channel, user, fixGrammar, skipDuplicates, review, botId, languageOverrides, templateOverrides) => {
+                if (window.realSubmit) return window.realUploadApi.submitFile(file, account, channel, user,
+                    fixGrammar, skipDuplicates, review, botId, languageOverrides, templateOverrides);
                 window.languageOverrideObjects.push(languageOverrides);
+                window.templateOverrideObjects.push(templateOverrides);
                 window.reviewFileObjects.push(file);
-                window.calls.posts.push({...await fileDetails(file), languageOverrides});
+                window.calls.posts.push({...await fileDetails(file), languageOverrides,
+                    templateOverrides: structuredClone(templateOverrides), fixGrammar});
                 if (window.failPost) throw new Error('Submission response lost');
                 return {account, channel, submitted: 1, results: [], status: 'COMPLETED'};
             },
@@ -156,6 +166,10 @@ def upload_page(upload_modules):
                 child => load(child, name), module.exports, module);
             return module.exports;
         }
+        const actualApiModule = {exports: {}};
+        new Function('require', 'exports', 'module', window.sources['@/lib/api'])(
+            child => load(child, '@/lib/api'), actualApiModule.exports, actualApiModule);
+        window.realUploadApi = actualApiModule.exports;
         window.uploadDrafts = load('@/lib/upload-draft');
         window.tabState = load('@/lib/tab-state');
         window.scope = window.uploadDrafts.uploadDraftScope({userId: 'operator-1', tenant: 'tata',
@@ -325,9 +339,17 @@ def test_upload_discard_removes_restorable_review_and_bytes(upload_page):
         {"name": "discard.csv", "mimeType": "text/csv", "buffer": b'original upload'},
     )
     expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_enabled()
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Saved discarded edit")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Unsaved discarded edit")
     selection = page.evaluate("tabState.getTabState('submit_upload', null)")
     page.get_by_role("button", name="Remove", exact=True).click()
     assert page.evaluate("async saved => await uploadDrafts.loadUploadDraft(saved.scope, saved.id)", selection) is None
+    assert page.evaluate("tabState.getTabState('submit_template_overrides', null)") == {}
+    assert page.evaluate("tabState.getTabState('submit_edit_drafts', null)") == {}
+    assert page.evaluate("tabState.getTabState('submit_original_previews', null)") == []
     page.evaluate("unmount(); mountUpload()")
     expect(page.get_by_text("discard.csv", exact=True)).to_have_count(0)
     expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_have_count(0)
@@ -487,7 +509,7 @@ def test_messages_and_provenance_are_visible_before_live_inventory(upload_page):
         "name": "Client workbook.xlsx", "mimeType": "application/octet-stream", "buffer": source,
     })
     page.wait_for_function("inventoryRequests.length === 1")
-    row = page.get_by_role("row").filter(has_text="att_exact_draft")
+    row = page.get_by_test_id("upload-template-card").filter(has_text="att_exact_draft")
     expect(row).to_contain_text("Exact reviewed copy")
     expect(row).to_contain_text("Client workbook.xlsx")
     expect(row).to_contain_text("Offers!D17")
@@ -528,12 +550,20 @@ def test_inventory_failure_retries_retained_file_without_resetting_review(upload
 
 
 @pytest.mark.parametrize("change", ["replacement", "scope", "discard"])
-def test_late_inventory_cannot_verify_a_different_upload_or_destination(upload_page, change):
+@pytest.mark.parametrize("edited", [False, True], ids=["original", "saved-edits"])
+def test_late_inventory_cannot_verify_a_different_upload_or_destination(upload_page, change, edited):
     page = upload_page
-    page.evaluate("holdInventory = true; mountUpload()")
+    page.evaluate("edited => { holdInventory = !edited; mountUpload(); }", edited)
     page.locator('input[type="file"]').first.set_input_files({
         "name": "first.csv", "mimeType": "text/csv", "buffer": b'first exact source',
     })
+    if edited:
+        expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_enabled()
+        page.get_by_role("button", name="Edit", exact=True).click()
+        page.get_by_label("Message", exact=True).fill("Saved original upload copy")
+        page.get_by_role("button", name="Save", exact=True).click()
+        page.evaluate("holdInventory = true")
+        page.get_by_role("button", name="Retry inventory check", exact=True).click()
     page.wait_for_function("inventoryRequests.length === 1")
     if change == "replacement":
         page.evaluate("previews[0].template_name = 'second_draft'; previews[0].components[0].text = 'Second exact copy'")
@@ -546,7 +576,10 @@ def test_late_inventory_cannot_verify_a_different_upload_or_destination(upload_p
         expect(page.get_by_text("first.csv", exact=True)).to_have_count(0)
     else:
         page.get_by_role("button", name="Remove", exact=True).click()
-    page.evaluate("inventoryRequests[0].resolve(inventoryRequests[0].result)")
+    page.evaluate("""edited => {
+        if (edited) inventoryRequests[0].result[0].template_name = 'att_late_canonical_name';
+        inventoryRequests[0].resolve(inventoryRequests[0].result);
+    }""", edited)
     if change == "replacement":
         expect(page.get_by_text("Second exact copy", exact=True)).to_be_visible()
         expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
@@ -613,16 +646,16 @@ def test_whatsapp_language_review_rechecks_exact_source_and_bytes_before_submit(
     page.evaluate("inventoryRequests[0].resolve(inventoryRequests[0].result)")
     expect(submit).to_be_disabled()
     expect(selector).to_have_value(language)
-    row = page.get_by_role("row").filter(has_text="att_exact_draft")
-    expect(row.locator("pre").first).to_have_text(body)
-    expect(row).to_contain_text("Regional.xlsx")
-    expect(row).to_contain_text("Offers!D17")
+    card = page.get_by_test_id("upload-template-card").filter(has_text="att_exact_draft")
+    expect(card.get_by_test_id("upload-body").locator("pre")).to_have_text(body)
+    expect(card).to_contain_text("Regional.xlsx")
+    expect(card).to_contain_text("Offers!D17")
     assert page.evaluate("tabState.getTabState('submit_state', null).previews[0].language") == detected_language
     page.get_by_role("button", name="Reconnect this destination", exact=True).click()
     page.evaluate("unmount(); mountUpload()")
     expect(page.get_by_text("Regional.xlsx", exact=True)).to_be_visible()
     expect(selector).to_have_value(language)
-    expect(row.locator("pre").first).to_have_text(body)
+    expect(card.get_by_test_id("upload-body").locator("pre")).to_have_text(body)
     expect(submit).to_be_disabled()
     assert page.evaluate("calls.previews.length") == 2
     assert page.evaluate("calls.reconnects") == 1
@@ -844,19 +877,31 @@ def test_unknown_registration_is_not_rejected_or_automatically_replayed(upload_p
 def test_lost_upload_submission_response_cannot_be_replayed_from_preview(upload_page):
     page = upload_page
     page.evaluate("failPost = true; mountUpload()")
+    source = b'exact uncertain original'
     page.locator('input[type="file"]').first.set_input_files({
-        "name": "uncertain.csv", "mimeType": "text/csv", "buffer": b'exact uncertain original',
+        "name": "uncertain.csv", "mimeType": "text/csv", "buffer": source,
     })
     submit = page.get_by_role("button", name="Submit 1 template to", exact=False)
     expect(submit).to_be_enabled()
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Edited uncertain copy")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    expect(submit).to_be_enabled()
     submit.click()
     expect(page.get_by_role("heading", name="Submission outcome unknown", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Reconnect here", exact=True).click()
     page.get_by_role("button", name="Back to preview", exact=True).click()
     expect(submit).to_be_disabled()
+    expect(page.get_by_role("button", name="Edit", exact=True)).to_be_disabled()
     page.evaluate("failPost = false; unmount(); mountUpload()")
     expect(page.get_by_text("uncertain.csv", exact=True)).to_be_visible()
+    expect(page.get_by_test_id("upload-body")).to_contain_text("Edited uncertain copy")
     expect(submit).to_be_disabled()
     assert page.evaluate("calls.posts.length") == 1
+    assert page.evaluate("calls.posts[0].bytes") == list(source)
+    assert page.evaluate("calls.posts[0].fixGrammar") is False
+    assert page.evaluate("calls.posts[0].templateOverrides['CSV row 2'].components[0].text") == "Edited uncertain copy"
 
 
 def test_rcs_rich_card_and_carousel_sources_stay_beside_full_copy(upload_page):
@@ -864,9 +909,9 @@ def test_rcs_rich_card_and_carousel_sources_stay_beside_full_copy(upload_page):
     page.evaluate("""() => {
         app.channel = 'rcs'; holdInventory = true;
         previews = [
-            {template_name: 'rich_card', source_file: 'RCS.xlsx', source_sheet: 'Rich', source_cell: 'B4',
+            {template_name: 'rich_card', template_type: 'richcard', source_file: 'RCS.xlsx', source_sheet: 'Rich', source_cell: 'B4',
                 card_title: 'Exact rich title', card_description: 'Exact full rich message, not just its title'},
-            {template_name: 'carousel', source_ref: 'Client carousel 8', source_file: 'RCS.xlsx',
+            {template_name: 'carousel', template_type: 'carousel', source_ref: 'Client carousel 8', source_file: 'RCS.xlsx',
                 carousel_cards: [{cardTitle: 'First card title', cardDescription: 'First exact card body'},
                     {cardTitle: 'Second card title', cardDescription: 'Second exact card body'}]}
         ];
@@ -876,10 +921,10 @@ def test_rcs_rich_card_and_carousel_sources_stay_beside_full_copy(upload_page):
         "name": "RCS.xlsx", "mimeType": "application/octet-stream", "buffer": b'exact rcs workbook',
     })
     page.wait_for_function("inventoryRequests.length === 1")
-    rich = page.get_by_role("row").filter(has_text="rich_card")
+    rich = page.get_by_test_id("upload-template-card").filter(has_text="rich_card")
     expect(rich).to_contain_text("Rich!B4")
     expect(rich).to_contain_text("Exact full rich message, not just its title")
-    carousel = page.get_by_role("row").filter(has_text="Client carousel 8")
+    carousel = page.get_by_test_id("upload-template-card").filter(has_text="Client carousel 8")
     expect(carousel).to_contain_text("RCS.xlsx")
     expect(carousel).to_contain_text("First exact card body")
     expect(carousel).to_contain_text("Second exact card body")
@@ -900,3 +945,424 @@ def test_sms_inventory_result_is_discarded_after_operator_or_tenant_change(uploa
     }""", [field, value])
     expect(page.get_by_role("dialog")).to_have_count(0)
     assert page.evaluate("calls.smsPosts.length") == 0
+
+
+def editable_upload(page, *, channel="whatsapp", hold_inventory=False, second_template=False):
+    page.evaluate("""([channel, hold, second]) => {
+        app.channel = channel; holdInventory = hold;
+        previews = [{template_name: 'att_exact_draft', source_ref: 'Offers!D17',
+            source_file: 'Regional.xlsx', source_sheet: 'Offers', source_cell: 'D17',
+            category: 'MARKETING', language: 'gu', inventory_status: 'verified', submission_ready: true,
+            components: [
+                {type: 'HEADER', format: 'TEXT', text: 'તમારી ઑફર'},
+                {type: 'BODY', text: 'નમસ્તે {{1}}\\nતમારી મૂળ ઑફર અહીં છે.', example: {body_text: [['મીના']]}},
+                {type: 'FOOTER', text: 'નિયમો લાગુ'},
+                {type: 'BUTTONS', buttons: [{type: 'URL', text: 'મારી ઑફર જુઓ',
+                    url: 'https://offers.example.test/offer/{{1}}', example: ['https://offers.example.test/offer/123']}]}]}];
+        if (second) previews.push({...structuredClone(previews[0]), template_name: 'att_second_draft',
+            source_ref: 'Offers!D18', source_cell: 'D18'});
+        mountUpload();
+    }""", [channel, hold_inventory, second_template])
+    source = "exact original workbook bytes\r\nમૂળ સ્રોત".encode()
+    page.locator('input[type="file"]').first.set_input_files({
+        "name": "Regional.xlsx", "mimeType": "application/octet-stream", "buffer": source,
+    })
+    expect(page.get_by_test_id("upload-template-card")).to_have_count(2 if second_template else 1)
+    expect(page.get_by_test_id("upload-template-card").first).to_be_visible()
+    return source
+
+
+def test_uploaded_whatsapp_edit_save_cancel_and_separate_regional_buttons(upload_page):
+    page = upload_page
+    editable_upload(page)
+    card = page.get_by_test_id("upload-template-card")
+    message = card.get_by_test_id("upload-body")
+    buttons = card.get_by_test_id("upload-buttons")
+    assert message.locator("pre").inner_text() == "નમસ્તે {{1}}\nતમારી મૂળ ઑફર અહીં છે."
+    expect(message).not_to_contain_text("મારી ઑફર જુઓ")
+    expect(buttons).to_contain_text("મારી ઑફર જુઓ")
+    expect(buttons).to_contain_text("URL")
+    expect(buttons).not_to_contain_text("તમારી મૂળ ઑફર અહીં છે.")
+    expect(buttons).to_contain_text("Destination URL: https://offers.example.test/offer/{{1}}")
+    expect(buttons).to_contain_text("URL example: https://offers.example.test/offer/123")
+    expect(card.locator("table")).to_have_count(0)
+    expect(buttons.locator("pre")).to_have_count(0)
+    card.get_by_role("button", name="Edit", exact=True).click()
+    expect(page.get_by_label("Message", exact=True)).to_have_value("નમસ્તે {{1}}\nતમારી મૂળ ઑફર અહીં છે.\n\nનિયમો લાગુ")
+    expect(page.get_by_label("Footer", exact=True)).to_have_count(0)
+    page.get_by_label("Message", exact=True).fill("Discard this change")
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
+    page.get_by_role("button", name="Cancel", exact=True).click()
+    expect(message).to_contain_text("તમારી મૂળ ઑફર અહીં છે.")
+    assert page.evaluate("tabState.getTabState('submit_template_overrides', {})") == {}
+    card.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Template name", exact=True).fill("regional_reviewed")
+    page.get_by_label("Category", exact=True).select_option("UTILITY")
+    page.get_by_label("Language code", exact=True).fill("mr")
+    page.get_by_label("Header", exact=True).fill("आपली ऑफर")
+    page.get_by_label("Message", exact=True).fill("नमस्कार {{1}}\nमान्य केलेला अचूक मजकूर.\n\nअटी लागू")
+    page.get_by_label("Sample {{1}}", exact=True).fill("मीना")
+    page.get_by_label("Button label", exact=True).fill("ऑफर पहा")
+    exact_url = "https://mnge.co/reviewed/{{1}}"
+    page.get_by_label("Destination URL", exact=True).fill(exact_url)
+    page.get_by_label("URL examples (one per line)", exact=True).fill("https://mnge.co/reviewed/123")
+    page.get_by_role("button", name="+ Add button", exact=True).click()
+    page.get_by_label("Action type", exact=True).nth(1).select_option("QUICK_REPLY")
+    page.get_by_label("Button label", exact=True).nth(1).fill("होय")
+    page.get_by_role("button", name="+ Add button", exact=True).click()
+    page.get_by_label("Action type", exact=True).nth(2).select_option("PHONE_NUMBER")
+    page.get_by_label("Button label", exact=True).nth(2).fill("फोन करा")
+    page.get_by_label("Phone number", exact=True).fill("+919876543210")
+    page.get_by_role("button", name="Save", exact=True).click()
+    expect(page.get_by_role("heading", name="att_regional_reviewed", exact=True)).to_be_visible()
+    expect(page.get_by_text("Manual edits are authoritative.", exact=False)).to_be_visible()
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
+    patch = page.evaluate("tabState.getTabState('submit_template_overrides', {})['Offers!D17']")
+    assert patch["template_name"] == "att_regional_reviewed"
+    assert patch["category"] == "UTILITY"
+    assert patch["language"] == "mr"
+    components = {component["type"]: component for component in patch["components"]}
+    assert components["BODY"]["example"] == {"body_text": [["मीना"]]}
+    assert components["BODY"]["text"] == "नमस्कार {{1}}\nमान्य केलेला अचूक मजकूर.\n\nअटी लागू"
+    assert "FOOTER" not in components
+    assert components["BUTTONS"]["buttons"] == [
+        {"type": "URL", "text": "ऑफर पहा", "url": exact_url, "example": ["https://mnge.co/reviewed/123"]},
+        {"type": "QUICK_REPLY", "text": "होय"},
+        {"type": "PHONE_NUMBER", "text": "फोन करा", "phone_number": "+919876543210"},
+    ]
+    assert message.locator("pre").inner_text() == components["BODY"]["text"]
+    expect(message).not_to_contain_text("ऑफर पहा")
+    expect(buttons).to_contain_text("ऑफर पहा")
+    card.locator("summary", has_text="Original source preview").click()
+    expect(card.locator("aside").get_by_test_id("upload-body")).to_contain_text("તમારી મૂળ ઑફર અહીં છે.")
+    expect(card.locator("aside")).not_to_contain_text("मान्य केलेला अचूक मजकूर.")
+    assert page.evaluate("calls.posts.length") == 0
+
+
+def test_saved_upload_edits_survive_reconnect_remount_and_reload_without_replay(upload_page):
+    page = upload_page
+    source = editable_upload(page)
+    server_previews = page.evaluate("structuredClone(previews)")
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("مستند ترمیم شدہ پیغام {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.wait_for_function("""async () => {
+        const selected = tabState.getTabState('submit_upload', null);
+        const stored = await uploadDrafts.loadUploadDraft(selected.scope, selected.id);
+        return stored.review?.templateOverrides?.['Offers!D17']?.components?.[1]?.text === 'مستند ترمیم شدہ پیغام {{1}}';
+    }""")
+    page.get_by_role("button", name="Reconnect this destination", exact=True).click()
+    page.evaluate("unmount(); mountUpload()")
+    expect(page.get_by_test_id("upload-body")).to_contain_text("مستند ترمیم شدہ پیغام {{1}}")
+    page.reload()
+    page.evaluate("values => { previews = values; mountUpload(); }", server_previews)
+    expect(page.get_by_test_id("upload-body")).to_contain_text("مستند ترمیم شدہ پیغام {{1}}")
+    card = page.get_by_test_id("upload-template-card")
+    card.locator("summary", has_text="Original source preview").click()
+    expect(card.locator("aside").get_by_test_id("upload-body")).to_contain_text("તમારી મૂળ ઑફર અહીં છે.")
+    expect(card.locator("aside")).not_to_contain_text("مستند ترمیم شدہ پیغام")
+    card.locator("summary", has_text="Original source preview").click()
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
+    assert page.evaluate("calls.previews.length") == 0
+    assert page.evaluate("calls.posts.length") == 0
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_enabled()
+    assert page.evaluate("calls.previews.map(call => call.bytes)") == [list(source)]
+    assert page.evaluate("calls.previews.every(call => call.templateOverrides['Offers!D17'].components[1].text === 'مستند ترمیم شدہ پیغام {{1}}')") is True
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Unsaved retained edit")
+    page.evaluate("unmount(); mountUpload()")
+    expect(page.get_by_label("Message", exact=True)).to_have_value("Unsaved retained edit")
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
+    page.get_by_role("button", name="Cancel", exact=True).click()
+    expect(page.get_by_test_id("upload-body")).to_contain_text("مستند ترمیم شدہ پیغام {{1}}")
+
+
+def test_old_inventory_cannot_reset_or_verify_manually_edited_upload(upload_page):
+    page = upload_page
+    editable_upload(page, hold_inventory=True)
+    page.wait_for_function("inventoryRequests.length === 1")
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Reviewed exact body {{1}} CTA: keep these literal words")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.evaluate("inventoryRequests[0].resolve(inventoryRequests[0].result)")
+    expect(page.get_by_test_id("upload-body")).to_contain_text("Reviewed exact body {{1}} CTA: keep these literal words")
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    page.wait_for_function("inventoryRequests.length === 2")
+    page.evaluate("inventoryRequests[1].resolve(inventoryRequests[1].result)")
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_enabled()
+    assert page.evaluate("calls.previews[2].templateOverrides['Offers!D17'].components[1].text") == "Reviewed exact body {{1}} CTA: keep these literal words"
+    assert page.evaluate("calls.posts.length") == 0
+
+
+def test_actual_preview_and_submit_multipart_carry_saved_patch_and_original_bytes(upload_page):
+    from email import policy
+    from email.parser import BytesParser
+
+    page = upload_page
+    source = editable_upload(page)
+    captured = []
+
+    def capture_upload(route):
+        request = route.request
+        mime = b"Content-Type: " + request.headers["content-type"].encode() + b"\r\nMIME-Version: 1.0\r\n\r\n"
+        message = BytesParser(policy=policy.default).parsebytes(mime + request.post_data_buffer)
+        parts = {part.get_param("name", header="content-disposition"): part.get_payload(decode=True)
+                 for part in message.iter_parts()}
+        captured.append((request.url, parts))
+        if "/api/preview?" in request.url:
+            preview = page.evaluate("previews[0]")
+            preview.update(json.loads(parts["template_overrides"])["Offers!D17"])
+            response = [preview]
+        else:
+            response = {"account": "tcl_promo", "channel": "whatsapp", "submitted": 1,
+                        "results": [], "status": "COMPLETED"}
+        route.fulfill(content_type="application/json", body=json.dumps(response))
+
+    page.route("**/api/preview?**", capture_upload)
+    page.route("**/api/submit?**", capture_upload)
+    page.evaluate("realPreview = true; realSubmit = true")
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("अंतिम मान्य केलेला मजकूर {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    submit = page.get_by_role("button", name="Submit 1 template to", exact=False)
+    expect(submit).to_be_enabled()
+    reviewed = page.evaluate("calls.previews.at(-1).templateOverrides")
+    assert len(captured) == 1
+    assert "/api/preview?" in captured[0][0]
+    submit.click()
+    expect(page.get_by_role("heading", name="Registration results", exact=True)).to_be_visible()
+    assert len(captured) == 2
+    assert "fix_grammar=false" in captured[1][0]
+    for _, parts in captured:
+        assert parts["file"] == source
+        assert json.loads(parts["template_overrides"]) == reviewed
+        assert json.loads(parts["language_overrides"]) == {"Offers!D17": "gu"}
+    body = next(component for component in reviewed["Offers!D17"]["components"] if component["type"] == "BODY")
+    assert body["text"] == "अंतिम मान्य केलेला मजकूर {{1}}"
+
+
+def test_invalid_upload_edits_stay_blocked_and_new_source_resets_patches(upload_page):
+    page = upload_page
+    editable_upload(page)
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Destination URL", exact=True).fill("javascript:alert(1)")
+    page.get_by_role("button", name="Save", exact=True).click()
+    expect(page.get_by_role("group", name="Edit uploaded template", exact=True).get_by_role("alert")).to_be_visible()
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_disabled()
+    assert page.evaluate("tabState.getTabState('submit_template_overrides', {})") == {}
+    page.get_by_label("Destination URL", exact=True).fill("https://offers.example.test/reviewed")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.locator('input[type="file"]').first.set_input_files({
+        "name": "New source.xlsx", "mimeType": "application/octet-stream", "buffer": b'new exact source',
+    })
+    page.wait_for_function("calls.previews.length === 4")
+    assert page.evaluate("calls.previews[2].templateOverrides") == {}
+    assert page.evaluate("tabState.getTabState('submit_template_overrides', {})") == {}
+    assert page.evaluate("tabState.getTabState('submit_edit_drafts', {})") == {}
+    saved = page.evaluate("tabState.getTabState('submit_upload', null)")
+    page.evaluate("app.account = 'tcl_trans'; mountUpload()")
+    expect(page.get_by_test_id("upload-template-card")).to_have_count(0)
+    assert page.evaluate("tabState.getTabState('submit_template_overrides', {})") == {}
+    assert page.evaluate("tabState.getTabState('submit_original_previews', null)") == []
+    assert page.evaluate("async saved => await uploadDrafts.loadUploadDraft(saved.scope, saved.id)", saved) is None
+    assert page.evaluate("calls.posts.length") == 0
+
+
+def test_rcs_richcard_and_carousel_have_structured_editors_and_source_safe_patches(upload_page):
+    page = upload_page
+    page.evaluate("""() => {
+        app.channel = 'rcs';
+        previews = [{template_name: 'att_rcs', source_ref: 'RCS!B7', source_file: 'RCS.xlsx',
+            template_type: 'carousel', card_title: 'Original title', card_description: 'Original body',
+            inventory_status: 'verified', submission_ready: true,
+            media_url: 'https://cdn.example.test/original.png',
+            suggestions: [{suggestionType: 'url_action', text: 'Explore', url: 'https://offers.example.test/'}],
+            carousel_cards: [{cardTitle: 'Original card', cardDescription: 'Original card body',
+                mediaUrl: 'https://cdn.example.test/card.png', fileName: 'server-owned-original.png',
+                suggestions: [{suggestionType: 'reply', text: 'Yes', postbackData: 'original-reply'}]},
+                {cardTitle: 'Original second card', cardDescription: 'Original second body',
+                    mediaUrl: 'https://cdn.example.test/second-original.png', suggestions: []}]}];
+        mountUpload();
+    }""")
+    source = b'original rcs source bytes'
+    page.locator('input[type="file"]').first.set_input_files({
+        "name": "RCS.xlsx", "mimeType": "application/octet-stream", "buffer": source,
+    })
+    page.get_by_role("button", name="Edit", exact=True).click()
+    expect(page.get_by_label("Title", exact=True)).to_have_count(0)
+    expect(page.get_by_label("Message", exact=True)).to_have_count(0)
+    page.get_by_role("group", name="Card 1", exact=True).get_by_label("Card title", exact=True).fill("Reviewed carousel title")
+    page.get_by_role("group", name="Card 1", exact=True).get_by_label("Card message", exact=True).fill("Reviewed carousel body")
+    page.get_by_label("Button label", exact=True).nth(1).fill("Reviewed reply")
+    page.get_by_role("button", name="+ Add card", exact=True).click()
+    page.get_by_label("Card title", exact=True).nth(2).fill("Third card")
+    page.get_by_label("Card message", exact=True).nth(2).fill("Third body")
+    page.get_by_label("Card media URL", exact=True).nth(2).fill("https://cdn.example.test/third.png")
+    page.get_by_role("button", name="Save", exact=True).click()
+    expect(page.get_by_text("Reviewed carousel body", exact=True)).to_be_visible()
+    patch = page.evaluate("tabState.getTabState('submit_template_overrides', {})['RCS!B7']")
+    assert "card_title" not in patch
+    assert "card_description" not in patch
+    assert "media_url" not in patch
+    assert patch["suggestions"] == [{"suggestionType": "url_action", "text": "Explore", "url": "https://offers.example.test/"}]
+    assert patch["carousel_cards"][0] == {
+        "cardTitle": "Reviewed carousel title", "cardDescription": "Reviewed carousel body",
+        "mediaUrl": "https://cdn.example.test/card.png",
+        "suggestions": [{"suggestionType": "reply", "text": "Reviewed reply", "postbackData": "original-reply"}],
+    }
+    assert len(patch["carousel_cards"]) == 3
+    assert "source_ref" not in patch
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_role("button", name="Remove card 3", exact=True).click()
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    expect(page.get_by_role("button", name="Submit 1 template to", exact=False)).to_be_enabled()
+    assert len(page.evaluate("calls.previews.at(-1).templateOverrides['RCS!B7'].carousel_cards")) == 2
+    assert page.evaluate("calls.previews.every(call => JSON.stringify(call.bytes) === JSON.stringify(calls.previews[0].bytes))") is True
+    assert page.evaluate("calls.posts.length") == 0
+
+
+def test_explicit_edited_recheck_accepts_canonical_copy_and_requires_separate_submit(upload_page):
+    page = upload_page
+    source = editable_upload(page, second_template=True)
+    cards = page.get_by_test_id("upload-template-card")
+    cards.first.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Template name", exact=True).fill("att_saved_name")
+    page.get_by_label("Message", exact=True).fill("Reviewed offer {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    saved = page.evaluate("structuredClone(tabState.getTabState('submit_template_overrides', {}))")
+    page.evaluate("holdInventory = true")
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    page.wait_for_function("inventoryRequests.length === 1")
+    submit = page.get_by_role("button", name="Submit 2 templates to", exact=False)
+    expect(submit).to_be_disabled()
+    page.evaluate("""() => {
+        const request = inventoryRequests[0];
+        Object.assign(request.result[0], {template_name: 'att_canonical_name',
+            components: [{type: 'BODY', text: 'Reviewed offer sample value'},
+                {type: 'BUTTONS', buttons: [{type: 'URL', text: 'મારી ઑફર જુઓ',
+                    url: 'https://offers.example.test/canonical'}]}]});
+        request.resolve(request.result.reverse());
+    }""")
+    expect(cards.first.get_by_role("heading", name="att_canonical_name", exact=True)).to_be_visible()
+    assert cards.first.get_by_test_id("upload-body").locator("pre").inner_text() == "Reviewed offer sample value"
+    expect(cards.first.get_by_test_id("upload-buttons")).to_contain_text("https://offers.example.test/canonical")
+    expect(cards.nth(1).get_by_role("heading", name="att_second_draft", exact=True)).to_be_visible()
+    expect(page.get_by_role("status").filter(has_text="Review this formatted preview")).to_be_visible()
+    expect(submit).to_be_enabled()
+    assert page.evaluate("calls.posts.length") == 0
+    assert page.evaluate("calls.previews[2].templateOverrides") == saved
+    assert page.evaluate("tabState.getTabState('submit_template_overrides', {})") == saved
+    assert page.evaluate("calls.previews[2].bytes") == list(source)
+    cards.first.locator("summary", has_text="Original source preview").click()
+    expect(cards.first.locator("aside")).to_contain_text("તમારી મૂળ ઑફર અહીં છે.")
+    expect(cards.first.locator("aside")).not_to_contain_text("Reviewed offer sample value")
+    submit.click()
+    page.wait_for_function("calls.posts.length === 1")
+    assert page.evaluate("calls.posts[0].templateOverrides") == saved
+    assert page.evaluate("calls.posts[0].bytes") == list(source)
+    assert page.evaluate("calls.posts[0].fixGrammar") is False
+    assert page.evaluate("reviewFileObjects[2] === reviewFileObjects[3]") is True
+    assert page.evaluate("templateOverrideObjects[2] === templateOverrideObjects[3]") is True
+
+
+@pytest.mark.parametrize("mismatch", ["changed", "duplicate", "missing"])
+def test_canonical_recheck_requires_unchanged_unique_source_identities(upload_page, mismatch):
+    page = upload_page
+    editable_upload(page, second_template=True)
+    cards = page.get_by_test_id("upload-template-card")
+    cards.first.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Keep this saved message {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.evaluate("holdInventory = true")
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    page.wait_for_function("inventoryRequests.length === 1")
+    page.evaluate("""mismatch => {
+        const request = inventoryRequests[0];
+        request.result[0].components = [{type: 'BODY', text: 'Unexpected replacement copy'}];
+        if (mismatch === 'changed') request.result[0].source_ref = 'Different source';
+        if (mismatch === 'duplicate') request.result[1].source_ref = request.result[0].source_ref;
+        if (mismatch === 'missing') delete request.result[0].source_ref;
+        request.resolve(request.result);
+    }""", mismatch)
+    expect(page.get_by_text("source identities", exact=False)).to_be_visible()
+    expect(cards.first.get_by_test_id("upload-body")).to_contain_text("Keep this saved message {{1}}")
+    expect(page.get_by_text("Unexpected replacement copy", exact=True)).to_have_count(0)
+    expect(page.get_by_role("button", name="Submit 2 templates to", exact=False)).to_be_disabled()
+    assert page.evaluate("calls.posts.length") == 0
+
+
+def test_late_canonical_recheck_cannot_overwrite_unsaved_or_newly_saved_edits(upload_page):
+    page = upload_page
+    editable_upload(page)
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("First saved body {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.evaluate("holdInventory = true")
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    page.wait_for_function("inventoryRequests.length === 1")
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Unsaved exact body {{1}}")
+    page.evaluate("""() => {
+        inventoryRequests[0].result[0].components = [{type: 'BODY', text: 'Stale canonical body'}];
+        inventoryRequests[0].resolve(inventoryRequests[0].result);
+    }""")
+    expect(page.get_by_label("Message", exact=True)).to_have_value("Unsaved exact body {{1}}")
+    submit = page.get_by_role("button", name="Submit 1 template to", exact=False)
+    expect(submit).to_be_disabled()
+    expect(page.get_by_role("button", name="Retry inventory check", exact=True)).to_be_disabled()
+    page.get_by_role("button", name="Cancel", exact=True).click()
+    expect(page.get_by_test_id("upload-body")).to_contain_text("First saved body {{1}}")
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    page.wait_for_function("inventoryRequests.length === 2")
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("New saved body {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.evaluate("inventoryRequests[1].resolve(inventoryRequests[1].result)")
+    expect(page.get_by_test_id("upload-body")).to_contain_text("New saved body {{1}}")
+    expect(submit).to_be_disabled()
+    assert page.evaluate("tabState.getTabState('submit_state', null).previews[0].inventory_status") == "unverified"
+    assert page.evaluate("calls.posts.length") == 0
+
+
+def test_slow_file_restore_keeps_new_saved_and_unsaved_review_edits(upload_page):
+    page = upload_page
+    source = editable_upload(page)
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Saved before navigation {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.evaluate("""() => {
+        const load = uploadDrafts.loadUploadDraft;
+        uploadDrafts.loadUploadDraft = async (...args) => {
+            const restored = await load(...args);
+            const deferred = Promise.withResolvers();
+            window.resolveRestore = () => {
+                uploadDrafts.loadUploadDraft = load;
+                deferred.resolve(restored);
+            };
+            return deferred.promise;
+        };
+        unmount(); mountUpload();
+    }""")
+    page.wait_for_function("typeof resolveRestore === 'function'")
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("New saved copy during restore {{1}}")
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.get_by_role("button", name="Edit", exact=True).click()
+    page.get_by_label("Message", exact=True).fill("Unsaved exact copy during restore {{1}}")
+    page.evaluate("resolveRestore()")
+    expect(page.get_by_text("Regional.xlsx", exact=True)).to_be_visible()
+    expect(page.get_by_label("Message", exact=True)).to_have_value("Unsaved exact copy during restore {{1}}")
+    submit = page.get_by_role("button", name="Submit 1 template to", exact=False)
+    expect(submit).to_be_disabled()
+    assert page.evaluate("calls.previews.length") == 2
+    page.get_by_role("button", name="Cancel", exact=True).click()
+    expect(page.get_by_test_id("upload-body")).to_contain_text("New saved copy during restore {{1}}")
+    page.get_by_role("button", name="Retry inventory check", exact=True).click()
+    expect(submit).to_be_enabled()
+    assert page.evaluate("calls.previews[2].bytes") == list(source)
+    assert page.evaluate("calls.previews[2].templateOverrides['Offers!D17'].components[1].text") == "New saved copy during restore {{1}}"
+    assert page.evaluate("calls.posts.length") == 0

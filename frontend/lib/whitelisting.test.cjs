@@ -84,3 +84,32 @@ test('file preview and submission carry exact source-keyed language overrides wi
       [...new Uint8Array(await original.arrayBuffer())]);
   }
 });
+
+test('edited file preview and submit carry identical source patches and bytes without grammar rewriting', async () => {
+  const calls = [];
+  const api = apiFor(async (url, options) => {
+    calls.push({ url: new URL(url), form: options.body });
+    return json(url.includes('/api/preview') ? [] : { account: 'tata', channel: 'whatsapp', submitted: 1, results: [] });
+  });
+  const original = new Blob(['મૂળ સ્રોત\\r\\n'], { type: 'text/csv' });
+  const templateOverrides = { 'Offers!D17': {
+    template_name: 'att_reviewed', category: 'UTILITY', language: 'gu',
+    components: [
+      { type: 'BODY', text: 'માન્ય કરેલો સંદેશ {{1}}', example: { body_text: [['મીના']] } },
+      { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'મારી ઑફર જુઓ',
+        url: 'https://mnge.co/reviewed/{{1}}', example: ['https://mnge.co/reviewed/123'] }] },
+    ],
+  } };
+  const languageOverrides = { 'Offers!D17': 'gu' };
+  await api.previewFile(original, 'tata', 'whatsapp', { verifyInventory: false, languageOverrides, templateOverrides });
+  await api.previewFile(original, 'tata', 'whatsapp', { verifyInventory: true, languageOverrides, templateOverrides });
+  await api.submitFile(original, 'tata', 'whatsapp', 'Operator', true, true,
+    { account: 'tata', channel: 'whatsapp' }, undefined, languageOverrides, templateOverrides);
+  for (const { form } of calls) {
+    assert.equal(form.get('template_overrides'), JSON.stringify(templateOverrides));
+    assert.equal(form.get('language_overrides'), JSON.stringify(languageOverrides));
+    assert.deepEqual([...new Uint8Array(await form.get('file').arrayBuffer())],
+      [...new Uint8Array(await original.arrayBuffer())]);
+  }
+  assert.equal(calls[2].url.searchParams.get('fix_grammar'), 'false');
+});

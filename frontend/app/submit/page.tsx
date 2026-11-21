@@ -5,7 +5,7 @@ import { useTabState, getTabState, clearTabState } from '@/lib/tab-state';
 import { loadUploadDraft, saveUploadDraft, saveUploadReview, uploadDraftScope } from '@/lib/upload-draft';
 import { useWhitelistingConnection } from '@/components/connection-workflow';
 import { previewFile, submitFile, getSampleCsvUrl, fetchJob, resumeJob, identifyTemplates } from '@/lib/api';
-import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem } from '@/lib/api';
+import type { TemplatePreview, Template, JobTask, IdentificationReport, TemplateDiscrepancyItem, UploadTemplateOverrides } from '@/lib/api';
 import { useApp, getRcsDetails } from '@/lib/context';
 import { formatChannel, formatError } from '@/lib/format';
 import { destinationLabel } from '@/lib/destination';
@@ -13,6 +13,7 @@ import type { Channel } from '@/lib/api';
 import { SmsDltUpload } from '@/components/sms-dlt';
 import { WHITELIST_NAME_HINT } from '@/lib/jira-template-name';
 import { templateOutcome, type TemplateOutcomeInput } from '@/lib/template-status';
+import { UploadTemplateContent, UploadTemplateEditor, UploadOriginalSource, uploadTemplatePatch } from '@/components/upload-template-editor';
 
 function StatusBadge({ item }: { item: TemplateOutcomeInput }) {
   const outcome = templateOutcome(item);
@@ -27,8 +28,9 @@ function StatusBadge({ item }: { item: TemplateOutcomeInput }) {
 
 function previewIdentity(preview: TemplatePreview): string {
   return JSON.stringify([preview.source_file, preview.source_ref, preview.source_sheet, preview.source_cell,
-    preview.template_name, preview.language, preview.components, preview.text_message,
-    preview.template_message, preview.card_title, preview.card_description, preview.carousel_cards]);
+    preview.template_name, preview.category, preview.language, preview.components, preview.text_message,
+    preview.template_message, preview.template_type, preview.media_url, preview.suggestions,
+    preview.card_title, preview.card_description, preview.carousel_cards]);
 }
 
 function PreviewSource({ preview }: { preview: TemplatePreview }) {
@@ -67,7 +69,7 @@ function mergeJobResults(results: Template[], tasks: JobTask[]): Template[] {
 type State =
   | { step: 'idle' }
   | { step: 'previewing' }
-  | { step: 'previewed'; previews: TemplatePreview[]; uploadId?: string; submissionUncertain?: boolean }
+  | { step: 'previewed'; previews: TemplatePreview[]; uploadId?: string; submissionUncertain?: boolean; formattingChanged?: boolean }
   | { step: 'submitting'; previews: TemplatePreview[]; uploadId?: string }
   | {
       step: 'submitted';
@@ -84,7 +86,10 @@ type State =
 
 
 type UploadSelection = { scope: string; id: string; botId?: string; persisted?: boolean };
-type SavedReview = { state: State; botId?: string; languageOverrides?: Record<string, string> };
+type SavedReview = {
+  state: State; botId?: string; languageOverrides?: Record<string, string>;
+  templateOverrides?: UploadTemplateOverrides; originalPreviews?: TemplatePreview[]; editDrafts?: Record<string, TemplatePreview>;
+};
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -114,6 +119,11 @@ export default function SubmitPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadSelection, setUploadSelection] = useTabState<UploadSelection | null>('submit_upload', null);
   const [languageOverrides, setLanguageOverrides] = useTabState<Record<string, string>>('submit_language_overrides', {});
+  const [templateOverrides, setTemplateOverrides] = useTabState<UploadTemplateOverrides>('submit_template_overrides', {});
+  const [originalPreviews, setOriginalPreviews] = useTabState<TemplatePreview[]>('submit_original_previews', []);
+  const [editDrafts, setEditDrafts] = useTabState<Record<string, TemplatePreview>>('submit_edit_drafts', {});
+  const editing = Object.keys(editDrafts).length > 0;
+  const hasManualEdits = Object.keys(templateOverrides).length > 0;
   const [storageNotice, setStorageNotice] = useState('');
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [inventoryCheck, setInventoryCheck] = useState<{ uploadId: string; checking: boolean; error?: string } | null>(null);
@@ -128,6 +138,7 @@ export default function SubmitPage() {
   const inventoryVersionRef = useRef(0);
   const jobRequestRef = useRef(false);
   const selectionVersionRef = useRef(0);
+  const uploadVersionRef = useRef(0); // File hydration must survive edits to the same upload.
   const identifyVersionRef = useRef(0);
   const scopeRef = useRef({ account, channel, uploadScope });
   scopeRef.current = { account, channel, uploadScope };
@@ -271,6 +282,7 @@ export default function SubmitPage() {
       mountedRef.current = false;
       identifyVersionRef.current++;
       selectionVersionRef.current++;
+      uploadVersionRef.current++;
       inventoryVersionRef.current++;
     };
   }, []);
@@ -279,12 +291,17 @@ export default function SubmitPage() {
     previousScopeRef.current = uploadScope;
     if (previousScope === uploadScope || !previousScope) return;
     selectionVersionRef.current++;
+    uploadVersionRef.current++;
+    clearTabState('submit_upload');
     identifyVersionRef.current++;
     setIdentifyReport(null);
     setIdentifyFile(null);
     setIdentifying(false);
     setReview(null);
     setLanguageOverrides({});
+    setTemplateOverrides({});
+    setOriginalPreviews([]);
+    setEditDrafts({});
     setShowBlockedModal(false);
     setCheckingConnection(false);
     setStorageNotice('');
@@ -306,7 +323,7 @@ export default function SubmitPage() {
   useEffect(() => {
     if (!uploadScope || channel === 'sms') return;
     let cancelled = false;
-    const version = selectionVersionRef.current;
+    const version = uploadVersionRef.current;
     const saved = getTabState<UploadSelection | null>('submit_upload', null);
     const cached = getTabState<State>('submit_state', { step: 'idle' });
     if (cached.step === 'submitted') {
@@ -318,23 +335,30 @@ export default function SubmitPage() {
       return;
     }
     void loadUploadDraft<SavedReview>(uploadScope, saved.id).then((restored) => {
-      if (cancelled || version !== selectionVersionRef.current || scopeRef.current.uploadScope !== uploadScope) return;
+      if (cancelled || version !== uploadVersionRef.current || scopeRef.current.uploadScope !== uploadScope) return;
       if (!restored) throw new Error('The original saved file is unavailable. Select it again; no templates have been resubmitted.');
       setFile(restored.file);
       setUploadSelection({ ...saved, persisted: true });
-      const restoredState = cached.step === 'idle' ? restored.review?.state || cached : cached;
-      setLanguageOverrides(cached.step === 'idle'
+      const latest = getTabState<State>('submit_state', cached);
+      const restoredState = latest.step === 'idle' ? restored.review?.state || latest : latest;
+      setLanguageOverrides(latest.step === 'idle'
         ? restored.review?.languageOverrides || {}
         : getTabState('submit_language_overrides', restored.review?.languageOverrides || {}));
+      setTemplateOverrides(latest.step === 'idle' ? restored.review?.templateOverrides || {}
+        : getTabState('submit_template_overrides', restored.review?.templateOverrides || {}));
+      setOriginalPreviews(latest.step === 'idle' ? restored.review?.originalPreviews || []
+        : getTabState('submit_original_previews', restored.review?.originalPreviews || []));
+      setEditDrafts(latest.step === 'idle' ? restored.review?.editDrafts || {}
+        : getTabState('submit_edit_drafts', restored.review?.editDrafts || {}));
       if ((restoredState.step === 'previewed' || restoredState.step === 'error' || restoredState.step === 'submitting') && restoredState.uploadId === saved.id) {
         setReview({ account, channel, botId: restored.review?.botId ?? saved.botId, file: restored.file });
         setState(restoredState.step === 'submitting'
           ? { step: 'error', message: 'The submission response was lost. Check History before submitting again: the queue may already contain this upload.', previews: restoredState.previews, uploadId: restoredState.uploadId, submissionUncertain: true }
           : restoredState);
       }
-      if (cached.step === 'previewing') setState({ step: 'idle' });
+      if (latest.step === 'previewing') setState({ step: 'idle' });
     }).catch((error) => {
-      if (!cancelled && version === selectionVersionRef.current) setStorageNotice(formatError(error));
+      if (!cancelled && version === uploadVersionRef.current && scopeRef.current.uploadScope === uploadScope) setStorageNotice(formatError(error));
     });
     return () => { cancelled = true; };
   }, [uploadScope]);
@@ -344,38 +368,60 @@ export default function SubmitPage() {
     if (state.step !== 'previewed' && state.step !== 'error') return;
     if (state.uploadId !== uploadSelection.id) return;
     const version = selectionVersionRef.current;
-    void saveUploadReview(uploadScope, uploadSelection.id, { state, botId: review.botId, languageOverrides }).catch((error) => {
+    void saveUploadReview(uploadScope, uploadSelection.id, { state, botId: review.botId, languageOverrides, templateOverrides, originalPreviews, editDrafts }).catch((error) => {
       if (mountedRef.current && version === selectionVersionRef.current && scopeRef.current.uploadScope === uploadScope) {
         setStorageNotice(`The file review could not be saved. Keep this page open. ${formatError(error)}`);
       }
     });
-  }, [state, uploadSelection, uploadScope, review, file, languageOverrides]);
+  }, [state, uploadSelection, uploadScope, review, file, languageOverrides, templateOverrides, originalPreviews, editDrafts]);
 
-  const verifyInventory = useCallback(async (selected: File, uploadId: string, baseline: TemplatePreview[], overrides: Record<string, string>) => {
+  const verifyInventory = useCallback(async (selected: File, uploadId: string, baseline: TemplatePreview[], overrides: Record<string, string>, patches: UploadTemplateOverrides, allowCanonical = false) => {
     const version = ++inventoryVersionRef.current;
     const selectionVersion = selectionVersionRef.current;
     const requestedScope = uploadScope;
-    const current = () => mountedRef.current && version === inventoryVersionRef.current
-      && selectionVersion === selectionVersionRef.current && scopeRef.current.uploadScope === requestedScope;
+    const identities = baseline.map(previewIdentity);
+    const acceptCanonical = allowCanonical && Object.keys(patches).length > 0;
+    const current = () => {
+      const selectedUpload = getTabState<UploadSelection | null>('submit_upload', null);
+      return mountedRef.current && version === inventoryVersionRef.current
+        && selectionVersion === selectionVersionRef.current && scopeRef.current.uploadScope === requestedScope
+        && selectedUpload?.id === uploadId && selectedUpload.scope === requestedScope;
+    };
     setInventoryCheck({ uploadId, checking: true });
     try {
-      const verified = await previewFile(selected, account, channel, { verifyInventory: true, languageOverrides: overrides });
+      const verified = await previewFile(selected, account, channel, { verifyInventory: true, languageOverrides: overrides, templateOverrides: patches });
       if (!current()) return;
-      if (verified.length !== baseline.length || verified.some((preview, index) => previewIdentity(preview) !== previewIdentity(baseline[index]))) {
+      const bySource = new Map(verified.map((preview) => [preview.source_ref, preview]));
+      if (acceptCanonical) {
+        const sources = new Set(baseline.map((preview) => preview.source_ref));
+        if (verified.length !== baseline.length || sources.size !== baseline.length || bySource.size !== verified.length
+          || baseline.some((preview) => !preview.source_ref?.trim())
+          || verified.some((preview) => !preview.source_ref?.trim() || !sources.has(preview.source_ref))) {
+          throw new Error('Inventory returned different or duplicate source identities. Your saved edits are retained; select the original file again or retry the check.');
+        }
+      } else if (verified.length !== baseline.length || verified.some((preview, index) => previewIdentity(preview) !== identities[index])) {
         throw new Error('Inventory returned a different set of messages. Your original preview is retained; retry the inventory check.');
       }
       if (verified.some((preview) => preview.inventory_status !== 'verified')) {
         throw new Error(verified.find((preview) => preview.inventory_error)?.inventory_error || 'Inventory is unavailable. Existing templates are unknown, not missing.');
       }
+      const ordered = acceptCanonical ? baseline.map((preview) => bySource.get(preview.source_ref)!) : verified;
+      const formattingChanged = acceptCanonical && ordered.some((preview, index) => previewIdentity(preview) !== identities[index]);
       setState((previous) => {
-        if (previous.step !== 'previewed' || previous.uploadId !== uploadId
-          || previous.previews.length !== baseline.length
-          || previous.previews.some((preview, index) => previewIdentity(preview) !== previewIdentity(baseline[index]))) return previous;
-        return { ...previous, previews: previous.previews.map((preview, index) => ({
-          ...preview, inventory_status: verified[index].inventory_status, inventory_error: verified[index].inventory_error,
-          submission_ready: verified[index].submission_ready, already_exists_on_waba: verified[index].already_exists_on_waba,
-          exists_on_waba: verified[index].exists_on_waba, duplicate_warning: verified[index].duplicate_warning,
-        })) };
+        if (!current() || previous.step !== 'previewed' || previous.submissionUncertain || previous.uploadId !== uploadId
+          || previous.previews.length !== identities.length
+          || previous.previews.some((preview, index) => previewIdentity(preview) !== identities[index])) return previous;
+        return { ...previous, formattingChanged: previous.formattingChanged || formattingChanged,
+          previews: previous.previews.map((preview, index) => acceptCanonical ? {
+            ...preview, ...ordered[index], source_file: preview.source_file, source_ref: preview.source_ref,
+            source_sheet: preview.source_sheet, source_cell: preview.source_cell,
+          } : {
+            ...preview, inventory_status: ordered[index].inventory_status, inventory_error: ordered[index].inventory_error,
+            submission_ready: ordered[index].submission_ready, already_exists_on_waba: ordered[index].already_exists_on_waba,
+            exists_on_waba: ordered[index].exists_on_waba, duplicate_warning: ordered[index].duplicate_warning,
+            compliance_warnings: ordered[index].compliance_warnings, grammar_warnings: ordered[index].grammar_warnings,
+            aspect_ratio_blocked: ordered[index].aspect_ratio_blocked, aspect_ratio_warnings: ordered[index].aspect_ratio_warnings,
+          }) };
       });
       setInventoryCheck({ uploadId, checking: false });
     } catch (error) {
@@ -386,7 +432,9 @@ export default function SubmitPage() {
   const handleFile = useCallback(
     async (selected: File) => {
       if (!uploadScope) return;
+      if (selected === file && (editing || state.step === 'submitting' || ('submissionUncertain' in state && state.submissionUncertain))) return;
       const version = ++selectionVersionRef.current;
+      uploadVersionRef.current++;
       const requestedScope = { account, channel };
       if (!account || account === 'all') {
         setState({ step: 'error', message: 'Choose an account in “Whitelisting for” before uploading.', previews: null });
@@ -400,7 +448,13 @@ export default function SubmitPage() {
       }
       const sameFile = file === selected;
       const overrides = sameFile ? languageOverrides : {};
-      if (!sameFile) setLanguageOverrides(overrides);
+      const patches = sameFile ? templateOverrides : {};
+      if (!sameFile) {
+        setLanguageOverrides(overrides);
+        setTemplateOverrides({});
+        setOriginalPreviews([]);
+        setEditDrafts({});
+      }
       setFile(selected);
       setStorageNotice('');
       if (!sameFile) { setReview(null); setState({ step: 'idle' }); }
@@ -421,12 +475,13 @@ export default function SubmitPage() {
       if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.uploadScope !== uploadScope) return;
       setState({ step: 'previewing' });
       try {
-        const parsed = await previewFile(selected, account, channel, { verifyInventory: false, languageOverrides: overrides });
+        const parsed = await previewFile(selected, account, channel, { verifyInventory: false, languageOverrides: overrides, templateOverrides: patches });
         const previews = parsed.map((preview) => ({ ...preview, inventory_status: 'unverified' as const, submission_ready: false }));
         if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
+        if (!sameFile) setOriginalPreviews(structuredClone(parsed));
         setReview({ ...requestedScope, botId: activeRcs.botId || undefined, file: selected });
         setState({ step: 'previewed', previews, uploadId });
-        void verifyInventory(selected, uploadId, previews, overrides);
+        void verifyInventory(selected, uploadId, previews, overrides, patches);
       } catch (err) {
         if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
         setState({
@@ -437,7 +492,7 @@ export default function SubmitPage() {
         });
       }
     },
-    [account, channel, activeRcs.botId, uploadScope, file, uploadSelection, verifyInventory, languageOverrides]
+    [account, channel, activeRcs.botId, uploadScope, file, uploadSelection, verifyInventory, languageOverrides, templateOverrides, editing, state]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -473,6 +528,7 @@ export default function SubmitPage() {
 
   const handleClear = useCallback(() => {
     selectionVersionRef.current++;
+    uploadVersionRef.current++;
     inventoryVersionRef.current++;
     setInventoryCheck(null);
     setJobError('');
@@ -482,6 +538,9 @@ export default function SubmitPage() {
     setCheckingConnection(false);
     setReview(null);
     setLanguageOverrides({});
+    setTemplateOverrides({});
+    setOriginalPreviews([]);
+    setEditDrafts({});
     setRefreshingJob(false);
     setFile(null);
     setState({ step: 'idle' });
@@ -499,13 +558,37 @@ export default function SubmitPage() {
     setCheckingConnection(false);
     setShowBlockedModal(false);
     setLanguageOverrides({ ...languageOverrides, [sourceRef]: language });
-    setState({ ...state, previews: state.previews.map((preview) => ({
+    if (templateOverrides[sourceRef]) setTemplateOverrides({ ...templateOverrides, [sourceRef]: { ...templateOverrides[sourceRef], language } });
+    setState({ ...state, formattingChanged: false, previews: state.previews.map((preview) => ({
       ...preview, inventory_status: 'unverified', submission_ready: false,
       already_exists_on_waba: null, exists_on_waba: null, duplicate_warning: undefined,
     })) });
   };
+  const invalidateEditReview = () => {
+    selectionVersionRef.current++;
+    inventoryVersionRef.current++;
+    setInventoryCheck(null);
+    setCheckingConnection(false);
+    setShowBlockedModal(false);
+    setState((previous) => previous.step === 'previewed' ? { ...previous, formattingChanged: false, previews: previous.previews.map((preview) => ({
+      ...preview, inventory_status: 'unverified', submission_ready: false,
+      already_exists_on_waba: null, exists_on_waba: null, duplicate_warning: undefined,
+    })) } : previous);
+  };
+  const saveTemplateEdit = (sourceRef: string, edited: TemplatePreview) => {
+    if (state.step !== 'previewed' || state.submissionUncertain) return;
+    invalidateEditReview();
+    setTemplateOverrides({ ...templateOverrides, [sourceRef]: uploadTemplatePatch(edited, channel) });
+    if (channel === 'whatsapp') setLanguageOverrides({ ...languageOverrides, [sourceRef]: edited.language || '' });
+    setEditDrafts((previous) => { const next = { ...previous }; delete next[sourceRef]; return next; });
+    setState((previous) => previous.step === 'previewed' ? { ...previous, previews: previous.previews.map((preview) =>
+      preview.source_ref === sourceRef ? { ...edited, source_ref: preview.source_ref, source_file: preview.source_file,
+        source_sheet: preview.source_sheet, source_cell: preview.source_cell, inventory_status: 'unverified',
+        submission_ready: false, language_review_required: false, language_review_message: null,
+        already_exists_on_waba: null, exists_on_waba: null, duplicate_warning: undefined } : preview) } : previous);
+  };
   const executeSubmit = useCallback(async (fixGrammar: boolean) => {
-    if (!file || !currentPreviews?.length || state.step !== 'previewed' || state.submissionUncertain || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
+    if (editing || !file || !currentPreviews?.length || state.step !== 'previewed' || state.submissionUncertain || !review || review.file !== file || review.account !== account || review.channel !== channel) return;
     if (languageReviewPending || inventoryCheck?.checking || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
     if (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId)) {
       setState({
@@ -526,7 +609,7 @@ export default function SubmitPage() {
     const submitting: State = { step: 'submitting', previews: currentPreviews, uploadId: uploadSelection?.id };
     setState(submitting);
     if (uploadSelection) {
-      try { await saveUploadReview(uploadScope, uploadSelection.id, { state: submitting, botId: review.botId, languageOverrides }); }
+      try { await saveUploadReview(uploadScope, uploadSelection.id, { state: submitting, botId: review.botId, languageOverrides, templateOverrides, originalPreviews, editDrafts }); }
       catch (error) {
         if (mountedRef.current && version === selectionVersionRef.current && scopeRef.current.uploadScope === uploadScope) setStorageNotice(`The submission status could not be saved in browser storage. Check History if this page closes. ${formatError(error)}`);
       }
@@ -534,8 +617,8 @@ export default function SubmitPage() {
     if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.uploadScope !== uploadScope) return;
     try {
       const res = await submitFile(
-        file, account, channel, user, fixGrammar, autoSkipDuplicates,
-        review, channel === 'rcs' ? review.botId : undefined, languageOverrides
+        file, account, channel, user, hasManualEdits ? false : fixGrammar, autoSkipDuplicates,
+        review, channel === 'rcs' ? review.botId : undefined, languageOverrides, templateOverrides
       );
       if (!mountedRef.current || version !== selectionVersionRef.current || scopeRef.current.account !== account || scopeRef.current.channel !== channel) return;
       const isComplete = !res.job_id || ['COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED'].includes(res.status || '');
@@ -559,10 +642,10 @@ export default function SubmitPage() {
         submissionUncertain: true,
       });
     }
-  }, [file, account, channel, user, currentPreviews, state, review, autoSkipDuplicates, activeRcs.botId, ensureConnected, uploadScope, uploadSelection, inventoryCheck, languageOverrides, languageReviewPending]);
+  }, [file, account, channel, user, currentPreviews, state, review, autoSkipDuplicates, activeRcs.botId, ensureConnected, uploadScope, uploadSelection, inventoryCheck, languageOverrides, languageReviewPending, templateOverrides, originalPreviews, editDrafts, editing, hasManualEdits]);
 
   const handleInitiateSubmit = useCallback(async () => {
-    if (languageReviewPending || checkingConnection || inventoryCheck?.checking || state.step !== 'previewed' || state.submissionUncertain || !file || !currentPreviews?.length || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
+    if (editing || languageReviewPending || checkingConnection || inventoryCheck?.checking || state.step !== 'previewed' || state.submissionUncertain || !file || !currentPreviews?.length || currentPreviews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false)) return;
     const version = selectionVersionRef.current;
     setCheckingConnection(true);
     const connected = await ensureConnected();
@@ -583,7 +666,7 @@ export default function SubmitPage() {
       return;
     }
     executeSubmit(autoFixGrammar);
-  }, [file, currentPreviews, state, channel, autoFixGrammar, executeSubmit, ensureConnected, uploadScope, checkingConnection, inventoryCheck, languageReviewPending]);
+  }, [file, currentPreviews, state, channel, autoFixGrammar, executeSubmit, ensureConnected, uploadScope, checkingConnection, inventoryCheck, languageReviewPending, editing]);
   const handleReset = useCallback(() => {
     handleClear();
   }, [handleClear]);
@@ -807,7 +890,7 @@ export default function SubmitPage() {
         </div>
       )}
 
-      {/* STEP 2: Preview Table */}
+      {/* STEP 2: Preview cards */}
       {state.step === 'previewed' && (
         <div className="space-y-4">
           {/* Smart Routing Account Auto-Detection Banner */}
@@ -973,7 +1056,8 @@ export default function SubmitPage() {
                   <label className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-900 cursor-pointer shrink-0 hover:bg-gray-50/50 transition-colors">
                     <input
                       type="checkbox"
-                      checked={autoFixGrammar}
+                      checked={!hasManualEdits && autoFixGrammar}
+                      disabled={hasManualEdits}
                       onChange={(e) => setAutoFixGrammar(e.target.checked)}
                       className="rounded border-gray-300 text-gray-700 focus:ring-blue-500"
                     />
@@ -981,7 +1065,7 @@ export default function SubmitPage() {
                   </label>
                 </div>
 
-                {autoFixGrammar ? (
+                {!hasManualEdits && autoFixGrammar ? (
                   <div className="text-xs text-gray-900 bg-gray-100/70 p-3 rounded-lg border border-gray-200/80 flex items-center gap-2">
                     <span>
                       <strong>Corrections enabled:</strong> Typos (e.g. &ldquo;recieved&rdquo; &rarr; &ldquo;received&rdquo;), repeated words and spacing will be corrected before submission.
@@ -990,13 +1074,16 @@ export default function SubmitPage() {
                 ) : (
                   <div className="text-xs text-gray-900 bg-white/80 p-3 rounded-lg border border-gray-200 flex items-center gap-2">
                     <span>
-                      <strong>Original text:</strong> Text will be submitted exactly as written in your spreadsheet without typo corrections.
+                      <strong>{hasManualEdits ? 'Saved copy:' : 'Original text:'}</strong> {hasManualEdits ? 'Grammar corrections are disabled. Recheck and review the final formatted preview before submitting.' : 'Text will be submitted exactly as written in your spreadsheet without typo corrections.'}
                     </span>
                   </div>
                 )}
               </div>
             );
           })()}
+          {hasManualEdits && <p role="status" className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">Manual edits are authoritative. Auto-fix grammar is disabled for this batch. Recheck the retained file after every edit and review any required submission formatting before submitting.</p>}
+          {editing && <p role="status" className="text-sm text-amber-900">Finish editing with Save or Cancel, then run a fresh inventory check before submitting.</p>}
+          {state.formattingChanged && <p role="status" className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">Your saved edits were formatted for submission; names, components or variable samples may have changed. Review this formatted preview, then Confirm &amp; Submit to approve it. Rechecking never submits.</p>}
 
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
             <div className="flex flex-col gap-4 border-b border-gray-200 bg-gray-50 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1015,7 +1102,12 @@ export default function SubmitPage() {
                   <p>{languageReviewPending ? 'Choose a language for each flagged message, then recheck the retained file. Submission stays blocked until the chosen languages and inventory are verified.' : inventoryCheck?.checking ? 'Checking live inventory in the background. Your messages and sources are available now; submission waits for verification.' : 'Inventory is not verified. Existing templates are unknown, not missing; submission is blocked. Your file and review are retained.'}</p>
                   <p>{inventoryCheck?.error || state.previews.find((preview) => preview.inventory_error)?.inventory_error}</p>
                   <button type="button" onClick={reconnect} className="underline">Reconnect this destination</button>
-                  <button type="button" disabled={!file || inventoryCheck?.checking || checkingConnection || state.submissionUncertain} className="ml-3 underline disabled:opacity-50" onClick={() => { if (file && state.uploadId) { if (languageReviewPending) void handleFile(file); else void verifyInventory(file, state.uploadId, state.previews, languageOverrides); } }}>{languageReviewPending ? 'Recheck language & inventory' : 'Retry inventory check'}</button>
+                  <button type="button" disabled={editing || !file || inventoryCheck?.checking || checkingConnection || state.submissionUncertain} className="ml-3 underline disabled:opacity-50" onClick={() => {
+                    if (!file || !state.uploadId || editing || state.submissionUncertain) return;
+                    if (hasManualEdits) void verifyInventory(file, state.uploadId, state.previews, languageOverrides, templateOverrides, true);
+                    else if (languageReviewPending) void handleFile(file);
+                    else void verifyInventory(file, state.uploadId, state.previews, languageOverrides, templateOverrides);
+                  }}>{languageReviewPending ? 'Recheck language & inventory' : 'Retry inventory check'}</button>
                 </div>}
                 {channel === 'rcs' && !activeRcs.botId && (
                   <p role="alert" className="mt-1 text-xs font-medium text-amber-800">
@@ -1032,9 +1124,10 @@ export default function SubmitPage() {
                 </button>
                 <button
                   onClick={handleInitiateSubmit}
-                  disabled={languageReviewPending || checkingConnection || inventoryCheck?.checking || state.submissionUncertain || !state.previews.length || !review || review.account !== account || review.channel !== channel || account === 'all' || state.previews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false) || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
+                  disabled={editing || languageReviewPending || checkingConnection || inventoryCheck?.checking || state.submissionUncertain || !state.previews.length || !review || review.account !== account || review.channel !== channel || account === 'all' || state.previews.some((preview) => preview.inventory_status !== 'verified' || preview.submission_ready === false) || (channel === 'rcs' && (!review.botId || review.botId !== activeRcs.botId))}
                   className="px-4 py-2 rounded-lg text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                 >
+                  {state.formattingChanged && 'Confirm & '}
                   {(() => {
                     const blocked = channel === 'rcs' ? state.previews.filter(p => p.aspect_ratio_blocked || (p.aspect_ratio_warnings && p.aspect_ratio_warnings.some(w => w.blocked))) : [];
                     const dupes = state.previews.filter(p => p.already_exists_on_waba || p.exists_on_waba || p.duplicate_warning);
@@ -1068,166 +1161,59 @@ export default function SubmitPage() {
             <summary className="cursor-pointer font-medium">Workbook scope and excluded sections</summary>
             <ul className="mt-2 list-disc space-y-1 pl-4">{state.previews[0].import_notes.map((note, index) => <li key={index}>{note}</li>)}</ul>
           </details> : null}
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
-              <thead>
-                <tr className="bg-gray-50/30 text-gray-900 font-medium border-b border-gray-200">
-                  {channel === 'whatsapp' ? (
-                    <>
-                      <th className="font-medium px-5 py-3">#</th>
-                      <th className="font-medium px-5 py-3">Template name</th>
-                      <th className="font-medium px-5 py-3">Category</th>
-                      <th className="font-medium px-5 py-3">Language</th>
-                      <th className="font-medium px-5 py-3">Components</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="font-medium px-5 py-3">#</th>
-                      <th className="font-medium px-5 py-3">Template name</th>
-                      <th className="font-medium px-5 py-3">Type</th>
-                      <th className="font-medium px-5 py-3">Content / title</th>
-                      <th className="font-medium px-5 py-3">Buttons / cards</th>
-                    </>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {state.previews.map((p, idx) => (
-                  <tr key={idx} className="hover:bg-gray-50/50">
-                    <td className="px-5 py-3 text-gray-500 font-mono">{idx + 1}</td>
-                    <td className="px-5 py-3 font-medium text-gray-900 font-mono">
-                      <div className="flex items-center gap-2">
-                        <span>{p.template_name}</span>
-                        {(p.already_exists_on_waba || p.exists_on_waba) && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-800 border border-rose-200 shrink-0" title="Already exists on this WABA">
-                            Already on WABA
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    {channel === 'whatsapp' ? (
-                      <>
-                        <td className="px-5 py-3 text-gray-700">{p.category || 'MARKETING'}</td>
-                        <td className="px-5 py-3 text-gray-700">
-                            <label className="block space-y-1 text-xs">
-                              <span>{!p.language || p.language_review_required ? 'Needs review: language' : 'Review language'}</span>
-                              <select
-                                aria-label={`Language for ${p.template_name} (${p.source_ref || 'source unavailable'})`}
-                                value={(p.source_ref ? languageOverrides[p.source_ref] : undefined) ?? p.language ?? ''}
-                                disabled={!p.source_ref || checkingConnection || state.submissionUncertain}
-                                onChange={(event) => { if (p.source_ref) handleLanguageChange(p.source_ref, event.target.value); }}
-                                className="block rounded-md border border-gray-300 bg-white px-2 py-1 text-sm disabled:opacity-50"
-                              >
-                                <option value="" disabled>Choose language</option>
-                                {WHATSAPP_LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label} ({code})</option>)}
-                              </select>
-                              {p.language_review_message && <span className="block text-amber-900">{p.language_review_message}</span>}
-                              {!p.source_ref && <span className="block text-amber-900">Language correction unavailable: source identity missing.</span>}
-                            </label>
-                        </td>
-                        <td className="px-5 py-3 text-gray-600">
-                          {p.components?.length ? (
-                            <div className="space-y-1">
-                              <div className="flex flex-wrap gap-1">
-                                {p.components.map((c, cIdx) => {
-                                  const isHeader = c.type === 'HEADER';
-                                  const format = c.format ? ` (${c.format})` : '';
-                                  const color = isHeader
-                                    ? 'bg-gray-100 text-gray-900 border border-gray-200'
-                                    : c.type === 'BODY'
-                                    ? 'bg-gray-100 text-gray-900 border border-gray-200'
-                                    : c.type === 'BUTTONS'
-                                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                                    : 'bg-gray-100 text-gray-700 border-gray-200';
-                                  return (
-                                    <span
-                                      key={cIdx}
-                                      className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium border ${color}`}
-                                    >
-                                      {c.type}{format}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                              <details open className="max-w-lg">
-                                <summary className="cursor-pointer font-medium text-blue-700">Review message and buttons</summary>
-                                <PreviewSource preview={p} />
-                                {p.components.filter((component) => component.text).map((component, index) => <pre key={index} className="mt-2 whitespace-pre-wrap break-words font-sans">{component.text}</pre>)}
-                                {p.components.filter((component) => component.type === 'BUTTONS').map((component, index) => <pre key={index} className="mt-2 whitespace-pre-wrap break-all">{JSON.stringify(component.buttons, null, 2)}</pre>)}
-                              </details>
-
-                              {p.grammar_warnings && p.grammar_warnings.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {p.grammar_warnings.slice(0, 3).map((gw, gIdx) => (
-                                    <span
-                                      key={gIdx}
-                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-50 text-gray-900 border border-gray-200"
-                                      title={gw.issue}
-                                    >
-                                      <span>{gw.suggestion}</span>
-                                      <span className={`px-1 py-0.5 rounded font-medium ${autoFixGrammar ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-700'}`}>
-                                        {autoFixGrammar ? 'Fix enabled' : 'Raw'}
-                                      </span>
-                                    </span>
-                                  ))}
-                                  {p.grammar_warnings.length > 3 && (
-                                    <span className="text-xs font-medium text-gray-700 px-1">
-                                      +{p.grammar_warnings.length - 3} more
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-
-                              {p.compliance_warnings && p.compliance_warnings.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {p.compliance_warnings.map((cw, cIdx) => (
-                                    <span
-                                      key={cIdx}
-                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium border ${
-                                        cw.severity === 'error'
-                                          ? 'bg-rose-100 text-rose-800 border-rose-200'
-                                          : 'bg-amber-100 text-amber-800 border-amber-200'
-                                      }`}
-                                      title={cw.recommendation}
-                                    >
-                                      <span>{cw.issue}</span>
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            'Standard'
-                          )}
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-5 py-3 font-medium text-gray-800 text-xs">
-                          {p.template_type || (p.carousel_cards?.length ? 'carousel' : (p.media_url ? 'richcard' : 'text'))}
-                        </td>
-                        <td className="max-w-lg space-y-2 px-5 py-3 text-gray-700">
-                          <PreviewSource preview={p} />
-                          {p.card_title && <p className="font-medium">{p.card_title}</p>}
-                          {[p.text_message, p.template_message, p.card_description].filter((text, index, values) => text && values.indexOf(text) === index).map((text, index) => <pre key={index} className="whitespace-pre-wrap break-words font-sans">{text}</pre>)}
-                          {p.carousel_cards?.map((card, index) => <div key={index} className="space-y-1 border-t border-gray-100 pt-2">
-                            <p className="text-xs font-medium">Card {index + 1}</p>
-                            {['cardTitle', 'card_title', 'title', 'cardDescription', 'card_description', 'description', 'text', 'text_message'].map((field) => typeof card[field] === 'string' && card[field] ? <pre key={field} className="whitespace-pre-wrap break-words font-sans">{String(card[field])}</pre> : null)}
-                          </div>)}
-                        </td>
-                        <td className="px-5 py-3 text-gray-600 text-xs">
-                          {p.carousel_cards?.length
-                            ? `${p.carousel_cards.length} card(s)`
-                            : p.suggestions?.length
-                            ? `${p.suggestions.length} button(s)`
-                            : 'No buttons'}
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-4 bg-gray-50/40 p-4 sm:p-5">
+            {state.previews.map((preview, index) => {
+              const sourceRef = preview.source_ref || '';
+              return <article key={sourceRef || index} aria-label={`Uploaded template ${index + 1}`} data-testid="upload-template-card" className="min-w-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 space-y-2">
+                    <h3 className="break-words font-mono text-sm font-medium text-gray-900">{preview.template_name}</h3>
+                    <p className="text-xs text-gray-500">#{index + 1} · {channel === 'whatsapp' ? preview.category || 'MARKETING' : preview.template_type || 'text'}{channel === 'whatsapp' && ` · ${preview.language || 'Language needs review'}`}</p>
+                    <PreviewSource preview={preview} />
+                    {(preview.already_exists_on_waba || preview.exists_on_waba) && <p className="text-xs text-rose-800">Already on WABA</p>}
+                  </div>
+                  {!editDrafts[sourceRef] && <button type="button" disabled={!sourceRef || checkingConnection || state.submissionUncertain}
+                    className="workspace-button disabled:opacity-50" onClick={() => {
+                      invalidateEditReview();
+                      setEditDrafts({ ...editDrafts, [sourceRef]: structuredClone({ ...preview, language: languageOverrides[sourceRef] ?? preview.language }) });
+                    }}>Edit</button>}
+                </div>
+                <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]">
+                  <div className="min-w-0 space-y-4">
+                    {editDrafts[sourceRef] ? <UploadTemplateEditor draft={editDrafts[sourceRef]} channel={channel}
+                      disabled={checkingConnection || state.submissionUncertain}
+                      onChange={(draft) => { invalidateEditReview(); setEditDrafts({ ...editDrafts, [sourceRef]: draft }); }}
+                      onSave={(edited) => saveTemplateEdit(sourceRef, edited)}
+                      onCancel={() => { invalidateEditReview(); setEditDrafts((previous) => { const next = { ...previous }; delete next[sourceRef]; return next; }); }} />
+                      : <UploadTemplateContent preview={preview} channel={channel} />}
+                    {channel === 'whatsapp' && !editDrafts[sourceRef] && <label className="block space-y-1 text-xs text-gray-600">
+                      <span>{!preview.language || preview.language_review_required ? 'Needs review: language' : 'Review language'}</span>
+                      <select aria-label={`Language for ${preview.template_name} (${sourceRef || 'source unavailable'})`}
+                        value={languageOverrides[sourceRef] ?? preview.language ?? ''}
+                        disabled={!sourceRef || checkingConnection || state.submissionUncertain}
+                        onChange={(event) => handleLanguageChange(sourceRef, event.target.value)}
+                        className="block rounded-md border border-gray-300 bg-white px-2 py-1 text-sm disabled:opacity-50">
+                        <option value="" disabled>Choose language</option>
+                        {WHATSAPP_LANGUAGES.map(([code, label]) => <option key={code} value={code}>{label} ({code})</option>)}
+                        {preview.language && !WHATSAPP_LANGUAGES.some(([code]) => code === preview.language) && <option value={preview.language}>{preview.language}</option>}
+                      </select>
+                      {preview.language_review_message && <span className="block text-amber-900">{preview.language_review_message}</span>}
+                    </label>}
+                    {preview.grammar_warnings?.map((warning, warningIndex) => <p key={warningIndex} className="text-xs text-gray-600">{warning.issue}: {warning.suggestion}</p>)}
+                    {preview.compliance_warnings?.map((warning, warningIndex) => <p key={warningIndex} className="text-xs text-amber-900">{warning.issue} {warning.recommendation}</p>)}
+                    {!sourceRef && <p role="alert" className="text-xs text-amber-900">Editing unavailable: this preview has no source identity. Select the original file again.</p>}
+                  </div>
+                  <aside className="min-w-0 space-y-3 border-t border-gray-200 pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+                    <UploadOriginalSource preview={originalPreviews.find((original) => original.source_ref === sourceRef) || preview} channel={channel} />
+                    {file && <button type="button" className="text-xs text-gray-600 underline" onClick={() => {
+                      const url = URL.createObjectURL(file);
+                      const link = document.createElement('a'); link.href = url; link.download = file.name; link.click();
+                      setTimeout(() => URL.revokeObjectURL(url), 0);
+                    }}>Download original source file</button>}
+                  </aside>
+                </div>
+              </article>;
+            })}
           </div>
         </div>
         </div>

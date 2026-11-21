@@ -60,6 +60,12 @@ and identifiers remain unchanged. No generated artwork or story video is used.
 - Every WhatsApp writer serializes only verified URL, reply and phone button fields.
   Legacy `label` becomes `text`; existing reviewed `text` wins. UI/source metadata
   never reaches Meta. Unsupported action types fail before provider side effects.
+- Uploaded WhatsApp/RCS drafts have Jira-style Edit, Save and Cancel controls.
+  Message text and structured buttons are separate; button JSON is never displayed
+  as message copy. Original file/sheet/cell evidence remains visible and unchanged.
+  Saved edits survive reconnecting and navigation, but invalidate inventory checks.
+  Recheck changes, review provider formatting/samples, then explicitly confirm.
+  Automatic grammar rewriting is disabled for manually edited batches.
 - Unavailable, malformed, contradictory or wrong-account provider catalogs remain
   unverified, never empty/missing. Previews retain editable drafts; registration and
   duplicate-checked submissions stay blocked until a successful fresh review.

@@ -377,7 +377,9 @@ def extract_and_strip_cta(
         fallback_body = existing_footer.strip() if existing_footer and existing_footer.strip() else ""
         return fallback_body, existing_btn_text or "Check Offer", resolve_cta_url(existing_btn_url or DEFAULT_CTA_URL, "tata"), None
 
-    text = body.strip()
+    from cta import separate_inline_cta_instructions
+
+    text = separate_inline_cta_instructions(body).strip()
     extracted_btn_text = existing_btn_text
     extracted_url = existing_btn_url
 

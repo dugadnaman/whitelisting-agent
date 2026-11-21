@@ -15,7 +15,7 @@ from pathlib import Path
 
 from config import get_waba_id
 from models import TemplateComponent, TemplateSubmission
-from cta import TATA_CTA_URL, normalize_whatsapp_cta_buttons
+from cta import TATA_CTA_URL, normalize_whatsapp_cta_buttons, separate_inline_cta_instructions
 from campaign_names import normalize_campaign_name
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ def parse_single_cell_whatsapp_block(cell_text: str, client: str = "bajaj") -> d
             "button_example": "https://www.tatacapital.com",
         }
 
-    lines = [line.strip() for line in cell_text.splitlines() if line.strip()]
+    lines = [line.strip() for line in separate_inline_cta_instructions(cell_text).splitlines() if line.strip()]
 
     inferred_btn, inferred_url, inferred_ex = infer_whatsapp_cta(cell_text, client=client)
     button_text = inferred_btn
