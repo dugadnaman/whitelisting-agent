@@ -907,7 +907,8 @@ def _native_template_cells(rows, sheet_name, selected_channel="whatsapp"):
 
     for index, anchor in enumerate(anchors):
         end = anchors[index + 1] if index + 1 < len(anchors) else width
-        columns = {anchor + 1: ""} if anchor + 1 < end else {}
+        # Without headers, the channel owns every copy column up to the next channel block.
+        columns = {ci: "" for ci in range(anchor + 1, end)}
         scope = sheet_name if _whatsapp_import_channel(sheet_name) == selected_channel else ""
         active = bool(scope)
         for ri, row in enumerate(rows):
@@ -928,7 +929,7 @@ def _native_template_cells(rows, sheet_name, selected_channel="whatsapp"):
                     if row[ci] is not None and not _metadata(row[ci])
                     and (_language(row[ci]) or re.fullmatch(r"[a-z]|\d+\s*-\s*\d+|generic", _norm(row[ci]))
                          or _has_whatsapp_table_headers([row[ci]]) or "content" in _norm(row[ci]))
-                } or ({anchor + 1: ""} if anchor + 1 < end else {})
+                } or {ci: "" for ci in range(anchor + 1, end)}
                 scope = str(value) if channel == selected_channel else ""
                 active = bool(scope)
                 continue

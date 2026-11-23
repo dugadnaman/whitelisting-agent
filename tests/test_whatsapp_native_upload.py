@@ -290,3 +290,56 @@ def test_inline_regional_cta_becomes_button_not_message_body(tmp_path, body, lab
     assert "CTA:" not in jira_body
     assert body in jira_body
     assert "T&Cs apply." in jira_body
+
+
+@pytest.mark.parametrize("channel", ["whatsapp", "rcs"])
+@pytest.mark.parametrize("extension", ["csv", "xlsx"])
+@pytest.mark.parametrize("with_headers", [False, True])
+def test_parallel_language_columns_preserve_every_copy_cell(tmp_path, channel, extension, with_headers):
+    from rcs_loader import load_rcs_from_csv, load_rcs_from_excel
+
+    variants = [
+        ("English", "en", "Your next payment is due soon. Please keep sufficient balance."),
+        ("Hindi", "", "आपकी अगली किस्त जल्द देय है। कृपया खाते में पर्याप्त राशि रखें।"),
+        ("Assamese", "", "আপোনাৰ পৰৱৰ্তী কিস্তি সোনকালে দিব লাগিব। পৰ্যাপ্ত ধন ৰাখক।"),
+        ("Odia", "or", "ଆପଣଙ୍କ ପରବର୍ତ୍ତୀ କିସ୍ତି ଶୀଘ୍ର ଦେୟ। ଖାତାରେ ଯଥେଷ୍ଟ ଟଙ୍କା ରଖନ୍ତୁ।"),
+        ("Tamil", "ta", "உங்கள் அடுத்த தவணை விரைவில் செலுத்த வேண்டும். போதுமான இருப்பை வையுங்கள்."),
+        ("Telugu", "te", "మీ తదుపరి వాయిదా త్వరలో చెల్లించాలి. ఖాతాలో తగినంత డబ్బు ఉంచండి."),
+        ("Bengali", "", "আপনার পরবর্তী কিস্তি শীঘ্রই দিতে হবে। অ্যাকাউন্টে পর্যাপ্ত টাকা রাখুন।"),
+    ]
+    path = tmp_path / f"parallel.{extension}"
+    book = openpyxl.Workbook()
+    book.remove(book.active)
+    expected = {}
+    titles = ["First", "Second"] if extension == "xlsx" else ["parallel"]
+    for title in titles:
+        sheet = book.create_sheet(title)
+        prefix = [] if title == "First" else ["ID", "Cohort", "Topic"]
+        if with_headers:
+            sheet.append([*prefix, "Channel", *[label for label, _, _ in variants], "Channel", "English"])
+        for number in range(1, 5):
+            copies = [f"{text} Record {number}." for _, _, text in variants]
+            sheet.append([*prefix, channel, *copies, "SMS", "This SMS must never become a selected-channel template."])
+            for column, ((label, language, _), copy) in enumerate(zip(variants, copies), len(prefix) + 2):
+                ref = f"{path.name}:{title}!{openpyxl.utils.get_column_letter(column)}{sheet.max_row}"
+                declared = {"Hindi": "hi", "Assamese": "as", "Bengali": "bn"}.get(label, language)
+                expected[ref] = (copy, declared if with_headers else language)
+        sheet.append([*prefix, "PN", *["Push copy must not become a selected-channel template."] * 7])
+    if extension == "xlsx":
+        book.save(path)
+    else:
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerows(book.active.values)
+    book.close()
+    load = {("whatsapp", "xlsx"): load_from_excel, ("whatsapp", "csv"): load_from_csv,
+            ("rcs", "xlsx"): load_rcs_from_excel, ("rcs", "csv"): load_rcs_from_csv}[channel, extension]
+    submissions = load(str(path), client="bajaj")
+
+    assert {submission.source_ref for submission in submissions} == set(expected)
+    assert len(submissions) == len(expected)
+    assert len({submission.template_name for submission in submissions}) == len(expected)
+    for submission in submissions:
+        copy, language = expected[submission.source_ref]
+        assert copy in (_body(submission) if channel == "whatsapp" else submission.text_message)
+        if channel == "whatsapp":
+            assert submission.language == language

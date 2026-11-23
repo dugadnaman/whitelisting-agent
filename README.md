@@ -48,6 +48,11 @@ and identifiers remain unchanged. No generated artwork or story video is used.
   retain explicit routing; unscoped sections are not guessed into another channel.
   Preview retains filename/sheet/cell provenance, shows body/buttons, and discloses
   excluded or ambiguous sections.
+  Headerless channel rows such as `ID | Cohort | Topic | WhatsApp | English copy |
+  Hindi copy | …` import all copy columns before the next channel block, not only
+  the first. This also applies to CSV imports and RCS channel blocks. Regression
+  coverage checks multiple worksheets, shifted channel columns, explicit language
+  headers, headerless rows, and adjacent SMS/PN content that must remain excluded.
 - Generated names reserve a stable source/content suffix, so temporary upload paths
   and truncation cannot collapse different messages into one name.
 - SMS named tables such as `Template Name, SMS 2` retain supplied names and exact
