@@ -39,6 +39,10 @@ template does not send a message to a customer.**
 - **Work with MoEngage.** Use account-specific tools for RCS template sync,
   campaign reporting, and click counts. Apparel also has attribution reporting
   and WhatsApp campaign-draft creation; those drafts are not launched by this flow.
+  In the Apparel RCS dashboard, choose **Source Karix RCS Bot ID** to show only
+  that bot's templates and scope bulk sync. **All RCS bots** restores the full
+  inventory. Changing bots clears selection; mapped workspaces still require
+  their matching source bot.
 
 ## How the template workflow fits together
 

@@ -86,6 +86,7 @@ export default function DashboardPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [operatorFilter, setOperatorFilter] = useState('all');
+  const [botFilter, setBotFilter] = useState('');
   const [polling, setPolling] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -97,13 +98,15 @@ export default function DashboardPage() {
   const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState<string | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const apparelRcs = account === 'apparel' && channel === 'rcs';
+  const inventorySearch = apparelRcs ? '' : debouncedSearch;
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const requestVersionRef = useRef(0);
   const statsFlightsRef = useRef(new Set<number>());
   const templatesFlightsRef = useRef(new Set<string>());
   const templatesQueryRef = useRef('');
-  templatesQueryRef.current = JSON.stringify([account, channel, debouncedSearch]);
+  templatesQueryRef.current = JSON.stringify([account, channel, inventorySearch]);
   const dataScopeRef = useRef(`${account}:${channel}`);
   if (dataScopeRef.current !== `${account}:${channel}`) {
     dataScopeRef.current = `${account}:${channel}`;
@@ -129,10 +132,11 @@ export default function DashboardPage() {
   const syncBusyRef = useRef(false);
   const selectedWorkspace = syncWorkspaces.find((workspace) => workspace.id === syncWorkspaceId);
   const syncBotId = account === 'apparel' ? selectedWorkspace?.bot_id : undefined;
-  const syncDestinationReady = account !== 'apparel' || Boolean(selectedWorkspace && !workspaceLoading && !workspaceError);
+  const syncDestinationReady = (account !== 'apparel' || Boolean(selectedWorkspace && !workspaceLoading && !workspaceError))
+    && (!botFilter || !syncBotId || botFilter === syncBotId);
   const syncBusy = syncingRcs || Object.values(syncingSingleRcs).some(Boolean);
   const syncDestinationLabel = account === 'apparel' ? selectedWorkspace?.name || 'Select workspace' : 'MoEngage';
-  const syncScope = `${account}:${channel}:${syncWorkspaceId}`;
+  const syncScope = `${account}:${channel}:${syncWorkspaceId}:${botFilter}`;
   const syncScopeRef = useRef(syncScope);
   const syncGenerationRef = useRef(0);
   if (syncScopeRef.current !== syncScope) {
@@ -188,7 +192,7 @@ export default function DashboardPage() {
         media_url: t.media_url,
         cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
         cta_url: syncTemplate.cta_url,
-        sender_id: syncBotId || t.sender_ids?.[0],
+        sender_id: syncBotId || t.bot_id || t.sender_ids?.[0],
         template_type: isCarousel ? 'carousel' : 'card',
         carousel_cards: syncTemplate.carousel_cards || undefined,
         width: t.width,
@@ -219,7 +223,10 @@ export default function DashboardPage() {
     try {
       setSyncingRcs(true);
       setSyncRcsFeedback(null);
-      const res = await syncKarixRcsToMoEngage(account, account === 'apparel' ? syncWorkspaceId : undefined);
+      const res = await syncKarixRcsToMoEngage(
+        account, account === 'apparel' ? syncWorkspaceId : undefined,
+        apparelRcs && botFilter ? botFilter : undefined,
+      );
       if (generation !== syncGenerationRef.current) return;
       if (!res.ok) {
         setSyncRcsFeedback({ message: `${syncDestinationLabel}: ${res.error || 'Sync failed'}`, type: 'error' });
@@ -242,7 +249,7 @@ export default function DashboardPage() {
   };
   const handleSyncSelectedRcsToMoEngage = async () => {
     if (selectedTemplates.size === 0 || !syncDestinationReady || syncBusyRef.current) return;
-    const targets = templates.filter((t) => selectedTemplates.has(t.template_name));
+    const targets = visibleTemplates.filter((t) => selectedTemplates.has(t.template_name));
     const mismatched = syncBotId ? targets.filter((t) => !t.sender_ids?.includes(syncBotId)) : [];
     if (mismatched.length > 0) {
       setSyncRcsFeedback({
@@ -275,7 +282,7 @@ export default function DashboardPage() {
             media_url: t.media_url,
             cta_text: t.cta_text || (account === 'apparel' ? 'Visit Store' : 'Explore Now'),
             cta_url: syncTemplate.cta_url,
-            sender_id: syncBotId || t.sender_ids?.[0],
+            sender_id: syncBotId || t.bot_id || t.sender_ids?.[0],
             template_type: isCarousel ? 'carousel' : 'card',
             carousel_cards: syncTemplate.carousel_cards || undefined,
             width: t.width,
@@ -331,6 +338,7 @@ export default function DashboardPage() {
     setLastInventoryRead(null);
     setStatusFilter('');
     setOperatorFilter('all');
+    setBotFilter('');
     setSearch('');
     setExpandedRow(null);
     setSelectedTemplates(new Set());
@@ -374,7 +382,7 @@ export default function DashboardPage() {
     try {
       if (live) setTemplatesLoading(true);
       const params: { status?: string; search?: string } = {};
-      if (debouncedSearch) params.search = debouncedSearch;
+      if (inventorySearch) params.search = inventorySearch;
       const data = await fetchTemplates({ account, channel, ...params, live });
       if (requestVersion !== requestVersionRef.current || query !== templatesQueryRef.current) return;
       setTemplates((previous) => {
@@ -403,7 +411,7 @@ export default function DashboardPage() {
       templatesFlightsRef.current.delete(flight);
       if (requestVersion === requestVersionRef.current && query === templatesQueryRef.current) setTemplatesLoading(false);
     }
-  }, [account, channel, debouncedSearch, mounted]);
+  }, [account, channel, inventorySearch, mounted]);
 
   const loadActivity = useCallback(async () => {
     if (!mounted) return;
@@ -556,18 +564,32 @@ export default function DashboardPage() {
   const accountLabel = getAccountLabel(account);
   const channelLabel = formatChannel(channel);
 
-  // Client-side operator filter (server filters status/search only)
+  // Keep Apparel's bot choices available while search/status filters narrow the rows.
+  const botIds = Array.from(new Set([
+    ...templates.flatMap(t => t.bot_id ? [t.bot_id] : t.sender_ids || []),
+    ...syncWorkspaces.flatMap(workspace => workspace.bot_id ? [workspace.bot_id] : []),
+    ...(botFilter ? [botFilter] : []),
+  ])).sort();
+  const templateSearch = debouncedSearch.toLowerCase();
   const operators = Array.from(
     new Set(templates.map(t => t.submitted_by).filter(Boolean) as string[])
   ).sort();
   const visibleTemplates = templates.filter((template) =>
     (operatorFilter === 'all' || (template.submitted_by || '—') === operatorFilter)
-    && (!statusFilter || template.approval_status === statusFilter || template.status === statusFilter));
-  const hasFilters = Boolean(search || statusFilter || operatorFilter !== 'all');
+    && (!statusFilter || template.approval_status === statusFilter || template.status === statusFilter)
+    && (!apparelRcs || (
+      (!botFilter || (template.bot_id ? template.bot_id === botFilter : template.sender_ids?.includes(botFilter)))
+      && (!templateSearch || [template.template_name, template.template_id, template.source_ref, template.provider_ref_id]
+        .some(value => (value || '').toLowerCase().includes(templateSearch)))
+    )));
+  const hasFilters = Boolean(search || statusFilter || operatorFilter !== 'all' || botFilter);
   const resetFilters = () => {
     setSearch('');
     setStatusFilter('');
     setOperatorFilter('all');
+    setBotFilter('');
+    setSelectedTemplates(new Set());
+    setExpandedRow(null);
   };
 
   // Distribution bar segments
@@ -686,6 +708,28 @@ export default function DashboardPage() {
               <a href="/settings" className="mt-3 inline-block text-sm font-medium text-blue-700 hover:underline">MoEngage connection settings →</a>
             </div>
             <div className="flex min-w-0 flex-col gap-3 lg:w-96 lg:shrink-0">
+              <label className="text-sm font-medium text-gray-700" htmlFor="rcs-bot-filter">Source Karix RCS Bot ID</label>
+              <select
+                id="rcs-bot-filter"
+                value={botFilter}
+                onChange={(event) => {
+                  if (syncBusyRef.current) return;
+                  setBotFilter(event.target.value);
+                  setSelectedTemplates(new Set());
+                  setExpandedRow(null);
+                }}
+                disabled={templatesLoading || syncBusy}
+                className="w-full min-w-0 max-w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:opacity-60"
+              >
+                <option value="">All RCS bots</option>
+                {botIds.map(id => <option key={id} value={id}>{id}</option>)}
+              </select>
+              <p className="max-w-sm break-words text-sm text-gray-600">
+                {botFilter ? `Showing and syncing only bot ${botFilter}.` : 'Showing all configured Karix RCS bots.'}
+              </p>
+              {botFilter && syncBotId && botFilter !== syncBotId && (
+                <p role="alert" className="max-w-sm text-sm text-amber-800">Choose a destination matching the selected source bot before syncing.</p>
+              )}
               <label className="text-sm font-medium text-gray-700" htmlFor="rcs-sync-workspace">Destination MoEngage workspace</label>
               <select
                 id="rcs-sync-workspace"
@@ -739,7 +783,7 @@ export default function DashboardPage() {
                     <svg className="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    <span>Sync Approved RCS to {syncDestinationLabel}</span>
+                    <span>Sync Approved {botFilter ? 'Bot Templates' : 'RCS'} to {syncDestinationLabel}</span>
                   </>
                 )}
               </button>
@@ -1126,6 +1170,7 @@ export default function DashboardPage() {
                     visibleTemplates.map((t, idx) => {
                       const key = channel === 'sms'
                         ? (t.template_id || t.provider_ref_id || t.task_id || `sms-row-${idx}`)
+                        : channel === 'rcs' ? `${t.bot_id || t.sender_ids?.[0] || ''}:${t.template_id || t.source_ref || t.template_name || idx}`
                         : (t.source_ref || t.template_name || `row-${idx}`);
                       const isExpanded = expandedRow === key;
                       const rejectionReason = t.approval_reason && String(t.approval_reason) !== 'NONE' ? String(t.approval_reason) : null;

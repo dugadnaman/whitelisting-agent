@@ -251,3 +251,58 @@ def test_mapped_carousel_accepts_original_media_per_card_without_top_level_image
     content = portal.writes[0][1]["json"]["meta_data"]["data"]
     assert "https://media.example/one.jpg" in str(content)
     assert "https://media.example/two.jpg" in str(content)
+
+
+def test_source_bot_filter_never_registers_other_bot_with_same_name(portal, monkeypatch):
+    import rcs_client
+    import rcs_config
+
+    monkeypatch.setattr(rcs_config, "get_rcs_bot_ids", lambda account: ["crocs-bot", "other-bot"])
+    monkeypatch.setattr(rcs_client, "fetch_rcs_templates", lambda **kwargs: [
+        {"templateId": "selected", "status": "APPROVED", "botId": "crocs-bot", "viTemplate": {
+            "name": "shared_offer", "standaloneCard": {
+                "cardTitle": "Selected", "cardDescription": "Selected source",
+                "mediaUrl": "https://media.example/selected.jpg",
+            },
+        }},
+        {"templateId": "foreign", "status": "APPROVED", "botId": "other-bot", "viTemplate": {
+            "name": "shared_offer", "standaloneCard": {
+                "cardTitle": "Other", "cardDescription": "Other source",
+                "mediaUrl": "https://media.example/other.jpg",
+            },
+        }},
+    ])
+    result = sync.sync_karix_rcs_to_moengage(
+        account="apparel", workspace_id=portal.target, bot_id="crocs-bot",
+        semantic_dedup=False, resolve_attributes=False,
+    )
+    assert [item["template_id"] for item in result["created"]] == ["selected"]
+    assert result["error_count"] == 1
+    assert len(portal.writes) == 1
+    metadata = portal.writes[0][1]["json"]["meta_data"]
+    assert metadata["sender_ids"] == ["crocs-sender-record"]
+    assert metadata["data"]["description"] == "Selected source"
+
+
+def test_source_filter_cannot_override_mapped_workspace_bot(portal, mapped_brand, monkeypatch):
+    import rcs_config
+
+    workspace, _ = mapped_brand
+    monkeypatch.setattr(rcs_config, "get_rcs_bot_ids", lambda account: ["other-bot"])
+    with pytest.raises(ValueError, match="Source RCS bot does not match"):
+        sync.sync_karix_rcs_to_moengage(
+            account="apparel", workspace_id=workspace, bot_id="other-bot",
+        )
+    assert portal.writes == []
+
+
+def test_source_filter_rejects_another_accounts_bot_before_provider_access(portal, monkeypatch):
+    import rcs_config
+
+    monkeypatch.setattr(rcs_config, "get_rcs_bot_ids", lambda account: ["crocs-bot"])
+    with pytest.raises(ValueError, match="does not match the selected account"):
+        sync.sync_karix_rcs_to_moengage(
+            account="apparel", workspace_id=portal.target, bot_id="tata-bot",
+        )
+    assert portal.reads == []
+    assert portal.writes == []

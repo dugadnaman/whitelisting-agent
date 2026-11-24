@@ -106,6 +106,7 @@ export type Template = {
   channel?: string;
   template_id?: string;
   template_type?: string;
+  bot_id?: string;
   sender_ids?: string[];
   template_message_type?: string;
   template_message?: string;
@@ -1993,7 +1994,7 @@ export async function fetchRcsSyncWorkspaces(account: string): Promise<RcsSyncWo
   return (await res.json()).workspaces;
 }
 
-export async function syncKarixRcsToMoEngage(account: string = "tata", workspaceId?: string): Promise<{
+export async function syncKarixRcsToMoEngage(account: string = "tata", workspaceId?: string, botId?: string): Promise<{
   ok: boolean;
   account: string;
   workspace_id: string;
@@ -2008,6 +2009,7 @@ export async function syncKarixRcsToMoEngage(account: string = "tata", workspace
 }> {
   const qs = new URLSearchParams({ account });
   if (workspaceId) qs.set("workspace_id", workspaceId);
+  if (botId) qs.set("bot_id", botId);
   const res = await fetchWithRetry(getApiUrl(`/api/moengage/rcs/sync-karix?${qs}`), {
     method: "POST",
   }, 0);

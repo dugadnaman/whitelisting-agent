@@ -5115,6 +5115,7 @@ def sync_karix_rcs_to_moengage_endpoint(
     semantic_dedup: bool = Query(True),
     resolve_attributes: bool = Query(True),
     workspace_id: str | None = Query(None),
+    bot_id: str | None = Query(None),
     current_user: dict = Depends(get_current_user),
 ):
     """Pull approved RCS templates from Karix and register them in an account's MoEngage workspace."""
@@ -5128,6 +5129,7 @@ def sync_karix_rcs_to_moengage_endpoint(
             semantic_dedup=semantic_dedup,
             resolve_attributes=resolve_attributes,
             workspace_id=workspace_id,
+            bot_id=bot_id,
         )
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -5143,6 +5145,7 @@ def sync_karix_rcs_to_moengage_endpoint(
             "skipped_count": result.get("skipped_count"),
             "error_count": result.get("error_count"),
             "workspace_id": result.get("workspace_id"),
+            "bot_id": bot_id,
         },
         status="success" if result.get("ok") else "failed",
     )

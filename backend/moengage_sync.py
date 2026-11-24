@@ -663,6 +663,7 @@ def sync_karix_rcs_to_moengage(
     semantic_dedup: bool = True,
     resolve_attributes: bool = True,
     workspace_id: str | None = None,
+    bot_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Pull already-approved RCS templates from Karix for an account and register
@@ -672,14 +673,21 @@ def sync_karix_rcs_to_moengage(
     - MoEngage Attribute Resolver: Maps positional {{1}}, {{2}} to verified MoEngage personalization tags.
     """
     from rcs_client import fetch_rcs_templates
+    from rcs_config import get_rcs_bot_ids
+
+    if bot_id is not None and bot_id not in get_rcs_bot_ids(account):
+        raise ValueError("RCS inventory bot ID does not match the selected account")
 
     context = _rcs_workspace_context(account, workspace_id) if account.strip().lower() == "apparel" or workspace_id is not None else None
     destination = context[0]["workspace_id"] if context else get_moengage_config(account)["workspace_id"]
     mapped_bot = context[0].get("bot_id") if context else None
+    if bot_id and mapped_bot and bot_id != mapped_bot:
+        raise ValueError("Source RCS bot does not match the destination workspace.")
+    source_bot = bot_id or mapped_bot
 
     try:
-        karix_templates = (fetch_rcs_templates(client=account, bot_id=mapped_bot)
-                           if mapped_bot else fetch_rcs_templates(client=account))
+        karix_templates = (fetch_rcs_templates(client=account, bot_id=source_bot)
+                           if source_bot else fetch_rcs_templates(client=account))
     except Exception as exc:
         return {
             "ok": False,
@@ -710,8 +718,8 @@ def sync_karix_rcs_to_moengage(
         name = str(vi.get("name") or lt.get("templateId", "")).strip()
         template_id = str(lt.get("templateId", "")).strip()
         status = str(lt.get("status", "")).upper()
-        if mapped_bot and any(
-            source.get(key) is not None and source[key] != mapped_bot
+        if source_bot and any(
+            source.get(key) is not None and source[key] != source_bot
             for source in (lt, vi) for key in ("botId", "bot_id", "senderId", "sender_id")
         ):
             errors.append({"template_name": name, "error": "Source RCS bot does not match the destination workspace."})
@@ -804,7 +812,7 @@ def sync_karix_rcs_to_moengage(
                 cta_text=cta_text,
                 cta_url=cta_url,
                 account=account,
-                sender_id=mapped_bot or lt.get("botId") or vi.get("botId"),
+                sender_id=source_bot or lt.get("botId") or vi.get("botId"),
                 template_type="carousel" if is_carousel else "card",
                 carousel_cards=carousel_cards if is_carousel else None,
                 width=vi.get("width") or "MEDIUM",
