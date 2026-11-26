@@ -67,7 +67,7 @@ def connection_provider(monkeypatch):
 
 def test_sms_live_check_reads_only_exact_tata_profile(connection_provider, provision_user):
     _, headers = provision_user("tata")
-    result = TestClient(api.app, headers=headers).post("/api/connection-check?account=tata&channel=sms")
+    result = TestClient(api.app, headers=headers).get("/api/connection-check?account=tata&channel=sms")
     assert result.status_code == 200, result.text
     assert result.json()["ok"] is True
     assert result.json()["inventory_verified"] is False
@@ -79,7 +79,7 @@ def test_sms_live_check_reads_only_exact_tata_profile(connection_provider, provi
 def test_sms_check_distinguishes_expired_session_from_outage(connection_provider, provision_user, status, code):
     _, headers = provision_user("tata")
     connection_provider["status"] = status
-    result = TestClient(api.app, headers=headers).post("/api/connection-check?account=tata&channel=sms")
+    result = TestClient(api.app, headers=headers).get("/api/connection-check?account=tata&channel=sms")
     assert result.status_code == 200
     assert result.json()["ok"] is False
     assert result.json()["error_code"] == code
@@ -90,32 +90,41 @@ def test_sms_check_distinguishes_expired_session_from_outage(connection_provider
 def test_sms_check_rejects_another_live_principal(connection_provider, provision_user):
     _, headers = provision_user("tata")
     connection_provider["profile"] = "<div>OTHER FINANCE LIMITED | 1101000000000000000</div>"
-    result = TestClient(api.app, headers=headers).post("/api/connection-check?account=tata&channel=sms")
+    result = TestClient(api.app, headers=headers).get("/api/connection-check?account=tata&channel=sms")
     assert result.json()["ok"] is False
     assert result.json()["error_code"] == "provider_unavailable"
 
 
-@pytest.mark.parametrize("account,channel,body,status", [
-    ("bajaj", "sms", None, 403), ("tata", "all", None, 400),
-    ("all", "sms", None, 400), ("tata", "sms", {"cookie": "must-not-save"}, 400),
-    ("tcl_promo", "sms", None, 400),
+@pytest.mark.parametrize("account,channel,status", [
+    ("bajaj", "sms", 403), ("tata", "all", 400),
+    ("all", "sms", 400), ("tcl_promo", "sms", 400),
 ])
-def test_connection_checks_reject_unauthorized_ambiguous_or_write_requests(connection_provider, provision_user, account, channel, body, status):
+def test_connection_checks_reject_unauthorized_or_ambiguous_destinations(connection_provider, provision_user, account, channel, status):
     _, headers = provision_user("tata")
-    result = TestClient(api.app, headers=headers).post("/api/connection-check", params={"account": account, "channel": channel}, json=body)
+    result = TestClient(api.app, headers=headers).get("/api/connection-check", params={"account": account, "channel": channel})
     assert result.status_code == status, result.text
     assert connection_provider["calls"] == []
 
 
 def test_connection_check_requires_authentication(connection_provider):
-    result = TestClient(api.app).post("/api/connection-check?account=tata&channel=sms")
+    result = TestClient(api.app).get("/api/connection-check?account=tata&channel=sms")
     assert result.status_code in (401, 403)
+    assert connection_provider["calls"] == []
+
+
+def test_connection_checks_refuse_posted_credentials(connection_provider, provision_user):
+    _, headers = provision_user("tata")
+    result = TestClient(api.app, headers=headers).post(
+        "/api/connection-check?account=tata&channel=sms",
+        json={"cookie": "must-not-save"},
+    )
+    assert result.status_code == 405
     assert connection_provider["calls"] == []
 
 
 def test_whatsapp_check_uses_supported_one_row_probe(connection_provider, provision_user):
     _, headers = provision_user("tata")
-    result = TestClient(api.app, headers=headers).post("/api/connection-check?account=tcl_promo&channel=whatsapp")
+    result = TestClient(api.app, headers=headers).get("/api/connection-check?account=tcl_promo&channel=whatsapp")
     assert result.status_code == 200, result.text
     assert result.json()["ok"] is True
     assert result.json()["inventory_verified"] is False
@@ -129,7 +138,7 @@ def test_whatsapp_check_uses_supported_one_row_probe(connection_provider, provis
 def test_connection_probe_refuses_cross_scope_inventory(connection_provider, provision_user, channel, payload):
     _, headers = provision_user("tata")
     connection_provider["wa" if channel == "whatsapp" else "rcs"] = payload
-    result = TestClient(api.app, headers=headers).post(f"/api/connection-check?account=tata&channel={channel}")
+    result = TestClient(api.app, headers=headers).get(f"/api/connection-check?account=tata&channel={channel}")
     assert result.status_code == 200
     assert result.json()["ok"] is False
     assert result.json()["inventory_verified"] is False
@@ -137,7 +146,7 @@ def test_connection_probe_refuses_cross_scope_inventory(connection_provider, pro
 
 def test_rcs_check_reports_honest_inventory_verification(connection_provider, provision_user):
     _, headers = provision_user("tata")
-    result = TestClient(api.app, headers=headers).post("/api/connection-check?account=tata&channel=rcs")
+    result = TestClient(api.app, headers=headers).get("/api/connection-check?account=tata&channel=rcs")
     assert result.status_code == 200, result.text
     assert result.json()["ok"] is True
     assert result.json()["inventory_verified"] is True
@@ -149,7 +158,7 @@ def test_rcs_check_reports_honest_inventory_verification(connection_provider, pr
 def test_other_channels_distinguish_provider_outage_from_auth(connection_provider, provision_user, channel, status, code):
     _, headers = provision_user("tata")
     connection_provider["status"] = status
-    result = TestClient(api.app, headers=headers).post(f"/api/connection-check?account=tata&channel={channel}")
+    result = TestClient(api.app, headers=headers).get(f"/api/connection-check?account=tata&channel={channel}")
     assert result.status_code == 200
     assert result.json()["error_code"] == code
 
@@ -167,7 +176,7 @@ def test_official_whatsapp_fallback_is_live_inventory_not_saved_pairing(connecti
     monkeypatch.delenv("FIXTURE_KARIX_BEARER_TOKEN", raising=False)
     monkeypatch.setattr(portal_sessions, "session_record", lambda *args: None)
     monkeypatch.setattr(api, "OFFICIAL_TEMPLATE_BASE_URL", vilpower.BASE_URL + "/official")
-    result = TestClient(api.app, headers=headers).post("/api/connection-check?account=tata&channel=whatsapp")
+    result = TestClient(api.app, headers=headers).get("/api/connection-check?account=tata&channel=whatsapp")
     assert result.status_code == 200, result.text
     assert result.json()["ok"] is True
     assert result.json()["inventory_verified"] is True
@@ -183,6 +192,6 @@ def test_rcs_network_timeout_is_not_reported_as_an_expired_session(connection_pr
         except requests.Timeout as exc:
             raise rcs_client.RcsInventoryUnavailable("Cannot reach provider") from exc
     monkeypatch.setattr(api, "_fetch_rcs_inventory", unavailable)
-    result = TestClient(api.app, headers=headers).post("/api/connection-check?account=tcl_promo&channel=rcs")
+    result = TestClient(api.app, headers=headers).get("/api/connection-check?account=tcl_promo&channel=rcs")
     assert result.json()["ok"] is False
     assert result.json()["error_code"] == "provider_unavailable"

@@ -113,3 +113,20 @@ test('edited file preview and submit carry identical source patches and bytes wi
   }
   assert.equal(calls[2].url.searchParams.get('fix_grammar'), 'false');
 });
+
+test('connection verification reads saved credentials without a POST body or submission', async () => {
+  const calls = [];
+  const api = apiFor(async (url, options) => {
+    calls.push({ url: new URL(url), options });
+    return json({ ok: true, message: 'Scoped session verified', inventory_verified: false });
+  });
+  const result = await api.checkConnection('tcl_promo', 'whatsapp');
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url.pathname, '/api/connection-check');
+  assert.equal(calls[0].url.searchParams.get('account'), 'tcl_promo');
+  assert.equal(calls[0].url.searchParams.get('channel'), 'whatsapp');
+  assert.equal(calls[0].options.method, 'GET');
+  assert.equal(calls[0].options.cache, 'no-store');
+  assert.equal(calls[0].options.body, undefined);
+});

@@ -749,7 +749,7 @@ export async function checkConnection(account: Account, channel: Channel): Promi
 }> {
   const qs = new URLSearchParams({ account, channel });
   const response = await fetchWithRetry(getApiUrl(`/api/connection-check?${qs}`), {
-    method: "POST", cache: "no-store",
+    method: "GET", cache: "no-store",
   }, 0, 800, 20000);
   if (!response.ok) throw new Error(await getErrorMessage(response));
   return response.json();

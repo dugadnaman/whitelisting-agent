@@ -77,6 +77,10 @@ and Apparel credentials, workspaces, and data remain separate.
   be reconciled rather than blindly retried.
 - **Provider sessions can expire.** A human may need to sign in again and refresh
   the supported connection. The application does not bypass login, OTP, or CAPTCHA.
+- **Karix connection settings use Auth Sync.** Manual WhatsApp/RCS session
+  overrides and account-identifier/token editors are no longer shown to operators.
+  Saved-connection verification uses a bodyless `GET /api/connection-check` in
+  FastAPI's normal synchronous worker pool; it never submits templates.
 - **Providers decide approval.** The application automates the workflow, not the
   provider's decision. Customer-message delivery is separate from template approval.
 

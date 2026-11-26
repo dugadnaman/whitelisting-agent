@@ -3393,17 +3393,14 @@ def _check_saved_connection(acc: str, chan: str) -> dict:
     return {**result, "inventory_verified": True}
 
 
-@app.post("/api/connection-check")
-async def connection_check(
-    request: Request,
+@app.get("/api/connection-check")
+def connection_check(
     account: str = Query(...),
     channel: str = Query(...),
     current_user: dict = Depends(get_current_user),
 ):
     acc, chan = _explicit_submission_destination(account, channel, current_user)
-    if await request.body():
-        raise HTTPException(status_code=400, detail="Connection checks use saved credentials only; do not send a body.")
-    return await asyncio.to_thread(_check_saved_connection, acc, chan)
+    return _check_saved_connection(acc, chan)
 
 
 @app.post("/api/test-credentials")
